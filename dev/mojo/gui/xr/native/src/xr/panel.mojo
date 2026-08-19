@@ -75,41 +75,43 @@ struct Vec3(Copyable, Movable):
     var y: Float32
     var z: Float32
 
-    fn __init__(out self, x: Float32 = 0.0, y: Float32 = 0.0, z: Float32 = 0.0):
+    def __init__(
+        out self, x: Float32 = 0.0, y: Float32 = 0.0, z: Float32 = 0.0
+    ):
         self.x = x
         self.y = y
         self.z = z
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.x = copy.x
         self.y = copy.y
         self.z = copy.z
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.x = take.x
-        self.y = take.y
-        self.z = take.z
+    def __init__(out self, *, deinit move: Self):
+        self.x = move.x
+        self.y = move.y
+        self.z = move.z
 
-    fn __eq__(self, other: Self) -> Bool:
+    def __eq__(self, other: Self) -> Bool:
         return self.x == other.x and self.y == other.y and self.z == other.z
 
-    fn __ne__(self, other: Self) -> Bool:
+    def __ne__(self, other: Self) -> Bool:
         return not self.__eq__(other)
 
-    fn __add__(self, other: Self) -> Self:
+    def __add__(self, other: Self) -> Self:
         return Vec3(self.x + other.x, self.y + other.y, self.z + other.z)
 
-    fn __sub__(self, other: Self) -> Self:
+    def __sub__(self, other: Self) -> Self:
         return Vec3(self.x - other.x, self.y - other.y, self.z - other.z)
 
-    fn __mul__(self, scalar: Float32) -> Self:
+    def __mul__(self, scalar: Float32) -> Self:
         return Vec3(self.x * scalar, self.y * scalar, self.z * scalar)
 
-    fn length_squared(self) -> Float32:
+    def length_squared(self) -> Float32:
         """Return the squared length of this vector."""
         return self.x * self.x + self.y * self.y + self.z * self.z
 
-    fn dot(self, other: Self) -> Float32:
+    def dot(self, other: Self) -> Float32:
         """Return the dot product of this vector with another."""
         return self.x * other.x + self.y * other.y + self.z * other.z
 
@@ -131,7 +133,7 @@ struct Quaternion(Copyable, Movable):
     var z: Float32
     var w: Float32
 
-    fn __init__(
+    def __init__(
         out self,
         x: Float32 = 0.0,
         y: Float32 = 0.0,
@@ -143,25 +145,25 @@ struct Quaternion(Copyable, Movable):
         self.z = z
         self.w = w
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.x = copy.x
         self.y = copy.y
         self.z = copy.z
         self.w = copy.w
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.x = take.x
-        self.y = take.y
-        self.z = take.z
-        self.w = take.w
+    def __init__(out self, *, deinit move: Self):
+        self.x = move.x
+        self.y = move.y
+        self.z = move.z
+        self.w = move.w
 
     @staticmethod
-    fn identity() -> Quaternion:
+    def identity() -> Quaternion:
         """Return the identity quaternion (no rotation)."""
         return Quaternion(0.0, 0.0, 0.0, 1.0)
 
     @staticmethod
-    fn from_euler_degrees(
+    def from_euler_degrees(
         pitch_deg: Float32, yaw_deg: Float32, roll_deg: Float32
     ) -> Quaternion:
         """Create a quaternion from Euler angles in degrees.
@@ -179,7 +181,7 @@ struct Quaternion(Copyable, Movable):
         Returns:
             A unit quaternion representing the combined rotation.
         """
-        alias DEG_TO_RAD: Float32 = 3.14159265358979323846 / 180.0
+        comptime DEG_TO_RAD: Float32 = 3.14159265358979323846 / 180.0
 
         var half_pitch = pitch_deg * DEG_TO_RAD * 0.5
         var half_yaw = yaw_deg * DEG_TO_RAD * 0.5
@@ -202,7 +204,7 @@ struct Quaternion(Copyable, Movable):
             w=cp * cy * cr + sp * sy * sr,
         )
 
-    fn length_squared(self) -> Float32:
+    def length_squared(self) -> Float32:
         """Return the squared length of this quaternion."""
         return (
             self.x * self.x
@@ -256,7 +258,7 @@ struct PanelConfig(Copyable, Movable):
     var curvature_radius: Float32
     var interact: Bool
 
-    fn __init__(
+    def __init__(
         out self,
         width_m: Float32 = 0.8,
         height_m: Float32 = 0.6,
@@ -276,7 +278,7 @@ struct PanelConfig(Copyable, Movable):
         self.curvature_radius = curvature_radius
         self.interact = interact
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.width_m = copy.width_m
         self.height_m = copy.height_m
         self.pixels_per_meter = copy.pixels_per_meter
@@ -286,17 +288,17 @@ struct PanelConfig(Copyable, Movable):
         self.curvature_radius = copy.curvature_radius
         self.interact = copy.interact
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.width_m = take.width_m
-        self.height_m = take.height_m
-        self.pixels_per_meter = take.pixels_per_meter
-        self.position = take.position^
-        self.rotation = take.rotation^
-        self.curved = take.curved
-        self.curvature_radius = take.curvature_radius
-        self.interact = take.interact
+    def __init__(out self, *, deinit move: Self):
+        self.width_m = move.width_m
+        self.height_m = move.height_m
+        self.pixels_per_meter = move.pixels_per_meter
+        self.position = move.position^
+        self.rotation = move.rotation^
+        self.curved = move.curved
+        self.curvature_radius = move.curvature_radius
+        self.interact = move.interact
 
-    fn texture_width(self) -> UInt32:
+    def texture_width(self) -> UInt32:
         """Compute the texture width in pixels from physical size and density.
 
         Returns:
@@ -304,7 +306,7 @@ struct PanelConfig(Copyable, Movable):
         """
         return UInt32(Int(self.width_m * self.pixels_per_meter + 0.5))
 
-    fn texture_height(self) -> UInt32:
+    def texture_height(self) -> UInt32:
         """Compute the texture height in pixels from physical size and density.
 
         Returns:
@@ -318,8 +320,8 @@ struct PanelConfig(Copyable, Movable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-@value
-struct PanelState:
+@fieldwise_init
+struct PanelState(Copyable, Movable):
     """Runtime state flags for an active XR panel.
 
     Tracks whether the panel is visible, focused, dirty (needs re-render),
@@ -343,7 +345,7 @@ struct PanelState:
     """Whether the initial mount mutations have been applied. False
     until the first app.mount() call completes."""
 
-    fn __init__(out self):
+    def __init__(out self):
         self.visible = True
         self.focused = False
         self.dirty = False
@@ -440,7 +442,7 @@ struct XRPanel(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self, panel_id: UInt32, config: PanelConfig):
+    def __init__(out self, panel_id: UInt32, config: PanelConfig):
         """Create an XRPanel with the given ID and configuration.
 
         This should only be called by XRScene.create_panel(), which
@@ -464,23 +466,23 @@ struct XRPanel(Movable):
         self.interact = config.interact
         self.state = PanelState()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.panel_id = take.panel_id
-        self.position = take.position^
-        self.rotation = take.rotation^
-        self.width_m = take.width_m
-        self.height_m = take.height_m
-        self.pixels_per_meter = take.pixels_per_meter
-        self.texture_width = take.texture_width
-        self.texture_height = take.texture_height
-        self.curved = take.curved
-        self.curvature_radius = take.curvature_radius
-        self.interact = take.interact
-        self.state = take.state
+    def __init__(out self, *, deinit move: Self):
+        self.panel_id = move.panel_id
+        self.position = move.position^
+        self.rotation = move.rotation^
+        self.width_m = move.width_m
+        self.height_m = move.height_m
+        self.pixels_per_meter = move.pixels_per_meter
+        self.texture_width = move.texture_width
+        self.texture_height = move.texture_height
+        self.curved = move.curved
+        self.curvature_radius = move.curvature_radius
+        self.interact = move.interact
+        self.state = move.state
 
     # ── Transform manipulation ───────────────────────────────────────
 
-    fn set_position(mut self, x: Float32, y: Float32, z: Float32):
+    def set_position(mut self, x: Float32, y: Float32, z: Float32):
         """Set the world-space position of the panel center.
 
         Args:
@@ -490,7 +492,7 @@ struct XRPanel(Movable):
         """
         self.position = Vec3(x, y, z)
 
-    fn set_rotation(mut self, quat: Quaternion):
+    def set_rotation(mut self, quat: Quaternion):
         """Set the world-space rotation of the panel.
 
         Args:
@@ -498,7 +500,7 @@ struct XRPanel(Movable):
         """
         self.rotation = quat
 
-    fn set_rotation_euler(
+    def set_rotation_euler(
         mut self, pitch_deg: Float32, yaw_deg: Float32, roll_deg: Float32
     ):
         """Set the world-space rotation from Euler angles in degrees.
@@ -516,7 +518,7 @@ struct XRPanel(Movable):
 
     # ── Size manipulation ────────────────────────────────────────────
 
-    fn set_size(mut self, width_m: Float32, height_m: Float32):
+    def set_size(mut self, width_m: Float32, height_m: Float32):
         """Resize the panel's physical dimensions.
 
         This also recalculates the texture dimensions based on the
@@ -535,7 +537,7 @@ struct XRPanel(Movable):
         )
         self.state.dirty = True
 
-    fn set_pixels_per_meter(mut self, ppm: Float32):
+    def set_pixels_per_meter(mut self, ppm: Float32):
         """Change the pixel density and recalculate texture dimensions.
 
         Higher values give sharper text but cost more GPU. The shim must
@@ -551,11 +553,11 @@ struct XRPanel(Movable):
 
     # ── Visibility ───────────────────────────────────────────────────
 
-    fn show(mut self):
+    def show(mut self):
         """Make the panel visible in the XR scene."""
         self.state.visible = True
 
-    fn hide(mut self):
+    def hide(mut self):
         """Hide the panel from the XR scene.
 
         Hidden panels retain their DOM state and can be shown again
@@ -564,13 +566,13 @@ struct XRPanel(Movable):
         """
         self.state.visible = False
 
-    fn is_visible(self) -> Bool:
+    def is_visible(self) -> Bool:
         """Return True if the panel is visible in the XR scene."""
         return self.state.visible
 
     # ── Dirty state ──────────────────────────────────────────────────
 
-    fn mark_dirty(mut self):
+    def mark_dirty(mut self):
         """Mark the panel's texture as needing re-render.
 
         Called after mutations are applied to the panel's DOM. The XR
@@ -578,17 +580,17 @@ struct XRPanel(Movable):
         """
         self.state.dirty = True
 
-    fn is_dirty(self) -> Bool:
+    def is_dirty(self) -> Bool:
         """Return True if the panel needs its texture re-rendered."""
         return self.state.dirty
 
-    fn clear_dirty(mut self):
+    def clear_dirty(mut self):
         """Clear the dirty flag after the texture has been re-rendered."""
         self.state.dirty = False
 
     # ── Hit testing ──────────────────────────────────────────────────
 
-    fn ray_intersect(
+    def ray_intersect(
         self, ray_origin: Vec3, ray_direction: Vec3
     ) -> Optional[Vec3]:
         """Test if a ray intersects this panel's quad.
@@ -623,7 +625,7 @@ struct XRPanel(Movable):
 
     # ── Debug ────────────────────────────────────────────────────────
 
-    fn __str__(self) -> String:
+    def __str__(self) -> String:
         """Return a debug string representation of this panel."""
         return (
             String("XRPanel(id=")
@@ -657,7 +659,7 @@ struct XRPanel(Movable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn default_panel_config() -> PanelConfig:
+def default_panel_config() -> PanelConfig:
     """Return the default panel configuration.
 
     Creates a comfortable reading panel at roughly arm's length:
@@ -672,7 +674,7 @@ fn default_panel_config() -> PanelConfig:
     return PanelConfig()
 
 
-fn dashboard_panel_config() -> PanelConfig:
+def dashboard_panel_config() -> PanelConfig:
     """Return a wide dashboard panel configuration.
 
     Creates a large curved panel suitable for dashboards and multi-column
@@ -695,7 +697,7 @@ fn dashboard_panel_config() -> PanelConfig:
     )
 
 
-fn tooltip_panel_config() -> PanelConfig:
+def tooltip_panel_config() -> PanelConfig:
     """Return a small tooltip/HUD panel configuration.
 
     Creates a small non-interactive overlay suitable for tooltips, status
@@ -717,7 +719,7 @@ fn tooltip_panel_config() -> PanelConfig:
     )
 
 
-fn hand_anchored_panel_config() -> PanelConfig:
+def hand_anchored_panel_config() -> PanelConfig:
     """Return a panel configuration suitable for anchoring to a hand.
 
     Creates a small interactive panel that can be attached to a controller

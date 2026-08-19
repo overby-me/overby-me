@@ -21,15 +21,15 @@ from wasm_harness import (
 )
 
 
-fn _get_wasm() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Negate — int32 ───────────────────────────────────────────────────────────
 
 
-fn test_neg_int32_positive(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_neg_int32_positive(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("neg_int32", args_i32(5))),
@@ -38,8 +38,8 @@ fn test_neg_int32_positive(
     )
 
 
-fn test_neg_int32_negative(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_neg_int32_negative(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("neg_int32", args_i32(-5))),
@@ -48,8 +48,8 @@ fn test_neg_int32_negative(
     )
 
 
-fn test_neg_int32_zero(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_neg_int32_zero(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("neg_int32", args_i32(0))),
@@ -61,8 +61,8 @@ fn test_neg_int32_zero(
 # ── Negate — int64 ───────────────────────────────────────────────────────────
 
 
-fn test_neg_int64_positive(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_neg_int64_positive(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("neg_int64", args_i64(42))),
@@ -71,8 +71,8 @@ fn test_neg_int64_positive(
     )
 
 
-fn test_neg_int64_negative(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_neg_int64_negative(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("neg_int64", args_i64(-42))),
@@ -81,8 +81,8 @@ fn test_neg_int64_negative(
     )
 
 
-fn test_neg_int64_zero(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_neg_int64_zero(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("neg_int64", args_i64(0))),
@@ -94,7 +94,7 @@ fn test_neg_int64_zero(
 # ── Negate — float32 ────────────────────────────────────────────────────────
 
 
-fn test_neg_float32(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
+def test_neg_float32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     var result = Float64(w[].call_f32("neg_float32", args_f32(3.14)))
     var expected = Float64(-Float32(3.14))
     assert_equal(result, expected, "neg_float32(3.14)")
@@ -103,8 +103,8 @@ fn test_neg_float32(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
 # ── Negate — float64 ────────────────────────────────────────────────────────
 
 
-fn test_neg_float64_positive(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_neg_float64_positive(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("neg_float64", args_f64(3.14)),
@@ -113,8 +113,8 @@ fn test_neg_float64_positive(
     )
 
 
-fn test_neg_float64_negative(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_neg_float64_negative(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("neg_float64", args_f64(-3.14)),
@@ -123,8 +123,8 @@ fn test_neg_float64_negative(
     )
 
 
-fn test_neg_float64_zero(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_neg_float64_zero(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     # neg_float64(0.0) produces -0.0
     var result = w[].call_f64("neg_float64", args_f64(0.0))
@@ -138,8 +138,8 @@ fn test_neg_float64_zero(
 # ── Absolute value — int32 ──────────────────────────────────────────────────
 
 
-fn test_abs_int32_positive(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_int32_positive(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("abs_int32", args_i32(5))),
@@ -148,8 +148,8 @@ fn test_abs_int32_positive(
     )
 
 
-fn test_abs_int32_negative(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_int32_negative(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("abs_int32", args_i32(-5))),
@@ -158,8 +158,8 @@ fn test_abs_int32_negative(
     )
 
 
-fn test_abs_int32_zero(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_int32_zero(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("abs_int32", args_i32(0))),
@@ -171,8 +171,8 @@ fn test_abs_int32_zero(
 # ── Absolute value — int64 ──────────────────────────────────────────────────
 
 
-fn test_abs_int64_positive(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_int64_positive(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("abs_int64", args_i64(99))),
@@ -181,8 +181,8 @@ fn test_abs_int64_positive(
     )
 
 
-fn test_abs_int64_negative(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_int64_negative(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("abs_int64", args_i64(-99))),
@@ -191,8 +191,8 @@ fn test_abs_int64_negative(
     )
 
 
-fn test_abs_int64_zero(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_int64_zero(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("abs_int64", args_i64(0))),
@@ -204,16 +204,16 @@ fn test_abs_int64_zero(
 # ── Absolute value — float32 ────────────────────────────────────────────────
 
 
-fn test_abs_float32_positive(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_float32_positive(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var result = Float64(w[].call_f32("abs_float32", args_f32(2.5)))
     var expected = Float64(Float32(2.5))
     assert_equal(result, expected, "abs_float32(2.5)")
 
 
-fn test_abs_float32_negative(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_float32_negative(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var result = Float64(w[].call_f32("abs_float32", args_f32(-2.5)))
     var expected = Float64(Float32(2.5))
@@ -223,8 +223,8 @@ fn test_abs_float32_negative(
 # ── Absolute value — float64 ────────────────────────────────────────────────
 
 
-fn test_abs_float64_positive(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_float64_positive(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("abs_float64", args_f64(3.14)),
@@ -233,8 +233,8 @@ fn test_abs_float64_positive(
     )
 
 
-fn test_abs_float64_negative(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_float64_negative(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("abs_float64", args_f64(-3.14)),
@@ -243,8 +243,8 @@ fn test_abs_float64_negative(
     )
 
 
-fn test_abs_float64_zero(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_float64_zero(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("abs_float64", args_f64(0.0)),
@@ -253,7 +253,7 @@ fn test_abs_float64_zero(
     )
 
 
-fn main() raises:
+def main() raises:
     from wasm_harness import get_instance
 
     var w = get_instance()

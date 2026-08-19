@@ -35,27 +35,27 @@ from wasm_harness import (
 )
 
 
-fn _get_wasm() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Int:
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
-fn _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _destroy_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_destroy", args_ptr(rt))
 
 
-fn _scope_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _scope_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     height: Int32,
     parent: Int32,
@@ -65,34 +65,34 @@ fn _scope_create(
     )
 
 
-fn _scope_begin_render(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, scope_id: Int
+def _scope_begin_render(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, scope_id: Int
 ) raises -> Int:
     return Int(
         w[].call_i32("scope_begin_render", args_ptr_i32(rt, Int32(scope_id)))
     )
 
 
-fn _scope_end_render(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, prev: Int
+def _scope_end_render(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, prev: Int
 ) raises:
     w[].call_void("scope_end_render", args_ptr_i32(rt, Int32(prev)))
 
 
-fn _signal_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, initial: Int32
+def _signal_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
 ) raises -> Int:
     return Int(w[].call_i32("signal_create_i32", args_ptr_i32(rt, initial)))
 
 
-fn _signal_read(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_read(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     return Int(w[].call_i32("signal_read_i32", args_ptr_i32(rt, Int32(key))))
 
 
-fn _signal_write(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _signal_write(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     key: Int,
     value: Int32,
@@ -100,20 +100,20 @@ fn _signal_write(
     w[].call_void("signal_write_i32", args_ptr_i32_i32(rt, Int32(key), value))
 
 
-fn _signal_peek(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_peek(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     return Int(w[].call_i32("signal_peek_i32", args_ptr_i32(rt, Int32(key))))
 
 
-fn _signal_version(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_version(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     return Int(w[].call_i32("signal_version", args_ptr_i32(rt, Int32(key))))
 
 
-fn _memo_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: Int32,
@@ -126,14 +126,14 @@ fn _memo_create(
     )
 
 
-fn _memo_begin_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_begin_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
-fn _memo_end_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_end_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Int32,
@@ -144,28 +144,28 @@ fn _memo_end_compute(
     )
 
 
-fn _memo_read(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_read(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     return Int(w[].call_i32("memo_read_i32", args_ptr_i32(rt, Int32(memo_id))))
 
 
-fn _memo_is_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_is_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return w[].call_i32("memo_is_dirty", args_ptr_i32(rt, Int32(memo_id))) != 0
 
 
-fn _memo_output_key(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_output_key(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     return Int(
         w[].call_i32("memo_output_key", args_ptr_i32(rt, Int32(memo_id)))
     )
 
 
-fn _memo_did_value_change(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_did_value_change(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return (
         w[].call_i32("memo_did_value_change", args_ptr_i32(rt, Int32(memo_id)))
@@ -173,8 +173,8 @@ fn _memo_did_value_change(
     )
 
 
-fn _memo_bool_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_bool_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: Bool,
@@ -192,14 +192,14 @@ fn _memo_bool_create(
     )
 
 
-fn _memo_bool_begin_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_bool_begin_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_bool_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
-fn _memo_bool_end_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_bool_end_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Bool,
@@ -215,14 +215,14 @@ fn _memo_bool_end_compute(
     )
 
 
-fn _memo_bool_read(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_bool_read(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return w[].call_i32("memo_bool_read", args_ptr_i32(rt, Int32(memo_id))) != 0
 
 
-fn _memo_string_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_string_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: String,
@@ -236,14 +236,14 @@ fn _memo_string_create(
     )
 
 
-fn _memo_string_begin_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_string_begin_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_string_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
-fn _memo_string_end_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_string_end_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: String,
@@ -255,8 +255,8 @@ fn _memo_string_end_compute(
     )
 
 
-fn _memo_string_peek(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_string_peek(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
     w[].call_void(
@@ -265,8 +265,8 @@ fn _memo_string_peek(
     return w[].read_string_struct(out_ptr)
 
 
-fn _memo_string_is_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_string_is_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return (
         w[].call_i32("memo_string_is_dirty", args_ptr_i32(rt, Int32(memo_id)))
@@ -274,8 +274,8 @@ fn _memo_string_is_dirty(
     )
 
 
-fn _runtime_signal_changed(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _runtime_signal_changed(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Bool:
     return (
         w[].call_i32("runtime_signal_changed", args_ptr_i32(rt, Int32(key)))
@@ -283,26 +283,26 @@ fn _runtime_signal_changed(
     )
 
 
-fn _runtime_clear_changed_signals(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _runtime_clear_changed_signals(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_clear_changed_signals", args_ptr(rt))
 
 
-fn _drain_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _drain_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Int:
     return Int(w[].call_i32("runtime_drain_dirty", args_ptr(rt)))
 
 
-fn _has_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _has_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Bool:
     return w[].call_i32("runtime_has_dirty", args_ptr(rt)) != 0
 
 
-fn _memo_destroy(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_destroy(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_destroy", args_ptr_i32(rt, Int32(memo_id)))
 
@@ -313,8 +313,8 @@ fn _memo_destroy(
 # by reading its inputs and writing the result.
 
 
-fn _recompute_i32(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _recompute_i32(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Int32,
@@ -324,8 +324,8 @@ fn _recompute_i32(
     _memo_end_compute(w, rt, memo_id, value)
 
 
-fn _recompute_bool(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _recompute_bool(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Bool,
@@ -335,8 +335,8 @@ fn _recompute_bool(
     _memo_bool_end_compute(w, rt, memo_id, value)
 
 
-fn _recompute_string(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _recompute_string(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: String,
@@ -351,7 +351,7 @@ fn _recompute_string(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_i32_same_value_no_change() raises:
+def test_i32_same_value_no_change() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -382,7 +382,7 @@ fn test_i32_same_value_no_change() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_i32_different_value_changed() raises:
+def test_i32_different_value_changed() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -407,7 +407,7 @@ fn test_i32_different_value_changed() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_i32_initial_compute_changed() raises:
+def test_i32_initial_compute_changed() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -443,7 +443,7 @@ fn test_i32_initial_compute_changed() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_bool_same_value_no_change() raises:
+def test_bool_same_value_no_change() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -468,7 +468,7 @@ fn test_bool_same_value_no_change() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_bool_different_value_changed() raises:
+def test_bool_different_value_changed() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -493,7 +493,7 @@ fn test_bool_different_value_changed() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_bool_false_to_false_no_change() raises:
+def test_bool_false_to_false_no_change() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -518,7 +518,7 @@ fn test_bool_false_to_false_no_change() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_string_same_value_no_change() raises:
+def test_string_same_value_no_change() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -543,7 +543,7 @@ fn test_string_same_value_no_change() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_string_different_value_changed() raises:
+def test_string_different_value_changed() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -568,7 +568,7 @@ fn test_string_different_value_changed() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_string_empty_to_empty_no_change() raises:
+def test_string_empty_to_empty_no_change() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -593,7 +593,7 @@ fn test_string_empty_to_empty_no_change() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_string_version_not_bumped_when_stable() raises:
+def test_string_version_not_bumped_when_stable() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -623,7 +623,7 @@ fn test_string_version_not_bumped_when_stable() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_string_version_bumped_when_changed() raises:
+def test_string_version_bumped_when_changed() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -654,7 +654,7 @@ fn test_string_version_bumped_when_changed() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_chain_cascade_stable() raises:
+def test_chain_cascade_stable() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -713,7 +713,7 @@ fn test_chain_cascade_stable() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_chain_cascade_changed() raises:
+def test_chain_cascade_changed() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -768,7 +768,7 @@ fn test_chain_cascade_changed() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_chain_partial_cascade() raises:
+def test_chain_partial_cascade() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -823,7 +823,7 @@ fn test_chain_partial_cascade() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_diamond_one_parent_changed() raises:
+def test_diamond_one_parent_changed() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -896,7 +896,7 @@ fn test_diamond_one_parent_changed() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_diamond_both_parents_stable() raises:
+def test_diamond_both_parents_stable() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -964,7 +964,7 @@ fn test_diamond_both_parents_stable() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_diamond_both_parents_changed() raises:
+def test_diamond_both_parents_changed() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -1039,7 +1039,7 @@ fn test_diamond_both_parents_changed() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_changed_signals_tracking() raises:
+def test_changed_signals_tracking() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -1097,7 +1097,7 @@ fn test_changed_signals_tracking() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_changed_signals_reset() raises:
+def test_changed_signals_reset() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
 
@@ -1126,7 +1126,7 @@ fn test_changed_signals_reset() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_mixed_type_chain_cascade_stable() raises:
+def test_mixed_type_chain_cascade_stable() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -1201,7 +1201,7 @@ fn test_mixed_type_chain_cascade_stable() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_mixed_type_chain_partial() raises:
+def test_mixed_type_chain_partial() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -1275,7 +1275,7 @@ fn test_mixed_type_chain_partial() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_regression_changed_flag_reset() raises:
+def test_regression_changed_flag_reset() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -1319,7 +1319,7 @@ fn test_regression_changed_flag_reset() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn main() raises:
+def main() raises:
     var passed = 0
     var failed = 0
     var total = 22

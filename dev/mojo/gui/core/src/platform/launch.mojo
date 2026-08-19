@@ -109,7 +109,7 @@ struct AppConfig(Copyable, Movable):
     var height: Int
     var debug: Bool
 
-    fn __init__(
+    def __init__(
         out self,
         title: String = "mojo-gui",
         width: Int = 800,
@@ -121,17 +121,17 @@ struct AppConfig(Copyable, Movable):
         self.height = height
         self.debug = debug
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.title = copy.title
         self.width = copy.width
         self.height = copy.height
         self.debug = copy.debug
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.title = take.title^
-        self.width = take.width
-        self.height = take.height
-        self.debug = take.debug
+    def __init__(out self, *, deinit move: Self):
+        self.title = move.title^
+        self.width = move.width
+        self.height = move.height
+        self.debug = move.debug
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -149,7 +149,7 @@ struct AppConfig(Copyable, Movable):
 #   - desktop_launch() receives config as a direct argument from launch()
 
 
-fn get_launch_config() -> AppConfig:
+def get_launch_config() -> AppConfig:
     """Retrieve the AppConfig set by the most recent launch() call.
 
     Note: This returns the default AppConfig on all targets. The config
@@ -167,7 +167,7 @@ fn get_launch_config() -> AppConfig:
     return AppConfig()
 
 
-fn has_launched() -> Bool:
+def has_launched() -> Bool:
     """Return True if launch() has been called.
 
     Note: This always returns False because module-level `var` is not
@@ -185,7 +185,7 @@ fn has_launched() -> Bool:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn launch[AppType: GuiApp](config: AppConfig = AppConfig()) raises:
+def launch[AppType: GuiApp](config: AppConfig = AppConfig()) raises:
     """Launch the mojo-gui application on the current platform.
 
     This is the universal entry point for all mojo-gui apps. The renderer
@@ -216,7 +216,7 @@ fn launch[AppType: GuiApp](config: AppConfig = AppConfig()) raises:
         from platform import launch, AppConfig
         from counter import CounterApp
 
-        fn main() raises:
+        def main() raises:
             launch[CounterApp](AppConfig(
                 title="My Counter",
                 width=400,

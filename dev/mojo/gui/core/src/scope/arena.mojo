@@ -47,28 +47,28 @@ struct ScopeArena(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         self._scopes = List[ScopeState]()
         self._states = List[_ScopeSlotState]()
         self._free_head = -1
         self._count = 0
 
-    fn __init__(out self, *, capacity: Int):
+    def __init__(out self, *, capacity: Int):
         """Create an arena with pre-allocated capacity."""
         self._scopes = List[ScopeState](capacity=capacity)
         self._states = List[_ScopeSlotState](capacity=capacity)
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._scopes = take._scopes^
-        self._states = take._states^
-        self._free_head = take._free_head
-        self._count = take._count
+    def __init__(out self, *, deinit move: Self):
+        self._scopes = move._scopes^
+        self._states = move._states^
+        self._free_head = move._free_head
+        self._count = move._count
 
     # ── Create / Destroy ─────────────────────────────────────────────
 
-    fn create(mut self, height: UInt32, parent_id: Int) -> UInt32:
+    def create(mut self, height: UInt32, parent_id: Int) -> UInt32:
         """Create a new scope and return its ID.
 
         Args:
@@ -94,7 +94,7 @@ struct ScopeArena(Movable):
             self._count += 1
             return UInt32(idx)
 
-    fn create_child(mut self, parent_id: UInt32) -> UInt32:
+    def create_child(mut self, parent_id: UInt32) -> UInt32:
         """Create a child scope whose height is parent.height + 1.
 
         Convenience method that reads the parent's height automatically.
@@ -108,7 +108,7 @@ struct ScopeArena(Movable):
         var parent_height = self._scopes[Int(parent_id)].height
         return self.create(parent_height + 1, Int(parent_id))
 
-    fn destroy(mut self, id: UInt32):
+    def destroy(mut self, id: UInt32):
         """Destroy the scope at `id`, freeing its slot for reuse.
 
         Destroying a non-existent or already-freed scope is a no-op.
@@ -128,9 +128,9 @@ struct ScopeArena(Movable):
 
     # ── Access ───────────────────────────────────────────────────────
 
-    fn get_ptr(
+    def get_ptr(
         self, id: UInt32
-    ) -> UnsafePointer[ScopeState, MutExternalOrigin]:
+    ) -> UnsafePointer[ScopeState, MutUntrackedOrigin]:
         """Return a pointer to the ScopeState at `id`.
 
         The caller must ensure `id` refers to a live scope.
@@ -140,85 +140,85 @@ struct ScopeArena(Movable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn count(self) -> Int:
+    def count(self) -> Int:
         """Return the number of live scopes."""
         return self._count
 
-    fn contains(self, id: UInt32) -> Bool:
+    def contains(self, id: UInt32) -> Bool:
         """Check whether `id` is a live scope."""
         var idx = Int(id)
         if idx < 0 or idx >= len(self._states):
             return False
         return self._states[idx].occupied
 
-    fn height(self, id: UInt32) -> UInt32:
+    def height(self, id: UInt32) -> UInt32:
         """Return the height (depth) of the scope at `id`."""
         return self._scopes[Int(id)].height
 
-    fn parent_id(self, id: UInt32) -> Int:
+    def parent_id(self, id: UInt32) -> Int:
         """Return the parent ID of the scope at `id`, or -1 if root."""
         return self._scopes[Int(id)].parent_id
 
-    fn is_dirty(self, id: UInt32) -> Bool:
+    def is_dirty(self, id: UInt32) -> Bool:
         """Check whether the scope at `id` is dirty (needs re-render)."""
         return self._scopes[Int(id)].dirty
 
-    fn render_count(self, id: UInt32) -> UInt32:
+    def render_count(self, id: UInt32) -> UInt32:
         """Return how many times the scope at `id` has been rendered."""
         return self._scopes[Int(id)].render_count
 
-    fn hook_count(self, id: UInt32) -> Int:
+    def hook_count(self, id: UInt32) -> Int:
         """Return the number of hooks in the scope at `id`."""
         return self._scopes[Int(id)].hook_count()
 
     # ── Mutators (delegating to ScopeState) ──────────────────────────
 
-    fn set_dirty(mut self, id: UInt32, dirty: Bool):
+    def set_dirty(mut self, id: UInt32, dirty: Bool):
         """Set the dirty flag on the scope at `id`."""
         if dirty:
             self._scopes[Int(id)].mark_dirty()
         else:
             self._scopes[Int(id)].clear_dirty()
 
-    fn begin_render(mut self, id: UInt32):
+    def begin_render(mut self, id: UInt32):
         """Begin a render pass on the scope at `id`.
 
         Resets hook cursor, increments render count, clears dirty flag.
         """
         self._scopes[Int(id)].begin_render()
 
-    fn push_hook(mut self, id: UInt32, tag: UInt8, value: UInt32):
+    def push_hook(mut self, id: UInt32, tag: UInt8, value: UInt32):
         """Push a new hook onto the scope at `id`."""
         self._scopes[Int(id)].push_hook(tag, value)
 
-    fn next_hook(mut self, id: UInt32) -> UInt32:
+    def next_hook(mut self, id: UInt32) -> UInt32:
         """Advance the hook cursor on scope `id` and return the current value.
         """
         return self._scopes[Int(id)].next_hook()
 
-    fn has_more_hooks(self, id: UInt32) -> Bool:
+    def has_more_hooks(self, id: UInt32) -> Bool:
         """Check if scope `id` has more hooks to process."""
         return self._scopes[Int(id)].has_more_hooks()
 
-    fn is_first_render(self, id: UInt32) -> Bool:
+    def is_first_render(self, id: UInt32) -> Bool:
         """Check if scope `id` is on its first render."""
         return self._scopes[Int(id)].is_first_render()
 
-    fn hook_value_at(self, id: UInt32, index: Int) -> UInt32:
+    def hook_value_at(self, id: UInt32, index: Int) -> UInt32:
         """Return the hook value at position `index` in scope `id`."""
         return self._scopes[Int(id)].hook_value_at(index)
 
-    fn hook_tag_at(self, id: UInt32, index: Int) -> UInt8:
+    def hook_tag_at(self, id: UInt32, index: Int) -> UInt8:
         """Return the hook tag at position `index` in scope `id`."""
         return self._scopes[Int(id)].hook_tag_at(index)
 
-    fn hook_cursor(self, id: UInt32) -> Int:
+    def hook_cursor(self, id: UInt32) -> Int:
         """Return the current hook cursor position for scope `id`."""
         return self._scopes[Int(id)].hook_cursor
 
     # ── Bulk operations ──────────────────────────────────────────────
 
-    fn clear(mut self):
+    def clear(mut self):
         """Destroy all scopes."""
         self._scopes.clear()
         self._states.clear()
@@ -227,7 +227,7 @@ struct ScopeArena(Movable):
 
     # ── Context (Dependency Injection) ───────────────────────────────
 
-    fn provide_context(mut self, scope_id: UInt32, key: UInt32, value: Int32):
+    def provide_context(mut self, scope_id: UInt32, key: UInt32, value: Int32):
         """Provide a context value at the given scope.
 
         If the key already exists in the scope's context map, the value
@@ -240,7 +240,7 @@ struct ScopeArena(Movable):
         """
         self._scopes[Int(scope_id)].provide_context(key, value)
 
-    fn consume_context(
+    def consume_context(
         self, scope_id: UInt32, key: UInt32
     ) -> Tuple[Bool, Int32]:
         """Look up a context value by walking up the scope tree.
@@ -268,18 +268,18 @@ struct ScopeArena(Movable):
             current = self._scopes[idx].parent_id
         return Tuple(False, Int32(0))
 
-    fn has_context_local(self, scope_id: UInt32, key: UInt32) -> Bool:
+    def has_context_local(self, scope_id: UInt32, key: UInt32) -> Bool:
         """Check whether the scope itself provides a context for `key`.
 
         Does NOT walk up the parent chain.
         """
         return self._scopes[Int(scope_id)].has_context(key)
 
-    fn context_count(self, scope_id: UInt32) -> Int:
+    def context_count(self, scope_id: UInt32) -> Int:
         """Return the number of context entries in the given scope."""
         return self._scopes[Int(scope_id)].context_count()
 
-    fn remove_context(mut self, scope_id: UInt32, key: UInt32) -> Bool:
+    def remove_context(mut self, scope_id: UInt32, key: UInt32) -> Bool:
         """Remove a context entry from the given scope.
 
         Returns True if the entry was found and removed.
@@ -288,34 +288,34 @@ struct ScopeArena(Movable):
 
     # ── Error Boundaries ─────────────────────────────────────────────
 
-    fn set_error_boundary(mut self, scope_id: UInt32, enabled: Bool):
+    def set_error_boundary(mut self, scope_id: UInt32, enabled: Bool):
         """Mark or unmark a scope as an error boundary.
 
         An error boundary catches errors from descendant scopes.
         """
         self._scopes[Int(scope_id)].set_error_boundary(enabled)
 
-    fn is_error_boundary(self, scope_id: UInt32) -> Bool:
+    def is_error_boundary(self, scope_id: UInt32) -> Bool:
         """Check whether the scope is an error boundary."""
         return self._scopes[Int(scope_id)].is_error_boundary
 
-    fn set_error(mut self, scope_id: UInt32, message: String):
+    def set_error(mut self, scope_id: UInt32, message: String):
         """Set an error on the scope (marks it as having an error)."""
         self._scopes[Int(scope_id)].set_error(message)
 
-    fn clear_error(mut self, scope_id: UInt32):
+    def clear_error(mut self, scope_id: UInt32):
         """Clear the error state on the scope."""
         self._scopes[Int(scope_id)].clear_error()
 
-    fn has_error(self, scope_id: UInt32) -> Bool:
+    def has_error(self, scope_id: UInt32) -> Bool:
         """Check whether the scope has a captured error."""
         return self._scopes[Int(scope_id)].has_error
 
-    fn get_error_message(self, scope_id: UInt32) -> String:
+    def get_error_message(self, scope_id: UInt32) -> String:
         """Return the error message on the scope, or empty string."""
         return self._scopes[Int(scope_id)].get_error_message()
 
-    fn find_error_boundary(self, scope_id: UInt32) -> Int:
+    def find_error_boundary(self, scope_id: UInt32) -> Int:
         """Walk up from `scope_id` to find the nearest error boundary.
 
         Returns the boundary scope's ID as Int, or -1 if none found.
@@ -333,7 +333,7 @@ struct ScopeArena(Movable):
             current = self._scopes[idx].parent_id
         return -1
 
-    fn propagate_error(mut self, scope_id: UInt32, message: String) -> Int:
+    def propagate_error(mut self, scope_id: UInt32, message: String) -> Int:
         """Propagate an error from `scope_id` to its nearest error boundary.
 
         Sets the error on the boundary scope and returns its ID.
@@ -353,7 +353,7 @@ struct ScopeArena(Movable):
 
     # ── Suspense ─────────────────────────────────────────────────────
 
-    fn set_suspense_boundary(mut self, scope_id: UInt32, enabled: Bool):
+    def set_suspense_boundary(mut self, scope_id: UInt32, enabled: Bool):
         """Mark or unmark a scope as a suspense boundary.
 
         A suspense boundary shows a fallback while any descendant
@@ -361,19 +361,19 @@ struct ScopeArena(Movable):
         """
         self._scopes[Int(scope_id)].set_suspense_boundary(enabled)
 
-    fn is_suspense_boundary(self, scope_id: UInt32) -> Bool:
+    def is_suspense_boundary(self, scope_id: UInt32) -> Bool:
         """Check whether the scope is a suspense boundary."""
         return self._scopes[Int(scope_id)].is_suspense_boundary
 
-    fn set_pending(mut self, scope_id: UInt32, pending: Bool):
+    def set_pending(mut self, scope_id: UInt32, pending: Bool):
         """Set the pending (async loading) state on a scope."""
         self._scopes[Int(scope_id)].set_pending(pending)
 
-    fn is_pending(self, scope_id: UInt32) -> Bool:
+    def is_pending(self, scope_id: UInt32) -> Bool:
         """Check whether the scope is in a pending state."""
         return self._scopes[Int(scope_id)].is_pending
 
-    fn find_suspense_boundary(self, scope_id: UInt32) -> Int:
+    def find_suspense_boundary(self, scope_id: UInt32) -> Int:
         """Walk up from `scope_id` to find the nearest suspense boundary.
 
         Returns the boundary scope's ID as Int, or -1 if none found.
@@ -391,7 +391,7 @@ struct ScopeArena(Movable):
             current = self._scopes[idx].parent_id
         return -1
 
-    fn has_pending_descendant(self, scope_id: UInt32) -> Bool:
+    def has_pending_descendant(self, scope_id: UInt32) -> Bool:
         """Check if any live scope has `scope_id` as an ancestor and is pending.
 
         This is an O(n) scan over all live scopes.  For small trees
@@ -415,7 +415,7 @@ struct ScopeArena(Movable):
                 current = self._scopes[current].parent_id
         return False
 
-    fn resolve_pending(mut self, scope_id: UInt32) -> Int:
+    def resolve_pending(mut self, scope_id: UInt32) -> Int:
         """Mark a scope as no longer pending and return its suspense boundary.
 
         Clears the pending flag and returns the nearest suspense boundary

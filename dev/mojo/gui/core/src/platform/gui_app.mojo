@@ -76,7 +76,7 @@
 #         fn handle_event(
 #             mut self, handler_id: UInt32, event_type: UInt8, value: String
 #         ) -> Bool:
-#             if len(value) > 0:
+#             if value.byte_length() > 0:
 #                 return self.ctx.dispatch_event_with_string(
 #                     handler_id, event_type, value
 #                 )
@@ -84,14 +84,14 @@
 #
 #         fn mount(
 #             mut self,
-#             writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+#             writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 #         ) -> Int32:
 #             var vnode_idx = self.render()
 #             return self.ctx.mount(writer_ptr, vnode_idx)
 #
 #         fn flush(
 #             mut self,
-#             writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+#             writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 #         ) -> Int32:
 #             if not self.ctx.consume_dirty():
 #                 return 0
@@ -126,7 +126,7 @@ from bridge import MutationWriter
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-trait GuiApp(ImplicitlyDestructible, Movable):
+trait GuiApp(Deinitable, Movable):
     """Lifecycle trait that every mojo-gui application implements.
 
     This is the app-side counterpart to `PlatformApp` (renderer-side).
@@ -159,7 +159,7 @@ trait GuiApp(ImplicitlyDestructible, Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create and fully initialize the application.
 
         All setup — context creation, signal creation, view registration,
@@ -174,7 +174,7 @@ trait GuiApp(ImplicitlyDestructible, Movable):
 
     # ── Rendering ────────────────────────────────────────────────────
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build a fresh VNode tree for the root component.
 
         Returns the VNode index in the store. The caller (mount or flush)
@@ -195,7 +195,7 @@ trait GuiApp(ImplicitlyDestructible, Movable):
 
     # ── Event dispatch ───────────────────────────────────────────────
 
-    fn handle_event(
+    def handle_event(
         mut self, handler_id: UInt32, event_type: UInt8, value: String
     ) -> Bool:
         """Dispatch a user interaction event to the app's handler registry.
@@ -207,7 +207,7 @@ trait GuiApp(ImplicitlyDestructible, Movable):
 
         Implementations should dispatch to the appropriate path:
 
-            if len(value) > 0:
+            if value.byte_length() > 0:
                 return self.ctx.dispatch_event_with_string(
                     handler_id, event_type, value
                 )
@@ -230,9 +230,9 @@ trait GuiApp(ImplicitlyDestructible, Movable):
 
     # ── Mount lifecycle ──────────────────────────────────────────────
 
-    fn mount(
+    def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Perform the initial render and write mount mutations.
 
@@ -264,9 +264,9 @@ trait GuiApp(ImplicitlyDestructible, Movable):
 
     # ── Flush lifecycle ──────────────────────────────────────────────
 
-    fn flush(
+    def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Re-render dirty scopes and write update mutations.
 
@@ -299,7 +299,7 @@ trait GuiApp(ImplicitlyDestructible, Movable):
 
     # ── Dirty state queries ──────────────────────────────────────────
 
-    fn has_dirty(self) -> Bool:
+    def has_dirty(self) -> Bool:
         """Check if any scopes need re-rendering.
 
         This is a non-consuming check — it does not collect or clear
@@ -316,7 +316,7 @@ trait GuiApp(ImplicitlyDestructible, Movable):
         """
         ...
 
-    fn consume_dirty(mut self) -> Bool:
+    def consume_dirty(mut self) -> Bool:
         """Collect and consume all dirty scopes.
 
         This drains the scheduler's dirty queue and prepares for
@@ -335,7 +335,7 @@ trait GuiApp(ImplicitlyDestructible, Movable):
 
     # ── Cleanup ──────────────────────────────────────────────────────
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """Release all resources held by the application.
 
         Called once when the app is shutting down. After this call,

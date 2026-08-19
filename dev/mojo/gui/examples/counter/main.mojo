@@ -18,7 +18,7 @@ from platform.launch import launch, AppConfig
 from counter import CounterApp
 
 
-fn main() raises:
+def main() raises:
     launch[CounterApp](
         AppConfig(
             title="High-Five Counter",

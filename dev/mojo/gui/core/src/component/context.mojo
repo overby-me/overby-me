@@ -112,17 +112,17 @@ struct EventBinding(Copyable, Equatable, Writable):
     var event_name: String
     var handler_id: UInt32
 
-    fn __init__(out self, event_name: String, handler_id: UInt32):
+    def __init__(out self, event_name: String, handler_id: UInt32):
         self.event_name = event_name
         self.handler_id = handler_id
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.event_name = copy.event_name
         self.handler_id = copy.handler_id
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.event_name = take.event_name^
-        self.handler_id = take.handler_id
+    def __init__(out self, *, deinit move: Self):
+        self.event_name = move.event_name^
+        self.handler_id = move.handler_id
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -160,7 +160,7 @@ struct AutoBinding(Copyable):
     var version_key: UInt32
 
     @staticmethod
-    fn event(event_name: String, handler_id: UInt32) -> Self:
+    def event(event_name: String, handler_id: UInt32) -> Self:
         """Create an event auto-binding."""
         return Self(
             kind=AUTO_BIND_EVENT,
@@ -172,7 +172,7 @@ struct AutoBinding(Copyable):
         )
 
     @staticmethod
-    fn value(
+    def value(
         attr_name: String, string_key: UInt32, version_key: UInt32
     ) -> Self:
         """Create a value binding auto-binding."""
@@ -185,7 +185,7 @@ struct AutoBinding(Copyable):
             version_key=version_key,
         )
 
-    fn __init__(
+    def __init__(
         out self,
         kind: UInt8,
         event_name: String,
@@ -201,7 +201,7 @@ struct AutoBinding(Copyable):
         self.string_key = string_key
         self.version_key = version_key
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.kind = copy.kind
         self.event_name = copy.event_name
         self.handler_id = copy.handler_id
@@ -209,19 +209,19 @@ struct AutoBinding(Copyable):
         self.string_key = copy.string_key
         self.version_key = copy.version_key
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.kind = take.kind
-        self.event_name = take.event_name^
-        self.handler_id = take.handler_id
-        self.attr_name = take.attr_name^
-        self.string_key = take.string_key
-        self.version_key = take.version_key
+    def __init__(out self, *, deinit move: Self):
+        self.kind = move.kind
+        self.event_name = move.event_name^
+        self.handler_id = move.handler_id
+        self.attr_name = move.attr_name^
+        self.string_key = move.string_key
+        self.version_key = move.version_key
 
-    fn is_event(self) -> Bool:
+    def is_event(self) -> Bool:
         """Check whether this is an event binding."""
         return self.kind == AUTO_BIND_EVENT
 
-    fn is_value(self) -> Bool:
+    def is_value(self) -> Bool:
         """Check whether this is a value binding."""
         return self.kind == AUTO_BIND_VALUE
 
@@ -246,14 +246,14 @@ struct RenderBuilder(Movable):
 
     Usage (in a component's render method):
 
-        fn render(self) -> UInt32:
+        def render(self) -> UInt32:
             var vb = self.ctx.render_builder()
             vb.add_dyn_text("Count: " + str(self.count.peek()))
             return vb.build()
 
     Compare with manual VNodeBuilder:
 
-        fn build_vnode(self) -> UInt32:
+        def build_vnode(self) -> UInt32:
             var vb = self.ctx.vnode_builder()
             vb.add_dyn_text("Count: " + str(self.count.peek()))
             vb.add_dyn_event("click", self.incr_handler)
@@ -264,9 +264,9 @@ struct RenderBuilder(Movable):
     var _vb: VNodeBuilder
     var _events: List[EventBinding]
     var _auto_bindings: List[AutoBinding]
-    var _runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    var _runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
 
-    fn __init__(
+    def __init__(
         out self,
         var vb: VNodeBuilder,
         var events: List[EventBinding],
@@ -275,13 +275,15 @@ struct RenderBuilder(Movable):
         self._vb = vb^
         self._events = events^
         self._auto_bindings = List[AutoBinding]()
-        self._runtime = UnsafePointer[Runtime, MutExternalOrigin]()
+        self._runtime = UnsafePointer[
+            Runtime, MutUntrackedOrigin
+        ].unsafe_dangling()
 
-    fn __init__(
+    def __init__(
         out self,
         var vb: VNodeBuilder,
         var auto_bindings: List[AutoBinding],
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ):
         """Construct with auto-bindings (events + value bindings)."""
         self._vb = vb^
@@ -289,15 +291,15 @@ struct RenderBuilder(Movable):
         self._auto_bindings = auto_bindings^
         self._runtime = runtime
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._vb = take._vb^
-        self._events = take._events^
-        self._auto_bindings = take._auto_bindings^
-        self._runtime = take._runtime
+    def __init__(out self, *, deinit move: Self):
+        self._vb = move._vb^
+        self._events = move._events^
+        self._auto_bindings = move._auto_bindings^
+        self._runtime = move._runtime
 
     # ── Dynamic text ─────────────────────────────────────────────────
 
-    fn add_dyn_text(mut self, value: String):
+    def add_dyn_text(mut self, value: String):
         """Add a dynamic text node (fills the next DynamicText slot).
 
         Call in order corresponding to `dyn_text(0)`, `dyn_text(1)`, ...
@@ -305,13 +307,13 @@ struct RenderBuilder(Movable):
         """
         self._vb.add_dyn_text(value)
 
-    fn add_dyn_placeholder(mut self):
+    def add_dyn_placeholder(mut self):
         """Add a dynamic placeholder node."""
         self._vb.add_dyn_placeholder()
 
     # ── Dynamic text from signal ─────────────────────────────────────
 
-    fn add_dyn_text_signal(mut self, signal: SignalString):
+    def add_dyn_text_signal(mut self, signal: SignalString):
         """Add a dynamic text node from a SignalString value.
 
         Reads the signal's current value (via peek/get — no subscription)
@@ -326,17 +328,17 @@ struct RenderBuilder(Movable):
 
     # ── Dynamic attributes (manual) ─────────────────────────────────
 
-    fn add_dyn_text_attr(mut self, name: String, value: String):
+    def add_dyn_text_attr(mut self, name: String, value: String):
         """Add a dynamic text attribute (e.g. class, id, href)."""
         self._vb.add_dyn_text_attr(name, value)
 
-    fn add_dyn_bool_attr(mut self, name: String, value: Bool):
+    def add_dyn_bool_attr(mut self, name: String, value: Bool):
         """Add a dynamic boolean attribute (e.g. disabled, checked)."""
         self._vb.add_dyn_bool_attr(name, value)
 
     # ── Conditional class helpers ────────────────────────────────────
 
-    fn add_class_if(mut self, condition: Bool, class_name: String):
+    def add_class_if(mut self, condition: Bool, class_name: String):
         """Add a conditional CSS class attribute.
 
         Shortcut for `add_dyn_text_attr("class", ...)`.
@@ -352,7 +354,7 @@ struct RenderBuilder(Movable):
         else:
             self._vb.add_dyn_text_attr(String("class"), String(""))
 
-    fn add_class_when(
+    def add_class_when(
         mut self,
         condition: Bool,
         true_class: String,
@@ -375,7 +377,7 @@ struct RenderBuilder(Movable):
 
     # ── Build ────────────────────────────────────────────────────────
 
-    fn build(mut self) -> UInt32:
+    def build(mut self) -> UInt32:
         """Finalize the VNode by auto-adding all registered bindings.
 
         Adds dynamic attributes for each AutoBinding (events + value
@@ -462,7 +464,7 @@ struct ComponentContext(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an uninitialized context.  Call create() instead."""
         self.shell = AppShell()
         self.scope_id = 0
@@ -472,17 +474,17 @@ struct ComponentContext(Movable):
         self._view_events = List[EventBinding]()
         self._auto_bindings = List[AutoBinding]()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.shell = take.shell^
-        self.scope_id = take.scope_id
-        self.template_id = take.template_id
-        self.current_vnode = take.current_vnode
-        self._setup_done = take._setup_done
-        self._view_events = take._view_events^
-        self._auto_bindings = take._auto_bindings^
+    def __init__(out self, *, deinit move: Self):
+        self.shell = move.shell^
+        self.scope_id = move.scope_id
+        self.template_id = move.template_id
+        self.current_vnode = move.current_vnode
+        self._setup_done = move._setup_done
+        self._view_events = move._view_events^
+        self._auto_bindings = move._auto_bindings^
 
     @staticmethod
-    fn create() -> Self:
+    def create() -> Self:
         """Create a fully initialized ComponentContext.
 
         Allocates the AppShell, creates a root scope, and begins the
@@ -500,7 +502,7 @@ struct ComponentContext(Movable):
         ctx._setup_done = False
         return ctx^
 
-    fn end_setup(mut self):
+    def end_setup(mut self):
         """End the initial setup (render bracket).
 
         Must be called after all use_signal/use_memo/use_effect calls
@@ -509,13 +511,13 @@ struct ComponentContext(Movable):
         self.shell.end_render(-1)
         self._setup_done = True
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """Free all resources.  Safe to call multiple times."""
         self.shell.destroy()
 
     # ── Signal hooks ─────────────────────────────────────────────────
 
-    fn use_signal(mut self, initial: Int32) -> SignalI32:
+    def use_signal(mut self, initial: Int32) -> SignalI32:
         """Create an Int32 signal and subscribe the root scope to it.
 
         Must be called during setup (before end_setup).
@@ -535,7 +537,7 @@ struct ComponentContext(Movable):
         _ = self.shell.read_signal_i32(key)
         return SignalI32(key, self.shell.runtime)
 
-    fn create_signal(mut self, initial: Int32) -> SignalI32:
+    def create_signal(mut self, initial: Int32) -> SignalI32:
         """Create an Int32 signal without the hook system.
 
         Can be called at any time (not just during setup).
@@ -552,7 +554,7 @@ struct ComponentContext(Movable):
 
     # ── Bool signal hooks ────────────────────────────────────────────
 
-    fn use_signal_bool(mut self, initial: Bool) -> SignalBool:
+    def use_signal_bool(mut self, initial: Bool) -> SignalBool:
         """Create a Bool signal and subscribe the root scope to it.
 
         Must be called during setup (before end_setup).
@@ -577,7 +579,7 @@ struct ComponentContext(Movable):
         _ = self.shell.read_signal_i32(key)
         return SignalBool(key, self.shell.runtime)
 
-    fn create_signal_bool(mut self, initial: Bool) -> SignalBool:
+    def create_signal_bool(mut self, initial: Bool) -> SignalBool:
         """Create a Bool signal without the hook system.
 
         Can be called at any time (not just during setup).
@@ -599,7 +601,7 @@ struct ComponentContext(Movable):
 
     # ── String signal hooks ──────────────────────────────────────────
 
-    fn use_signal_string(mut self, initial: String) -> SignalString:
+    def use_signal_string(mut self, initial: String) -> SignalString:
         """Create a String signal and subscribe the root scope to it.
 
         Must be called during setup (before end_setup).
@@ -620,7 +622,7 @@ struct ComponentContext(Movable):
         _ = self.shell.runtime[0].read_signal[Int32](keys[1])
         return SignalString(keys[0], keys[1], self.shell.runtime)
 
-    fn create_signal_string(mut self, initial: String) -> SignalString:
+    def create_signal_string(mut self, initial: String) -> SignalString:
         """Create a String signal without the hook system.
 
         Can be called at any time (not just during setup).
@@ -637,7 +639,7 @@ struct ComponentContext(Movable):
 
     # ── Memo hooks ───────────────────────────────────────────────────
 
-    fn use_memo(mut self, initial: Int32) -> MemoI32:
+    def use_memo(mut self, initial: Int32) -> MemoI32:
         """Create an Int32 memo and subscribe the root scope to it.
 
         Must be called during setup (before end_setup).
@@ -657,7 +659,7 @@ struct ComponentContext(Movable):
         _ = self.shell.memo_read_i32(memo_id)
         return MemoI32(memo_id, self.shell.runtime)
 
-    fn create_memo(mut self, initial: Int32) -> MemoI32:
+    def create_memo(mut self, initial: Int32) -> MemoI32:
         """Create an Int32 memo without the hook system.
 
         Can be called at any time.  Does NOT auto-subscribe.
@@ -673,7 +675,7 @@ struct ComponentContext(Movable):
 
     # ── MemoBool hooks ───────────────────────────────────────────────
 
-    fn use_memo_bool(mut self, initial: Bool) -> MemoBool:
+    def use_memo_bool(mut self, initial: Bool) -> MemoBool:
         """Create a Bool memo and subscribe the root scope to it.
 
         Must be called during setup (before end_setup).
@@ -689,7 +691,7 @@ struct ComponentContext(Movable):
         _ = self.shell.memo_read_bool(memo_id)
         return MemoBool(memo_id, self.shell.runtime)
 
-    fn create_memo_bool(mut self, initial: Bool) -> MemoBool:
+    def create_memo_bool(mut self, initial: Bool) -> MemoBool:
         """Create a Bool memo without the hook system.
 
         Can be called at any time.  Does NOT auto-subscribe.
@@ -705,7 +707,7 @@ struct ComponentContext(Movable):
 
     # ── MemoString hooks ─────────────────────────────────────────────
 
-    fn use_memo_string(mut self, initial: String) -> MemoString:
+    def use_memo_string(mut self, initial: String) -> MemoString:
         """Create a String memo and subscribe the root scope to it.
 
         Must be called during setup (before end_setup).
@@ -721,7 +723,7 @@ struct ComponentContext(Movable):
         _ = self.shell.memo_read_string(memo_id)
         return MemoString(memo_id, self.shell.runtime)
 
-    fn create_memo_string(mut self, initial: String) -> MemoString:
+    def create_memo_string(mut self, initial: String) -> MemoString:
         """Create a String memo without the hook system.
 
         Can be called at any time.  Does NOT auto-subscribe.
@@ -737,7 +739,7 @@ struct ComponentContext(Movable):
 
     # ── Effect hooks ─────────────────────────────────────────────────
 
-    fn use_effect(mut self) -> EffectHandle:
+    def use_effect(mut self) -> EffectHandle:
         """Create an effect and register it with the hook system.
 
         Must be called during setup (before end_setup).
@@ -748,7 +750,7 @@ struct ComponentContext(Movable):
         var effect_id = self.shell.use_effect()
         return EffectHandle(effect_id, self.shell.runtime)
 
-    fn create_effect(mut self) -> EffectHandle:
+    def create_effect(mut self) -> EffectHandle:
         """Create an effect without the hook system.
 
         Can be called at any time.
@@ -761,7 +763,7 @@ struct ComponentContext(Movable):
 
     # ── Template registration ────────────────────────────────────────
 
-    fn register_template(mut self, view: Node, name: String):
+    def register_template(mut self, view: Node, name: String):
         """Build a template from a Node tree and register it.
 
         Stores the template ID in `self.template_id` for later use
@@ -779,7 +781,7 @@ struct ComponentContext(Movable):
             self.shell.runtime[0].templates.register(template^)
         )
 
-    fn register_extra_template(mut self, view: Node, name: String) -> UInt32:
+    def register_extra_template(mut self, view: Node, name: String) -> UInt32:
         """Register an additional template without setting self.template_id.
 
         Use this when a component needs multiple templates — for example,
@@ -800,7 +802,7 @@ struct ComponentContext(Movable):
         var template = to_template(view, name)
         return UInt32(self.shell.runtime[0].templates.register(template^))
 
-    fn setup_view(mut self, view: Node, name: String):
+    def setup_view(mut self, view: Node, name: String):
         """End setup and register a view in one call.
 
         Combines `end_setup()` + `register_view()` for maximum
@@ -835,7 +837,7 @@ struct ComponentContext(Movable):
         self.end_setup()
         self.register_view(view, name)
 
-    fn register_view(mut self, view: Node, name: String):
+    def register_view(mut self, view: Node, name: String):
         """Build a template from a Node tree with inline event handlers.
 
         Processes the Node tree to:
@@ -946,7 +948,7 @@ struct ComponentContext(Movable):
 
     # ── View event query ─────────────────────────────────────────────
 
-    fn view_event_handler_id(self, index: Int) -> UInt32:
+    def view_event_handler_id(self, index: Int) -> UInt32:
         """Return the handler ID for the Nth event registered by register_view.
 
         After `register_view()` or `setup_view()`, events are stored in
@@ -976,9 +978,9 @@ struct ComponentContext(Movable):
 
     # ── Flush convenience ────────────────────────────────────────────
 
-    fn flush(
+    def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         new_vnode_idx: UInt32,
     ) -> Int32:
         """Diff old → new VNode, write End sentinel, return byte length.
@@ -1003,7 +1005,7 @@ struct ComponentContext(Movable):
 
     # ── Handler registration — click events ──────────────────────────
 
-    fn on_click_add(self, signal: SignalI32, delta: Int32) -> UInt32:
+    def on_click_add(self, signal: SignalI32, delta: Int32) -> UInt32:
         """Register a click handler that adds `delta` to a signal.
 
         Equivalent to: `onclick: move |_| signal += delta`
@@ -1021,7 +1023,7 @@ struct ComponentContext(Movable):
             )
         )
 
-    fn on_click_sub(self, signal: SignalI32, delta: Int32) -> UInt32:
+    def on_click_sub(self, signal: SignalI32, delta: Int32) -> UInt32:
         """Register a click handler that subtracts `delta` from a signal.
 
         Equivalent to: `onclick: move |_| signal -= delta`
@@ -1039,7 +1041,7 @@ struct ComponentContext(Movable):
             )
         )
 
-    fn on_click_set(self, signal: SignalI32, value: Int32) -> UInt32:
+    def on_click_set(self, signal: SignalI32, value: Int32) -> UInt32:
         """Register a click handler that sets a signal to a fixed value.
 
         Equivalent to: `onclick: move |_| signal.set(value)`
@@ -1057,7 +1059,7 @@ struct ComponentContext(Movable):
             )
         )
 
-    fn on_click_toggle(self, signal: SignalI32) -> UInt32:
+    def on_click_toggle(self, signal: SignalI32) -> UInt32:
         """Register a click handler that toggles a boolean signal (0 ↔ 1).
 
         Equivalent to: `onclick: move |_| signal.toggle()`
@@ -1076,7 +1078,7 @@ struct ComponentContext(Movable):
 
     # ── Handler registration — generic events ────────────────────────
 
-    fn on_event_add(
+    def on_event_add(
         self, event_name: String, signal: SignalI32, delta: Int32
     ) -> UInt32:
         """Register a handler for any event that adds `delta` to a signal.
@@ -1095,7 +1097,7 @@ struct ComponentContext(Movable):
             )
         )
 
-    fn on_event_sub(
+    def on_event_sub(
         self, event_name: String, signal: SignalI32, delta: Int32
     ) -> UInt32:
         """Register a handler for any event that subtracts `delta`.
@@ -1114,7 +1116,7 @@ struct ComponentContext(Movable):
             )
         )
 
-    fn on_event_set(
+    def on_event_set(
         self, event_name: String, signal: SignalI32, value: Int32
     ) -> UInt32:
         """Register a handler for any event that sets a signal.
@@ -1133,7 +1135,7 @@ struct ComponentContext(Movable):
             )
         )
 
-    fn on_input_set(self, signal: SignalI32) -> UInt32:
+    def on_input_set(self, signal: SignalI32) -> UInt32:
         """Register an input handler that sets a signal from event data.
 
         Equivalent to: `oninput: move |e| signal.set(e.value)`
@@ -1150,7 +1152,7 @@ struct ComponentContext(Movable):
             )
         )
 
-    fn register_handler(self, entry: HandlerEntry) -> UInt32:
+    def register_handler(self, entry: HandlerEntry) -> UInt32:
         """Register a raw HandlerEntry for full control.
 
         Use this when the convenience methods don't cover your use case.
@@ -1163,7 +1165,7 @@ struct ComponentContext(Movable):
         """
         return self.shell.runtime[0].register_handler(entry)
 
-    fn register_custom_handler(self, event_name: String) -> UInt32:
+    def register_custom_handler(self, event_name: String) -> UInt32:
         """Register a custom (app-routed) event handler under the root scope.
 
         Creates a HandlerEntry with ACTION_CUSTOM.  When dispatched, the
@@ -1183,7 +1185,7 @@ struct ComponentContext(Movable):
             HandlerEntry.custom(self.scope_id, event_name)
         )
 
-    fn mark_dirty(mut self):
+    def mark_dirty(mut self):
         """Manually mark the root scope as dirty.
 
         Use this when a non-signal state change (e.g. router navigation
@@ -1196,7 +1198,7 @@ struct ComponentContext(Movable):
 
     # ── VNode building ───────────────────────────────────────────────
 
-    fn vnode_builder(self) -> VNodeBuilder:
+    def vnode_builder(self) -> VNodeBuilder:
         """Create a VNodeBuilder for the context's registered template.
 
         Returns:
@@ -1204,7 +1206,7 @@ struct ComponentContext(Movable):
         """
         return VNodeBuilder(self.template_id, self.shell.store)
 
-    fn render_builder(mut self) -> RenderBuilder:
+    def render_builder(mut self) -> RenderBuilder:
         """Create a RenderBuilder that auto-adds registered event handlers
         and value bindings.
 
@@ -1232,7 +1234,7 @@ struct ComponentContext(Movable):
         else:
             return RenderBuilder(vb^, self._view_events.copy())
 
-    fn vnode_builder_keyed(self, key: String) -> VNodeBuilder:
+    def vnode_builder_keyed(self, key: String) -> VNodeBuilder:
         """Create a keyed VNodeBuilder for the context's template.
 
         Args:
@@ -1243,7 +1245,7 @@ struct ComponentContext(Movable):
         """
         return VNodeBuilder(self.template_id, key, self.shell.store)
 
-    fn vnode_builder_for(self, template_id: UInt32) -> VNodeBuilder:
+    def vnode_builder_for(self, template_id: UInt32) -> VNodeBuilder:
         """Create a VNodeBuilder for a specific template ID.
 
         Use this when the component has multiple templates.
@@ -1258,9 +1260,9 @@ struct ComponentContext(Movable):
 
     # ── Mount / Rebuild lifecycle ────────────────────────────────────
 
-    fn mount(
+    def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         vnode_idx: UInt32,
     ) -> Int32:
         """Initial mount: emit templates + create VNode + append to root.
@@ -1279,7 +1281,7 @@ struct ComponentContext(Movable):
 
     # ── Event dispatch ───────────────────────────────────────────────
 
-    fn dispatch_event(mut self, handler_id: UInt32, event_type: UInt8) -> Bool:
+    def dispatch_event(mut self, handler_id: UInt32, event_type: UInt8) -> Bool:
         """Dispatch an event to a handler.
 
         Args:
@@ -1291,7 +1293,7 @@ struct ComponentContext(Movable):
         """
         return self.shell.dispatch_event(handler_id, event_type)
 
-    fn dispatch_event_with_string(
+    def dispatch_event_with_string(
         mut self, handler_id: UInt32, event_type: UInt8, value: String
     ) -> Bool:
         """Dispatch an event with a String payload (Phase 20).
@@ -1314,11 +1316,11 @@ struct ComponentContext(Movable):
 
     # ── Flush lifecycle ──────────────────────────────────────────────
 
-    fn has_dirty(self) -> Bool:
+    def has_dirty(self) -> Bool:
         """Check if any scopes need re-rendering."""
         return self.shell.has_dirty()
 
-    fn consume_dirty(mut self) -> Bool:
+    def consume_dirty(mut self) -> Bool:
         """Collect and consume all dirty scopes.
 
         Returns:
@@ -1326,7 +1328,7 @@ struct ComponentContext(Movable):
         """
         return self.shell.consume_dirty()
 
-    fn settle_scopes(mut self):
+    def settle_scopes(mut self):
         """Remove dirty scopes with no actual signal changes.
 
         After memo recomputation, some scopes may have been eagerly
@@ -1341,21 +1343,21 @@ struct ComponentContext(Movable):
 
     # ── Batch signal writes (Phase 38) ───────────────────────────────
 
-    fn begin_batch(mut self):
+    def begin_batch(mut self):
         """Enter batch mode for signal writes."""
         self.shell.runtime[0].begin_batch()
 
-    fn end_batch(mut self):
+    def end_batch(mut self):
         """Exit batch mode and propagate all deferred writes."""
         self.shell.runtime[0].end_batch()
 
-    fn is_batching(self) -> Bool:
+    def is_batching(self) -> Bool:
         """Return True if currently inside a batch."""
         return self.shell.runtime[0].is_batching()
 
-    fn diff(
+    def diff(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         new_vnode_idx: UInt32,
     ):
         """Diff the current VNode against a new one.
@@ -1370,8 +1372,8 @@ struct ComponentContext(Movable):
         self.shell.diff(writer_ptr, old_idx, new_vnode_idx)
         self.current_vnode = Int(new_vnode_idx)
 
-    fn finalize(
-        self, writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin]
+    def finalize(
+        self, writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin]
     ) -> Int32:
         """Write the End sentinel and return byte length.
 
@@ -1385,7 +1387,7 @@ struct ComponentContext(Movable):
 
     # ── Child scopes (for keyed list items) ──────────────────────────
 
-    fn create_child_scope(mut self) -> UInt32:
+    def create_child_scope(mut self) -> UInt32:
         """Create a child scope under the root scope.
 
         Each keyed list item typically gets its own child scope so that
@@ -1397,7 +1399,7 @@ struct ComponentContext(Movable):
         """
         return self.shell.create_child_scope(self.scope_id)
 
-    fn destroy_child_scopes(mut self, scope_ids: List[UInt32]):
+    def destroy_child_scopes(mut self, scope_ids: List[UInt32]):
         """Destroy a list of child scopes and clean up their handlers.
 
         Call this before rebuilding a keyed list to release the old
@@ -1410,7 +1412,7 @@ struct ComponentContext(Movable):
 
     # ── Child component composition ──────────────────────────────────
 
-    fn create_child_component(
+    def create_child_component(
         mut self, view: Node, name: String
     ) -> ChildComponent:
         """Create a child component with its own scope and template.
@@ -1514,7 +1516,7 @@ struct ComponentContext(Movable):
             child_scope_id, tmpl_id, event_bindings^, auto_bindings^
         )
 
-    fn destroy_child_component(mut self, child: ChildComponent):
+    def destroy_child_component(mut self, child: ChildComponent):
         """Destroy a child component's scope and handlers.
 
         Convenience method that delegates to `child.destroy()` with
@@ -1527,7 +1529,7 @@ struct ComponentContext(Movable):
 
     # ── Child component context (self-rendering children) ────────────
 
-    fn create_child_context(
+    def create_child_context(
         mut self,
         view: Node,
         name: String,
@@ -1559,7 +1561,7 @@ struct ComponentContext(Movable):
             self.shell.eid_alloc,
         )
 
-    fn destroy_child_context(mut self, child_ctx: ChildComponentContext):
+    def destroy_child_context(mut self, child_ctx: ChildComponentContext):
         """Destroy a ChildComponentContext and its resources.
 
         Delegates to the child context's destroy() method which cleans
@@ -1570,7 +1572,7 @@ struct ComponentContext(Movable):
         """
         child_ctx.destroy()
 
-    fn create_child_context_under(
+    def create_child_context_under(
         mut self,
         parent_scope_id: UInt32,
         view: Node,
@@ -1671,7 +1673,7 @@ struct ComponentContext(Movable):
 
     # ── Context (Dependency Injection) ───────────────────────────────
 
-    fn provide_context(mut self, key: UInt32, value: Int32):
+    def provide_context(mut self, key: UInt32, value: Int32):
         """Provide a context value at the root scope.
 
         Stores a key-value pair in the root scope's context map.
@@ -1686,7 +1688,7 @@ struct ComponentContext(Movable):
         """
         self.shell.runtime[0].scopes.provide_context(self.scope_id, key, value)
 
-    fn consume_context(self, key: UInt32) -> Tuple[Bool, Int32]:
+    def consume_context(self, key: UInt32) -> Tuple[Bool, Int32]:
         """Look up a context value walking up the scope tree.
 
         Starts at the root scope and walks up the parent chain until
@@ -1700,7 +1702,7 @@ struct ComponentContext(Movable):
         """
         return self.shell.runtime[0].scopes.consume_context(self.scope_id, key)
 
-    fn has_context(self, key: UInt32) -> Bool:
+    def has_context(self, key: UInt32) -> Bool:
         """Check whether a context value is reachable from the root scope.
 
         Equivalent to `consume_context(key)[0]`.
@@ -1715,7 +1717,7 @@ struct ComponentContext(Movable):
 
     # ── Signal sharing via context ───────────────────────────────────
 
-    fn provide_signal_i32(mut self, key: UInt32, signal: SignalI32):
+    def provide_signal_i32(mut self, key: UInt32, signal: SignalI32):
         """Provide a SignalI32 handle to descendants via context.
 
         Stores the signal's internal key in the scope's context map
@@ -1728,7 +1730,7 @@ struct ComponentContext(Movable):
         """
         self.provide_context(key, Int32(signal.key))
 
-    fn provide_signal_bool(mut self, key: UInt32, signal: SignalBool):
+    def provide_signal_bool(mut self, key: UInt32, signal: SignalBool):
         """Provide a SignalBool handle to descendants via context.
 
         Stores the signal's internal key in the scope's context map.
@@ -1739,7 +1741,7 @@ struct ComponentContext(Movable):
         """
         self.provide_context(key, Int32(signal.key))
 
-    fn provide_signal_string(mut self, key: UInt32, signal: SignalString):
+    def provide_signal_string(mut self, key: UInt32, signal: SignalString):
         """Provide a SignalString handle to descendants via context.
 
         Stores the signal's string key in the scope's context map.
@@ -1757,7 +1759,7 @@ struct ComponentContext(Movable):
         self.provide_context(key, Int32(signal.string_key))
         self.provide_context(key + 1, Int32(signal.version_key))
 
-    fn consume_signal_i32(self, key: UInt32) -> SignalI32:
+    def consume_signal_i32(self, key: UInt32) -> SignalI32:
         """Look up a SignalI32 from an ancestor's context.
 
         Retrieves the signal key stored by `provide_signal_i32()` and
@@ -1773,7 +1775,7 @@ struct ComponentContext(Movable):
         var result = self.consume_context(key)
         return SignalI32(UInt32(result[1]), self.shell.runtime)
 
-    fn consume_signal_bool(self, key: UInt32) -> SignalBool:
+    def consume_signal_bool(self, key: UInt32) -> SignalBool:
         """Look up a SignalBool from an ancestor's context.
 
         Retrieves the signal key stored by `provide_signal_bool()` and
@@ -1788,7 +1790,7 @@ struct ComponentContext(Movable):
         var result = self.consume_context(key)
         return SignalBool(UInt32(result[1]), self.shell.runtime)
 
-    fn consume_signal_string(self, key: UInt32) -> SignalString:
+    def consume_signal_string(self, key: UInt32) -> SignalString:
         """Look up a SignalString from an ancestor's context.
 
         Retrieves both the string key (at `key`) and version key
@@ -1811,7 +1813,7 @@ struct ComponentContext(Movable):
 
     # ── Error Boundary ───────────────────────────────────────────────
 
-    fn use_error_boundary(mut self):
+    def use_error_boundary(mut self):
         """Mark the root scope as an error boundary.
 
         Call during setup (before end_setup / setup_view).  When a
@@ -1827,7 +1829,7 @@ struct ComponentContext(Movable):
         """
         self.shell.runtime[0].scopes.set_error_boundary(self.scope_id, True)
 
-    fn report_error(mut self, message: String) -> Int:
+    def report_error(mut self, message: String) -> Int:
         """Report an error to the nearest error boundary.
 
         First checks whether this scope itself is a boundary — if so,
@@ -1854,7 +1856,7 @@ struct ComponentContext(Movable):
             self.shell.runtime[0].mark_scope_dirty(UInt32(boundary_id))
         return boundary_id
 
-    fn has_error(self) -> Bool:
+    def has_error(self) -> Bool:
         """Check whether this scope (as a boundary) has captured an error.
 
         Returns:
@@ -1862,7 +1864,7 @@ struct ComponentContext(Movable):
         """
         return self.shell.runtime[0].scopes.has_error(self.scope_id)
 
-    fn error_message(self) -> String:
+    def error_message(self) -> String:
         """Get the error message captured by this boundary.
 
         Returns:
@@ -1870,7 +1872,7 @@ struct ComponentContext(Movable):
         """
         return self.shell.runtime[0].scopes.get_error_message(self.scope_id)
 
-    fn clear_error(mut self):
+    def clear_error(mut self):
         """Clear the error state on this boundary scope.
 
         After clearing, the next flush should render normal children
@@ -1882,7 +1884,7 @@ struct ComponentContext(Movable):
 
     # ── Suspense ─────────────────────────────────────────────────────
 
-    fn use_suspense_boundary(mut self):
+    def use_suspense_boundary(mut self):
         """Mark the root scope as a suspense boundary.
 
         Call during setup (before end_setup / setup_view).  When a
@@ -1898,7 +1900,7 @@ struct ComponentContext(Movable):
         """
         self.shell.runtime[0].scopes.set_suspense_boundary(self.scope_id, True)
 
-    fn set_pending(mut self, pending: Bool):
+    def set_pending(mut self, pending: Bool):
         """Set the pending (loading) state on the root scope.
 
         When pending is True, the nearest suspense boundary ancestor
@@ -1918,7 +1920,7 @@ struct ComponentContext(Movable):
         elif self.shell.runtime[0].scopes.is_suspense_boundary(self.scope_id):
             self.shell.runtime[0].mark_scope_dirty(self.scope_id)
 
-    fn has_pending(self) -> Bool:
+    def has_pending(self) -> Bool:
         """Check whether any descendant of this scope is pending.
 
         Scans all live scopes for pending descendants. Used by
@@ -1931,7 +1933,7 @@ struct ComponentContext(Movable):
             self.scope_id
         )
 
-    fn is_pending(self) -> Bool:
+    def is_pending(self) -> Bool:
         """Check whether this scope itself is in pending state.
 
         Returns:
@@ -1941,9 +1943,9 @@ struct ComponentContext(Movable):
 
     # ── Fragment lifecycle (for dynamic keyed lists) ─────────────────
 
-    fn flush_fragment(
+    def flush_fragment(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         slot: FragmentSlot,
         new_frag_idx: UInt32,
     ) -> FragmentSlot:
@@ -1967,7 +1969,7 @@ struct ComponentContext(Movable):
 
     # ── Conditional slot helpers ─────────────────────────────────────
 
-    fn conditional_slot(self) -> ConditionalSlot:
+    def conditional_slot(self) -> ConditionalSlot:
         """Create an uninitialized ConditionalSlot.
 
         The slot must be initialized with an anchor ElementId after
@@ -1994,9 +1996,9 @@ struct ComponentContext(Movable):
         """
         return ConditionalSlot()
 
-    fn flush_conditional_slot(
+    def flush_conditional_slot(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         slot: ConditionalSlot,
         new_vnode_idx: UInt32,
     ) -> ConditionalSlot:
@@ -2029,9 +2031,9 @@ struct ComponentContext(Movable):
             new_vnode_idx,
         )
 
-    fn flush_conditional_slot_empty(
+    def flush_conditional_slot_empty(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         slot: ConditionalSlot,
     ) -> ConditionalSlot:
         """Flush a conditional slot: hide the current branch (back to placeholder).
@@ -2060,7 +2062,7 @@ struct ComponentContext(Movable):
             slot,
         )
 
-    fn build_empty_fragment(self) -> UInt32:
+    def build_empty_fragment(self) -> UInt32:
         """Create an empty Fragment VNode in the store.
 
         Convenience for initializing a FragmentSlot before the first
@@ -2071,7 +2073,7 @@ struct ComponentContext(Movable):
         """
         return self.shell.store[0].push(VNode.fragment())
 
-    fn push_fragment_child(self, frag_idx: UInt32, child_idx: UInt32):
+    def push_fragment_child(self, frag_idx: UInt32, child_idx: UInt32):
         """Append a child VNode to an existing Fragment VNode.
 
         Args:
@@ -2082,29 +2084,29 @@ struct ComponentContext(Movable):
 
     # ── Accessors for WASM exports ───────────────────────────────────
 
-    fn runtime_ptr(self) -> UnsafePointer[Runtime, MutExternalOrigin]:
+    def runtime_ptr(self) -> UnsafePointer[Runtime, MutUntrackedOrigin]:
         """Return the runtime pointer (for WASM export helpers)."""
         return self.shell.runtime
 
-    fn store_ptr(self) -> UnsafePointer[VNodeStore, MutExternalOrigin]:
+    def store_ptr(self) -> UnsafePointer[VNodeStore, MutUntrackedOrigin]:
         """Return the VNode store pointer."""
         return self.shell.store
 
-    fn handler_count(self) -> UInt32:
+    def handler_count(self) -> UInt32:
         """Return the number of live event handlers in the runtime.
 
         Useful for testing and introspection.
         """
         return UInt32(self.shell.runtime[0].handler_count())
 
-    fn view_events(self) -> List[EventBinding]:
+    def view_events(self) -> List[EventBinding]:
         """Return a copy of the registered view event bindings.
 
         Useful for testing and introspection.
         """
         return self._view_events.copy()
 
-    fn auto_bindings(self) -> List[AutoBinding]:
+    def auto_bindings(self) -> List[AutoBinding]:
         """Return a copy of the registered auto-bindings (events + values).
 
         Useful for testing and introspection.  Phase 20 (M20.4).
@@ -2126,7 +2128,7 @@ struct _EventInfo(Copyable, Equatable, Writable):
     var operand: Int32
     var attr_idx: UInt32  # The dyn_attr slot index assigned in _process_view_tree
 
-    fn __init__(
+    def __init__(
         out self,
         event_name: String,
         action: UInt8,
@@ -2140,19 +2142,19 @@ struct _EventInfo(Copyable, Equatable, Writable):
         self.operand = operand
         self.attr_idx = attr_idx
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.event_name = copy.event_name
         self.action = copy.action
         self.signal_key = copy.signal_key
         self.operand = copy.operand
         self.attr_idx = copy.attr_idx
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.event_name = take.event_name^
-        self.action = take.action
-        self.signal_key = take.signal_key
-        self.operand = take.operand
-        self.attr_idx = take.attr_idx
+    def __init__(out self, *, deinit move: Self):
+        self.event_name = move.event_name^
+        self.action = move.action
+        self.signal_key = move.signal_key
+        self.operand = move.operand
+        self.attr_idx = move.attr_idx
 
 
 struct _ValueBindingInfo(Copyable, Equatable, Writable):
@@ -2163,7 +2165,7 @@ struct _ValueBindingInfo(Copyable, Equatable, Writable):
     var version_key: UInt32
     var attr_idx: UInt32  # The dyn_attr slot index assigned in _process_view_tree
 
-    fn __init__(
+    def __init__(
         out self,
         attr_name: String,
         string_key: UInt32,
@@ -2175,20 +2177,20 @@ struct _ValueBindingInfo(Copyable, Equatable, Writable):
         self.version_key = version_key
         self.attr_idx = attr_idx
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.attr_name = copy.attr_name
         self.string_key = copy.string_key
         self.version_key = copy.version_key
         self.attr_idx = copy.attr_idx
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.attr_name = take.attr_name^
-        self.string_key = take.string_key
-        self.version_key = take.version_key
-        self.attr_idx = take.attr_idx
+    def __init__(out self, *, deinit move: Self):
+        self.attr_name = move.attr_name^
+        self.string_key = move.string_key
+        self.version_key = move.version_key
+        self.attr_idx = move.attr_idx
 
 
-fn _process_view_tree(
+def _process_view_tree(
     node: Node,
     mut events: List[_EventInfo],
     mut value_bindings: List[_ValueBindingInfo],

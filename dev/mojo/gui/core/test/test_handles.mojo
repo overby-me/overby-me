@@ -51,24 +51,24 @@ from bridge import MutationWriter
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn _create_runtime() -> UnsafePointer[Runtime, MutExternalOrigin]:
+def _create_runtime() -> UnsafePointer[Runtime, MutUntrackedOrigin]:
     return create_runtime()
 
 
-fn _destroy_runtime(rt: UnsafePointer[Runtime, MutExternalOrigin]):
+def _destroy_runtime(rt: UnsafePointer[Runtime, MutUntrackedOrigin]):
     destroy_runtime(rt)
 
 
-fn _alloc_writer() -> UnsafePointer[MutationWriter, MutExternalOrigin]:
+def _alloc_writer() -> UnsafePointer[MutationWriter, MutUntrackedOrigin]:
     var buf_ptr = alloc[UInt8](8192)
     var writer_ptr = alloc[MutationWriter](1)
-    writer_ptr.init_pointee_move(MutationWriter(buf_ptr, 8192))
+    writer_ptr.unsafe_write(MutationWriter(buf_ptr, 8192))
     return writer_ptr
 
 
-fn _free_writer(writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin]):
+def _free_writer(writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin]):
     writer_ptr[0].buf.free()
-    writer_ptr.destroy_pointee()
+    writer_ptr.unsafe_deinit_pointee()
     writer_ptr.free()
 
 
@@ -1761,7 +1761,7 @@ def test_ctx_signal_string_with_signal_i32() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn main() raises:
+def main() raises:
     var pass_count = 0
     var fail_count = 0
 

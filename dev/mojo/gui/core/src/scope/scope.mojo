@@ -89,7 +89,7 @@ struct ScopeState(Copyable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self, id: UInt32, height: UInt32, parent_id: Int):
+    def __init__(out self, id: UInt32, height: UInt32, parent_id: Int):
         """Create a new scope state.
 
         Args:
@@ -113,7 +113,7 @@ struct ScopeState(Copyable):
         self.is_suspense_boundary = False
         self.is_pending = False
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.id = copy.id
         self.height = copy.height
         self.parent_id = copy.parent_id
@@ -130,26 +130,26 @@ struct ScopeState(Copyable):
         self.is_suspense_boundary = copy.is_suspense_boundary
         self.is_pending = copy.is_pending
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.id = take.id
-        self.height = take.height
-        self.parent_id = take.parent_id
-        self.dirty = take.dirty
-        self.render_count = take.render_count
-        self.hook_cursor = take.hook_cursor
-        self.hook_tags = take.hook_tags^
-        self.hook_values = take.hook_values^
-        self.context_keys = take.context_keys^
-        self.context_values = take.context_values^
-        self.is_error_boundary = take.is_error_boundary
-        self.has_error = take.has_error
-        self.error_message = take.error_message^
-        self.is_suspense_boundary = take.is_suspense_boundary
-        self.is_pending = take.is_pending
+    def __init__(out self, *, deinit move: Self):
+        self.id = move.id
+        self.height = move.height
+        self.parent_id = move.parent_id
+        self.dirty = move.dirty
+        self.render_count = move.render_count
+        self.hook_cursor = move.hook_cursor
+        self.hook_tags = move.hook_tags^
+        self.hook_values = move.hook_values^
+        self.context_keys = move.context_keys^
+        self.context_values = move.context_values^
+        self.is_error_boundary = move.is_error_boundary
+        self.has_error = move.has_error
+        self.error_message = move.error_message^
+        self.is_suspense_boundary = move.is_suspense_boundary
+        self.is_pending = move.is_pending
 
     # ── Render lifecycle ─────────────────────────────────────────────
 
-    fn begin_render(mut self):
+    def begin_render(mut self):
         """Begin a render pass.
 
         Resets the hook cursor to 0 so hooks are accessed in order.
@@ -159,7 +159,7 @@ struct ScopeState(Copyable):
         self.render_count += 1
         self.dirty = False
 
-    fn is_first_render(self) -> Bool:
+    def is_first_render(self) -> Bool:
         """Check if this scope has never been rendered.
 
         Returns True if render_count is 0 (before first begin_render)
@@ -169,11 +169,11 @@ struct ScopeState(Copyable):
 
     # ── Hook management ──────────────────────────────────────────────
 
-    fn hook_count(self) -> Int:
+    def hook_count(self) -> Int:
         """Return the number of hooks registered in this scope."""
         return len(self.hook_values)
 
-    fn push_hook(mut self, tag: UInt8, value: UInt32):
+    def push_hook(mut self, tag: UInt8, value: UInt32):
         """Register a new hook at the current cursor position.
 
         Called during first render to create a new hook slot.
@@ -183,7 +183,7 @@ struct ScopeState(Copyable):
         self.hook_values.append(value)
         self.hook_cursor += 1
 
-    fn next_hook(mut self) -> UInt32:
+    def next_hook(mut self) -> UInt32:
         """Advance the hook cursor and return the value at the current position.
 
         Called during re-render to retrieve an existing hook's stored value.
@@ -192,28 +192,28 @@ struct ScopeState(Copyable):
         self.hook_cursor += 1
         return self.hook_values[idx]
 
-    fn next_hook_tag(self) -> UInt8:
+    def next_hook_tag(self) -> UInt8:
         """Return the tag of the hook at the current cursor position.
 
         Does NOT advance the cursor — call next_hook() to advance.
         """
         return self.hook_tags[self.hook_cursor]
 
-    fn has_more_hooks(self) -> Bool:
+    def has_more_hooks(self) -> Bool:
         """Check if there are more hooks to process in this render pass."""
         return self.hook_cursor < len(self.hook_values)
 
-    fn hook_value_at(self, index: Int) -> UInt32:
+    def hook_value_at(self, index: Int) -> UInt32:
         """Return the hook value at the given index (for introspection)."""
         return self.hook_values[index]
 
-    fn hook_tag_at(self, index: Int) -> UInt8:
+    def hook_tag_at(self, index: Int) -> UInt8:
         """Return the hook tag at the given index (for introspection)."""
         return self.hook_tags[index]
 
     # ── Context (Dependency Injection) ───────────────────────────────
 
-    fn provide_context(mut self, key: UInt32, value: Int32):
+    def provide_context(mut self, key: UInt32, value: Int32):
         """Provide a context value at this scope.
 
         If the key already exists in this scope's context map, the value
@@ -230,7 +230,7 @@ struct ScopeState(Copyable):
         self.context_keys.append(key)
         self.context_values.append(value)
 
-    fn get_context(self, key: UInt32) -> Tuple[Bool, Int32]:
+    def get_context(self, key: UInt32) -> Tuple[Bool, Int32]:
         """Look up a context value in THIS scope only.
 
         Returns (True, value) if found, (False, 0) if not.
@@ -247,7 +247,7 @@ struct ScopeState(Copyable):
                 return Tuple(True, self.context_values[i])
         return Tuple(False, Int32(0))
 
-    fn has_context(self, key: UInt32) -> Bool:
+    def has_context(self, key: UInt32) -> Bool:
         """Check whether this scope provides a context for `key`.
 
         Does NOT walk up the parent chain.
@@ -257,11 +257,11 @@ struct ScopeState(Copyable):
                 return True
         return False
 
-    fn context_count(self) -> Int:
+    def context_count(self) -> Int:
         """Return the number of context entries in this scope."""
         return len(self.context_keys)
 
-    fn remove_context(mut self, key: UInt32) -> Bool:
+    def remove_context(mut self, key: UInt32) -> Bool:
         """Remove a context entry from this scope.
 
         Returns True if the entry was found and removed, False otherwise.
@@ -280,7 +280,7 @@ struct ScopeState(Copyable):
 
     # ── Error Boundary ───────────────────────────────────────────────
 
-    fn set_error_boundary(mut self, enabled: Bool):
+    def set_error_boundary(mut self, enabled: Bool):
         """Mark or unmark this scope as an error boundary.
 
         An error boundary catches errors from descendant scopes and can
@@ -291,7 +291,7 @@ struct ScopeState(Copyable):
         """
         self.is_error_boundary = enabled
 
-    fn set_error(mut self, message: String):
+    def set_error(mut self, message: String):
         """Set an error on this scope.
 
         Typically called by the runtime when a descendant scope reports
@@ -303,7 +303,7 @@ struct ScopeState(Copyable):
         self.has_error = True
         self.error_message = message
 
-    fn clear_error(mut self):
+    def clear_error(mut self):
         """Clear the error state on this scope.
 
         After clearing, the boundary can re-render its children normally
@@ -312,13 +312,13 @@ struct ScopeState(Copyable):
         self.has_error = False
         self.error_message = String("")
 
-    fn get_error_message(self) -> String:
+    def get_error_message(self) -> String:
         """Return the current error message, or empty string if no error."""
         return self.error_message
 
     # ── Suspense ─────────────────────────────────────────────────────
 
-    fn set_suspense_boundary(mut self, enabled: Bool):
+    def set_suspense_boundary(mut self, enabled: Bool):
         """Mark or unmark this scope as a suspense boundary.
 
         A suspense boundary shows a fallback while any descendant scope
@@ -329,7 +329,7 @@ struct ScopeState(Copyable):
         """
         self.is_suspense_boundary = enabled
 
-    fn set_pending(mut self, pending: Bool):
+    def set_pending(mut self, pending: Bool):
         """Set the pending (async loading) state on this scope.
 
         When a scope is pending, its nearest suspense boundary ancestor
@@ -342,14 +342,14 @@ struct ScopeState(Copyable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn is_root(self) -> Bool:
+    def is_root(self) -> Bool:
         """Check whether this is a root scope (no parent)."""
         return self.parent_id == -1
 
-    fn mark_dirty(mut self):
+    def mark_dirty(mut self):
         """Mark this scope as needing re-render."""
         self.dirty = True
 
-    fn clear_dirty(mut self):
+    def clear_dirty(mut self):
         """Clear the dirty flag (called after re-render)."""
         self.dirty = False

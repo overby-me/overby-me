@@ -38,7 +38,7 @@ Usage (via the unified launch() entry point — single-panel apps):
     from platform import launch, AppConfig
     from counter import CounterApp
 
-    fn main() raises:
+    def main() raises:
         launch[CounterApp](AppConfig(title="Counter", width=400, height=350))
 
     # When compiled with --feature xr, launch() calls xr_launch[CounterApp]()

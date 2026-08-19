@@ -18,7 +18,7 @@ from platform.launch import launch, AppConfig
 from todo import TodoApp
 
 
-fn main() raises:
+def main() raises:
     launch[TodoApp](
         AppConfig(
             title="Todo List",

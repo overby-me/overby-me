@@ -138,7 +138,7 @@ struct MultiViewApp(GuiApp):
     # Todo add handler ID (from the todo view — registered as a custom handler)
     var todo_add_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         """Initialize the multi-view app with all reactive state and views.
 
         Sets up:
@@ -218,21 +218,21 @@ struct MultiViewApp(GuiApp):
         # Navigate to initial route
         _ = self.router.navigate(String("/"))
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.router = take.router^
-        self.count = take.count^
-        self.counter_tmpl = take.counter_tmpl
-        self.counter_incr_handler = take.counter_incr_handler
-        self.counter_decr_handler = take.counter_decr_handler
-        self.todo_count = take.todo_count^
-        self.todo_next_id = take.todo_next_id
-        self.todo_tmpl = take.todo_tmpl
-        self.nav_counter_handler = take.nav_counter_handler
-        self.nav_todo_handler = take.nav_todo_handler
-        self.todo_add_handler = take.todo_add_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.router = move.router^
+        self.count = move.count^
+        self.counter_tmpl = move.counter_tmpl
+        self.counter_incr_handler = move.counter_incr_handler
+        self.counter_decr_handler = move.counter_decr_handler
+        self.todo_count = move.todo_count^
+        self.todo_next_id = move.todo_next_id
+        self.todo_tmpl = move.todo_tmpl
+        self.nav_counter_handler = move.nav_counter_handler
+        self.nav_todo_handler = move.nav_todo_handler
+        self.todo_add_handler = move.todo_add_handler
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build a fresh VNode for the app shell.
 
         The app shell always renders a placeholder for dyn_node[0] — the
@@ -245,7 +245,7 @@ struct MultiViewApp(GuiApp):
         vb.add_dyn_placeholder()
         return vb.build()
 
-    fn build_counter_view(mut self) -> UInt32:
+    def build_counter_view(mut self) -> UInt32:
         """Build the counter view VNode.
 
         Returns the VNode index in the store.
@@ -257,7 +257,7 @@ struct MultiViewApp(GuiApp):
         vb.add_dyn_event(String("click"), self.counter_decr_handler)
         return vb.index()
 
-    fn build_todo_view(mut self) -> UInt32:
+    def build_todo_view(mut self) -> UInt32:
         """Build the todo view VNode.
 
         Returns the VNode index in the store.
@@ -279,7 +279,7 @@ struct MultiViewApp(GuiApp):
         vb.add_dyn_event(String("click"), self.todo_add_handler)
         return vb.index()
 
-    fn build_view_for_branch(mut self) -> UInt32:
+    def build_view_for_branch(mut self) -> UInt32:
         """Build the VNode for the currently active branch.
 
         Returns the VNode index in the store.
@@ -291,7 +291,7 @@ struct MultiViewApp(GuiApp):
         # Fallback — should not happen with well-formed routes
         return self.build_counter_view()
 
-    fn navigate(mut self, path: String) -> Bool:
+    def navigate(mut self, path: String) -> Bool:
         """Navigate to a URL path.
 
         Updates the router and marks the app scope as dirty so the next
@@ -311,7 +311,7 @@ struct MultiViewApp(GuiApp):
 
     # ── GuiApp trait: Event dispatch ─────────────────────────────────
 
-    fn handle_event(
+    def handle_event(
         mut self, handler_id: UInt32, event_type: UInt8, value: String
     ) -> Bool:
         """Dispatch a user interaction event (GuiApp trait method).
@@ -333,7 +333,7 @@ struct MultiViewApp(GuiApp):
             True if the handler was recognized and acted upon.
         """
         # String events go through the string dispatch path
-        if len(value) > 0:
+        if value.byte_length() > 0:
             return self.ctx.dispatch_event_with_string(
                 handler_id, event_type, value
             )
@@ -356,9 +356,9 @@ struct MultiViewApp(GuiApp):
 
     # ── GuiApp trait: Mount lifecycle ────────────────────────────────
 
-    fn mount(
+    def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Initial render (mount) of the multi-view app (GuiApp trait method).
 
@@ -417,9 +417,9 @@ struct MultiViewApp(GuiApp):
 
     # ── GuiApp trait: Flush lifecycle ────────────────────────────────
 
-    fn flush(
+    def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Re-render dirty scopes and write update mutations (GuiApp trait method).
 
@@ -463,7 +463,7 @@ struct MultiViewApp(GuiApp):
 
     # ── GuiApp trait: Dirty state queries ────────────────────────────
 
-    fn has_dirty(self) -> Bool:
+    def has_dirty(self) -> Bool:
         """Check if any scopes or the router need re-rendering.
 
         Returns:
@@ -472,7 +472,7 @@ struct MultiViewApp(GuiApp):
         """
         return self.ctx.has_dirty() or self.router.dirty
 
-    fn consume_dirty(mut self) -> Bool:
+    def consume_dirty(mut self) -> Bool:
         """Collect and consume all dirty scopes.
 
         Note: This only consumes scope-level dirty state. Router dirty
@@ -488,6 +488,6 @@ struct MultiViewApp(GuiApp):
 
     # ── GuiApp trait: Cleanup ────────────────────────────────────────
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """Release all resources held by the multi-view app."""
         self.ctx.destroy()

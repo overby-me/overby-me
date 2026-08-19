@@ -129,7 +129,7 @@ struct WebApp(PlatformApp):
     var _config: AppConfig
     var _initialized: Bool
 
-    fn __init__(out self, config: AppConfig = AppConfig()):
+    def __init__(out self, config: AppConfig = AppConfig()):
         """Create a new WebApp with the given configuration.
 
         Args:
@@ -140,7 +140,7 @@ struct WebApp(PlatformApp):
         self._config = config
         self._initialized = False
 
-    fn __init__(
+    def __init__(
         out self,
         title: String,
         width: Int = 800,
@@ -158,13 +158,13 @@ struct WebApp(PlatformApp):
         self._config = AppConfig(title, width, height, debug)
         self._initialized = False
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._config = take._config^
-        self._initialized = take._initialized
+    def __init__(out self, *, deinit move: Self):
+        self._config = move._config^
+        self._initialized = move._initialized
 
     # ── PlatformApp trait implementation ──────────────────────────────
 
-    fn init(mut self) raises:
+    def init(mut self) raises:
         """Register web platform features.
 
         On the WASM target, platform initialization is handled by the JS
@@ -182,7 +182,7 @@ struct WebApp(PlatformApp):
 
         self._initialized = True
 
-    fn flush_mutations(
+    def flush_mutations(
         mut self, buf: UnsafePointer[UInt8, _], length: Int
     ) raises:
         """No-op on WASM — the JS runtime reads the mutation buffer directly.
@@ -203,7 +203,7 @@ struct WebApp(PlatformApp):
         # Nothing to do here — the @export return value signals the JS side.
         pass
 
-    fn request_animation_frame(mut self):
+    def request_animation_frame(mut self):
         """No-op on WASM — the JS runtime manages requestAnimationFrame.
 
         The browser's event loop and requestAnimationFrame scheduling are
@@ -213,7 +213,7 @@ struct WebApp(PlatformApp):
         """
         pass
 
-    fn should_quit(self) -> Bool:
+    def should_quit(self) -> Bool:
         """Always returns False on WASM — the browser tab lifecycle is separate.
 
         The WASM module runs until the page is unloaded or the app is
@@ -222,7 +222,7 @@ struct WebApp(PlatformApp):
         """
         return False
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """No-op on WASM — memory is reclaimed by the browser on page unload.
 
         The JS runtime handles cleanup via the AppHandle.destroy() method,
@@ -234,7 +234,7 @@ struct WebApp(PlatformApp):
 
     # ── Web-specific helpers ──────────────────────────────────────────
 
-    fn config(self) -> AppConfig:
+    def config(self) -> AppConfig:
         """Return the application configuration.
 
         Useful for @export init wrappers that need to access the config
@@ -242,7 +242,7 @@ struct WebApp(PlatformApp):
         """
         return self._config
 
-    fn is_initialized(self) -> Bool:
+    def is_initialized(self) -> Bool:
         """Return True if init() has been called.
 
         The @export wrappers can check this to ensure the platform
@@ -250,7 +250,7 @@ struct WebApp(PlatformApp):
         """
         return self._initialized
 
-    fn is_debug(self) -> Bool:
+    def is_debug(self) -> Bool:
         """Return True if debug mode is enabled.
 
         When True, the JS runtime logs mutation buffer traffic and event
@@ -264,7 +264,7 @@ struct WebApp(PlatformApp):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn create_web_app() -> WebApp:
+def create_web_app() -> WebApp:
     """Create a WebApp using the global launch configuration.
 
     If launch() has been called, uses the stored AppConfig.
@@ -277,7 +277,7 @@ fn create_web_app() -> WebApp:
     return WebApp(get_launch_config())
 
 
-fn create_web_app(title: String, debug: Bool = False) -> WebApp:
+def create_web_app(title: String, debug: Bool = False) -> WebApp:
     """Create a WebApp with explicit title and debug settings.
 
     Args:

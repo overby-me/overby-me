@@ -38,15 +38,15 @@ from wasm_harness import (
 )
 
 
-fn _load() raises -> WasmInstance:
+def _load() raises -> WasmInstance:
     return WasmInstance("build/out.wasm")
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_pc(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_pc(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a PropsCounterApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("pc_init", no_args()))
@@ -55,8 +55,8 @@ fn _create_pc(
     return Tuple(app, buf)
 
 
-fn _destroy_pc(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _destroy_pc(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -65,8 +65,8 @@ fn _destroy_pc(
     w[].call_void("pc_destroy", args_ptr(app))
 
 
-fn _flush(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _flush(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -78,7 +78,7 @@ fn _flush(
 
 
 def test_pc_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero app pointer."""
     var app = Int(w[].call_i64("pc_init", no_args()))
@@ -90,7 +90,7 @@ def test_pc_init_creates_app(
 
 
 def test_pc_scopes_distinct(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child scope ID differs from parent scope ID."""
     var app = Int(w[].call_i64("pc_init", no_args()))
@@ -106,7 +106,7 @@ def test_pc_scopes_distinct(
 
 
 def test_pc_templates_distinct(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child template ID differs from parent template ID."""
     var app = Int(w[].call_i64("pc_init", no_args()))
@@ -122,7 +122,7 @@ def test_pc_templates_distinct(
 
 
 def test_pc_scope_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """App has exactly 2 live scopes (parent + child)."""
     var app = Int(w[].call_i64("pc_init", no_args()))
@@ -135,7 +135,7 @@ def test_pc_scope_count(
 
 
 def test_pc_initial_count_zero(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Initial count value should be 0."""
     var app = Int(w[].call_i64("pc_init", no_args()))
@@ -147,7 +147,7 @@ def test_pc_initial_count_zero(
 
 
 def test_pc_initial_show_hex_false(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Initial show_hex should be false (0)."""
     var app = Int(w[].call_i64("pc_init", no_args()))
@@ -159,7 +159,7 @@ def test_pc_initial_show_hex_false(
 
 
 def test_pc_handler_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """At least 3 handlers registered (incr, decr, toggle)."""
     var app = Int(w[].call_i64("pc_init", no_args()))
@@ -172,7 +172,7 @@ def test_pc_handler_count(
 
 
 def test_pc_increment_updates_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Dispatching increment handler increases count to 1."""
     var result = _create_pc(w)
@@ -190,7 +190,7 @@ def test_pc_increment_updates_count(
 
 
 def test_pc_decrement_updates_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Dispatching decrement handler decreases count to -1."""
     var result = _create_pc(w)
@@ -208,7 +208,7 @@ def test_pc_decrement_updates_count(
 
 
 def test_pc_toggle_marks_child_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Dispatching toggle handler marks child dirty, not parent."""
     var result = _create_pc(w)
@@ -230,7 +230,7 @@ def test_pc_toggle_marks_child_dirty(
 
 
 def test_pc_increment_marks_parent_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Dispatching increment handler marks parent dirty."""
     var result = _create_pc(w)
@@ -247,7 +247,7 @@ def test_pc_increment_marks_parent_dirty(
 
 
 def test_pc_rebuild_produces_mutations(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Rebuild produces mutation bytes > 0."""
     var app = Int(w[].call_i64("pc_init", no_args()))
@@ -264,7 +264,7 @@ def test_pc_rebuild_produces_mutations(
 
 
 def test_pc_flush_returns_zero_when_clean(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush after rebuild with no changes returns 0."""
     var result = _create_pc(w)
@@ -279,7 +279,7 @@ def test_pc_flush_returns_zero_when_clean(
 
 
 def test_pc_flush_after_increment(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush after increment emits mutations > 0."""
     var result = _create_pc(w)
@@ -297,7 +297,7 @@ def test_pc_flush_after_increment(
 
 
 def test_pc_mixed_increment_toggle(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Mixed increment + toggle both apply correctly."""
     var result = _create_pc(w)
@@ -325,7 +325,7 @@ def test_pc_mixed_increment_toggle(
 
 
 def test_pc_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Creating and destroying the app does not crash."""
     var result = _create_pc(w)
@@ -338,7 +338,7 @@ def test_pc_destroy_does_not_crash(
 
 
 def test_pc_destroy_with_dirty_state(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroying app with unflushed dirty state does not crash."""
     var result = _create_pc(w)
@@ -356,7 +356,7 @@ def test_pc_destroy_with_dirty_state(
 
 
 def test_pc_destroy_recreate_cycle(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy then recreate produces a fresh app with correct initial state."""
     var result1 = _create_pc(w)
@@ -384,7 +384,7 @@ def test_pc_destroy_recreate_cycle(
 
 
 def test_pc_rapid_increments(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Ten rapid increments + flushes produce correct final count."""
     var result = _create_pc(w)
@@ -403,7 +403,7 @@ def test_pc_rapid_increments(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn main() raises:
+def main() raises:
     var wp = get_instance()
     print("test_props_counter — PropsCounterApp (Phase 31.3):")
 

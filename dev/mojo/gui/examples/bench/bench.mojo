@@ -233,17 +233,17 @@ struct BenchRow(Copyable):
     var id: Int32
     var label: String
 
-    fn __init__(out self, id: Int32, label: String):
+    def __init__(out self, id: Int32, label: String):
         self.id = id
         self.label = label
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.id = copy.id
         self.label = copy.label
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.id = take.id
-        self.label = take.label^
+    def __init__(out self, *, deinit move: Self):
+        self.id = move.id
+        self.label = move.label^
 
 
 # ── performance.now() — cross-platform high-resolution timer ─────────────────
@@ -257,7 +257,7 @@ struct BenchRow(Copyable):
 # read the monotonic clock and converts nanoseconds to milliseconds.
 
 
-fn performance_now() -> Float64:
+def performance_now() -> Float64:
     """Return high-resolution timestamp in milliseconds.
 
     On WASM: maps to `performance.now()` in the browser and Deno runtimes.
@@ -278,7 +278,7 @@ fn performance_now() -> Float64:
 # ── Timing formatter ─────────────────────────────────────────────────────────
 
 
-fn format_timing_ms(ms: Float64) -> String:
+def format_timing_ms(ms: Float64) -> String:
     """Format elapsed milliseconds for the timing dyn_text node.
 
     Produces " — {whole}.{frac}ms" with 1 decimal place and leading
@@ -299,7 +299,7 @@ fn format_timing_ms(ms: Float64) -> String:
     return " — " + String(whole) + "." + String(frac) + "ms"
 
 
-fn _format_number(n: Int) -> String:
+def _format_number(n: Int) -> String:
     """Format a non-negative integer with comma thousands separators.
 
     Examples: 0 → "0", 999 → "999", 1000 → "1,000", 10000 → "10,000".
@@ -317,7 +317,7 @@ fn _format_number(n: Int) -> String:
         return String(thousands) + "," + String(remainder)
 
 
-fn format_row_count(count: Int) -> String:
+def format_row_count(count: Int) -> String:
     """Format a row count for the row-count dyn_text node.
 
     Produces " · {N} rows" with comma-formatted number and leading
@@ -335,7 +335,7 @@ comptime _COL_COUNT: Int = 11
 comptime _NOUN_COUNT: Int = 12
 
 
-fn _adjective(idx: Int) -> String:
+def _adjective(idx: Int) -> String:
     if idx == 0:
         return "pretty"
     elif idx == 1:
@@ -362,7 +362,7 @@ fn _adjective(idx: Int) -> String:
         return "elegant"
 
 
-fn _colour(idx: Int) -> String:
+def _colour(idx: Int) -> String:
     if idx == 0:
         return "red"
     elif idx == 1:
@@ -387,7 +387,7 @@ fn _colour(idx: Int) -> String:
         return "grey"
 
 
-fn _noun(idx: Int) -> String:
+def _noun(idx: Int) -> String:
     if idx == 0:
         return "table"
     elif idx == 1:
@@ -484,7 +484,7 @@ struct BenchmarkApp(GuiApp):
     var swap_handler: UInt32
     var clear_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         """Initialize the benchmark app with all reactive state, templates,
         and toolbar handlers.
 
@@ -642,41 +642,41 @@ struct BenchmarkApp(GuiApp):
         self.timing_text = String("")
         self.row_count_text = String("")
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.version = take.version^
-        self.selected = take.selected^
-        self.rows_list = take.rows_list^
-        self.rows = take.rows^
-        self.next_id = take.next_id
-        self.rng_state = take.rng_state
-        self.op_name = take.op_name^
-        self.timing_text = take.timing_text^
-        self.row_count_text = take.row_count_text^
-        self.create1k_handler = take.create1k_handler
-        self.create10k_handler = take.create10k_handler
-        self.append_handler = take.append_handler
-        self.update_handler = take.update_handler
-        self.swap_handler = take.swap_handler
-        self.clear_handler = take.clear_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.version = move.version^
+        self.selected = move.selected^
+        self.rows_list = move.rows_list^
+        self.rows = move.rows^
+        self.next_id = move.next_id
+        self.rng_state = move.rng_state
+        self.op_name = move.op_name^
+        self.timing_text = move.timing_text^
+        self.row_count_text = move.row_count_text^
+        self.create1k_handler = move.create1k_handler
+        self.create10k_handler = move.create10k_handler
+        self.append_handler = move.append_handler
+        self.update_handler = move.update_handler
+        self.swap_handler = move.swap_handler
+        self.clear_handler = move.clear_handler
 
-    fn _next_random(mut self) -> UInt32:
+    def _next_random(mut self) -> UInt32:
         """Simple LCG: state = state * 1664525 + 1013904223."""
         self.rng_state = self.rng_state * 1664525 + 1013904223
         return self.rng_state
 
-    fn _generate_label(mut self) -> String:
+    def _generate_label(mut self) -> String:
         """Generate a random "adjective colour noun" label."""
         var a = Int(self._next_random() % UInt32(_ADJ_COUNT))
         var c = Int(self._next_random() % UInt32(_COL_COUNT))
         var n = Int(self._next_random() % UInt32(_NOUN_COUNT))
         return _adjective(a) + " " + _colour(c) + " " + _noun(n)
 
-    fn _bump_version(mut self):
+    def _bump_version(mut self):
         """Increment the version signal to trigger re-render."""
         self.version += 1
 
-    fn create_rows(mut self, count: Int):
+    def create_rows(mut self, count: Int):
         """Replace all rows with `count` newly generated rows."""
         self.rows = List[BenchRow]()
         for _ in range(count):
@@ -685,7 +685,7 @@ struct BenchmarkApp(GuiApp):
             self.next_id += 1
         self._bump_version()
 
-    fn append_rows(mut self, count: Int):
+    def append_rows(mut self, count: Int):
         """Append `count` newly generated rows to the list."""
         for _ in range(count):
             var label = self._generate_label()
@@ -693,7 +693,7 @@ struct BenchmarkApp(GuiApp):
             self.next_id += 1
         self._bump_version()
 
-    fn update_every_10th(mut self):
+    def update_every_10th(mut self):
         """Append " !!!" to every 10th row's label."""
         var i = 0
         while i < len(self.rows):
@@ -701,11 +701,11 @@ struct BenchmarkApp(GuiApp):
             i += 10
         self._bump_version()
 
-    fn select_row(mut self, id: Int32):
+    def select_row(mut self, id: Int32):
         """Select the row with the given id."""
         self.selected.set(id)
 
-    fn swap_rows(mut self, a: Int, b: Int):
+    def swap_rows(mut self, a: Int, b: Int):
         """Swap two rows by their list indices."""
         if a < 0 or b < 0 or a >= len(self.rows) or b >= len(self.rows):
             return
@@ -716,7 +716,7 @@ struct BenchmarkApp(GuiApp):
         self.rows[b] = tmp.copy()
         self._bump_version()
 
-    fn remove_row(mut self, id: Int32):
+    def remove_row(mut self, id: Int32):
         """Remove a row by id."""
         for i in range(len(self.rows)):
             if self.rows[i].id == id:
@@ -727,14 +727,14 @@ struct BenchmarkApp(GuiApp):
                 self._bump_version()
                 return
 
-    fn clear_rows(mut self):
+    def clear_rows(mut self):
         """Remove all rows."""
         self.rows = List[BenchRow]()
         self._bump_version()
 
     # ── GuiApp trait: Event dispatch ─────────────────────────────────
 
-    fn handle_event(
+    def handle_event(
         mut self, handler_id: UInt32, event_type: UInt8, value: String
     ) -> Bool:
         """Dispatch a user interaction event (GuiApp trait method).
@@ -776,7 +776,7 @@ struct BenchmarkApp(GuiApp):
         False otherwise.
         """
         # String events go through the string dispatch path
-        if len(value) > 0:
+        if value.byte_length() > 0:
             return self.ctx.dispatch_event_with_string(
                 handler_id, event_type, value
             )
@@ -838,7 +838,7 @@ struct BenchmarkApp(GuiApp):
             return True
         return False
 
-    fn build_row_vnode(mut self, row: BenchRow) -> UInt32:
+    def build_row_vnode(mut self, row: BenchRow) -> UInt32:
         """Build a keyed VNode for a single benchmark row.
 
         Uses Phase 17 ItemBuilder + Phase 18 conditional helpers:
@@ -872,7 +872,7 @@ struct BenchmarkApp(GuiApp):
 
         return ib.index()
 
-    fn build_rows_fragment(mut self) -> UInt32:
+    def build_rows_fragment(mut self) -> UInt32:
         """Build a Fragment VNode containing all row VNodes.
 
         Uses KeyedList.begin_rebuild() to destroy old child scopes,
@@ -887,9 +887,9 @@ struct BenchmarkApp(GuiApp):
 
     # ── GuiApp trait: Mount lifecycle ────────────────────────────────
 
-    fn mount(
+    def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Initial render (mount) of the benchmark app (GuiApp trait method).
 
@@ -949,9 +949,9 @@ struct BenchmarkApp(GuiApp):
 
     # ── GuiApp trait: Flush lifecycle ────────────────────────────────
 
-    fn flush(
+    def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Re-render dirty scopes and write update mutations (GuiApp trait method).
 
@@ -989,7 +989,7 @@ struct BenchmarkApp(GuiApp):
 
     # ── GuiApp trait: Dirty state queries ────────────────────────────
 
-    fn has_dirty(self) -> Bool:
+    def has_dirty(self) -> Bool:
         """Check if any scopes need re-rendering.
 
         Returns:
@@ -997,7 +997,7 @@ struct BenchmarkApp(GuiApp):
         """
         return self.ctx.has_dirty()
 
-    fn consume_dirty(mut self) -> Bool:
+    def consume_dirty(mut self) -> Bool:
         """Collect and consume all dirty scopes.
 
         Returns:
@@ -1007,13 +1007,13 @@ struct BenchmarkApp(GuiApp):
 
     # ── GuiApp trait: Cleanup ────────────────────────────────────────
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """Release all resources held by the benchmark app."""
         self.ctx.destroy()
 
     # ── GuiApp trait: Rendering ──────────────────────────────────────
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build the app shell VNode using render_builder (auto-populates).
 
         Phase 24.4: Three dyn_text nodes for the status bar:

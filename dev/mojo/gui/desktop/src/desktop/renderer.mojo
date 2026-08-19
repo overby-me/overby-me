@@ -115,28 +115,30 @@ struct BufReader:
       - path: u8 length prefix + byte array
     """
 
-    var buf: UnsafePointer[UInt8, MutAnyOrigin]
+    var buf: UnsafePointer[UInt8, MutUntrackedOrigin]
     var offset: Int
     var length: Int
 
-    fn __init__(out self, buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int):
+    def __init__(
+        out self, buf: UnsafePointer[UInt8, MutUntrackedOrigin], length: Int
+    ):
         self.buf = buf
         self.offset = 0
         self.length = length
 
-    fn has_remaining(self) -> Bool:
+    def has_remaining(self) -> Bool:
         """Check if there are more bytes to read."""
         return self.offset < self.length
 
     @always_inline
-    fn read_u8(mut self) -> UInt8:
+    def read_u8(mut self) -> UInt8:
         """Read a single byte."""
         var val = self.buf[self.offset]
         self.offset += 1
         return val
 
     @always_inline
-    fn read_u16_le(mut self) -> UInt16:
+    def read_u16_le(mut self) -> UInt16:
         """Read a 16-bit little-endian unsigned integer."""
         var lo = UInt16(self.buf[self.offset])
         var hi = UInt16(self.buf[self.offset + 1])
@@ -144,7 +146,7 @@ struct BufReader:
         return lo | (hi << 8)
 
     @always_inline
-    fn read_u32_le(mut self) -> UInt32:
+    def read_u32_le(mut self) -> UInt32:
         """Read a 32-bit little-endian unsigned integer."""
         var b0 = UInt32(self.buf[self.offset])
         var b1 = UInt32(self.buf[self.offset + 1])
@@ -153,7 +155,7 @@ struct BufReader:
         self.offset += 4
         return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
 
-    fn read_str(mut self) -> String:
+    def read_str(mut self) -> String:
         """Read a u32-length-prefixed UTF-8 string."""
         var str_len = Int(self.read_u32_le())
         if str_len == 0:
@@ -166,7 +168,7 @@ struct BufReader:
         self.offset += str_len
         return result
 
-    fn read_short_str(mut self) -> String:
+    def read_short_str(mut self) -> String:
         """Read a u16-length-prefixed UTF-8 string (for names <= 65535 bytes).
         """
         var str_len = Int(self.read_u16_le())
@@ -179,13 +181,13 @@ struct BufReader:
         self.offset += str_len
         return result
 
-    fn read_path_len(mut self) -> Int:
+    def read_path_len(mut self) -> Int:
         """Read a u8 path length."""
         return Int(self.read_u8())
 
-    fn read_path_bytes(
+    def read_path_bytes(
         mut self, path_len: Int
-    ) -> UnsafePointer[UInt8, MutAnyOrigin]:
+    ) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
         """Read path_len bytes and return a pointer to the start.
 
         The pointer points directly into the buffer. The caller must not
@@ -198,7 +200,7 @@ struct BufReader:
         self.offset += path_len
         return ptr
 
-    fn skip(mut self, count: Int):
+    def skip(mut self, count: Int):
         """Skip forward by count bytes."""
         self.offset += count
 
@@ -223,10 +225,10 @@ struct MutationInterpreter(Movable):
     outlive the Blitz context.
     """
 
-    var _blitz: UnsafePointer[Blitz, MutAnyOrigin]
+    var _blitz: UnsafePointer[Blitz, MutUntrackedOrigin]
     var _stack: List[UInt32]
 
-    fn __init__(out self, ref[MutAnyOrigin] blitz: Blitz):
+    def __init__(out self, mut blitz: Blitz):
         """Create a mutation interpreter backed by the given Blitz instance.
 
         Args:
@@ -235,16 +237,20 @@ struct MutationInterpreter(Movable):
         """
         # Store a pointer to the Blitz instance. This is an unsafe borrow —
         # the caller guarantees the Blitz instance outlives the interpreter.
-        self._blitz = UnsafePointer(to=blitz)
+        self._blitz = UnsafePointer(to=blitz).unsafe_origin_cast[
+            MutUntrackedOrigin
+        ]()
         self._stack = List[UInt32](capacity=64)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._blitz = take._blitz
-        self._stack = take._stack^
+    def __init__(out self, *, deinit move: Self):
+        self._blitz = move._blitz
+        self._stack = move._stack^
 
     # ── Public API ───────────────────────────────────────────────────────
 
-    fn apply(mut self, buf: UnsafePointer[UInt8, MutAnyOrigin], length: Int):
+    def apply(
+        mut self, buf: UnsafePointer[UInt8, MutUntrackedOrigin], length: Int
+    ):
         """Apply all mutations in the given buffer to the Blitz DOM.
 
         Reads opcodes sequentially from the buffer until OP_END is
@@ -308,11 +314,11 @@ struct MutationInterpreter(Movable):
 
     # ── Stack helpers ────────────────────────────────────────────────────
 
-    fn _push(mut self, node_id: UInt32):
+    def _push(mut self, node_id: UInt32):
         """Push a node ID onto the interpreter stack."""
         self._stack.append(node_id)
 
-    fn _pop(mut self) -> UInt32:
+    def _pop(mut self) -> UInt32:
         """Pop a node ID from the interpreter stack.
 
         Returns 0 if the stack is empty (should not happen in valid
@@ -322,7 +328,7 @@ struct MutationInterpreter(Movable):
             return 0
         return self._stack.pop()
 
-    fn _pop_n(mut self, n: Int) -> List[UInt32]:
+    def _pop_n(mut self, n: Int) -> List[UInt32]:
         """Pop N node IDs from the stack (in LIFO order, reversed to
         give insertion order).
 
@@ -343,7 +349,7 @@ struct MutationInterpreter(Movable):
 
     # ── Opcode handlers ──────────────────────────────────────────────────
 
-    fn _op_append_children(mut self, mut reader: BufReader):
+    def _op_append_children(mut self, mut reader: BufReader):
         """OP_APPEND_CHILDREN: Pop m nodes, append as children of id.
 
         Wire: | id (u32) | m (u32) |
@@ -362,7 +368,7 @@ struct MutationInterpreter(Movable):
             self._blitz[].append_children(id, child_buf, UInt32(len(children)))
             child_buf.free()
 
-    fn _op_assign_id(mut self, mut reader: BufReader):
+    def _op_assign_id(mut self, mut reader: BufReader):
         """OP_ASSIGN_ID: Assign element ID to node at path in current template.
 
         Wire: | path_len (u8) | path ([u8]) | id (u32) |
@@ -392,7 +398,7 @@ struct MutationInterpreter(Movable):
         if target_id != 0:
             self._blitz[].assign_id(mojo_id, target_id)
 
-    fn _op_create_placeholder(mut self, mut reader: BufReader):
+    def _op_create_placeholder(mut self, mut reader: BufReader):
         """OP_CREATE_PLACEHOLDER: Create a placeholder and push to stack.
 
         Wire: | id (u32) |
@@ -403,7 +409,7 @@ struct MutationInterpreter(Movable):
         self._blitz[].assign_id(mojo_id, blitz_id)
         self._push(blitz_id)
 
-    fn _op_create_text_node(mut self, mut reader: BufReader):
+    def _op_create_text_node(mut self, mut reader: BufReader):
         """OP_CREATE_TEXT_NODE: Create a text node and push to stack.
 
         Wire: | id (u32) | len (u32) | text ([u8]) |
@@ -415,7 +421,7 @@ struct MutationInterpreter(Movable):
         self._blitz[].assign_id(mojo_id, blitz_id)
         self._push(blitz_id)
 
-    fn _op_load_template(mut self, mut reader: BufReader):
+    def _op_load_template(mut self, mut reader: BufReader):
         """OP_LOAD_TEMPLATE: Clone template, assign id, push to stack.
 
         Wire: | tmpl_id (u32) | index (u32) | id (u32) |
@@ -432,7 +438,7 @@ struct MutationInterpreter(Movable):
             self._blitz[].assign_id(mojo_id, blitz_id)
             self._push(blitz_id)
 
-    fn _op_replace_with(mut self, mut reader: BufReader):
+    def _op_replace_with(mut self, mut reader: BufReader):
         """OP_REPLACE_WITH: Replace node id with m stack nodes.
 
         Wire: | id (u32) | m (u32) |
@@ -450,7 +456,7 @@ struct MutationInterpreter(Movable):
             )
             replace_buf.free()
 
-    fn _op_replace_placeholder(mut self, mut reader: BufReader):
+    def _op_replace_placeholder(mut self, mut reader: BufReader):
         """OP_REPLACE_PLACEHOLDER: Replace placeholder at path with m stack nodes.
 
         Wire: | path_len (u8) | path ([u8]) | m (u32) |
@@ -487,7 +493,7 @@ struct MutationInterpreter(Movable):
             )
             replace_buf.free()
 
-    fn _op_insert_after(mut self, mut reader: BufReader):
+    def _op_insert_after(mut self, mut reader: BufReader):
         """OP_INSERT_AFTER: Insert m stack nodes after node id.
 
         Wire: | id (u32) | m (u32) |
@@ -503,7 +509,7 @@ struct MutationInterpreter(Movable):
             self._blitz[].insert_after(id, node_buf, UInt32(len(nodes)))
             node_buf.free()
 
-    fn _op_insert_before(mut self, mut reader: BufReader):
+    def _op_insert_before(mut self, mut reader: BufReader):
         """OP_INSERT_BEFORE: Insert m stack nodes before node id.
 
         Wire: | id (u32) | m (u32) |
@@ -519,7 +525,7 @@ struct MutationInterpreter(Movable):
             self._blitz[].insert_before(id, node_buf, UInt32(len(nodes)))
             node_buf.free()
 
-    fn _op_set_attribute(mut self, mut reader: BufReader):
+    def _op_set_attribute(mut self, mut reader: BufReader):
         """OP_SET_ATTRIBUTE: Set an attribute on element id.
 
         Wire: | id (u32) | ns (u8) | name_len (u16) | name | val_len (u32) | val |
@@ -534,7 +540,7 @@ struct MutationInterpreter(Movable):
 
         self._blitz[].set_attribute(id, name, value)
 
-    fn _op_set_text(mut self, mut reader: BufReader):
+    def _op_set_text(mut self, mut reader: BufReader):
         """OP_SET_TEXT: Update the text content of node id.
 
         Wire: | id (u32) | len (u32) | text ([u8]) |
@@ -544,7 +550,7 @@ struct MutationInterpreter(Movable):
 
         self._blitz[].set_text_content(id, text)
 
-    fn _op_new_event_listener(mut self, mut reader: BufReader):
+    def _op_new_event_listener(mut self, mut reader: BufReader):
         """OP_NEW_EVENT_LISTENER: Attach an event listener to element id.
 
         Wire: | id (u32) | handler_id (u32) | name_len (u16) | name ([u8]) |
@@ -555,7 +561,7 @@ struct MutationInterpreter(Movable):
 
         self._blitz[].add_event_listener(id, handler_id, event_name)
 
-    fn _op_remove_event_listener(mut self, mut reader: BufReader):
+    def _op_remove_event_listener(mut self, mut reader: BufReader):
         """OP_REMOVE_EVENT_LISTENER: Remove an event listener from element id.
 
         Wire: | id (u32) | name_len (u16) | name ([u8]) |
@@ -565,7 +571,7 @@ struct MutationInterpreter(Movable):
 
         self._blitz[].remove_event_listener(id, event_name)
 
-    fn _op_remove(mut self, mut reader: BufReader):
+    def _op_remove(mut self, mut reader: BufReader):
         """OP_REMOVE: Remove node id from the DOM.
 
         Wire: | id (u32) |
@@ -573,7 +579,7 @@ struct MutationInterpreter(Movable):
         var id = reader.read_u32_le()
         self._blitz[].remove_node(id)
 
-    fn _op_push_root(mut self, mut reader: BufReader):
+    def _op_push_root(mut self, mut reader: BufReader):
         """OP_PUSH_ROOT: Push node id onto the interpreter stack.
 
         Wire: | id (u32) |
@@ -581,7 +587,7 @@ struct MutationInterpreter(Movable):
         var id = reader.read_u32_le()
         self._push(id)
 
-    fn _op_register_template(mut self, mut reader: BufReader):
+    def _op_register_template(mut self, mut reader: BufReader):
         """OP_REGISTER_TEMPLATE: Build and register a template from its definition.
 
         Wire format:
@@ -726,7 +732,7 @@ struct MutationInterpreter(Movable):
                 var el_id = node_ids[i]
                 for a in range(af, af + ac):
                     if a < attr_count and attr_kinds[a] == TATTR_STATIC:
-                        if len(attr_names[a]) > 0:
+                        if (attr_names[a]).byte_length() > 0:
                             self._blitz[].set_attribute(
                                 el_id, attr_names[a], attr_values[a]
                             )
@@ -760,7 +766,7 @@ struct MutationInterpreter(Movable):
             if root_idx < len(node_ids):
                 self._blitz[].register_template(tmpl_id, node_ids[root_idx])
 
-    fn _op_remove_attribute(mut self, mut reader: BufReader):
+    def _op_remove_attribute(mut self, mut reader: BufReader):
         """OP_REMOVE_ATTRIBUTE: Remove an attribute from element id.
 
         Wire: | id (u32) | ns (u8) | name_len (u16) | name ([u8]) |

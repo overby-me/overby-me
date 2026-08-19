@@ -28,13 +28,13 @@ struct SchedulerEntry(Copyable, Equatable, Writable):
     var scope_id: UInt32
     var height: UInt32
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.scope_id = copy.scope_id
         self.height = copy.height
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.scope_id = take.scope_id
-        self.height = take.height
+    def __init__(out self, *, deinit move: Self):
+        self.scope_id = move.scope_id
+        self.height = move.height
 
 
 struct Scheduler(Movable):
@@ -55,15 +55,15 @@ struct Scheduler(Movable):
     var _queue: List[SchedulerEntry]
     var _sorted: Bool
 
-    fn __init__(out self):
+    def __init__(out self):
         self._queue = List[SchedulerEntry]()
         self._sorted = False
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._queue = take._queue^
-        self._sorted = take._sorted
+    def __init__(out self, *, deinit move: Self):
+        self._queue = move._queue^
+        self._sorted = move._sorted
 
-    fn collect(mut self, rt: UnsafePointer[Runtime, MutExternalOrigin]):
+    def collect(mut self, rt: UnsafePointer[Runtime, MutUntrackedOrigin]):
         """Drain the runtime's dirty queue into the scheduler.
 
         Deduplicates against any entries already in the queue.
@@ -79,9 +79,9 @@ struct Scheduler(Movable):
         if len(dirty) > 0:
             self._sorted = False
 
-    fn collect_one(
+    def collect_one(
         mut self,
-        rt: UnsafePointer[Runtime, MutExternalOrigin],
+        rt: UnsafePointer[Runtime, MutUntrackedOrigin],
         scope_id: UInt32,
     ):
         """Add a single scope to the queue (if not already present).
@@ -94,7 +94,7 @@ struct Scheduler(Movable):
             self._queue.append(SchedulerEntry(scope_id, h))
             self._sorted = False
 
-    fn next(mut self) -> UInt32:
+    def next(mut self) -> UInt32:
         """Return and remove the next scope to render (lowest height first).
 
         Precondition: `not self.is_empty()`.
@@ -116,7 +116,7 @@ struct Scheduler(Movable):
 
         return entry.scope_id
 
-    fn peek(self) -> UInt32:
+    def peek(self) -> UInt32:
         """Return the next scope ID without removing it.
 
         Precondition: `not self.is_empty()`.
@@ -124,33 +124,33 @@ struct Scheduler(Movable):
         """
         return self._queue[0].scope_id
 
-    fn is_empty(self) -> Bool:
+    def is_empty(self) -> Bool:
         """Check if there are no pending dirty scopes."""
         return len(self._queue) == 0
 
-    fn count(self) -> Int:
+    def count(self) -> Int:
         """Return the number of pending dirty scopes."""
         return len(self._queue)
 
-    fn clear(mut self):
+    def clear(mut self):
         """Discard all pending dirty scopes."""
         self._queue = List[SchedulerEntry]()
         self._sorted = False
 
-    fn has_scope(self, scope_id: UInt32) -> Bool:
+    def has_scope(self, scope_id: UInt32) -> Bool:
         """Check if a specific scope is already in the queue."""
         return self._contains(scope_id)
 
     # ── Internals ────────────────────────────────────────────────────
 
-    fn _contains(self, scope_id: UInt32) -> Bool:
+    def _contains(self, scope_id: UInt32) -> Bool:
         """Check if scope_id is already in the queue."""
         for i in range(len(self._queue)):
             if self._queue[i].scope_id == scope_id:
                 return True
         return False
 
-    fn _sort(mut self):
+    def _sort(mut self):
         """Sort the queue by height (ascending) using insertion sort.
 
         Insertion sort is optimal here because:

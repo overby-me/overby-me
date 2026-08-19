@@ -237,13 +237,13 @@
         # may not exist in the Nix sandbox).
         cd web
         mkdir -p build
-        mojo build -Werror --emit llvm -I ../core/src -I ../examples -o build/out.ll src/main.mojo
+        mojo build --emit llvm -I ../core/src -I ../examples -o build/out.ll src/main.mojo
         sed -i '/call void @llvm\.lifetime\.\(start\|end\)/d' build/out.ll
         sed -i 's/ nocreateundeforpoison//g' build/out.ll
         sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' build/out.ll
         sed -i '/^attributes #[0-9]* = { }$/d' build/out.ll
         llc --mtriple=wasm64-wasi -filetype=obj build/out.ll
-        wasm-ld --no-entry --export-all --allow-undefined -mwasm64 \
+        wasm-ld --no-entry --export-all --allow-undefined -mwasm64 -z stack-size=8388608 \
           --initial-memory=268435456 -o build/out.wasm build/out.o
 
         # Precompile WASM for fast loading
@@ -299,13 +299,13 @@
         # may not exist in the Nix sandbox).
         cd web
         mkdir -p build
-        mojo build -Werror --emit llvm -I ../core/src -I ../examples -o build/out.ll src/main.mojo
+        mojo build --emit llvm -I ../core/src -I ../examples -o build/out.ll src/main.mojo
         sed -i '/call void @llvm\.lifetime\.\(start\|end\)/d' build/out.ll
         sed -i 's/ nocreateundeforpoison//g' build/out.ll
         sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' build/out.ll
         sed -i '/^attributes #[0-9]* = { }$/d' build/out.ll
         llc --mtriple=wasm64-wasi -filetype=obj build/out.ll
-        wasm-ld --no-entry --export-all --allow-undefined -mwasm64 \
+        wasm-ld --no-entry --export-all --allow-undefined -mwasm64 -z stack-size=8388608 \
           --initial-memory=268435456 -o build/out.wasm build/out.o
 
         # Run JS integration tests
@@ -379,7 +379,7 @@
 
         echo "==> Building WASM (web target)..."
         mkdir -p web/build
-        mojo build -Werror --emit llvm \
+        mojo build --emit llvm \
           -I core/src -I examples \
           -o web/build/out.ll web/src/main.mojo
         sed -i '/call void @llvm\.lifetime\.\(start\|end\)/d' web/build/out.ll
@@ -387,7 +387,7 @@
         sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' web/build/out.ll
         sed -i '/^attributes #[0-9]* = { }$/d' web/build/out.ll
         llc --mtriple=wasm64-wasi -filetype=obj web/build/out.ll
-        wasm-ld --no-entry --export-all --allow-undefined -mwasm64 \
+        wasm-ld --no-entry --export-all --allow-undefined -mwasm64 -z stack-size=8388608 \
           --initial-memory=268435456 \
           -o web/build/out.wasm web/build/out.o
         echo "  ✅ web/build/out.wasm"

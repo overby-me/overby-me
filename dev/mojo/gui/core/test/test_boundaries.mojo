@@ -24,7 +24,7 @@ from wasm_harness import (
 )
 
 
-fn _get_wasm() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -39,8 +39,8 @@ comptime INT64_MIN = -9223372036854775808
 # ── Int32 boundary values — identity ─────────────────────────────────────────
 
 
-fn test_identity_int32_max(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_identity_int32_max(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("identity_int32", args_i32(INT32_MAX))),
@@ -49,8 +49,8 @@ fn test_identity_int32_max(
     )
 
 
-fn test_identity_int32_min(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_identity_int32_min(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("identity_int32", args_i32(INT32_MIN))),
@@ -59,8 +59,8 @@ fn test_identity_int32_min(
     )
 
 
-fn test_identity_int32_zero(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_identity_int32_zero(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("identity_int32", args_i32(0))),
@@ -72,8 +72,8 @@ fn test_identity_int32_zero(
 # ── Int64 boundary values — identity ─────────────────────────────────────────
 
 
-fn test_identity_int64_max(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_identity_int64_max(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("identity_int64", args_i64(INT64_MAX))),
@@ -82,8 +82,8 @@ fn test_identity_int64_max(
     )
 
 
-fn test_identity_int64_min(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_identity_int64_min(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("identity_int64", args_i64(INT64_MIN))),
@@ -95,8 +95,8 @@ fn test_identity_int64_min(
 # ── Int32 overflow — addition ────────────────────────────────────────────────
 
 
-fn test_add_int32_max_plus_one_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_add_int32_max_plus_one_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("add_int32", args_i32_i32(INT32_MAX, 1))),
@@ -105,8 +105,8 @@ fn test_add_int32_max_plus_one_wraps(
     )
 
 
-fn test_add_int32_min_minus_one_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_add_int32_min_minus_one_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("add_int32", args_i32_i32(INT32_MIN, -1))),
@@ -115,8 +115,8 @@ fn test_add_int32_min_minus_one_wraps(
     )
 
 
-fn test_add_int32_max_plus_max_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_add_int32_max_plus_max_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("add_int32", args_i32_i32(INT32_MAX, INT32_MAX))),
@@ -128,8 +128,8 @@ fn test_add_int32_max_plus_max_wraps(
 # ── Int64 overflow — addition ────────────────────────────────────────────────
 
 
-fn test_add_int64_max_plus_one_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_add_int64_max_plus_one_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("add_int64", args_i64_i64(INT64_MAX, 1))),
@@ -138,8 +138,8 @@ fn test_add_int64_max_plus_one_wraps(
     )
 
 
-fn test_add_int64_min_minus_one_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_add_int64_min_minus_one_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("add_int64", args_i64_i64(INT64_MIN, -1))),
@@ -151,8 +151,8 @@ fn test_add_int64_min_minus_one_wraps(
 # ── Int32 overflow — subtraction ─────────────────────────────────────────────
 
 
-fn test_sub_int32_min_minus_one_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_sub_int32_min_minus_one_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("sub_int32", args_i32_i32(INT32_MIN, 1))),
@@ -161,8 +161,8 @@ fn test_sub_int32_min_minus_one_wraps(
     )
 
 
-fn test_sub_int32_max_minus_neg_one_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sub_int32_max_minus_neg_one_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     assert_equal(
         Int(w[].call_i32("sub_int32", args_i32_i32(INT32_MAX, -1))),
@@ -174,8 +174,8 @@ fn test_sub_int32_max_minus_neg_one_wraps(
 # ── Int32 overflow — multiplication ──────────────────────────────────────────
 
 
-fn test_mul_int32_max_times_two_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_mul_int32_max_times_two_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("mul_int32", args_i32_i32(INT32_MAX, 2))),
@@ -184,8 +184,8 @@ fn test_mul_int32_max_times_two_wraps(
     )
 
 
-fn test_mul_int32_min_times_neg_one_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mul_int32_min_times_neg_one_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     assert_equal(
         Int(w[].call_i32("mul_int32", args_i32_i32(INT32_MIN, -1))),
@@ -197,7 +197,9 @@ fn test_mul_int32_min_times_neg_one_wraps(
 # ── Int32 overflow — negation ────────────────────────────────────────────────
 
 
-fn test_neg_int32_max(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
+def test_neg_int32_max(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+) raises:
     assert_equal(
         Int(w[].call_i32("neg_int32", args_i32(INT32_MAX))),
         -INT32_MAX,
@@ -205,8 +207,8 @@ fn test_neg_int32_max(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
     )
 
 
-fn test_neg_int32_min_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_neg_int32_min_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("neg_int32", args_i32(INT32_MIN))),
@@ -218,7 +220,9 @@ fn test_neg_int32_min_wraps(
 # ── Int64 overflow — negation ────────────────────────────────────────────────
 
 
-fn test_neg_int64_max(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
+def test_neg_int64_max(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+) raises:
     assert_equal(
         Int(w[].call_i64("neg_int64", args_i64(INT64_MAX))),
         -INT64_MAX,
@@ -226,8 +230,8 @@ fn test_neg_int64_max(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
     )
 
 
-fn test_neg_int64_min_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_neg_int64_min_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("neg_int64", args_i64(INT64_MIN))),
@@ -239,7 +243,9 @@ fn test_neg_int64_min_wraps(
 # ── Int32 boundary — abs ─────────────────────────────────────────────────────
 
 
-fn test_abs_int32_max(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
+def test_abs_int32_max(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+) raises:
     assert_equal(
         Int(w[].call_i32("abs_int32", args_i32(INT32_MAX))),
         INT32_MAX,
@@ -247,8 +253,8 @@ fn test_abs_int32_max(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
     )
 
 
-fn test_abs_int32_min_wraps(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_int32_min_wraps(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("abs_int32", args_i32(INT32_MIN))),
@@ -257,8 +263,8 @@ fn test_abs_int32_min_wraps(
     )
 
 
-fn test_abs_int32_min_plus_one(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_abs_int32_min_plus_one(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("abs_int32", args_i32(INT32_MIN + 1))),
@@ -270,8 +276,8 @@ fn test_abs_int32_min_plus_one(
 # ── Int32 boundary — min / max ───────────────────────────────────────────────
 
 
-fn test_min_int32_boundaries(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_min_int32_boundaries(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("min_int32", args_i32_i32(INT32_MIN, INT32_MAX))),
@@ -280,8 +286,8 @@ fn test_min_int32_boundaries(
     )
 
 
-fn test_max_int32_boundaries(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_max_int32_boundaries(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("max_int32", args_i32_i32(INT32_MIN, INT32_MAX))),
@@ -290,8 +296,8 @@ fn test_max_int32_boundaries(
     )
 
 
-fn test_min_int32_same_min(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_min_int32_same_min(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("min_int32", args_i32_i32(INT32_MIN, INT32_MIN))),
@@ -300,8 +306,8 @@ fn test_min_int32_same_min(
     )
 
 
-fn test_max_int32_same_max(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_max_int32_same_max(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("max_int32", args_i32_i32(INT32_MAX, INT32_MAX))),
@@ -313,8 +319,8 @@ fn test_max_int32_same_max(
 # ── Int32 boundary — comparison ──────────────────────────────────────────────
 
 
-fn test_lt_int32_min_max(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_lt_int32_min_max(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("lt_int32", args_i32_i32(INT32_MIN, INT32_MAX))),
@@ -323,8 +329,8 @@ fn test_lt_int32_min_max(
     )
 
 
-fn test_gt_int32_max_min(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_gt_int32_max_min(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("gt_int32", args_i32_i32(INT32_MAX, INT32_MIN))),
@@ -333,8 +339,8 @@ fn test_gt_int32_max_min(
     )
 
 
-fn test_eq_int32_max_max(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_eq_int32_max_max(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("eq_int32", args_i32_i32(INT32_MAX, INT32_MAX))),
@@ -343,8 +349,8 @@ fn test_eq_int32_max_max(
     )
 
 
-fn test_eq_int32_min_min(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_eq_int32_min_min(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("eq_int32", args_i32_i32(INT32_MIN, INT32_MIN))),
@@ -353,8 +359,8 @@ fn test_eq_int32_min_min(
     )
 
 
-fn test_ne_int32_min_max(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_ne_int32_min_max(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("ne_int32", args_i32_i32(INT32_MIN, INT32_MAX))),
@@ -366,8 +372,8 @@ fn test_ne_int32_min_max(
 # ── Int32 boundary — clamp ───────────────────────────────────────────────────
 
 
-fn test_clamp_int32_min_to_range(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_clamp_int32_min_to_range(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("clamp_int32", args_i32_i32_i32(INT32_MIN, 0, 100))),
@@ -376,8 +382,8 @@ fn test_clamp_int32_min_to_range(
     )
 
 
-fn test_clamp_int32_max_to_range(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_clamp_int32_max_to_range(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("clamp_int32", args_i32_i32_i32(INT32_MAX, 0, 100))),
@@ -386,8 +392,8 @@ fn test_clamp_int32_max_to_range(
     )
 
 
-fn test_clamp_int32_within_full_range(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_clamp_int32_within_full_range(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(
@@ -403,8 +409,8 @@ fn test_clamp_int32_within_full_range(
 # ── Int32 boundary — bitwise ─────────────────────────────────────────────────
 
 
-fn test_bitnot_int32_max(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_bitnot_int32_max(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bitnot_int32", args_i32(INT32_MAX))),
@@ -413,8 +419,8 @@ fn test_bitnot_int32_max(
     )
 
 
-fn test_bitnot_int32_min(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_bitnot_int32_min(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bitnot_int32", args_i32(INT32_MIN))),
@@ -423,8 +429,8 @@ fn test_bitnot_int32_min(
     )
 
 
-fn test_bitand_int32_max_min(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_bitand_int32_max_min(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bitand_int32", args_i32_i32(INT32_MAX, INT32_MIN))),
@@ -433,8 +439,8 @@ fn test_bitand_int32_max_min(
     )
 
 
-fn test_bitor_int32_max_min(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_bitor_int32_max_min(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bitor_int32", args_i32_i32(INT32_MAX, INT32_MIN))),
@@ -443,8 +449,8 @@ fn test_bitor_int32_max_min(
     )
 
 
-fn test_bitxor_int32_max_min(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_bitxor_int32_max_min(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bitxor_int32", args_i32_i32(INT32_MAX, INT32_MIN))),
@@ -456,8 +462,8 @@ fn test_bitxor_int32_max_min(
 # ── Int32 boundary — GCD ─────────────────────────────────────────────────────
 
 
-fn test_gcd_int32_max_with_one(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_gcd_int32_max_with_one(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("gcd_int32", args_i32_i32(INT32_MAX, 1))),
@@ -466,8 +472,8 @@ fn test_gcd_int32_max_with_one(
     )
 
 
-fn test_gcd_int32_max_with_self(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_gcd_int32_max_with_self(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("gcd_int32", args_i32_i32(INT32_MAX, INT32_MAX))),
@@ -479,8 +485,8 @@ fn test_gcd_int32_max_with_self(
 # ── Int32 overflow — factorial ───────────────────────────────────────────────
 
 
-fn test_factorial_int32_12_fits(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_factorial_int32_12_fits(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     # 12! = 479001600, fits in Int32
     assert_equal(
@@ -490,8 +496,8 @@ fn test_factorial_int32_12_fits(
     )
 
 
-fn test_factorial_int32_13_overflows(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_factorial_int32_13_overflows(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     # 13! = 6227020800, overflows Int32 — verify it wraps
     assert_equal(
@@ -504,8 +510,8 @@ fn test_factorial_int32_13_overflows(
 # ── Int64 boundary — factorial ───────────────────────────────────────────────
 
 
-fn test_factorial_int64_20_fits(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_factorial_int64_20_fits(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     # 20! = 2432902008176640000, fits in Int64
     assert_equal(
@@ -515,8 +521,8 @@ fn test_factorial_int64_20_fits(
     )
 
 
-fn test_factorial_int64_21_overflows(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_factorial_int64_21_overflows(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     # 21! = 51090942171709440000, overflows Int64 — verify it wraps
     assert_equal(
@@ -529,8 +535,8 @@ fn test_factorial_int64_21_overflows(
 # ── Int32 overflow — fibonacci ───────────────────────────────────────────────
 
 
-fn test_fib_int32_46_fits(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_fib_int32_46_fits(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     # fib(46) = 1836311903, fits in Int32
     assert_equal(
@@ -540,8 +546,8 @@ fn test_fib_int32_46_fits(
     )
 
 
-fn test_fib_int32_47_overflows(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_fib_int32_47_overflows(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     # fib(47) = 2971215073, overflows Int32 — verify wrapping
     assert_equal(
@@ -551,7 +557,7 @@ fn test_fib_int32_47_overflows(
     )
 
 
-fn main() raises:
+def main() raises:
     from wasm_harness import get_instance
 
     var w = get_instance()

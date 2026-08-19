@@ -37,27 +37,27 @@ from wasm_harness import (
 )
 
 
-fn _get_wasm() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def _create_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises -> Int:
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
-fn _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _destroy_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_destroy", args_ptr(rt))
 
 
-fn _scope_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _scope_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     height: Int32,
     parent: Int32,
@@ -67,40 +67,40 @@ fn _scope_create(
     )
 
 
-fn _scope_destroy(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, id: Int
+def _scope_destroy(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, id: Int
 ) raises:
     w[].call_void("scope_destroy", args_ptr_i32(rt, Int32(id)))
 
 
-fn _scope_begin_render(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, scope_id: Int
+def _scope_begin_render(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, scope_id: Int
 ) raises -> Int:
     return Int(
         w[].call_i32("scope_begin_render", args_ptr_i32(rt, Int32(scope_id)))
     )
 
 
-fn _scope_end_render(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, prev: Int
+def _scope_end_render(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, prev: Int
 ) raises:
     w[].call_void("scope_end_render", args_ptr_i32(rt, Int32(prev)))
 
 
-fn _signal_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, initial: Int32
+def _signal_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
 ) raises -> Int:
     return Int(w[].call_i32("signal_create_i32", args_ptr_i32(rt, initial)))
 
 
-fn _signal_read(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_read(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     return Int(w[].call_i32("signal_read_i32", args_ptr_i32(rt, Int32(key))))
 
 
-fn _signal_write(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _signal_write(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     key: Int,
     value: Int32,
@@ -108,16 +108,16 @@ fn _signal_write(
     w[].call_void("signal_write_i32", args_ptr_i32_i32(rt, Int32(key), value))
 
 
-fn _signal_subscriber_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_subscriber_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     return Int(
         w[].call_i32("signal_subscriber_count", args_ptr_i32(rt, Int32(key)))
     )
 
 
-fn _memo_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: Int32,
@@ -130,14 +130,14 @@ fn _memo_create(
     )
 
 
-fn _memo_begin_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_begin_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
-fn _memo_end_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_end_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Int32,
@@ -148,48 +148,48 @@ fn _memo_end_compute(
     )
 
 
-fn _memo_read(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_read(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     return Int(w[].call_i32("memo_read_i32", args_ptr_i32(rt, Int32(memo_id))))
 
 
-fn _memo_is_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_is_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return w[].call_i32("memo_is_dirty", args_ptr_i32(rt, Int32(memo_id))) != 0
 
 
-fn _memo_destroy(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_destroy(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_destroy", args_ptr_i32(rt, Int32(memo_id)))
 
 
-fn _memo_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _memo_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Int:
     return Int(w[].call_i32("memo_count", args_ptr(rt)))
 
 
-fn _memo_output_key(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_output_key(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     return Int(
         w[].call_i32("memo_output_key", args_ptr_i32(rt, Int32(memo_id)))
     )
 
 
-fn _memo_context_id(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_context_id(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     return Int(
         w[].call_i32("memo_context_id", args_ptr_i32(rt, Int32(memo_id)))
     )
 
 
-fn _memo_bool_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_bool_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: Bool,
@@ -207,14 +207,14 @@ fn _memo_bool_create(
     )
 
 
-fn _memo_bool_begin_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_bool_begin_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_bool_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
-fn _memo_bool_end_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_bool_end_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Bool,
@@ -230,14 +230,14 @@ fn _memo_bool_end_compute(
     )
 
 
-fn _memo_bool_read(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_bool_read(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return w[].call_i32("memo_bool_read", args_ptr_i32(rt, Int32(memo_id))) != 0
 
 
-fn _memo_bool_is_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_bool_is_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return (
         w[].call_i32("memo_bool_is_dirty", args_ptr_i32(rt, Int32(memo_id)))
@@ -245,8 +245,8 @@ fn _memo_bool_is_dirty(
     )
 
 
-fn _memo_string_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_string_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: String,
@@ -260,14 +260,14 @@ fn _memo_string_create(
     )
 
 
-fn _memo_string_begin_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_string_begin_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_string_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
-fn _memo_string_end_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_string_end_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: String,
@@ -279,8 +279,8 @@ fn _memo_string_end_compute(
     )
 
 
-fn _memo_string_read(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_string_read(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
     w[].call_void(
@@ -289,8 +289,8 @@ fn _memo_string_read(
     return w[].read_string_struct(out_ptr)
 
 
-fn _memo_string_peek(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_string_peek(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
     w[].call_void(
@@ -299,8 +299,8 @@ fn _memo_string_peek(
     return w[].read_string_struct(out_ptr)
 
 
-fn _memo_string_is_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_string_is_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return (
         w[].call_i32("memo_string_is_dirty", args_ptr_i32(rt, Int32(memo_id)))
@@ -308,34 +308,34 @@ fn _memo_string_is_dirty(
     )
 
 
-fn _drain_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _drain_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Int:
     return Int(w[].call_i32("runtime_drain_dirty", args_ptr(rt)))
 
 
-fn _effect_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _effect_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
 ) raises -> Int:
     return Int(w[].call_i32("effect_create", args_ptr_i32(rt, Int32(scope_id))))
 
 
-fn _effect_begin_run(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, effect_id: Int
+def _effect_begin_run(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises:
     w[].call_void("effect_begin_run", args_ptr_i32(rt, Int32(effect_id)))
 
 
-fn _effect_end_run(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, effect_id: Int
+def _effect_end_run(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises:
     w[].call_void("effect_end_run", args_ptr_i32(rt, Int32(effect_id)))
 
 
-fn _effect_is_pending(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, effect_id: Int
+def _effect_is_pending(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises -> Bool:
     return (
         w[].call_i32("effect_is_pending", args_ptr_i32(rt, Int32(effect_id)))
@@ -343,8 +343,8 @@ fn _effect_is_pending(
     )
 
 
-fn _effect_destroy(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, effect_id: Int
+def _effect_destroy(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises:
     w[].call_void("effect_destroy", args_ptr_i32(rt, Int32(effect_id)))
 
@@ -354,8 +354,8 @@ fn _effect_destroy(
 # establish subscriptions.  After setup, all memos are clean.
 
 
-fn _setup_chain_2(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _setup_chain_2(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     signal_key: Int,
@@ -384,8 +384,8 @@ fn _setup_chain_2(
     return Tuple(mA, mB)
 
 
-fn _setup_chain_3(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _setup_chain_3(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     signal_key: Int,
@@ -418,8 +418,8 @@ fn _setup_chain_3(
 # ── 1. test_chain_2_level ────────────────────────────────────────────────────
 
 
-fn test_chain_2_level(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_2_level(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Chain 2-level: signal → memoA → memoB.  Write signal, both dirty."""
     var rt = _create_runtime(w)
@@ -447,8 +447,8 @@ fn test_chain_2_level(
 # ── 2. test_chain_3_level ────────────────────────────────────────────────────
 
 
-fn test_chain_3_level(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_3_level(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Chain 3-level: signal → A → B → C.  Write signal, all three dirty."""
     var rt = _create_runtime(w)
@@ -476,8 +476,8 @@ fn test_chain_3_level(
 # ── 3. test_chain_4_level ────────────────────────────────────────────────────
 
 
-fn test_chain_4_level(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_4_level(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Chain 4-level: signal → A → B → C → D.  Write signal, all four dirty."""
     var rt = _create_runtime(w)
@@ -525,8 +525,8 @@ fn test_chain_4_level(
 # ── 4. test_chain_scope_at_end ───────────────────────────────────────────────
 
 
-fn test_chain_scope_at_end(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_scope_at_end(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Scope at end of chain: signal → A → B, scope subscribes to B's output.
 
@@ -564,8 +564,8 @@ fn test_chain_scope_at_end(
 # ── 5. test_chain_effect_at_end ──────────────────────────────────────────────
 
 
-fn test_chain_effect_at_end(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_effect_at_end(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Effect at end of chain: signal → A → B, effect subscribes to B's output.
 
@@ -606,8 +606,8 @@ fn test_chain_effect_at_end(
 # ── 6. test_diamond_2_inputs ─────────────────────────────────────────────────
 
 
-fn test_diamond_2_inputs(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_diamond_2_inputs(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Diamond 2 inputs: signal → A, signal → B, C subscribes to both A and B outputs.
 
@@ -655,8 +655,8 @@ fn test_diamond_2_inputs(
 # ── 7. test_diamond_deep ─────────────────────────────────────────────────────
 
 
-fn test_diamond_deep(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_diamond_deep(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Diamond deep: signal → A → B, signal → C → B (B has two parents).
 
@@ -704,8 +704,8 @@ fn test_diamond_deep(
 # ── 8. test_chain_already_dirty_skip ─────────────────────────────────────────
 
 
-fn test_chain_already_dirty_skip(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_already_dirty_skip(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Already-dirty skip: signal → A → B.  B already dirty before write.
 
@@ -758,8 +758,8 @@ fn test_chain_already_dirty_skip(
 # ── 9. test_chain_recompute_clears_dirty ─────────────────────────────────────
 
 
-fn test_chain_recompute_clears_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_recompute_clears_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Recompute clears dirty: signal → A → B.  Write, recompute A then B.
 
@@ -801,8 +801,8 @@ fn test_chain_recompute_clears_dirty(
 # ── 10. test_chain_recompute_order_matters ───────────────────────────────────
 
 
-fn test_chain_recompute_order_matters(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_recompute_order_matters(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Recompute order matters: signal → A → B.  Write, recompute A then B.
 
@@ -845,8 +845,8 @@ fn test_chain_recompute_order_matters(
 # ── 11. test_chain_independent_write ─────────────────────────────────────────
 
 
-fn test_chain_independent_write(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_independent_write(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Independent signals: signal1 → A → C, signal2 → B.
 
@@ -897,8 +897,8 @@ fn test_chain_independent_write(
 # ── 12. test_chain_propagation_after_resubscribe ─────────────────────────────
 
 
-fn test_chain_propagation_after_resubscribe(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_propagation_after_resubscribe(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Re-subscription: signal1 → A → B.  Recompute A reading signal2.
 
@@ -961,8 +961,8 @@ fn test_chain_propagation_after_resubscribe(
 # ── 13. test_chain_with_destroyed_memo ───────────────────────────────────────
 
 
-fn test_chain_with_destroyed_memo(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_with_destroyed_memo(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroyed memo: signal → A → B.  Destroy B.  Write signal.  No crash."""
     var rt = _create_runtime(w)
@@ -988,8 +988,8 @@ fn test_chain_with_destroyed_memo(
 # ── 14. test_chain_mixed_types ───────────────────────────────────────────────
 
 
-fn test_chain_mixed_types(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_mixed_types(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Mixed types: signal(Int32) → MemoI32 → MemoBool → MemoString.
 
@@ -1045,8 +1045,8 @@ fn test_chain_mixed_types(
 # ── 15. test_chain_string_memo_at_end ────────────────────────────────────────
 
 
-fn test_chain_string_memo_at_end(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_string_memo_at_end(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """String memo at end: signal → MemoI32 → MemoString.
 
@@ -1100,8 +1100,8 @@ fn test_chain_string_memo_at_end(
 # ── 16. test_chain_bool_memo_in_middle ───────────────────────────────────────
 
 
-fn test_chain_bool_memo_in_middle(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_bool_memo_in_middle(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Bool memo in middle: signal → MemoBool → MemoI32.
 
@@ -1143,8 +1143,8 @@ fn test_chain_bool_memo_in_middle(
 # ── 17. test_chain_no_subscribers ────────────────────────────────────────────
 
 
-fn test_chain_no_subscribers(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_no_subscribers(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """No subscribers: signal → memoA (no subscribers on A's output).
 
@@ -1175,8 +1175,8 @@ fn test_chain_no_subscribers(
 # ── 18. test_chain_memo_to_memo_and_scope ────────────────────────────────────
 
 
-fn test_chain_memo_to_memo_and_scope(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_memo_to_memo_and_scope(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Memo + scope: signal → A; both scope AND memoB subscribe to A's output.
 
@@ -1224,8 +1224,8 @@ fn test_chain_memo_to_memo_and_scope(
 # ── 19. test_chain_memo_to_memo_and_effect ───────────────────────────────────
 
 
-fn test_chain_memo_to_memo_and_effect(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_chain_memo_to_memo_and_effect(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Memo + effect: signal → A; both effect AND memoB subscribe to A's output.
 
@@ -1274,8 +1274,8 @@ fn test_chain_memo_to_memo_and_effect(
 # ── 20. test_regression_single_memo ──────────────────────────────────────────
 
 
-fn test_regression_single_memo(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_regression_single_memo(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Regression single memo: signal → memo (no chain), scope on output.
 
@@ -1316,7 +1316,7 @@ fn test_regression_single_memo(
 # ── Runner ───────────────────────────────────────────────────────────────────
 
 
-fn test_all(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
+def test_all(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     test_chain_2_level(w)
     test_chain_3_level(w)
     test_chain_4_level(w)
@@ -1339,7 +1339,7 @@ fn test_all(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
     test_regression_single_memo(w)
 
 
-fn main() raises:
+def main() raises:
     from wasm_harness import get_instance
 
     var w = get_instance()

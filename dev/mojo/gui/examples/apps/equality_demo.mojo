@@ -57,7 +57,7 @@ struct EqualityDemoApp(Movable):
     var incr_handler: UInt32
     var decr_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.input = self.ctx.create_signal(0)
         self.clamped = self.ctx.use_memo(0)
@@ -85,15 +85,15 @@ struct EqualityDemoApp(Movable):
         self.incr_handler = self.ctx.view_event_handler_id(0)
         self.decr_handler = self.ctx.view_event_handler_id(1)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.input = take.input.copy()
-        self.clamped = take.clamped.copy()
-        self.label = take.label.copy()
-        self.incr_handler = take.incr_handler
-        self.decr_handler = take.decr_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.input = move.input.copy()
+        self.clamped = move.clamped.copy()
+        self.label = move.label.copy()
+        self.incr_handler = move.incr_handler
+        self.decr_handler = move.decr_handler
 
-    fn run_memos(mut self):
+    def run_memos(mut self):
         """Recompute all memos in dependency order.
 
         Chain: input → clamped (clamp(input, 0, 10))
@@ -122,7 +122,7 @@ struct EqualityDemoApp(Movable):
             else:
                 self.label.end_compute(String("low"))
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build a fresh VNode with 2 dyn_text slots (clamped + label).
 
         The input signal is NOT displayed here because the scope does
@@ -139,23 +139,23 @@ struct EqualityDemoApp(Movable):
 # ── EqualityDemoApp lifecycle functions ───────────────────────────────────────
 
 
-fn _eq_init() -> UnsafePointer[EqualityDemoApp, MutExternalOrigin]:
+def _eq_init() -> UnsafePointer[EqualityDemoApp, MutUntrackedOrigin]:
     var app_ptr = alloc[EqualityDemoApp](1)
-    app_ptr.init_pointee_move(EqualityDemoApp())
+    app_ptr.unsafe_write(EqualityDemoApp())
     return app_ptr
 
 
-fn _eq_destroy(
-    app_ptr: UnsafePointer[EqualityDemoApp, MutExternalOrigin],
+def _eq_destroy(
+    app_ptr: UnsafePointer[EqualityDemoApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _eq_rebuild(
+def _eq_rebuild(
     mut app: EqualityDemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the equality-demo app."""
     # Run initial memo recomputation
@@ -168,7 +168,7 @@ fn _eq_rebuild(
     return result
 
 
-fn _eq_handle_event(
+def _eq_handle_event(
     mut app: EqualityDemoApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -176,9 +176,9 @@ fn _eq_handle_event(
     return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _eq_flush(
+def _eq_flush(
     mut app: EqualityDemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with equality-gated memo chain.
 

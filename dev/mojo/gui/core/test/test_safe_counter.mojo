@@ -41,15 +41,15 @@ from wasm_harness import (
 )
 
 
-fn _load() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_sc(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_sc(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a SafeCounterApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("sc_init", no_args()))
@@ -58,8 +58,8 @@ fn _create_sc(
     return Tuple(app, buf)
 
 
-fn _destroy_sc(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _destroy_sc(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -68,8 +68,8 @@ fn _destroy_sc(
     w[].call_void("sc_destroy", args_ptr(app))
 
 
-fn _flush(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _flush(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -77,8 +77,8 @@ fn _flush(
     return w[].call_i32("sc_flush", args_ptr_ptr_i32(app, buf, 8192))
 
 
-fn _handle_event(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _handle_event(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -89,8 +89,8 @@ fn _handle_event(
 # ── Test: init creates app ───────────────────────────────────────────────────
 
 
-fn test_sc_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_init_creates_app(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero pointer."""
     var app = Int(w[].call_i64("sc_init", no_args()))
@@ -101,8 +101,8 @@ fn test_sc_init_creates_app(
 # ── Test: count starts at 0 ─────────────────────────────────────────────────
 
 
-fn test_sc_count_starts_at_0(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_count_starts_at_0(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Initial count value is 0."""
     var t = _create_sc(w)
@@ -116,8 +116,8 @@ fn test_sc_count_starts_at_0(
 # ── Test: has_error initially false ──────────────────────────────────────────
 
 
-fn test_sc_has_error_initially_false(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_has_error_initially_false(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Boundary has no error after init."""
     var t = _create_sc(w)
@@ -131,8 +131,8 @@ fn test_sc_has_error_initially_false(
 # ── Test: normal mounted after rebuild ───────────────────────────────────────
 
 
-fn test_sc_normal_mounted_after_rebuild(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_normal_mounted_after_rebuild(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Normal child is mounted after rebuild."""
     var t = _create_sc(w)
@@ -146,8 +146,8 @@ fn test_sc_normal_mounted_after_rebuild(
 # ── Test: fallback not mounted initially ─────────────────────────────────────
 
 
-fn test_sc_fallback_not_mounted_initially(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_fallback_not_mounted_initially(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Fallback child is NOT mounted after initial rebuild."""
     var t = _create_sc(w)
@@ -161,8 +161,8 @@ fn test_sc_fallback_not_mounted_initially(
 # ── Test: increment updates count ────────────────────────────────────────────
 
 
-fn test_sc_increment_updates_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_increment_updates_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Incrementing via the incr handler updates the count signal."""
     var t = _create_sc(w)
@@ -178,8 +178,8 @@ fn test_sc_increment_updates_count(
 # ── Test: crash sets error ───────────────────────────────────────────────────
 
 
-fn test_sc_crash_sets_error(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_crash_sets_error(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Dispatching the crash handler sets has_error to true."""
     var t = _create_sc(w)
@@ -195,8 +195,8 @@ fn test_sc_crash_sets_error(
 # ── Test: flush after crash hides normal ─────────────────────────────────────
 
 
-fn test_sc_flush_after_crash_hides_normal(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_flush_after_crash_hides_normal(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After crash + flush, normal child is no longer mounted."""
     var t = _create_sc(w)
@@ -213,8 +213,8 @@ fn test_sc_flush_after_crash_hides_normal(
 # ── Test: flush after crash shows fallback ───────────────────────────────────
 
 
-fn test_sc_flush_after_crash_shows_fallback(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_flush_after_crash_shows_fallback(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After crash + flush, fallback child is mounted."""
     var t = _create_sc(w)
@@ -231,8 +231,8 @@ fn test_sc_flush_after_crash_shows_fallback(
 # ── Test: retry clears error ─────────────────────────────────────────────────
 
 
-fn test_sc_retry_clears_error(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_retry_clears_error(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Retry handler clears the error state."""
     var t = _create_sc(w)
@@ -253,8 +253,8 @@ fn test_sc_retry_clears_error(
 # ── Test: flush after retry shows normal ─────────────────────────────────────
 
 
-fn test_sc_flush_after_retry_shows_normal(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_flush_after_retry_shows_normal(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After crash + flush + retry + flush, normal child is re-mounted."""
     var t = _create_sc(w)
@@ -276,8 +276,8 @@ fn test_sc_flush_after_retry_shows_normal(
 # ── Test: flush after retry hides fallback ───────────────────────────────────
 
 
-fn test_sc_flush_after_retry_hides_fallback(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_flush_after_retry_hides_fallback(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After crash + flush + retry + flush, fallback child is hidden."""
     var t = _create_sc(w)
@@ -299,8 +299,8 @@ fn test_sc_flush_after_retry_hides_fallback(
 # ── Test: count preserved after crash/recovery ───────────────────────────────
 
 
-fn test_sc_count_preserved_after_crash_recovery(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_count_preserved_after_crash_recovery(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Count signal persists across crash/recovery cycles."""
     var t = _create_sc(w)
@@ -330,8 +330,8 @@ fn test_sc_count_preserved_after_crash_recovery(
 # ── Test: multiple crash/retry cycles ────────────────────────────────────────
 
 
-fn test_sc_multiple_crash_retry_cycles(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_multiple_crash_retry_cycles(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Five crash/retry cycles all succeed without errors."""
     var t = _create_sc(w)
@@ -358,8 +358,8 @@ fn test_sc_multiple_crash_retry_cycles(
 # ── Test: destroy does not crash ─────────────────────────────────────────────
 
 
-fn test_sc_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_destroy_does_not_crash(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy after normal lifecycle does not crash."""
     var t = _create_sc(w)
@@ -371,8 +371,8 @@ fn test_sc_destroy_does_not_crash(
 # ── Test: rapid increments after recovery ────────────────────────────────────
 
 
-fn test_sc_rapid_increments_after_recovery(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_rapid_increments_after_recovery(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Twenty increments after crash/recovery produce correct count."""
     var t = _create_sc(w)
@@ -402,8 +402,8 @@ fn test_sc_rapid_increments_after_recovery(
 # ── Test: scope count ────────────────────────────────────────────────────────
 
 
-fn test_sc_scope_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_scope_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Three scopes: parent + normal child + fallback child."""
     var t = _create_sc(w)
@@ -417,8 +417,8 @@ fn test_sc_scope_count(
 # ── Test: scope IDs are distinct ─────────────────────────────────────────────
 
 
-fn test_sc_scope_ids_distinct(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_scope_ids_distinct(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Parent, normal child, and fallback child have distinct scope IDs."""
     var t = _create_sc(w)
@@ -436,8 +436,8 @@ fn test_sc_scope_ids_distinct(
 # ── Test: handler IDs are valid ──────────────────────────────────────────────
 
 
-fn test_sc_handler_ids_valid(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_handler_ids_valid(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Crash, retry, and increment handler IDs are all distinct and non-negative.
     """
@@ -459,8 +459,8 @@ fn test_sc_handler_ids_valid(
 # ── Test: flush returns 0 when clean ─────────────────────────────────────────
 
 
-fn test_sc_flush_returns_0_when_clean(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_flush_returns_0_when_clean(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush without any state change returns 0."""
     var t = _create_sc(w)
@@ -474,8 +474,8 @@ fn test_sc_flush_returns_0_when_clean(
 # ── Test: destroy with active error ──────────────────────────────────────────
 
 
-fn test_sc_destroy_with_active_error(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_destroy_with_active_error(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy while error is active does not crash."""
     var t = _create_sc(w)
@@ -491,8 +491,8 @@ fn test_sc_destroy_with_active_error(
 # ── Test: increment after crash without flush ────────────────────────────────
 
 
-fn test_sc_increment_after_crash_no_flush(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_sc_increment_after_crash_no_flush(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Increment after crash (before flush) still updates count."""
     var t = _create_sc(w)
@@ -512,7 +512,7 @@ fn test_sc_increment_after_crash_no_flush(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn main() raises:
+def main() raises:
     var wp = _load()
 
     print("test_safe_counter — SafeCounterApp error boundary (Phase 32.2):")

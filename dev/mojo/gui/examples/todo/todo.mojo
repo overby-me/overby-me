@@ -164,20 +164,20 @@ struct TodoItem(Copyable):
     var text: String
     var completed: Bool
 
-    fn __init__(out self, id: Int32, text: String, completed: Bool):
+    def __init__(out self, id: Int32, text: String, completed: Bool):
         self.id = id
         self.text = text
         self.completed = completed
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.id = copy.id
         self.text = copy.text
         self.completed = copy.completed
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.id = take.id
-        self.text = take.text^
-        self.completed = take.completed
+    def __init__(out self, *, deinit move: Self):
+        self.id = move.id
+        self.text = move.text^
+        self.completed = move.completed
 
 
 # App-defined action tags for ItemBuilder.add_custom_event() dispatch.
@@ -228,7 +228,7 @@ struct TodoApp(GuiApp):
     var empty_msg_tmpl: UInt32
     var empty_msg_slot: ConditionalSlot
 
-    fn __init__(out self):
+    def __init__(out self):
         """Initialize the todo app with all reactive state, templates, and handlers.
 
         Creates: ComponentContext (runtime, VNode store, element ID
@@ -321,29 +321,29 @@ struct TodoApp(GuiApp):
         self.data = List[TodoItem]()
         self.next_id = 1
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.list_version = take.list_version^
-        self.items = take.items^
-        self.data = take.data^
-        self.next_id = take.next_id
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.list_version = move.list_version^
+        self.items = move.items^
+        self.data = move.data^
+        self.next_id = move.next_id
         self.input_text = (
-            take.input_text.copy()
+            move.input_text.copy()
         )  # SignalString is Copyable (not ImplicitlyCopyable)
-        self.add_handler = take.add_handler
-        self.enter_handler = take.enter_handler
-        self.empty_msg_tmpl = take.empty_msg_tmpl
-        self.empty_msg_slot = take.empty_msg_slot.copy()
+        self.add_handler = move.add_handler
+        self.enter_handler = move.enter_handler
+        self.empty_msg_tmpl = move.empty_msg_tmpl
+        self.empty_msg_slot = move.empty_msg_slot.copy()
 
-    fn add_item(mut self, text: String):
+    def add_item(mut self, text: String):
         """Add a new item and bump the list version signal."""
-        if len(text) == 0:
+        if text.byte_length() == 0:
             return
         self.data.append(TodoItem(self.next_id, text, False))
         self.next_id += 1
         self._bump_version()
 
-    fn remove_item(mut self, item_id: Int32):
+    def remove_item(mut self, item_id: Int32):
         """Remove an item by ID and bump the list version signal."""
         for i in range(len(self.data)):
             if self.data[i].id == item_id:
@@ -355,7 +355,7 @@ struct TodoApp(GuiApp):
                 self._bump_version()
                 return
 
-    fn toggle_item(mut self, item_id: Int32):
+    def toggle_item(mut self, item_id: Int32):
         """Toggle an item's completed status and bump the list version signal.
         """
         for i in range(len(self.data)):
@@ -364,11 +364,11 @@ struct TodoApp(GuiApp):
                 self._bump_version()
                 return
 
-    fn _bump_version(mut self):
+    def _bump_version(mut self):
         """Increment the list version signal to trigger re-render."""
         self.list_version += 1
 
-    fn build_item_vnode(mut self, item: TodoItem) -> UInt32:
+    def build_item_vnode(mut self, item: TodoItem) -> UInt32:
         """Build a keyed VNode for a single todo item.
 
         Uses Phase 17 ItemBuilder + Phase 18 conditional helpers:
@@ -405,7 +405,7 @@ struct TodoApp(GuiApp):
 
         return ib.index()
 
-    fn build_items_fragment(mut self) -> UInt32:
+    def build_items_fragment(mut self) -> UInt32:
         """Build a Fragment VNode containing keyed item children.
 
         Uses KeyedList.begin_rebuild() to destroy old child scopes,
@@ -420,7 +420,7 @@ struct TodoApp(GuiApp):
 
     # ── GuiApp trait: Event dispatch ─────────────────────────────────
 
-    fn handle_event(
+    def handle_event(
         mut self, handler_id: UInt32, event_type: UInt8, value: String
     ) -> Bool:
         """Dispatch a user interaction event (GuiApp trait method).
@@ -447,7 +447,7 @@ struct TodoApp(GuiApp):
         False otherwise.
         """
         # String events (input/change) go through the string dispatch path
-        if len(value) > 0:
+        if value.byte_length() > 0:
             return self.ctx.dispatch_event_with_string(
                 handler_id, event_type, value
             )
@@ -456,7 +456,7 @@ struct TodoApp(GuiApp):
         if handler_id == self.add_handler or handler_id == self.enter_handler:
             # Phase 20.5: WASM-driven Add — read signal, add item, clear
             var input = self.input_text.peek()
-            if len(input) > 0:
+            if input.byte_length() > 0:
                 self.add_item(input)
                 self.input_text.set(String(""))
             return True
@@ -473,9 +473,9 @@ struct TodoApp(GuiApp):
 
     # ── GuiApp trait: Mount lifecycle ────────────────────────────────
 
-    fn mount(
+    def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Initial render (mount) of the todo app (GuiApp trait method).
 
@@ -540,9 +540,9 @@ struct TodoApp(GuiApp):
 
     # ── GuiApp trait: Flush lifecycle ────────────────────────────────
 
-    fn flush(
+    def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Re-render dirty scopes and write update mutations (GuiApp trait method).
 
@@ -597,7 +597,7 @@ struct TodoApp(GuiApp):
 
     # ── GuiApp trait: Dirty state queries ────────────────────────────
 
-    fn has_dirty(self) -> Bool:
+    def has_dirty(self) -> Bool:
         """Check if any scopes need re-rendering.
 
         Returns:
@@ -605,7 +605,7 @@ struct TodoApp(GuiApp):
         """
         return self.ctx.has_dirty()
 
-    fn consume_dirty(mut self) -> Bool:
+    def consume_dirty(mut self) -> Bool:
         """Collect and consume all dirty scopes.
 
         Returns:
@@ -615,13 +615,13 @@ struct TodoApp(GuiApp):
 
     # ── GuiApp trait: Cleanup ────────────────────────────────────────
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """Release all resources held by the todo app."""
         self.ctx.destroy()
 
     # ── GuiApp trait: Rendering ──────────────────────────────────────
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build the app shell VNode using render_builder (auto-populates).
 
         Phase 20.5: Uses render_builder() which auto-populates all
@@ -642,7 +642,7 @@ struct TodoApp(GuiApp):
 
         return vb.build()
 
-    fn build_empty_message(mut self) -> UInt32:
+    def build_empty_message(mut self) -> UInt32:
         """Build the empty state message VNode (Phase 28).
 
         Returns the VNode index in the store.

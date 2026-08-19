@@ -68,31 +68,31 @@ from platform import GuiApp
 
 
 @always_inline
-fn _as_ptr[T: AnyType](addr: Int) -> UnsafePointer[T, MutExternalOrigin]:
-    """Reinterpret an integer address as an UnsafePointer[T, MutExternalOrigin].
+def _as_ptr[T: AnyType](addr: Int) -> UnsafePointer[T, MutUntrackedOrigin]:
+    """Reinterpret an integer address as an UnsafePointer[T, MutUntrackedOrigin].
     """
     var slot = alloc[Int](1)
     slot[0] = addr
-    var result = slot.bitcast[UnsafePointer[T, MutExternalOrigin]]()[0]
+    var result = slot.bitcast[UnsafePointer[T, MutUntrackedOrigin]]()[0]
     slot.free()
     return result
 
 
 @always_inline
-fn _to_i64[T: AnyType](ptr: UnsafePointer[T, MutExternalOrigin]) -> Int64:
+def _to_i64[T: AnyType](ptr: UnsafePointer[T, MutUntrackedOrigin]) -> Int64:
     """Return the raw address of a typed pointer as Int64."""
     return Int64(Int(ptr))
 
 
 @always_inline
-fn _get[T: AnyType](ptr: Int64) -> UnsafePointer[T, MutExternalOrigin]:
-    """Reinterpret an Int64 WASM handle as an UnsafePointer[T, MutExternalOrigin].
+def _get[T: AnyType](ptr: Int64) -> UnsafePointer[T, MutUntrackedOrigin]:
+    """Reinterpret an Int64 WASM handle as an UnsafePointer[T, MutUntrackedOrigin].
     """
     return _as_ptr[T](Int(ptr))
 
 
 @always_inline
-fn _b2i(val: Bool) -> Int32:
+def _b2i(val: Bool) -> Int32:
     """Convert a Bool to Int32 (1 or 0) for WASM export returns."""
     if val:
         return 1
@@ -100,20 +100,20 @@ fn _b2i(val: Bool) -> Int32:
 
 
 @always_inline
-fn _alloc_writer(
+def _alloc_writer(
     buf_ptr: Int64, capacity: Int32
-) -> UnsafePointer[MutationWriter, MutExternalOrigin]:
+) -> UnsafePointer[MutationWriter, MutUntrackedOrigin]:
     """Allocate a MutationWriter on the heap with the given buffer and capacity.
     """
     var ptr = alloc[MutationWriter](1)
-    ptr.init_pointee_move(MutationWriter(_get[UInt8](buf_ptr), Int(capacity)))
+    ptr.unsafe_write(MutationWriter(_get[UInt8](buf_ptr), Int(capacity)))
     return ptr
 
 
 @always_inline
-fn _free_writer(ptr: UnsafePointer[MutationWriter, MutExternalOrigin]):
+def _free_writer(ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin]):
     """Destroy and free a heap-allocated MutationWriter."""
-    ptr.destroy_pointee()
+    ptr.unsafe_deinit_pointee()
     ptr.free()
 
 
@@ -123,7 +123,7 @@ fn _free_writer(ptr: UnsafePointer[MutationWriter, MutExternalOrigin]):
 
 
 @always_inline
-fn gui_app_init[T: GuiApp]() -> Int64:
+def gui_app_init[T: GuiApp]() -> Int64:
     """Allocate a GuiApp on the heap and initialize it.
 
     Calls T.__init__() which performs all app setup (context creation,
@@ -138,12 +138,12 @@ fn gui_app_init[T: GuiApp]() -> Int64:
         Int64 address of the heap-allocated app instance.
     """
     var ptr = alloc[T](1)
-    ptr.init_pointee_move(T())
+    ptr.unsafe_write(T())
     return _to_i64(ptr)
 
 
 @always_inline
-fn gui_app_destroy[T: GuiApp](app_ptr: Int64):
+def gui_app_destroy[T: GuiApp](app_ptr: Int64):
     """Destroy a heap-allocated GuiApp and free its memory.
 
     Calls T.destroy() to release all app resources (ComponentContext,
@@ -157,12 +157,12 @@ fn gui_app_destroy[T: GuiApp](app_ptr: Int64):
     """
     var ptr = _get[T](app_ptr)
     ptr[0].destroy()
-    ptr.destroy_pointee()
+    ptr.unsafe_deinit_pointee()
     ptr.free()
 
 
 @always_inline
-fn gui_app_mount[
+def gui_app_mount[
     T: GuiApp
 ](app_ptr: Int64, buf_ptr: Int64, capacity: Int32) -> Int32:
     """Perform the initial render (mount) of a GuiApp.
@@ -193,7 +193,7 @@ fn gui_app_mount[
 
 
 @always_inline
-fn gui_app_handle_event[
+def gui_app_handle_event[
     T: GuiApp
 ](app_ptr: Int64, handler_id: Int32, event_type: Int32) -> Int32:
     """Dispatch a user interaction event (no string payload) to a GuiApp.
@@ -221,7 +221,7 @@ fn gui_app_handle_event[
 
 
 @always_inline
-fn gui_app_handle_event_string[
+def gui_app_handle_event_string[
     T: GuiApp
 ](app_ptr: Int64, handler_id: Int32, event_type: Int32, value: String) -> Int32:
     """Dispatch a user interaction event with a string payload to a GuiApp.
@@ -250,7 +250,7 @@ fn gui_app_handle_event_string[
 
 
 @always_inline
-fn gui_app_flush[
+def gui_app_flush[
     T: GuiApp
 ](app_ptr: Int64, buf_ptr: Int64, capacity: Int32) -> Int32:
     """Flush pending updates (re-render dirty scopes) for a GuiApp.
@@ -280,7 +280,7 @@ fn gui_app_flush[
 
 
 @always_inline
-fn gui_app_has_dirty[T: GuiApp](app_ptr: Int64) -> Int32:
+def gui_app_has_dirty[T: GuiApp](app_ptr: Int64) -> Int32:
     """Check if a GuiApp has dirty scopes needing re-render.
 
     Calls T.has_dirty() — a non-consuming check that does not drain
@@ -299,7 +299,7 @@ fn gui_app_has_dirty[T: GuiApp](app_ptr: Int64) -> Int32:
 
 
 @always_inline
-fn gui_app_consume_dirty[T: GuiApp](app_ptr: Int64) -> Int32:
+def gui_app_consume_dirty[T: GuiApp](app_ptr: Int64) -> Int32:
     """Collect and consume all dirty scopes in a GuiApp.
 
     Calls T.consume_dirty() — drains the scheduler's dirty queue.

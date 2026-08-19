@@ -84,16 +84,16 @@ from .panel import (
 # Maximum number of panels allowed in a single scene. This is a soft limit
 # to prevent runaway allocation — each panel owns a Blitz document and an
 # offscreen GPU texture, so resource usage scales linearly.
-alias MAX_PANELS: Int = 32
+comptime MAX_PANELS: Int = 32
 
 # Default arc radius for arrange_arc() layout helper.
-alias DEFAULT_ARC_RADIUS: Float32 = 1.2
+comptime DEFAULT_ARC_RADIUS: Float32 = 1.2
 
 # Default arc center height for arrange_arc() layout helper.
-alias DEFAULT_ARC_HEIGHT: Float32 = 1.4
+comptime DEFAULT_ARC_HEIGHT: Float32 = 1.4
 
 # Default angular gap between panels in an arc (in degrees).
-alias DEFAULT_ARC_GAP_DEG: Float32 = 5.0
+comptime DEFAULT_ARC_GAP_DEG: Float32 = 5.0
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -101,8 +101,8 @@ alias DEFAULT_ARC_GAP_DEG: Float32 = 5.0
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-@value
-struct XREvent:
+@fieldwise_init
+struct XREvent(Copyable, Movable):
     """An input event targeting a specific panel.
 
     Produced by the scene manager after raycasting controller input against
@@ -136,7 +136,7 @@ struct XREvent:
     """Panel-local V coordinate of the hit point (0.0 = top, 1.0 = bottom).
     Only meaningful for pointer events; -1.0 if not applicable."""
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an empty/invalid event."""
         self.valid = False
         self.panel_id = 0
@@ -152,8 +152,8 @@ struct XREvent:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-@value
-struct RaycastHit:
+@fieldwise_init
+struct RaycastHit(Copyable, Movable):
     """Result of a raycast against an XR panel.
 
     Contains the panel index, the UV hit coordinates on the panel surface,
@@ -231,7 +231,7 @@ struct XRScene(Movable):
 
     # ── Construction ──────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an empty XR scene with no panels.
 
         The scene starts active. Panels are added via create_panel().
@@ -242,16 +242,16 @@ struct XRScene(Movable):
         self.active = True
         self.destroyed = False
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.panels = take.panels^
-        self.focused_panel_index = take.focused_panel_index
-        self.hovered_panel_index = take.hovered_panel_index
-        self.active = take.active
-        self.destroyed = take.destroyed
+    def __init__(out self, *, deinit move: Self):
+        self.panels = move.panels^
+        self.focused_panel_index = move.focused_panel_index
+        self.hovered_panel_index = move.hovered_panel_index
+        self.active = move.active
+        self.destroyed = move.destroyed
 
     # ── Panel lifecycle ───────────────────────────────────────────────
 
-    fn create_panel(mut self, config: PanelConfig) -> Int:
+    def create_panel(mut self, config: PanelConfig) -> Int:
         """Create a new XR panel and add it to the scene.
 
         Allocates a Blitz document on the shim side (via FFI) and creates
@@ -286,7 +286,7 @@ struct XRScene(Movable):
 
         return index
 
-    fn destroy_panel(mut self, index: Int) -> Bool:
+    def destroy_panel(mut self, index: Int) -> Bool:
         """Destroy a panel and remove it from the scene.
 
         Releases the panel's Blitz document on the shim side and removes
@@ -333,11 +333,11 @@ struct XRScene(Movable):
 
     # ── Panel access ──────────────────────────────────────────────────
 
-    fn panel_count(self) -> Int:
+    def panel_count(self) -> Int:
         """Return the number of panels in the scene."""
         return len(self.panels)
 
-    fn get_panel(ref self, index: Int) -> ref[self.panels] XRPanel:
+    def get_panel(ref self, index: Int) -> ref[self.panels] XRPanel:
         """Return a reference to the panel at the given index.
 
         Args:
@@ -348,7 +348,7 @@ struct XRScene(Movable):
         """
         return self.panels[index]
 
-    fn get_panel_by_id(ref self, panel_id: UInt32) -> Optional[Int]:
+    def get_panel_by_id(ref self, panel_id: UInt32) -> Optional[Int]:
         """Find the index of a panel by its shim-assigned ID.
 
         Args:
@@ -364,7 +364,7 @@ struct XRScene(Movable):
 
     # ── Focus management ──────────────────────────────────────────────
 
-    fn set_focus(mut self, index: Int) -> Bool:
+    def set_focus(mut self, index: Int) -> Bool:
         """Set input focus to the specified panel.
 
         Removes focus from the previously focused panel (if any) and
@@ -398,7 +398,7 @@ struct XRScene(Movable):
         self.panels[index].state.focused = True
         return True
 
-    fn focused_panel_id(self) -> Optional[UInt32]:
+    def focused_panel_id(self) -> Optional[UInt32]:
         """Return the panel ID of the currently focused panel.
 
         Returns:
@@ -410,7 +410,7 @@ struct XRScene(Movable):
             return self.panels[self.focused_panel_index].panel_id
         return None
 
-    fn clear_focus(mut self):
+    def clear_focus(mut self):
         """Remove focus from all panels."""
         if self.focused_panel_index >= 0 and self.focused_panel_index < len(
             self.panels
@@ -420,7 +420,7 @@ struct XRScene(Movable):
 
     # ── Dirty tracking ────────────────────────────────────────────────
 
-    fn has_dirty_panels(self) -> Bool:
+    def has_dirty_panels(self) -> Bool:
         """Return True if any panel needs its texture re-rendered.
 
         The XR frame loop uses this to decide whether to call Vello
@@ -431,7 +431,7 @@ struct XRScene(Movable):
                 return True
         return False
 
-    fn dirty_panel_indices(self) -> List[Int]:
+    def dirty_panel_indices(self) -> List[Int]:
         """Return a list of indices of all dirty, visible panels.
 
         The XR frame loop iterates this list and re-renders each panel's
@@ -443,7 +443,7 @@ struct XRScene(Movable):
                 result.append(i)
         return result
 
-    fn clear_all_dirty(mut self):
+    def clear_all_dirty(mut self):
         """Clear the dirty flag on all panels.
 
         Called after all dirty panel textures have been re-rendered.
@@ -453,7 +453,7 @@ struct XRScene(Movable):
 
     # ── Raycasting ────────────────────────────────────────────────────
 
-    fn raycast(
+    def raycast(
         self, ray_origin: Vec3, ray_direction: Vec3
     ) -> Optional[RaycastHit]:
         """Raycast against all visible, interactive panels and return the
@@ -571,7 +571,7 @@ struct XRScene(Movable):
 
     # ── Spatial layout helpers ────────────────────────────────────────
 
-    fn arrange_arc(
+    def arrange_arc(
         mut self,
         indices: List[Int],
         radius: Float32 = DEFAULT_ARC_RADIUS,
@@ -602,7 +602,7 @@ struct XRScene(Movable):
         if count == 0:
             return
 
-        alias DEG_TO_RAD: Float32 = 3.14159265358979323846 / 180.0
+        comptime DEG_TO_RAD: Float32 = 3.14159265358979323846 / 180.0
 
         for i in range(count):
             var idx = indices[i]
@@ -631,7 +631,7 @@ struct XRScene(Movable):
             # Rotate to face the center (yaw only)
             self.panels[idx].set_rotation_euler(0.0, -angle_deg, 0.0)
 
-    fn arrange_grid(
+    def arrange_grid(
         mut self,
         indices: List[Int],
         columns: Int,
@@ -694,7 +694,7 @@ struct XRScene(Movable):
             self.panels[idx].set_position(x, y, z)
             self.panels[idx].set_rotation(Quaternion.identity())
 
-    fn arrange_stack(
+    def arrange_stack(
         mut self,
         indices: List[Int],
         spacing: Float32 = 0.05,
@@ -739,7 +739,7 @@ struct XRScene(Movable):
 
     # ── Visibility helpers ────────────────────────────────────────────
 
-    fn visible_panel_indices(self) -> List[Int]:
+    def visible_panel_indices(self) -> List[Int]:
         """Return a list of indices of all visible panels.
 
         Used by the XR frame loop to determine which panels to submit
@@ -751,7 +751,7 @@ struct XRScene(Movable):
                 result.append(i)
         return result
 
-    fn visible_panel_count(self) -> Int:
+    def visible_panel_count(self) -> Int:
         """Return the number of visible panels in the scene."""
         var count = 0
         for i in range(len(self.panels)):
@@ -759,12 +759,12 @@ struct XRScene(Movable):
                 count += 1
         return count
 
-    fn show_all(mut self):
+    def show_all(mut self):
         """Make all panels visible."""
         for i in range(len(self.panels)):
             self.panels[i].show()
 
-    fn hide_all(mut self):
+    def hide_all(mut self):
         """Hide all panels."""
         for i in range(len(self.panels)):
             self.panels[i].hide()
@@ -772,11 +772,11 @@ struct XRScene(Movable):
 
     # ── Session state ─────────────────────────────────────────────────
 
-    fn is_active(self) -> Bool:
+    def is_active(self) -> Bool:
         """Return True if the XR session is active."""
         return self.active and not self.destroyed
 
-    fn set_active(mut self, active: Bool):
+    def set_active(mut self, active: Bool):
         """Set the XR session active state.
 
         When the OpenXR session transitions to STOPPING or IDLE, set
@@ -790,7 +790,7 @@ struct XRScene(Movable):
 
     # ── Cleanup ───────────────────────────────────────────────────────
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """Destroy all panels and release scene resources.
 
         Called once when the XR session ends. After this call, the scene
@@ -812,7 +812,7 @@ struct XRScene(Movable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn create_single_panel_scene(
+def create_single_panel_scene(
     config: PanelConfig = default_panel_config(),
 ) -> XRScene:
     """Create a scene with a single panel.
@@ -832,7 +832,7 @@ fn create_single_panel_scene(
     return scene^
 
 
-fn create_dual_panel_scene(
+def create_dual_panel_scene(
     main_config: PanelConfig = default_panel_config(),
     side_config: PanelConfig = PanelConfig(
         width_m=0.4,

@@ -14,7 +14,7 @@ from std.pathlib import Path
 from wasmtime_mojo import Engine, Module
 
 
-fn main() raises:
+def main() raises:
     var wasm_path = "build/out.wasm"
     var cwasm_path = "build/out.cwasm"
 

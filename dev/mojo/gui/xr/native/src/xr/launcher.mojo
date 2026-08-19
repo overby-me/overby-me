@@ -92,9 +92,9 @@ comptime _PX_TO_METERS: Float32 = 0.0008
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn _alloc_mutation_buffer(
+def _alloc_mutation_buffer(
     capacity: Int,
-) -> UnsafePointer[UInt8, MutExternalOrigin]:
+) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """Allocate a heap buffer for mutation data.
 
     Returns a pointer to a zeroed buffer of `capacity` bytes.
@@ -105,9 +105,9 @@ fn _alloc_mutation_buffer(
     return buf
 
 
-fn _alloc_writer(
-    buf_ptr: UnsafePointer[UInt8, MutExternalOrigin], capacity: Int
-) -> UnsafePointer[MutationWriter, MutExternalOrigin]:
+def _alloc_writer(
+    buf_ptr: UnsafePointer[UInt8, MutUntrackedOrigin], capacity: Int
+) -> UnsafePointer[MutationWriter, MutUntrackedOrigin]:
     """Allocate a MutationWriter on the heap backed by the given buffer.
 
     The writer is initialized at offset 0 with the given buffer and capacity.
@@ -121,17 +121,17 @@ fn _alloc_writer(
     """
     var slot = alloc[Int](1)
     slot[0] = Int(buf_ptr)
-    var ext_ptr = slot.bitcast[UnsafePointer[UInt8, MutExternalOrigin]]()[0]
+    var ext_ptr = slot.bitcast[UnsafePointer[UInt8, MutUntrackedOrigin]]()[0]
     slot.free()
 
     var ptr = alloc[MutationWriter](1)
-    ptr.init_pointee_move(MutationWriter(ext_ptr, capacity))
+    ptr.unsafe_write(MutationWriter(ext_ptr, capacity))
     return ptr
 
 
-fn _reset_writer(
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-    buf_ptr: UnsafePointer[UInt8, MutExternalOrigin],
+def _reset_writer(
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    buf_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
     capacity: Int,
 ):
     """Reset a MutationWriter to offset 0, reusing the same buffer.
@@ -146,22 +146,22 @@ fn _reset_writer(
     """
     var slot = alloc[Int](1)
     slot[0] = Int(buf_ptr)
-    var ext_ptr = slot.bitcast[UnsafePointer[UInt8, MutExternalOrigin]]()[0]
+    var ext_ptr = slot.bitcast[UnsafePointer[UInt8, MutUntrackedOrigin]]()[0]
     slot.free()
 
-    writer_ptr.destroy_pointee()
-    writer_ptr.init_pointee_move(MutationWriter(ext_ptr, capacity))
+    writer_ptr.unsafe_deinit_pointee()
+    writer_ptr.unsafe_write(MutationWriter(ext_ptr, capacity))
 
 
-fn _free_writer(
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+def _free_writer(
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ):
     """Destroy and free a heap-allocated MutationWriter.
 
     Args:
         writer_ptr: Pointer to the MutationWriter to free.
     """
-    writer_ptr.destroy_pointee()
+    writer_ptr.unsafe_deinit_pointee()
     writer_ptr.free()
 
 
@@ -170,7 +170,7 @@ fn _free_writer(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn xr_launch[AppType: GuiApp](config: AppConfig) raises:
+def xr_launch[AppType: GuiApp](config: AppConfig) raises:
     """Launch a mojo-gui application in XR via the OpenXR + Blitz shim.
 
     This is the XR-side counterpart to `desktop_launch`. It creates an

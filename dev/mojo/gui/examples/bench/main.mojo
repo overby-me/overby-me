@@ -18,7 +18,7 @@ from platform.launch import launch, AppConfig
 from bench import BenchmarkApp
 
 
-fn main() raises:
+def main() raises:
     launch[BenchmarkApp](
         AppConfig(
             title="js-framework-benchmark — mojo-gui",

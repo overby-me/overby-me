@@ -88,7 +88,7 @@ trait PlatformApp(Movable):
         6. destroy() cleans up platform resources
     """
 
-    fn init(mut self) raises:
+    def init(mut self) raises:
         """Initialize the rendering surface and platform resources.
 
         For web: No-op — the JS runtime sets up the DOM and WASM memory.
@@ -103,7 +103,7 @@ trait PlatformApp(Movable):
         """
         ...
 
-    fn flush_mutations(
+    def flush_mutations(
         mut self, buf: UnsafePointer[UInt8, _], length: Int
     ) raises:
         """Deliver a completed mutation buffer to the renderer.
@@ -131,7 +131,7 @@ trait PlatformApp(Movable):
         """
         ...
 
-    fn request_animation_frame(mut self):
+    def request_animation_frame(mut self):
         """Request that the renderer schedule a new render cycle.
 
         For web: Triggers requestAnimationFrame on the JS side.
@@ -144,7 +144,7 @@ trait PlatformApp(Movable):
         """
         ...
 
-    fn should_quit(self) -> Bool:
+    def should_quit(self) -> Bool:
         """Return True if the application should exit.
 
         For web: Always False (the browser tab lifecycle is separate).
@@ -155,7 +155,7 @@ trait PlatformApp(Movable):
         """
         ...
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """Release all platform resources.
 
         Called once when the application is shutting down. After this call,
@@ -174,10 +174,10 @@ trait PlatformApp(Movable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn is_wasm_target() -> Bool:
+def is_wasm_target() -> Bool:
     """Return True if the current compilation target is WASM.
 
-    Detection strategy: uses `sys.param_env.is_defined` to check for the
+    Detection strategy: uses `sys.defines.is_defined` to check for the
     `MOJO_TARGET_WASM` compile-time define. The build system must pass
     `-D MOJO_TARGET_WASM` when compiling for a WASM target.
 
@@ -195,12 +195,12 @@ fn is_wasm_target() -> Bool:
 
     Used by launch() to select the appropriate renderer at compile time.
     """
-    from std.sys.param_env import is_defined
+    from std.sys.defines import is_defined
 
     return is_defined["MOJO_TARGET_WASM"]()
 
 
-fn is_native_target() -> Bool:
+def is_native_target() -> Bool:
     """Return True if the current compilation target is native (non-WASM).
 
     Convenience inverse of is_wasm_target().
@@ -208,10 +208,10 @@ fn is_native_target() -> Bool:
     return not is_wasm_target()
 
 
-fn is_xr_target() -> Bool:
+def is_xr_target() -> Bool:
     """Return True if the current compilation target is XR (OpenXR native).
 
-    Detection strategy: uses `sys.param_env.is_defined` to check for the
+    Detection strategy: uses `sys.defines.is_defined` to check for the
     `MOJO_TARGET_XR` compile-time define. The build system must pass
     `-D MOJO_TARGET_XR` when compiling for an XR target.
 
@@ -225,6 +225,6 @@ fn is_xr_target() -> Bool:
 
     Used by launch() to select the XR renderer at compile time.
     """
-    from std.sys.param_env import is_defined
+    from std.sys.defines import is_defined
 
     return is_defined["MOJO_TARGET_XR"]()

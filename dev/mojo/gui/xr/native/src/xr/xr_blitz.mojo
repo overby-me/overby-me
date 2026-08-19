@@ -135,7 +135,7 @@ struct XREvent(Copyable, Movable):
     var hit_v: Float32
     var hand: UInt8
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an invalid (empty) event."""
         self.valid = False
         self.panel_id = 0
@@ -146,7 +146,7 @@ struct XREvent(Copyable, Movable):
         self.hit_v = -1.0
         self.hand = 0
 
-    fn __init__(
+    def __init__(
         out self,
         valid: Bool,
         panel_id: UInt32,
@@ -166,7 +166,7 @@ struct XREvent(Copyable, Movable):
         self.hit_v = hit_v
         self.hand = hand
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.valid = copy.valid
         self.panel_id = copy.panel_id
         self.handler_id = copy.handler_id
@@ -176,15 +176,15 @@ struct XREvent(Copyable, Movable):
         self.hit_v = copy.hit_v
         self.hand = copy.hand
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.valid = take.valid
-        self.panel_id = take.panel_id
-        self.handler_id = take.handler_id
-        self.event_type = take.event_type
-        self.value = take.value^
-        self.hit_u = take.hit_u
-        self.hit_v = take.hit_v
-        self.hand = take.hand
+    def __init__(out self, *, deinit move: Self):
+        self.valid = move.valid
+        self.panel_id = move.panel_id
+        self.handler_id = move.handler_id
+        self.event_type = move.event_type
+        self.value = move.value^
+        self.hit_u = move.hit_u
+        self.hit_v = move.hit_v
+        self.hand = move.hand
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -212,7 +212,7 @@ struct XRPose(Copyable, Movable):
     var qz: Float32
     var qw: Float32
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an invalid pose."""
         self.valid = False
         self.px = 0.0
@@ -223,7 +223,7 @@ struct XRPose(Copyable, Movable):
         self.qz = 0.0
         self.qw = 1.0
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.valid = copy.valid
         self.px = copy.px
         self.py = copy.py
@@ -233,15 +233,15 @@ struct XRPose(Copyable, Movable):
         self.qz = copy.qz
         self.qw = copy.qw
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.valid = take.valid
-        self.px = take.px
-        self.py = take.py
-        self.pz = take.pz
-        self.qx = take.qx
-        self.qy = take.qy
-        self.qz = take.qz
-        self.qw = take.qw
+    def __init__(out self, *, deinit move: Self):
+        self.valid = move.valid
+        self.px = move.px
+        self.py = move.py
+        self.pz = move.pz
+        self.qx = move.qx
+        self.qy = move.qy
+        self.qz = move.qz
+        self.qw = move.qw
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -265,7 +265,7 @@ struct XRRaycastHit(Copyable, Movable):
     var v: Float32
     var distance: Float32
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create a miss result."""
         self.hit = False
         self.panel_id = 0
@@ -273,19 +273,19 @@ struct XRRaycastHit(Copyable, Movable):
         self.v = 0.0
         self.distance = 0.0
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.hit = copy.hit
         self.panel_id = copy.panel_id
         self.u = copy.u
         self.v = copy.v
         self.distance = copy.distance
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.hit = take.hit
-        self.panel_id = take.panel_id
-        self.u = take.u
-        self.v = take.v
-        self.distance = take.distance
+    def __init__(out self, *, deinit move: Self):
+        self.hit = move.hit
+        self.panel_id = move.panel_id
+        self.u = move.u
+        self.v = move.v
+        self.distance = move.distance
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -296,7 +296,7 @@ comptime _LIB_NAME = "libmojo_xr.so"
 comptime _LIB_NAME_DYLIB = "libmojo_xr.dylib"
 
 
-fn _lib_name() -> String:
+def _lib_name() -> String:
     """Return the platform-appropriate shared library filename."""
     # XR is Linux-only for now (OpenXR native). macOS/Windows support
     # is future work. Return .so unconditionally.
@@ -308,7 +308,7 @@ fn _lib_name() -> String:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn _find_library() -> String:
+def _find_library() -> String:
     """Search for the XR shim shared library.
 
     Search order:
@@ -325,24 +325,24 @@ fn _find_library() -> String:
 
     # 1. Explicit env var
     var lib_dir = getenv("MOJO_XR_LIB")
-    if len(lib_dir) > 0:
+    if (lib_dir).byte_length() > 0:
         return lib_dir + sep + name
 
     # 2. NIX_LDFLAGS — parse -L/nix/store/... paths
     var nix_flags = getenv("NIX_LDFLAGS")
-    if len(nix_flags) > 0:
+    if (nix_flags).byte_length() > 0:
         # Split on spaces and take the first -L. This was a hand-rolled
         # index walk, which 26.2.0 no longer allows: String has no range
         # __getitem__, only the byte= form used for single characters.
         for token in nix_flags.split(" "):
-            if len(token) > 2 and token.startswith("-L"):
+            if (token).byte_length() > 2 and token.startswith("-L"):
                 return token.removeprefix("-L") + sep + name
 
     # 3. LD_LIBRARY_PATH
     var ld_path = getenv("LD_LIBRARY_PATH")
-    if len(ld_path) > 0:
+    if (ld_path).byte_length() > 0:
         for dir_path in ld_path.split(":"):
-            if len(dir_path) > 0:
+            if (dir_path).byte_length() > 0:
                 return dir_path + sep + name
 
     # 4. Fall back to bare library name (let the linker search)
@@ -354,7 +354,7 @@ fn _find_library() -> String:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn _event_type_from_name(name: String) -> UInt8:
+def _event_type_from_name(name: String) -> UInt8:
     """Convert an event type name to the corresponding MXR_EVT_* constant.
 
     Args:
@@ -419,26 +419,26 @@ struct XRBlitz(Movable):
     """
 
     var _lib: _DLHandle
-    var _session: UnsafePointer[NoneType, MutAnyOrigin]
+    var _session: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]]
 
-    fn __init__(
+    def __init__(
         out self,
         lib: _DLHandle,
-        session: UnsafePointer[NoneType, MutAnyOrigin],
+        session: UnsafePointer[NoneType, MutUntrackedOrigin],
     ):
         """Private initializer. Use XRBlitz.create_session() or
         XRBlitz.create_headless() instead."""
         self._lib = lib
         self._session = session
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._lib = take._lib
-        self._session = take._session
+    def __init__(out self, *, deinit move: Self):
+        self._lib = move._lib
+        self._session = move._session
 
     # ── Factory methods ──────────────────────────────────────────────────
 
     @staticmethod
-    fn create_session(app_name: String) raises -> Self:
+    def create_session(app_name: String) raises -> Self:
         """Create an XR session with the default OpenXR runtime.
 
         Initializes the OpenXR instance, creates a session with graphics
@@ -458,10 +458,11 @@ struct XRBlitz(Movable):
         var lib = _DLHandle(lib_path)
 
         var name_ptr = app_name.unsafe_ptr()
-        var name_len = UInt32(len(app_name))
+        var name_len = UInt32((app_name).byte_length())
 
         var session = lib.call[
-            "mxr_create_session", UnsafePointer[NoneType, MutAnyOrigin]
+            "mxr_create_session",
+            Optional[UnsafePointer[NoneType, MutUntrackedOrigin]],
         ](name_ptr, name_len)
 
         if not session:
@@ -470,10 +471,10 @@ struct XRBlitz(Movable):
                 " available?"
             )
 
-        return Self(lib, session)
+        return Self(lib, session.value())
 
     @staticmethod
-    fn create_headless() raises -> Self:
+    def create_headless() raises -> Self:
         """Create a headless XR session for testing.
 
         Allocates Blitz documents and performs DOM operations, but does
@@ -490,7 +491,7 @@ struct XRBlitz(Movable):
         var lib = _DLHandle(lib_path)
 
         var session = lib.call[
-            "mxr_create_headless", UnsafePointer[NoneType, MutAnyOrigin]
+            "mxr_create_headless", UnsafePointer[NoneType, MutUntrackedOrigin]
         ]()
 
         return Self(lib, session)
@@ -499,14 +500,14 @@ struct XRBlitz(Movable):
     # Session lifecycle
     # ══════════════════════════════════════════════════════════════════════
 
-    fn session_state(self) -> Int32:
+    def session_state(self) -> Int32:
         """Query the current session state.
 
         Returns one of the STATE_* constants.
         """
         return self._lib.call["mxr_session_state", Int32](self._session)
 
-    fn is_alive(self) -> Bool:
+    def is_alive(self) -> Bool:
         """Check if the session is still alive (not exiting or destroyed).
 
         Returns:
@@ -515,20 +516,20 @@ struct XRBlitz(Movable):
         var result = self._lib.call["mxr_is_alive", Int32](self._session)
         return result != 0
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """Destroy the XR session and release all resources.
 
         The session is invalid after this call.
         """
         if self._session:
             self._lib.call["mxr_destroy_session", NoneType](self._session)
-            self._session = UnsafePointer[NoneType, MutAnyOrigin]()
+            self._session = None
 
     # ══════════════════════════════════════════════════════════════════════
     # Panel lifecycle
     # ══════════════════════════════════════════════════════════════════════
 
-    fn create_panel(self, width_px: UInt32, height_px: UInt32) -> UInt32:
+    def create_panel(self, width_px: UInt32, height_px: UInt32) -> UInt32:
         """Create a new XR panel with the given pixel dimensions.
 
         Allocates a new Blitz document, an offscreen texture, and a
@@ -545,7 +546,7 @@ struct XRBlitz(Movable):
             self._session, width_px, height_px
         )
 
-    fn destroy_panel(self, panel_id: UInt32):
+    def destroy_panel(self, panel_id: UInt32):
         """Destroy a panel and free its Blitz document and GPU texture.
 
         Args:
@@ -553,7 +554,7 @@ struct XRBlitz(Movable):
         """
         self._lib.call["mxr_destroy_panel", NoneType](self._session, panel_id)
 
-    fn panel_count(self) -> UInt32:
+    def panel_count(self) -> UInt32:
         """Query the number of active panels.
 
         Returns:
@@ -565,7 +566,7 @@ struct XRBlitz(Movable):
     # Panel transform & display
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_set_transform(
+    def panel_set_transform(
         self,
         panel_id: UInt32,
         px: Float32,
@@ -587,7 +588,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, px, py, pz, qx, qy, qz, qw
         )
 
-    fn panel_set_size(
+    def panel_set_size(
         self, panel_id: UInt32, width_m: Float32, height_m: Float32
     ):
         """Set a panel's physical size in meters.
@@ -601,7 +602,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, width_m, height_m
         )
 
-    fn panel_set_visible(self, panel_id: UInt32, visible: Bool):
+    def panel_set_visible(self, panel_id: UInt32, visible: Bool):
         """Show or hide a panel.
 
         Hidden panels are not rendered, not raycasted, and not submitted
@@ -616,7 +617,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, flag
         )
 
-    fn panel_is_visible(self, panel_id: UInt32) -> Bool:
+    def panel_is_visible(self, panel_id: UInt32) -> Bool:
         """Query whether a panel is visible.
 
         Returns:
@@ -627,7 +628,7 @@ struct XRBlitz(Movable):
         )
         return result != 0
 
-    fn panel_set_curved(self, panel_id: UInt32, curved: Bool, radius: Float32):
+    def panel_set_curved(self, panel_id: UInt32, curved: Bool, radius: Float32):
         """Set the curved display flag and curvature radius for a panel.
 
         Args:
@@ -644,7 +645,7 @@ struct XRBlitz(Movable):
     # User-agent stylesheet
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_add_ua_stylesheet(self, panel_id: UInt32, css: String):
+    def panel_add_ua_stylesheet(self, panel_id: UInt32, css: String):
         """Add a user-agent stylesheet to a panel's Blitz document.
 
         Should be called before applying mount mutations.
@@ -655,14 +656,14 @@ struct XRBlitz(Movable):
         """
         var css_ptr = css.unsafe_ptr()
         self._lib.call["mxr_panel_add_ua_stylesheet", NoneType](
-            self._session, panel_id, css_ptr, UInt32(len(css))
+            self._session, panel_id, css_ptr, UInt32((css).byte_length())
         )
 
     # ══════════════════════════════════════════════════════════════════════
     # Mutation batching
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_begin_mutations(self, panel_id: UInt32):
+    def panel_begin_mutations(self, panel_id: UInt32):
         """Begin a mutation batch for a panel.
 
         Must be called before applying mutations. Defers style resolution
@@ -675,7 +676,7 @@ struct XRBlitz(Movable):
             self._session, panel_id
         )
 
-    fn panel_end_mutations(self, panel_id: UInt32):
+    def panel_end_mutations(self, panel_id: UInt32):
         """End a mutation batch for a panel.
 
         Triggers style resolution and layout computation. Marks the
@@ -688,10 +689,10 @@ struct XRBlitz(Movable):
             self._session, panel_id
         )
 
-    fn panel_apply_mutations(
+    def panel_apply_mutations(
         self,
         panel_id: UInt32,
-        buf: UnsafePointer[UInt8, MutAnyOrigin],
+        buf: UnsafePointer[UInt8, MutUntrackedOrigin],
         length: UInt32,
     ):
         """Apply a binary mutation buffer to a panel's DOM.
@@ -717,7 +718,7 @@ struct XRBlitz(Movable):
     # DOM node creation (per-panel)
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_create_element(self, panel_id: UInt32, tag: String) -> UInt32:
+    def panel_create_element(self, panel_id: UInt32, tag: String) -> UInt32:
         """Create an HTML element node (detached) in a panel.
 
         Args:
@@ -729,10 +730,10 @@ struct XRBlitz(Movable):
         """
         var tag_ptr = tag.unsafe_ptr()
         return self._lib.call["mxr_panel_create_element", UInt32](
-            self._session, panel_id, tag_ptr, UInt32(len(tag))
+            self._session, panel_id, tag_ptr, UInt32((tag).byte_length())
         )
 
-    fn panel_create_text_node(self, panel_id: UInt32, text: String) -> UInt32:
+    def panel_create_text_node(self, panel_id: UInt32, text: String) -> UInt32:
         """Create a text node (detached) in a panel.
 
         Args:
@@ -744,10 +745,10 @@ struct XRBlitz(Movable):
         """
         var text_ptr = text.unsafe_ptr()
         return self._lib.call["mxr_panel_create_text_node", UInt32](
-            self._session, panel_id, text_ptr, UInt32(len(text))
+            self._session, panel_id, text_ptr, UInt32(text.byte_length())
         )
 
-    fn panel_create_placeholder(self, panel_id: UInt32) -> UInt32:
+    def panel_create_placeholder(self, panel_id: UInt32) -> UInt32:
         """Create a comment/placeholder node (detached) in a panel.
 
         Args:
@@ -764,10 +765,10 @@ struct XRBlitz(Movable):
     # Templates (per-panel)
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_register_template(
+    def panel_register_template(
         self,
         panel_id: UInt32,
-        buf: UnsafePointer[UInt8, MutAnyOrigin],
+        buf: UnsafePointer[UInt8, MutUntrackedOrigin],
         length: UInt32,
     ):
         """Register a template definition in a panel.
@@ -784,7 +785,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, buf, length
         )
 
-    fn panel_clone_template(
+    def panel_clone_template(
         self, panel_id: UInt32, template_id: UInt32
     ) -> UInt32:
         """Deep-clone a registered template in a panel.
@@ -804,7 +805,7 @@ struct XRBlitz(Movable):
     # DOM tree mutations (per-panel)
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_append_children(
+    def panel_append_children(
         self,
         panel_id: UInt32,
         parent_id: UInt32,
@@ -823,7 +824,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, parent_id, child_ids, child_count
         )
 
-    fn panel_insert_before(
+    def panel_insert_before(
         self,
         panel_id: UInt32,
         anchor_id: UInt32,
@@ -842,7 +843,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, anchor_id, new_ids, new_count
         )
 
-    fn panel_insert_after(
+    def panel_insert_after(
         self,
         panel_id: UInt32,
         anchor_id: UInt32,
@@ -861,7 +862,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, anchor_id, new_ids, new_count
         )
 
-    fn panel_replace_with(
+    def panel_replace_with(
         self,
         panel_id: UInt32,
         old_id: UInt32,
@@ -880,7 +881,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, old_id, new_ids, new_count
         )
 
-    fn panel_remove_node(self, panel_id: UInt32, node_id: UInt32):
+    def panel_remove_node(self, panel_id: UInt32, node_id: UInt32):
         """Remove and drop a node from a panel's DOM.
 
         Args:
@@ -895,7 +896,7 @@ struct XRBlitz(Movable):
     # DOM node attributes (per-panel)
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_set_attribute(
+    def panel_set_attribute(
         self, panel_id: UInt32, node_id: UInt32, name: String, value: String
     ):
         """Set an attribute on an element in a panel.
@@ -913,12 +914,12 @@ struct XRBlitz(Movable):
             panel_id,
             node_id,
             name_ptr,
-            UInt32(len(name)),
+            UInt32(name.byte_length()),
             value_ptr,
-            UInt32(len(value)),
+            UInt32(value.byte_length()),
         )
 
-    fn panel_remove_attribute(
+    def panel_remove_attribute(
         self, panel_id: UInt32, node_id: UInt32, name: String
     ):
         """Remove an attribute from an element in a panel.
@@ -934,14 +935,14 @@ struct XRBlitz(Movable):
             panel_id,
             node_id,
             name_ptr,
-            UInt32(len(name)),
+            UInt32(name.byte_length()),
         )
 
     # ══════════════════════════════════════════════════════════════════════
     # DOM text content (per-panel)
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_set_text_content(
+    def panel_set_text_content(
         self, panel_id: UInt32, node_id: UInt32, text: String
     ):
         """Set the text content of a text node in a panel.
@@ -953,14 +954,18 @@ struct XRBlitz(Movable):
         """
         var text_ptr = text.unsafe_ptr()
         self._lib.call["mxr_panel_set_text_content", NoneType](
-            self._session, panel_id, node_id, text_ptr, UInt32(len(text))
+            self._session,
+            panel_id,
+            node_id,
+            text_ptr,
+            UInt32(text.byte_length()),
         )
 
     # ══════════════════════════════════════════════════════════════════════
     # DOM tree traversal (per-panel)
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_node_at_path(
+    def panel_node_at_path(
         self,
         panel_id: UInt32,
         root_id: UInt32,
@@ -985,7 +990,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, root_id, path, path_len
         )
 
-    fn panel_child_at(
+    def panel_child_at(
         self, panel_id: UInt32, parent_id: UInt32, index: UInt32
     ) -> UInt32:
         """Get the Nth child of a node in a panel.
@@ -1002,7 +1007,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, parent_id, index
         )
 
-    fn panel_child_count(self, panel_id: UInt32, parent_id: UInt32) -> UInt32:
+    def panel_child_count(self, panel_id: UInt32, parent_id: UInt32) -> UInt32:
         """Get the number of children of a node in a panel.
 
         Args:
@@ -1020,7 +1025,7 @@ struct XRBlitz(Movable):
     # Event handling
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_add_event_listener(
+    def panel_add_event_listener(
         self,
         panel_id: UInt32,
         node_id: UInt32,
@@ -1039,7 +1044,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, node_id, handler_id, event_type
         )
 
-    fn panel_add_event_listener_by_name(
+    def panel_add_event_listener_by_name(
         self,
         panel_id: UInt32,
         node_id: UInt32,
@@ -1063,7 +1068,7 @@ struct XRBlitz(Movable):
                 panel_id, node_id, handler_id, event_type
             )
 
-    fn panel_remove_event_listener(
+    def panel_remove_event_listener(
         self,
         panel_id: UInt32,
         node_id: UInt32,
@@ -1082,7 +1087,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, node_id, handler_id, event_type
         )
 
-    fn panel_remove_event_listener_by_name(
+    def panel_remove_event_listener_by_name(
         self,
         panel_id: UInt32,
         node_id: UInt32,
@@ -1103,7 +1108,7 @@ struct XRBlitz(Movable):
                 panel_id, node_id, handler_id, event_type
             )
 
-    fn poll_event(self) -> XREvent:
+    def poll_event(self) -> XREvent:
         """Poll the next event from the XR input queue.
 
         Uses `mxr_poll_event_into` which writes event fields to
@@ -1183,7 +1188,9 @@ struct XRBlitz(Movable):
         if v_len > 0 and v_ptr_int != 0:
             var slot = alloc[Int](1)
             slot[0] = v_ptr_int
-            var v_ptr = slot.bitcast[UnsafePointer[UInt8, MutAnyOrigin]]()[0]
+            var v_ptr = slot.bitcast[
+                UnsafePointer[UInt8, MutUntrackedOrigin]
+            ]()[0]
             slot.free()
             for i in range(v_len):
                 value += chr(Int(v_ptr[i]))
@@ -1199,7 +1206,7 @@ struct XRBlitz(Movable):
             hand=hand,
         )
 
-    fn event_count(self) -> UInt32:
+    def event_count(self) -> UInt32:
         """Get the number of buffered events.
 
         Returns:
@@ -1207,7 +1214,7 @@ struct XRBlitz(Movable):
         """
         return self._lib.call["mxr_event_count", UInt32](self._session)
 
-    fn event_clear(self):
+    def event_clear(self):
         """Clear all buffered events."""
         self._lib.call["mxr_event_clear", NoneType](self._session)
 
@@ -1215,7 +1222,7 @@ struct XRBlitz(Movable):
     # Raycasting
     # ══════════════════════════════════════════════════════════════════════
 
-    fn raycast_panels(
+    def raycast_panels(
         self,
         ox: Float32,
         oy: Float32,
@@ -1276,7 +1283,7 @@ struct XRBlitz(Movable):
 
         return result
 
-    fn set_focused_panel(self, panel_id: UInt32):
+    def set_focused_panel(self, panel_id: UInt32):
         """Set the focused panel (receives keyboard/text input).
 
         Args:
@@ -1286,7 +1293,7 @@ struct XRBlitz(Movable):
             self._session, panel_id
         )
 
-    fn get_focused_panel(self) -> UInt32:
+    def get_focused_panel(self) -> UInt32:
         """Query which panel currently has input focus.
 
         Returns:
@@ -1298,7 +1305,7 @@ struct XRBlitz(Movable):
     # Frame loop
     # ══════════════════════════════════════════════════════════════════════
 
-    fn wait_frame(self) -> Int64:
+    def wait_frame(self) -> Int64:
         """Wait for the next frame from the OpenXR runtime.
 
         Blocks until the runtime signals that a new frame should be
@@ -1310,7 +1317,7 @@ struct XRBlitz(Movable):
         """
         return self._lib.call["mxr_wait_frame", Int64](self._session)
 
-    fn begin_frame(self) -> Bool:
+    def begin_frame(self) -> Bool:
         """Begin a new frame.
 
         Call after wait_frame(). Acquires the OpenXR swapchain image.
@@ -1321,7 +1328,7 @@ struct XRBlitz(Movable):
         var result = self._lib.call["mxr_begin_frame", Int32](self._session)
         return result != 0
 
-    fn render_dirty_panels(self) -> UInt32:
+    def render_dirty_panels(self) -> UInt32:
         """Render all dirty panel textures.
 
         For each panel marked dirty, runs Vello to re-render the panel's
@@ -1334,7 +1341,7 @@ struct XRBlitz(Movable):
         """
         return self._lib.call["mxr_render_dirty_panels", UInt32](self._session)
 
-    fn end_frame(self):
+    def end_frame(self):
         """End the frame and submit composition layers to OpenXR.
 
         Submits one quad layer per visible panel to the OpenXR compositor.
@@ -1345,7 +1352,7 @@ struct XRBlitz(Movable):
     # GPU initialisation — Vello offscreen rendering pipeline
     # ══════════════════════════════════════════════════════════════════════
 
-    fn init_gpu(self) -> Bool:
+    def init_gpu(self) -> Bool:
         """Try to initialise the GPU renderer (wgpu + Vello) for offscreen
         panel texture rendering.
 
@@ -1365,7 +1372,7 @@ struct XRBlitz(Movable):
         var result = self._lib.call["mxr_init_gpu", Int32](self._session)
         return result != 0
 
-    fn has_gpu(self) -> Bool:
+    def has_gpu(self) -> Bool:
         """Check whether the GPU renderer is available.
 
         Returns:
@@ -1375,7 +1382,7 @@ struct XRBlitz(Movable):
         var result = self._lib.call["mxr_has_gpu", Int32](self._session)
         return result != 0
 
-    fn read_pixels(
+    def read_pixels(
         self,
         panel_id: UInt32,
         buf: UnsafePointer[UInt8, _],
@@ -1405,7 +1412,7 @@ struct XRBlitz(Movable):
     # Input — controller and head pose tracking
     # ══════════════════════════════════════════════════════════════════════
 
-    fn get_pose(self, hand: UInt8) -> XRPose:
+    def get_pose(self, hand: UInt8) -> XRPose:
         """Get the current pose of a controller or the head.
 
         Uses `mxr_get_pose_into` which writes pose fields to
@@ -1468,7 +1475,7 @@ struct XRBlitz(Movable):
 
         return result
 
-    fn get_aim_ray(
+    def get_aim_ray(
         self,
         hand: UInt8,
     ) -> Tuple[Bool, Float32, Float32, Float32, Float32, Float32, Float32]:
@@ -1521,7 +1528,7 @@ struct XRBlitz(Movable):
     # Reference spaces
     # ══════════════════════════════════════════════════════════════════════
 
-    fn set_reference_space(self, space_type: UInt8) -> Bool:
+    def set_reference_space(self, space_type: UInt8) -> Bool:
         """Set the session's reference space type.
 
         Args:
@@ -1536,7 +1543,7 @@ struct XRBlitz(Movable):
         )
         return result != 0
 
-    fn get_reference_space(self) -> UInt8:
+    def get_reference_space(self) -> UInt8:
         """Query the current reference space type.
 
         Returns:
@@ -1548,7 +1555,7 @@ struct XRBlitz(Movable):
     # Capabilities — runtime feature detection
     # ══════════════════════════════════════════════════════════════════════
 
-    fn has_extension(self, ext_name: String) -> Bool:
+    def has_extension(self, ext_name: String) -> Bool:
         """Check if a specific OpenXR extension is available.
 
         Args:
@@ -1563,7 +1570,7 @@ struct XRBlitz(Movable):
         )
         return result != 0
 
-    fn has_hand_tracking(self) -> Bool:
+    def has_hand_tracking(self) -> Bool:
         """Check if hand tracking is available.
 
         Returns:
@@ -1574,7 +1581,7 @@ struct XRBlitz(Movable):
         )
         return result != 0
 
-    fn has_passthrough(self) -> Bool:
+    def has_passthrough(self) -> Bool:
         """Check if passthrough (AR) is available.
 
         Returns:
@@ -1583,7 +1590,7 @@ struct XRBlitz(Movable):
         var result = self._lib.call["mxr_has_passthrough", Int32](self._session)
         return result != 0
 
-    fn get_select_state(self) -> Int32:
+    def get_select_state(self) -> Int32:
         """Get the select (trigger) state for both hands.
 
         Returns a bitfield:
@@ -1599,7 +1606,7 @@ struct XRBlitz(Movable):
         """
         return self._lib.call["mxr_get_select_state", Int32](self._session)
 
-    fn get_squeeze_state(self) -> Int32:
+    def get_squeeze_state(self) -> Int32:
         """Get the squeeze (grip) state for both hands.
 
         Returns a bitfield:
@@ -1619,7 +1626,7 @@ struct XRBlitz(Movable):
     # ID mapping (per-panel)
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_assign_id(
+    def panel_assign_id(
         self, panel_id: UInt32, mojo_id: UInt32, node_id: UInt32
     ):
         """Assign a mojo-gui element ID to a Blitz node ID within a panel.
@@ -1635,7 +1642,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, mojo_id, node_id
         )
 
-    fn panel_resolve_id(self, panel_id: UInt32, mojo_id: UInt32) -> UInt32:
+    def panel_resolve_id(self, panel_id: UInt32, mojo_id: UInt32) -> UInt32:
         """Resolve a mojo-gui element ID to a Blitz node ID within a panel.
 
         Args:
@@ -1653,7 +1660,7 @@ struct XRBlitz(Movable):
     # Stack operations (per-panel, for mutation interpreter)
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_stack_push(self, panel_id: UInt32, node_id: UInt32):
+    def panel_stack_push(self, panel_id: UInt32, node_id: UInt32):
         """Push a node ID onto the panel's interpreter stack.
 
         Args:
@@ -1664,7 +1671,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, node_id
         )
 
-    fn panel_stack_pop(self, panel_id: UInt32) -> UInt32:
+    def panel_stack_pop(self, panel_id: UInt32) -> UInt32:
         """Pop a node ID from the panel's interpreter stack.
 
         Args:
@@ -1681,7 +1688,7 @@ struct XRBlitz(Movable):
     # Document root access (per-panel)
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_mount_point_id(self, panel_id: UInt32) -> UInt32:
+    def panel_mount_point_id(self, panel_id: UInt32) -> UInt32:
         """Get the mount point node ID for a panel.
 
         Returns the Blitz-internal node ID of the panel's mount point
@@ -1701,7 +1708,7 @@ struct XRBlitz(Movable):
     # Debug & inspection
     # ══════════════════════════════════════════════════════════════════════
 
-    fn panel_print_tree(self, panel_id: UInt32):
+    def panel_print_tree(self, panel_id: UInt32):
         """Print a panel's DOM tree to stderr (for debugging).
 
         Args:
@@ -1711,7 +1718,7 @@ struct XRBlitz(Movable):
             self._session, panel_id
         )
 
-    fn panel_serialize_subtree(self, panel_id: UInt32) -> String:
+    def panel_serialize_subtree(self, panel_id: UInt32) -> String:
         """Serialize a panel's DOM subtree to an HTML string.
 
         Args:
@@ -1724,7 +1731,7 @@ struct XRBlitz(Movable):
         var needed = self._lib.call["mxr_panel_serialize_subtree", UInt32](
             self._session,
             panel_id,
-            UnsafePointer[UInt8, MutAnyOrigin](),
+            Optional[UnsafePointer[UInt8, MutUntrackedOrigin]](None),
             UInt32(0),
         )
 
@@ -1748,7 +1755,7 @@ struct XRBlitz(Movable):
         buf.free()
         return result
 
-    fn panel_get_node_tag(self, panel_id: UInt32, node_id: UInt32) -> String:
+    def panel_get_node_tag(self, panel_id: UInt32, node_id: UInt32) -> String:
         """Get the tag name of a node in a panel (for testing).
 
         Args:
@@ -1774,7 +1781,7 @@ struct XRBlitz(Movable):
         buf.free()
         return result
 
-    fn panel_get_text_content(
+    def panel_get_text_content(
         self, panel_id: UInt32, node_id: UInt32
     ) -> String:
         """Get the text content of a node in a panel (for testing).
@@ -1802,7 +1809,7 @@ struct XRBlitz(Movable):
         buf.free()
         return result
 
-    fn panel_get_attribute_value(
+    def panel_get_attribute_value(
         self, panel_id: UInt32, node_id: UInt32, name: String
     ) -> String:
         """Get the value of an attribute on a node in a panel (for testing).
@@ -1826,7 +1833,7 @@ struct XRBlitz(Movable):
             panel_id,
             node_id,
             name_ptr,
-            UInt32(len(name)),
+            UInt32(name.byte_length()),
             buf,
             UInt32(buf_size),
         )
@@ -1838,7 +1845,7 @@ struct XRBlitz(Movable):
         buf.free()
         return result
 
-    fn panel_inject_event(
+    def panel_inject_event(
         self,
         panel_id: UInt32,
         handler_id: UInt32,
@@ -1863,10 +1870,10 @@ struct XRBlitz(Movable):
             handler_id,
             event_type,
             value_ptr,
-            UInt32(len(value)),
+            UInt32(value.byte_length()),
         )
 
-    fn panel_get_child_mojo_id(
+    def panel_get_child_mojo_id(
         self, panel_id: UInt32, parent_id: UInt32, index: UInt32
     ) -> UInt32:
         """Get the mojo element ID of a child node at a given index.
@@ -1883,7 +1890,7 @@ struct XRBlitz(Movable):
             self._session, panel_id, parent_id, index
         )
 
-    fn version(self) -> String:
+    def version(self) -> String:
         """Get the shim version string.
 
         Returns:

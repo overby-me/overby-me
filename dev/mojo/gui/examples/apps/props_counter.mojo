@@ -41,7 +41,7 @@ struct CounterDisplay(Movable):
     var count: _SignalI32  # consumed from parent context
     var show_hex: SignalBool  # child-owned local state
 
-    fn __init__(
+    def __init__(
         out self,
         var child_ctx: ChildComponentContext,
         var count: _SignalI32,
@@ -51,12 +51,12 @@ struct CounterDisplay(Movable):
         self.count = count^
         self.show_hex = show_hex^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
-        self.count = take.count^
-        self.show_hex = take.show_hex^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
+        self.count = move.count^
+        self.show_hex = move.show_hex^
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build the child's VNode with current count value."""
         var vb = self.child_ctx.render_builder()
         var val = self.count.peek()
@@ -81,7 +81,7 @@ struct PropsCounterApp(Movable):
     var count: _SignalI32
     var display: CounterDisplay
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.count = self.ctx.use_signal(0)
         # Provide count to descendants via context
@@ -126,36 +126,36 @@ struct PropsCounterApp(Movable):
         var prop_count = child_ctx.consume_signal_i32(_PC_PROP_COUNT)
         self.display = CounterDisplay(child_ctx^, prop_count^, show_hex_handle^)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.count = take.count^
-        self.display = take.display^
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.count = move.count^
+        self.display = move.display^
 
-    fn render_parent(mut self) -> UInt32:
+    def render_parent(mut self) -> UInt32:
         """Build the parent VNode with a placeholder for the child slot."""
         var pvb = self.ctx.render_builder()
         pvb.add_dyn_placeholder()
         return pvb.build()
 
 
-fn _pc_init() -> UnsafePointer[PropsCounterApp, MutExternalOrigin]:
+def _pc_init() -> UnsafePointer[PropsCounterApp, MutUntrackedOrigin]:
     var app_ptr = alloc[PropsCounterApp](1)
-    app_ptr.init_pointee_move(PropsCounterApp())
+    app_ptr.unsafe_write(PropsCounterApp())
     return app_ptr
 
 
-fn _pc_destroy(
-    app_ptr: UnsafePointer[PropsCounterApp, MutExternalOrigin],
+def _pc_destroy(
+    app_ptr: UnsafePointer[PropsCounterApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].display.child_ctx)
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _pc_rebuild(
+def _pc_rebuild(
     mut app: PropsCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the props-counter app."""
     # 1. Render parent with placeholder
@@ -193,7 +193,7 @@ fn _pc_rebuild(
     return Int32(writer_ptr[0].offset)
 
 
-fn _pc_handle_event(
+def _pc_handle_event(
     mut app: PropsCounterApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -201,9 +201,9 @@ fn _pc_handle_event(
     return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _pc_flush(
+def _pc_flush(
     mut app: PropsCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates."""
     var parent_dirty = app.ctx.consume_dirty()

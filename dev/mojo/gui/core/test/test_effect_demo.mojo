@@ -39,15 +39,15 @@ from wasm_harness import (
 )
 
 
-fn _load() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_ed(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_ed(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create an EffectDemoApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("ed_init", no_args()))
@@ -56,8 +56,8 @@ fn _create_ed(
     return Tuple(app, buf)
 
 
-fn _destroy_ed(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _destroy_ed(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -66,8 +66,8 @@ fn _destroy_ed(
     w[].call_void("ed_destroy", args_ptr(app))
 
 
-fn _flush(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _flush(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -75,8 +75,8 @@ fn _flush(
     return w[].call_i32("ed_flush", args_ptr_ptr_i32(app, buf, 8192))
 
 
-fn _handle_event(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _handle_event(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -84,8 +84,8 @@ fn _handle_event(
     return w[].call_i32("ed_handle_event", args_ptr_i32_i32(app, handler_id, 0))
 
 
-fn _incr(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _incr(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises:
     """Increment count via the button handler."""
@@ -93,8 +93,8 @@ fn _incr(
     _ = _handle_event(w, app, hid)
 
 
-fn _parity_text(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _parity_text(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     """Read the parity text from the app."""
@@ -106,8 +106,8 @@ fn _parity_text(
 # ── Test: init creates app ───────────────────────────────────────────────────
 
 
-fn test_ed_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_init_creates_app(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero pointer."""
     var app = Int(w[].call_i64("ed_init", no_args()))
@@ -118,8 +118,8 @@ fn test_ed_init_creates_app(
 # ── Test: count starts at 0 ─────────────────────────────────────────────────
 
 
-fn test_ed_count_starts_at_0(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_count_starts_at_0(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Count signal is 0 after init + rebuild."""
     var t = _create_ed(w)
@@ -132,8 +132,8 @@ fn test_ed_count_starts_at_0(
 # ── Test: doubled starts at 0 ───────────────────────────────────────────────
 
 
-fn test_ed_doubled_starts_at_0(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_doubled_starts_at_0(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Doubled signal is 0 after init + rebuild (effect ran on mount)."""
     var t = _create_ed(w)
@@ -146,8 +146,8 @@ fn test_ed_doubled_starts_at_0(
 # ── Test: parity starts at "even" ───────────────────────────────────────────
 
 
-fn test_ed_parity_starts_at_even(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_parity_starts_at_even(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Parity text is 'even' after init + rebuild (effect ran on mount)."""
     var t = _create_ed(w)
@@ -161,8 +161,8 @@ fn test_ed_parity_starts_at_even(
 # ── Test: effect starts pending ──────────────────────────────────────────────
 
 
-fn test_ed_effect_starts_pending(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_effect_starts_pending(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Effect is pending after init (before rebuild runs it)."""
     var app = Int(w[].call_i64("ed_init", no_args()))
@@ -174,8 +174,8 @@ fn test_ed_effect_starts_pending(
 # ── Test: rebuild runs effect ────────────────────────────────────────────────
 
 
-fn test_ed_rebuild_runs_effect(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_rebuild_runs_effect(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After rebuild, effect has been run (not pending), doubled=0, parity='even'.
     """
@@ -192,8 +192,8 @@ fn test_ed_rebuild_runs_effect(
 # ── Test: increment updates count ────────────────────────────────────────────
 
 
-fn test_ed_increment_updates_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_increment_updates_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment, count = 1."""
     var t = _create_ed(w)
@@ -207,8 +207,8 @@ fn test_ed_increment_updates_count(
 # ── Test: increment marks effect pending ─────────────────────────────────────
 
 
-fn test_ed_increment_marks_effect_pending(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_increment_marks_effect_pending(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment (before flush), effect is pending."""
     var t = _create_ed(w)
@@ -222,8 +222,8 @@ fn test_ed_increment_marks_effect_pending(
 # ── Test: flush after increment updates doubled ─────────────────────────────
 
 
-fn test_ed_flush_after_increment_doubled(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_flush_after_increment_doubled(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment + flush, doubled = 2."""
     var t = _create_ed(w)
@@ -238,8 +238,8 @@ fn test_ed_flush_after_increment_doubled(
 # ── Test: flush after increment updates parity ──────────────────────────────
 
 
-fn test_ed_flush_after_increment_parity(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_flush_after_increment_parity(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment + flush, parity = 'odd'."""
     var t = _create_ed(w)
@@ -255,8 +255,8 @@ fn test_ed_flush_after_increment_parity(
 # ── Test: effect not pending after flush ─────────────────────────────────────
 
 
-fn test_ed_effect_not_pending_after_flush(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_effect_not_pending_after_flush(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment + flush, effect is no longer pending."""
     var t = _create_ed(w)
@@ -271,8 +271,8 @@ fn test_ed_effect_not_pending_after_flush(
 # ── Test: two increments doubled=4 ──────────────────────────────────────────
 
 
-fn test_ed_two_increments_doubled_4(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_two_increments_doubled_4(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 2 increments + flush, doubled = 4."""
     var t = _create_ed(w)
@@ -290,8 +290,8 @@ fn test_ed_two_increments_doubled_4(
 # ── Test: two increments parity="even" ──────────────────────────────────────
 
 
-fn test_ed_two_increments_parity_even(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_two_increments_parity_even(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 2 increments + flush, parity = 'even'."""
     var t = _create_ed(w)
@@ -309,8 +309,8 @@ fn test_ed_two_increments_parity_even(
 # ── Test: 10 increments ─────────────────────────────────────────────────────
 
 
-fn test_ed_10_increments(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_10_increments(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 10 increments, count=10, doubled=20, parity='even'."""
     var t = _create_ed(w)
@@ -329,8 +329,8 @@ fn test_ed_10_increments(
 # ── Test: effect resubscribes each run ───────────────────────────────────────
 
 
-fn test_ed_effect_resubscribes_each_run(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_effect_resubscribes_each_run(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Effect dependency tracking works across multiple runs.
 
@@ -358,8 +358,8 @@ fn test_ed_effect_resubscribes_each_run(
 # ── Test: destroy does not crash ─────────────────────────────────────────────
 
 
-fn test_ed_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_destroy_does_not_crash(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy after normal use does not crash."""
     var t = _create_ed(w)
@@ -373,8 +373,8 @@ fn test_ed_destroy_does_not_crash(
 # ── Test: flush returns 0 when clean ─────────────────────────────────────────
 
 
-fn test_ed_flush_returns_0_when_clean(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_flush_returns_0_when_clean(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush returns 0 when no state changes have occurred."""
     var t = _create_ed(w)
@@ -388,8 +388,8 @@ fn test_ed_flush_returns_0_when_clean(
 # ── Test: rapid 20 increments ───────────────────────────────────────────────
 
 
-fn test_ed_rapid_20_increments(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_ed_rapid_20_increments(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """20 increments with flush after each — all derived state correct."""
     var t = _create_ed(w)
@@ -413,7 +413,7 @@ fn test_ed_rapid_20_increments(
 # ── Test runner ──────────────────────────────────────────────────────────────
 
 
-fn main() raises:
+def main() raises:
     var wp = _load()
 
     print("test_effect_demo — EffectDemoApp effect-in-flush (Phase 34.1):")

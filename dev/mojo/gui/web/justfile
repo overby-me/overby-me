@@ -1,13 +1,13 @@
 build:
     mkdir -p build
     rm -f build/out.cwasm
-    mojo build -Werror --emit llvm -I ../core/src -I ../examples -o build/out.ll src/main.mojo
+    mojo build --emit llvm -I ../core/src -I ../examples -o build/out.ll src/main.mojo
     sed -i '/call void @llvm\.lifetime\.\(start\|end\)/d' build/out.ll
     sed -i 's/ nocreateundeforpoison//g' build/out.ll
     sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' build/out.ll
     sed -i '/^attributes #[0-9]* = { }$/d' build/out.ll
     llc --mtriple=wasm64-wasi -filetype=obj build/out.ll
-    wasm-ld --no-entry --export-all --allow-undefined -mwasm64 --initial-memory=268435456 -o build/out.wasm build/out.o
+    wasm-ld --no-entry --export-all --allow-undefined -mwasm64 -z stack-size=8388608 --initial-memory=268435456 -o build/out.wasm build/out.o
 
 # Incremental build — skip if out.wasm is newer than all source files.
 build-if-changed:

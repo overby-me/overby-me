@@ -88,15 +88,15 @@ struct _HandlerMapping(Copyable, Equatable, Writable):
     var tag: UInt8
     var data: Int32
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.handler_id = copy.handler_id
         self.tag = copy.tag
         self.data = copy.data
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.handler_id = take.handler_id
-        self.tag = take.tag
-        self.data = take.data
+    def __init__(out self, *, deinit move: Self):
+        self.handler_id = move.handler_id
+        self.tag = move.tag
+        self.data = move.data
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -124,27 +124,27 @@ struct HandlerAction(Copyable, Equatable, Writable):
     var data: Int32
     var found: Bool
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create a not-found sentinel."""
         self.tag = 0
         self.data = 0
         self.found = False
 
-    fn __init__(out self, tag: UInt8, data: Int32):
+    def __init__(out self, tag: UInt8, data: Int32):
         """Create a found result with the given tag and data."""
         self.tag = tag
         self.data = data
         self.found = True
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.tag = copy.tag
         self.data = copy.data
         self.found = copy.found
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.tag = take.tag
-        self.data = take.data
-        self.found = take.found
+    def __init__(out self, *, deinit move: Self):
+        self.tag = move.tag
+        self.data = move.data
+        self.found = move.found
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -190,18 +190,18 @@ struct ItemBuilder(Movable):
 
     var vb: VNodeBuilder
     var scope_id: UInt32
-    var _runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    var _runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
     var _handler_map_ptr: UnsafePointer[
-        List[_HandlerMapping], MutExternalOrigin
+        List[_HandlerMapping], MutUntrackedOrigin
     ]
 
-    fn __init__(
+    def __init__(
         out self,
         var vb: VNodeBuilder,
         scope_id: UInt32,
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
         handler_map_ptr: UnsafePointer[
-            List[_HandlerMapping], MutExternalOrigin
+            List[_HandlerMapping], MutUntrackedOrigin
         ],
     ):
         """Create an ItemBuilder (called internally by KeyedList.begin_item).
@@ -217,15 +217,15 @@ struct ItemBuilder(Movable):
         self._runtime = runtime
         self._handler_map_ptr = handler_map_ptr
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.vb = take.vb^
-        self.scope_id = take.scope_id
-        self._runtime = take._runtime
-        self._handler_map_ptr = take._handler_map_ptr
+    def __init__(out self, *, deinit move: Self):
+        self.vb = move.vb^
+        self.scope_id = move.scope_id
+        self._runtime = move._runtime
+        self._handler_map_ptr = move._handler_map_ptr
 
     # ── Dynamic text ─────────────────────────────────────────────────
 
-    fn add_dyn_text(mut self, value: String):
+    def add_dyn_text(mut self, value: String):
         """Add a dynamic text node (fills the next DynamicText slot).
 
         Call in order corresponding to `dyn_text(0)`, `dyn_text(1)`, ...
@@ -236,7 +236,7 @@ struct ItemBuilder(Movable):
         """
         self.vb.add_dyn_text(value)
 
-    fn add_dyn_text_signal(mut self, signal: SignalString):
+    def add_dyn_text_signal(mut self, signal: SignalString):
         """Add a dynamic text node from a SignalString value.
 
         Reads the signal's current value (via peek/get — no subscription)
@@ -251,7 +251,7 @@ struct ItemBuilder(Movable):
 
     # ── Dynamic attributes ───────────────────────────────────────────
 
-    fn add_dyn_text_attr(mut self, name: String, value: String):
+    def add_dyn_text_attr(mut self, name: String, value: String):
         """Add a dynamic text attribute (e.g. class, id, href).
 
         Args:
@@ -260,7 +260,7 @@ struct ItemBuilder(Movable):
         """
         self.vb.add_dyn_text_attr(name, value)
 
-    fn add_dyn_bool_attr(mut self, name: String, value: Bool):
+    def add_dyn_bool_attr(mut self, name: String, value: Bool):
         """Add a dynamic boolean attribute (e.g. disabled, checked).
 
         Args:
@@ -271,7 +271,7 @@ struct ItemBuilder(Movable):
 
     # ── Events (manual) ──────────────────────────────────────────────
 
-    fn add_dyn_event(mut self, event_name: String, handler_id: UInt32):
+    def add_dyn_event(mut self, event_name: String, handler_id: UInt32):
         """Add a dynamic event attribute with an existing handler ID.
 
         Use this when the handler is already registered (e.g. via
@@ -286,7 +286,7 @@ struct ItemBuilder(Movable):
 
     # ── Events (ergonomic — register + map + add in one call) ────────
 
-    fn add_custom_event(
+    def add_custom_event(
         mut self, event_name: String, action_tag: UInt8, data: Int32
     ):
         """Register a custom event handler with action mapping.
@@ -322,7 +322,7 @@ struct ItemBuilder(Movable):
 
     # ── Conditional class helpers ────────────────────────────────────
 
-    fn add_class_if(mut self, condition: Bool, class_name: String):
+    def add_class_if(mut self, condition: Bool, class_name: String):
         """Add a conditional CSS class attribute.
 
         Shortcut for `add_dyn_text_attr("class", class_if(condition, name))`.
@@ -351,7 +351,7 @@ struct ItemBuilder(Movable):
         else:
             self.vb.add_dyn_text_attr(String("class"), String(""))
 
-    fn add_class_when(
+    def add_class_when(
         mut self,
         condition: Bool,
         true_class: String,
@@ -377,13 +377,13 @@ struct ItemBuilder(Movable):
 
     # ── Placeholder (for dyn_node slots) ─────────────────────────────
 
-    fn add_dyn_placeholder(mut self):
+    def add_dyn_placeholder(mut self):
         """Add a dynamic placeholder node."""
         self.vb.add_dyn_placeholder()
 
     # ── Finalize ─────────────────────────────────────────────────────
 
-    fn index(self) -> UInt32:
+    def index(self) -> UInt32:
         """Return the VNode index of the item being built.
 
         Call this after all dynamic text, attributes, and events have
@@ -442,7 +442,7 @@ struct KeyedList(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an uninitialized KeyedList (no template).
 
         Call `init_slot()` after the initial mount to set the anchor.
@@ -452,7 +452,7 @@ struct KeyedList(Movable):
         self.scope_ids = List[UInt32]()
         self.handler_map = List[_HandlerMapping]()
 
-    fn __init__(out self, template_id: UInt32):
+    def __init__(out self, template_id: UInt32):
         """Create a KeyedList for the given item template.
 
         Args:
@@ -463,15 +463,15 @@ struct KeyedList(Movable):
         self.scope_ids = List[UInt32]()
         self.handler_map = List[_HandlerMapping]()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.template_id = take.template_id
-        self.slot = take.slot^
-        self.scope_ids = take.scope_ids^
-        self.handler_map = take.handler_map^
+    def __init__(out self, *, deinit move: Self):
+        self.template_id = move.template_id
+        self.slot = move.slot^
+        self.scope_ids = move.scope_ids^
+        self.handler_map = move.handler_map^
 
     # ── Slot initialization ──────────────────────────────────────────
 
-    fn init_slot(mut self, anchor_id: UInt32, frag_idx: UInt32):
+    def init_slot(mut self, anchor_id: UInt32, frag_idx: UInt32):
         """Initialize the fragment slot after the initial mount.
 
         Call this after CreateEngine has assigned an ElementId to the
@@ -485,7 +485,7 @@ struct KeyedList(Movable):
 
     # ── Rebuild lifecycle ────────────────────────────────────────────
 
-    fn begin_rebuild(mut self, mut ctx: ComponentContext) -> UInt32:
+    def begin_rebuild(mut self, mut ctx: ComponentContext) -> UInt32:
         """Start a keyed list rebuild: destroy old scopes, return empty fragment.
 
         Destroys all tracked child scopes (cleaning up their handlers),
@@ -510,7 +510,7 @@ struct KeyedList(Movable):
 
     # ── Phase 17 — Ergonomic item building ───────────────────────────
 
-    fn begin_item(
+    def begin_item(
         mut self, key: String, mut ctx: ComponentContext
     ) -> ItemBuilder:
         """Begin building a keyed list item with automatic scope + builder.
@@ -544,14 +544,14 @@ struct KeyedList(Movable):
             vb^,
             scope_id,
             ctx.runtime_ptr(),
-            UnsafePointer[List[_HandlerMapping], MutExternalOrigin](
+            UnsafePointer[List[_HandlerMapping], MutUntrackedOrigin](
                 unsafe_from_address=Int(handler_map_ptr)
             ),
         )
 
     # ── Phase 17 — Handler action dispatch ───────────────────────────
 
-    fn get_action(self, handler_id: UInt32) -> HandlerAction:
+    def get_action(self, handler_id: UInt32) -> HandlerAction:
         """Look up a handler ID in the handler map.
 
         Returns a `HandlerAction` with the app-defined action tag and
@@ -577,7 +577,7 @@ struct KeyedList(Movable):
 
     # ── Phase 16 — Manual item building (still available) ────────────
 
-    fn create_scope(mut self, mut ctx: ComponentContext) -> UInt32:
+    def create_scope(mut self, mut ctx: ComponentContext) -> UInt32:
         """Create a child scope for a list item and track it.
 
         The scope is automatically cleaned up on the next `begin_rebuild()`
@@ -596,7 +596,7 @@ struct KeyedList(Movable):
         self.scope_ids.append(scope_id)
         return scope_id
 
-    fn item_builder(self, key: String, ctx: ComponentContext) -> VNodeBuilder:
+    def item_builder(self, key: String, ctx: ComponentContext) -> VNodeBuilder:
         """Create a keyed VNodeBuilder for a list item.
 
         Uses this KeyedList's template_id and the component's store.
@@ -613,7 +613,7 @@ struct KeyedList(Movable):
         """
         return VNodeBuilder(self.template_id, key, ctx.store_ptr())
 
-    fn push_child(
+    def push_child(
         self, ctx: ComponentContext, frag_idx: UInt32, child_idx: UInt32
     ):
         """Append a built item VNode to the fragment.
@@ -628,10 +628,10 @@ struct KeyedList(Movable):
 
     # ── Flush lifecycle ──────────────────────────────────────────────
 
-    fn flush(
+    def flush(
         mut self,
         mut ctx: ComponentContext,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         new_frag_idx: UInt32,
     ):
         """Flush the keyed list: diff old vs new fragment, emit mutations.
@@ -652,11 +652,11 @@ struct KeyedList(Movable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn scope_count(self) -> Int:
+    def scope_count(self) -> Int:
         """Return the number of tracked child scopes."""
         return len(self.scope_ids)
 
-    fn handler_count(self) -> Int:
+    def handler_count(self) -> Int:
         """Return the number of handler→action mappings.
 
         This reflects the number of custom events registered via
@@ -664,6 +664,6 @@ struct KeyedList(Movable):
         """
         return len(self.handler_map)
 
-    fn is_mounted(self) -> Bool:
+    def is_mounted(self) -> Bool:
         """Check whether the list has items in the DOM."""
         return self.slot.mounted

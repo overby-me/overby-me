@@ -51,14 +51,14 @@ struct EffectEntry(Copyable, Equatable, Writable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an empty (default) effect entry."""
         self.context_id = 0
         self.scope_id = 0
         self.pending = False
         self.running = False
 
-    fn __init__(out self, context_id: UInt32, scope_id: UInt32):
+    def __init__(out self, context_id: UInt32, scope_id: UInt32):
         """Create an effect entry with the given IDs.
 
         The effect starts pending (needs first execution) and not running.
@@ -72,17 +72,17 @@ struct EffectEntry(Copyable, Equatable, Writable):
         self.pending = True
         self.running = False
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.context_id = copy.context_id
         self.scope_id = copy.scope_id
         self.pending = copy.pending
         self.running = copy.running
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.context_id = take.context_id
-        self.scope_id = take.scope_id
-        self.pending = take.pending
-        self.running = take.running
+    def __init__(out self, *, deinit move: Self):
+        self.context_id = move.context_id
+        self.scope_id = move.scope_id
+        self.pending = move.pending
+        self.running = move.running
 
 
 # ── Slot state for the effect store ──────────────────────────────────────────
@@ -123,21 +123,21 @@ struct EffectStore(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         self._entries = List[EffectEntry]()
         self._states = List[EffectSlotState]()
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._entries = take._entries^
-        self._states = take._states^
-        self._free_head = take._free_head
-        self._count = take._count
+    def __init__(out self, *, deinit move: Self):
+        self._entries = move._entries^
+        self._states = move._states^
+        self._free_head = move._free_head
+        self._count = move._count
 
     # ── Create / Destroy ─────────────────────────────────────────────
 
-    fn create(mut self, context_id: UInt32, scope_id: UInt32) -> UInt32:
+    def create(mut self, context_id: UInt32, scope_id: UInt32) -> UInt32:
         """Create a new effect entry.  Returns its stable ID.
 
         The effect starts pending (needs first execution).
@@ -165,7 +165,7 @@ struct EffectStore(Movable):
             self._count += 1
             return UInt32(idx)
 
-    fn destroy(mut self, id: UInt32):
+    def destroy(mut self, id: UInt32):
         """Remove the effect at `id`, freeing its slot for reuse.
 
         Destroying a non-existent or already-freed effect is a no-op.
@@ -186,26 +186,26 @@ struct EffectStore(Movable):
 
     # ── Access ───────────────────────────────────────────────────────
 
-    fn get(self, id: UInt32) -> EffectEntry:
+    def get(self, id: UInt32) -> EffectEntry:
         """Return a copy of the effect entry at `id`.
 
         Precondition: `contains(id)` is True.
         """
         return self._entries[Int(id)].copy()
 
-    fn get_ptr(
+    def get_ptr(
         mut self, id: UInt32
-    ) -> UnsafePointer[EffectEntry, MutExternalOrigin]:
+    ) -> UnsafePointer[EffectEntry, MutUntrackedOrigin]:
         """Return a pointer to the effect entry at `id`.
 
         The pointer is valid until the next mutation of the store.
         Precondition: `contains(id)` is True.
         """
-        return UnsafePointer.address_of(self._entries[Int(id)])
+        return UnsafePointer(to=self._entries[Int(id)])
 
     # ── Pending tracking ─────────────────────────────────────────────
 
-    fn mark_pending(mut self, id: UInt32):
+    def mark_pending(mut self, id: UInt32):
         """Mark the effect as needing re-execution.
 
         Called when an input signal that the effect depends on is written.
@@ -217,7 +217,7 @@ struct EffectStore(Movable):
             return
         self._entries[idx].pending = True
 
-    fn clear_pending(mut self, id: UInt32):
+    def clear_pending(mut self, id: UInt32):
         """Clear the pending flag (called after successful execution)."""
         var idx = Int(id)
         if idx < 0 or idx >= len(self._entries):
@@ -226,7 +226,7 @@ struct EffectStore(Movable):
             return
         self._entries[idx].pending = False
 
-    fn is_pending(self, id: UInt32) -> Bool:
+    def is_pending(self, id: UInt32) -> Bool:
         """Check whether the effect needs re-execution.
 
         Precondition: `contains(id)` is True.
@@ -235,7 +235,7 @@ struct EffectStore(Movable):
 
     # ── Running state ────────────────────────────────────────────────
 
-    fn set_running(mut self, id: UInt32, running: Bool):
+    def set_running(mut self, id: UInt32, running: Bool):
         """Set the running flag on the effect.
 
         True while the effect is inside a begin_run / end_run bracket.
@@ -247,7 +247,7 @@ struct EffectStore(Movable):
             return
         self._entries[idx].running = running
 
-    fn is_running(self, id: UInt32) -> Bool:
+    def is_running(self, id: UInt32) -> Bool:
         """Check whether the effect is currently executing.
 
         Precondition: `contains(id)` is True.
@@ -256,14 +256,14 @@ struct EffectStore(Movable):
 
     # ── Field accessors ──────────────────────────────────────────────
 
-    fn context_id(self, id: UInt32) -> UInt32:
+    def context_id(self, id: UInt32) -> UInt32:
         """Return the reactive context ID of the effect.
 
         Precondition: `contains(id)` is True.
         """
         return self._entries[Int(id)].context_id
 
-    fn scope_id(self, id: UInt32) -> UInt32:
+    def scope_id(self, id: UInt32) -> UInt32:
         """Return the owning scope ID of the effect.
 
         Precondition: `contains(id)` is True.
@@ -272,11 +272,11 @@ struct EffectStore(Movable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn count(self) -> Int:
+    def count(self) -> Int:
         """Return the number of live effects."""
         return self._count
 
-    fn contains(self, id: UInt32) -> Bool:
+    def contains(self, id: UInt32) -> Bool:
         """Check whether `id` is a live effect."""
         var idx = Int(id)
         if idx < 0 or idx >= len(self._states):
@@ -285,7 +285,7 @@ struct EffectStore(Movable):
 
     # ── Bulk operations ──────────────────────────────────────────────
 
-    fn pending_effects(self) -> List[UInt32]:
+    def pending_effects(self) -> List[UInt32]:
         """Return a list of all effect IDs that are currently pending.
 
         The caller is responsible for running each pending effect via
@@ -297,7 +297,7 @@ struct EffectStore(Movable):
                 result.append(UInt32(i))
         return result^
 
-    fn remove_for_scope(mut self, scope_id: UInt32) -> List[UInt32]:
+    def remove_for_scope(mut self, scope_id: UInt32) -> List[UInt32]:
         """Remove all effects belonging to the given scope.
 
         Returns a list of the destroyed effect IDs so the caller (Runtime)
@@ -313,7 +313,7 @@ struct EffectStore(Movable):
                     self.destroy(UInt32(i))
         return destroyed^
 
-    fn effects_for_scope(self, scope_id: UInt32) -> List[UInt32]:
+    def effects_for_scope(self, scope_id: UInt32) -> List[UInt32]:
         """Return a list of effect IDs belonging to the given scope."""
         var result = List[UInt32]()
         for i in range(len(self._entries)):
@@ -322,7 +322,7 @@ struct EffectStore(Movable):
                     result.append(UInt32(i))
         return result^
 
-    fn clear(mut self):
+    def clear(mut self):
         """Remove all effects."""
         self._entries.clear()
         self._states.clear()

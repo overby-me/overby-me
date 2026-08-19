@@ -93,7 +93,7 @@ struct HandlerEntry(Copyable, Equatable, Writable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an empty (default) handler entry."""
         self.scope_id = 0
         self.action = ACTION_NONE
@@ -101,7 +101,7 @@ struct HandlerEntry(Copyable, Equatable, Writable):
         self.operand = 0
         self.event_name = String("")
 
-    fn __init__(
+    def __init__(
         out self,
         scope_id: UInt32,
         action: UInt8,
@@ -116,24 +116,24 @@ struct HandlerEntry(Copyable, Equatable, Writable):
         self.operand = operand
         self.event_name = event_name
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.scope_id = copy.scope_id
         self.action = copy.action
         self.signal_key = copy.signal_key
         self.operand = copy.operand
         self.event_name = copy.event_name
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.scope_id = take.scope_id
-        self.action = take.action
-        self.signal_key = take.signal_key
-        self.operand = take.operand
-        self.event_name = take.event_name^
+    def __init__(out self, *, deinit move: Self):
+        self.scope_id = move.scope_id
+        self.action = move.action
+        self.signal_key = move.signal_key
+        self.operand = move.operand
+        self.event_name = move.event_name^
 
     # ── Convenience constructors ─────────────────────────────────────
 
     @staticmethod
-    fn signal_set(
+    def signal_set(
         scope_id: UInt32,
         signal_key: UInt32,
         value: Int32,
@@ -145,7 +145,7 @@ struct HandlerEntry(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn signal_add(
+    def signal_add(
         scope_id: UInt32,
         signal_key: UInt32,
         delta: Int32,
@@ -157,7 +157,7 @@ struct HandlerEntry(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn signal_sub(
+    def signal_sub(
         scope_id: UInt32,
         signal_key: UInt32,
         delta: Int32,
@@ -169,7 +169,7 @@ struct HandlerEntry(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn signal_toggle(
+    def signal_toggle(
         scope_id: UInt32,
         signal_key: UInt32,
         event_name: String,
@@ -180,7 +180,7 @@ struct HandlerEntry(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn signal_set_input(
+    def signal_set_input(
         scope_id: UInt32,
         signal_key: UInt32,
         event_name: String,
@@ -195,7 +195,7 @@ struct HandlerEntry(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn signal_set_string(
+    def signal_set_string(
         scope_id: UInt32,
         string_key: UInt32,
         version_key: UInt32,
@@ -224,7 +224,7 @@ struct HandlerEntry(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn key_enter_custom(scope_id: UInt32) -> HandlerEntry:
+    def key_enter_custom(scope_id: UInt32) -> HandlerEntry:
         """Create a handler that fires only when the key is "Enter".
 
         Phase 22: Used by `onkeydown_enter_custom()` DSL helper.
@@ -241,12 +241,12 @@ struct HandlerEntry(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn custom(scope_id: UInt32, event_name: String) -> HandlerEntry:
+    def custom(scope_id: UInt32, event_name: String) -> HandlerEntry:
         """Create a handler with no Mojo-side action (JS handles it)."""
         return HandlerEntry(scope_id, ACTION_CUSTOM, 0, 0, event_name)
 
     @staticmethod
-    fn noop(scope_id: UInt32, event_name: String) -> HandlerEntry:
+    def noop(scope_id: UInt32, event_name: String) -> HandlerEntry:
         """Create a no-op handler (marks scope dirty but does nothing else)."""
         return HandlerEntry(scope_id, ACTION_NONE, 0, 0, event_name)
 
@@ -283,21 +283,21 @@ struct HandlerRegistry(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         self._entries = List[HandlerEntry]()
         self._states = List[HandlerSlotState]()
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._entries = take._entries^
-        self._states = take._states^
-        self._free_head = take._free_head
-        self._count = take._count
+    def __init__(out self, *, deinit move: Self):
+        self._entries = move._entries^
+        self._states = move._states^
+        self._free_head = move._free_head
+        self._count = move._count
 
     # ── Register / Remove ────────────────────────────────────────────
 
-    fn register(mut self, entry: HandlerEntry) -> UInt32:
+    def register(mut self, entry: HandlerEntry) -> UInt32:
         """Register a new handler.  Returns its stable ID."""
         if self._free_head != -1:
             var idx = self._free_head
@@ -313,7 +313,7 @@ struct HandlerRegistry(Movable):
             self._count += 1
             return UInt32(idx)
 
-    fn remove(mut self, id: UInt32):
+    def remove(mut self, id: UInt32):
         """Remove the handler at `id`, freeing its slot for reuse."""
         var idx = Int(id)
         if idx < 0 or idx >= len(self._entries):
@@ -329,56 +329,56 @@ struct HandlerRegistry(Movable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn count(self) -> Int:
+    def count(self) -> Int:
         """Return the number of live handlers."""
         return self._count
 
-    fn contains(self, id: UInt32) -> Bool:
+    def contains(self, id: UInt32) -> Bool:
         """Check whether `id` is a live handler."""
         var idx = Int(id)
         if idx < 0 or idx >= len(self._states):
             return False
         return self._states[idx].occupied
 
-    fn get(self, id: UInt32) -> HandlerEntry:
+    def get(self, id: UInt32) -> HandlerEntry:
         """Return a copy of the handler entry at `id`.
 
         Precondition: `contains(id)` is True.
         """
         return self._entries[Int(id)].copy()
 
-    fn get_ptr(
+    def get_ptr(
         self, id: UInt32
-    ) -> UnsafePointer[HandlerEntry, MutExternalOrigin]:
+    ) -> UnsafePointer[HandlerEntry, MutUntrackedOrigin]:
         """Return a pointer to the handler entry at `id`.
 
         Precondition: `contains(id)` is True.
         """
-        return UnsafePointer.address_of(self._entries[Int(id)])
+        return UnsafePointer(to=self._entries[Int(id)])
 
-    fn scope_id(self, id: UInt32) -> UInt32:
+    def scope_id(self, id: UInt32) -> UInt32:
         """Return the scope_id of the handler at `id`."""
         return self._entries[Int(id)].scope_id
 
-    fn action(self, id: UInt32) -> UInt8:
+    def action(self, id: UInt32) -> UInt8:
         """Return the action tag of the handler at `id`."""
         return self._entries[Int(id)].action
 
-    fn signal_key(self, id: UInt32) -> UInt32:
+    def signal_key(self, id: UInt32) -> UInt32:
         """Return the signal_key of the handler at `id`."""
         return self._entries[Int(id)].signal_key
 
-    fn operand(self, id: UInt32) -> Int32:
+    def operand(self, id: UInt32) -> Int32:
         """Return the operand of the handler at `id`."""
         return self._entries[Int(id)].operand
 
-    fn event_name(self, id: UInt32) -> String:
+    def event_name(self, id: UInt32) -> String:
         """Return the event_name of the handler at `id`."""
         return self._entries[Int(id)].event_name
 
     # ── Bulk operations ──────────────────────────────────────────────
 
-    fn remove_for_scope(mut self, scope_id: UInt32):
+    def remove_for_scope(mut self, scope_id: UInt32):
         """Remove all handlers belonging to the given scope.
 
         This is called when a scope is destroyed to clean up its handlers.
@@ -388,7 +388,7 @@ struct HandlerRegistry(Movable):
                 if self._entries[i].scope_id == scope_id:
                     self.remove(UInt32(i))
 
-    fn handlers_for_scope(self, scope_id: UInt32) -> List[UInt32]:
+    def handlers_for_scope(self, scope_id: UInt32) -> List[UInt32]:
         """Return a list of handler IDs belonging to the given scope."""
         var result = List[UInt32]()
         for i in range(len(self._entries)):
@@ -397,7 +397,7 @@ struct HandlerRegistry(Movable):
                     result.append(UInt32(i))
         return result^
 
-    fn clear(mut self):
+    def clear(mut self):
         """Remove all handlers."""
         self._entries.clear()
         self._states.clear()

@@ -18,7 +18,7 @@ from platform.launch import launch, AppConfig
 from app import MultiViewApp
 
 
-fn main() raises:
+def main() raises:
     launch[MultiViewApp](
         AppConfig(
             title="Multi-View App",

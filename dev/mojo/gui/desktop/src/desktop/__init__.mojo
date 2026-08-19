@@ -37,7 +37,7 @@ Usage (via the unified launch() entry point):
     from platform import launch, AppConfig
     from counter import CounterApp
 
-    fn main() raises:
+    def main() raises:
         launch[CounterApp](AppConfig(title="Counter", width=400, height=350))
 
     # On native targets, launch() calls desktop_launch[CounterApp](config)
@@ -49,6 +49,6 @@ Usage (direct, for advanced control):
     from desktop.renderer import MutationInterpreter
     from desktop.launcher import desktop_launch
 
-    fn main() raises:
+    def main() raises:
         desktop_launch[MyApp](AppConfig(title="My App"))
 """

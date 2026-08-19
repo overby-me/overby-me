@@ -43,7 +43,7 @@ struct SCNormalChild(Movable):
     var child_ctx: ChildComponentContext
     var count: _SignalI32
 
-    fn __init__(
+    def __init__(
         out self,
         var child_ctx: ChildComponentContext,
         var count: _SignalI32,
@@ -51,11 +51,11 @@ struct SCNormalChild(Movable):
         self.child_ctx = child_ctx^
         self.count = count^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
-        self.count = take.count^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
+        self.count = move.count^
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Count: ") + String(self.count.peek()))
         return vb.build()
@@ -72,13 +72,13 @@ struct SCFallbackChild(Movable):
 
     var child_ctx: ChildComponentContext
 
-    fn __init__(out self, var child_ctx: ChildComponentContext):
+    def __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
 
-    fn render(mut self, error_msg: String) -> UInt32:
+    def render(mut self, error_msg: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Error: ") + error_msg)
         return vb.build()
@@ -106,7 +106,7 @@ struct SafeCounterApp(Movable):
     var crash_handler: UInt32
     var retry_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.count = self.ctx.use_signal(0)
         self.ctx.use_error_boundary()
@@ -158,15 +158,15 @@ struct SafeCounterApp(Movable):
         self.retry_handler = fallback_ctx.event_handler_id(0)
         self.fallback = SCFallbackChild(fallback_ctx^)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.count = take.count^
-        self.normal = take.normal^
-        self.fallback = take.fallback^
-        self.crash_handler = take.crash_handler
-        self.retry_handler = take.retry_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.count = move.count^
+        self.normal = move.normal^
+        self.fallback = move.fallback^
+        self.crash_handler = move.crash_handler
+        self.retry_handler = move.retry_handler
 
-    fn render_parent(mut self) -> UInt32:
+    def render_parent(mut self) -> UInt32:
         """Build the parent VNode with placeholders for both child slots."""
         var pvb = self.ctx.render_builder()
         pvb.add_dyn_placeholder()  # dyn_node[0] — normal child
@@ -174,25 +174,25 @@ struct SafeCounterApp(Movable):
         return pvb.build()
 
 
-fn _sc_init() -> UnsafePointer[SafeCounterApp, MutExternalOrigin]:
+def _sc_init() -> UnsafePointer[SafeCounterApp, MutUntrackedOrigin]:
     var app_ptr = alloc[SafeCounterApp](1)
-    app_ptr.init_pointee_move(SafeCounterApp())
+    app_ptr.unsafe_write(SafeCounterApp())
     return app_ptr
 
 
-fn _sc_destroy(
-    app_ptr: UnsafePointer[SafeCounterApp, MutExternalOrigin],
+def _sc_destroy(
+    app_ptr: UnsafePointer[SafeCounterApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].normal.child_ctx)
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].fallback.child_ctx)
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _sc_rebuild(
+def _sc_rebuild(
     mut app: SafeCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the safe-counter app."""
     # 1. Render parent with placeholders
@@ -235,7 +235,7 @@ fn _sc_rebuild(
     return Int32(writer_ptr[0].offset)
 
 
-fn _sc_handle_event(
+def _sc_handle_event(
     mut app: SafeCounterApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -252,9 +252,9 @@ fn _sc_handle_event(
         return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _sc_flush(
+def _sc_flush(
     mut app: SafeCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with error boundary logic."""
     var parent_dirty = app.ctx.consume_dirty()

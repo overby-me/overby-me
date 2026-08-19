@@ -1,7 +1,7 @@
 #!/usr/bin/env nu
 # build-test-binaries.nu — Compile test/test_*.mojo into standalone binaries.
 #
-# Each test module has a fn main() that creates one WasmInstance and
+# Each test module has a def main() that creates one WasmInstance and
 # calls all tests in that module sequentially.  Precompiling avoids
 # the ~11s Mojo compilation overhead on every run.
 #
@@ -43,10 +43,10 @@ def main [
 
     mkdir $out_dir
 
-    # Collect source files — every test/test_*.mojo that contains fn main()
+    # Collect source files — every test/test_*.mojo that contains def main()
     let all_sources = (glob ($test_dir | path join "test_*.mojo")
         | where { |f| ($f | path type) == "file" }
-        | where { |f| (open $f | str contains "fn main") }
+        | where { |f| (open $f | str contains "def main") }
     )
 
     # Apply filter if provided
@@ -69,7 +69,7 @@ def main [
                 print -e $"  ($f | path basename | str replace '.mojo' '')"
             }
         } else {
-            print -e $"No test files with fn main\(\) found in ($test_dir)"
+            print -e $"No test files with def main\(\) found in ($test_dir)"
         }
         exit 1
     }

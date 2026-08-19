@@ -131,7 +131,7 @@ struct CounterApp(GuiApp):
     var detail_tmpl: UInt32
     var cond_slot: ConditionalSlot
 
-    fn __init__(out self):
+    def __init__(out self):
         """Initialize the counter app with all reactive state and view.
 
         Creates: ComponentContext (runtime, VNode store, element ID
@@ -184,16 +184,16 @@ struct CounterApp(GuiApp):
         )
         self.cond_slot = ConditionalSlot()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.count = take.count^
-        self.show_detail = take.show_detail^
-        self.detail_tmpl = take.detail_tmpl
-        self.cond_slot = take.cond_slot.copy()
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.count = move.count^
+        self.show_detail = move.show_detail^
+        self.detail_tmpl = move.detail_tmpl
+        self.cond_slot = move.cond_slot.copy()
 
     # ── GuiApp trait: Rendering ──────────────────────────────────────
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build a fresh VNode for the counter component.
 
         Uses render_builder() which auto-populates the event handler
@@ -216,7 +216,7 @@ struct CounterApp(GuiApp):
 
     # ── GuiApp trait: Event dispatch ─────────────────────────────────
 
-    fn handle_event(
+    def handle_event(
         mut self, handler_id: UInt32, event_type: UInt8, value: String
     ) -> Bool:
         """Dispatch an event to the counter app.
@@ -236,7 +236,7 @@ struct CounterApp(GuiApp):
         Returns:
             True if an action was executed, False otherwise.
         """
-        if len(value) > 0:
+        if value.byte_length() > 0:
             return self.ctx.dispatch_event_with_string(
                 handler_id, event_type, value
             )
@@ -244,9 +244,9 @@ struct CounterApp(GuiApp):
 
     # ── GuiApp trait: Mount lifecycle ────────────────────────────────
 
-    fn mount(
+    def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Initial render (mount) of the counter app.
 
@@ -279,9 +279,9 @@ struct CounterApp(GuiApp):
 
     # ── GuiApp trait: Flush lifecycle ────────────────────────────────
 
-    fn flush(
+    def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Flush pending updates after event dispatch.
 
@@ -326,7 +326,7 @@ struct CounterApp(GuiApp):
 
     # ── GuiApp trait: Dirty state queries ────────────────────────────
 
-    fn has_dirty(self) -> Bool:
+    def has_dirty(self) -> Bool:
         """Check if any scopes need re-rendering.
 
         Returns:
@@ -334,7 +334,7 @@ struct CounterApp(GuiApp):
         """
         return self.ctx.has_dirty()
 
-    fn consume_dirty(mut self) -> Bool:
+    def consume_dirty(mut self) -> Bool:
         """Collect and consume all dirty scopes.
 
         Returns:
@@ -344,13 +344,13 @@ struct CounterApp(GuiApp):
 
     # ── GuiApp trait: Cleanup ────────────────────────────────────────
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """Release all resources held by the counter app."""
         self.ctx.destroy()
 
     # ── App-specific helpers (not part of GuiApp) ────────────────────
 
-    fn build_detail(mut self) -> UInt32:
+    def build_detail(mut self) -> UInt32:
         """Build the detail VNode (even/odd + doubled value).
 
         Only called when show_detail is True.

@@ -45,7 +45,7 @@
 #
 # Environment variables:
 #
-#   MOJO_FLAGS    — extra flags to pass to `mojo build` (default: -Werror)
+#   MOJO_FLAGS    — extra flags to pass to `mojo build` (default: none during the 1.0 migration)
 #   BUILD_DIR     — output directory (default: build)
 #   INITIAL_MEM   — WASM initial memory in bytes (default: 268435456 = 256 MiB)
 
@@ -80,7 +80,7 @@ def main [...examples: string] {
     let web_examples_dir = $web_dir | path join examples
 
     let build_dir = $env.BUILD_DIR? | default ($web_dir | path join build)
-    let mojo_flags = $env.MOJO_FLAGS? | default "-Werror" | split row -r '\s+' | where {|f| $f != "" }
+    let mojo_flags = $env.MOJO_FLAGS? | default "" | split row -r '\s+' | where {|f| $f != "" }
     let initial_mem = $env.INITIAL_MEM? | default "268435456"
 
     let examples = if ($examples | is-empty) { $ALL_EXAMPLES } else { $examples }
@@ -139,6 +139,7 @@ def main [...examples: string] {
         --export-all
         --allow-undefined
         -mwasm64
+        -z stack-size=8388608
         $"--initial-memory=($initial_mem)"
         -o $out_wasm
         ($build_dir | path join out.o))

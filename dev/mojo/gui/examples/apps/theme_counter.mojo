@@ -50,7 +50,7 @@ struct TCCounterChild(Movable):
     var count: _SignalI32  # consumed from parent
     var theme: SignalBool  # consumed from parent
 
-    fn __init__(
+    def __init__(
         out self,
         var child_ctx: ChildComponentContext,
         var count: _SignalI32,
@@ -60,12 +60,12 @@ struct TCCounterChild(Movable):
         self.count = count^
         self.theme = theme^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
-        self.count = take.count^
-        self.theme = take.theme^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
+        self.count = move.count^
+        self.theme = move.theme^
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build the child's VNode with count + optional theme label."""
         var vb = self.child_ctx.render_builder()
         var val = self.count.peek()
@@ -87,7 +87,7 @@ struct TCSummaryChild(Movable):
     var count: _SignalI32  # consumed from parent
     var theme: SignalBool  # consumed from parent
 
-    fn __init__(
+    def __init__(
         out self,
         var child_ctx: ChildComponentContext,
         var count: _SignalI32,
@@ -97,12 +97,12 @@ struct TCSummaryChild(Movable):
         self.count = count^
         self.theme = theme^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
-        self.count = take.count^
-        self.theme = take.theme^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
+        self.count = move.count^
+        self.theme = move.theme^
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build the child's VNode with summary text + class attr."""
         var vb = self.child_ctx.render_builder()
         var val = self.count.peek()
@@ -134,7 +134,7 @@ struct ThemeCounterApp(Movable):
     var counter_child: TCCounterChild
     var summary_child: TCSummaryChild
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.count = self.ctx.use_signal(0)
         self.theme = self.ctx.use_signal_bool(False)
@@ -185,15 +185,15 @@ struct ThemeCounterApp(Movable):
         var sc_theme = summary_ctx.consume_signal_bool(_TC_CTX_THEME)
         self.summary_child = TCSummaryChild(summary_ctx^, sc_count^, sc_theme^)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.count = take.count^
-        self.theme = take.theme^
-        self.on_reset = take.on_reset^
-        self.counter_child = take.counter_child^
-        self.summary_child = take.summary_child^
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.count = move.count^
+        self.theme = move.theme^
+        self.on_reset = move.on_reset^
+        self.counter_child = move.counter_child^
+        self.summary_child = move.summary_child^
 
-    fn render_parent(mut self) -> UInt32:
+    def render_parent(mut self) -> UInt32:
         """Build the parent VNode with placeholders for child slots."""
         var pvb = self.ctx.render_builder()
         pvb.add_dyn_placeholder()  # dyn_node[0] — counter child
@@ -201,25 +201,25 @@ struct ThemeCounterApp(Movable):
         return pvb.build()
 
 
-fn _tc_init() -> UnsafePointer[ThemeCounterApp, MutExternalOrigin]:
+def _tc_init() -> UnsafePointer[ThemeCounterApp, MutUntrackedOrigin]:
     var app_ptr = alloc[ThemeCounterApp](1)
-    app_ptr.init_pointee_move(ThemeCounterApp())
+    app_ptr.unsafe_write(ThemeCounterApp())
     return app_ptr
 
 
-fn _tc_destroy(
-    app_ptr: UnsafePointer[ThemeCounterApp, MutExternalOrigin],
+def _tc_destroy(
+    app_ptr: UnsafePointer[ThemeCounterApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].counter_child.child_ctx)
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].summary_child.child_ctx)
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _tc_rebuild(
+def _tc_rebuild(
     mut app: ThemeCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the theme-counter app."""
     # 1. Render parent with placeholders
@@ -265,7 +265,7 @@ fn _tc_rebuild(
     return Int32(writer_ptr[0].offset)
 
 
-fn _tc_handle_event(
+def _tc_handle_event(
     mut app: ThemeCounterApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -273,9 +273,9 @@ fn _tc_handle_event(
     return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _tc_flush(
+def _tc_flush(
     mut app: ThemeCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates, handling reset callback."""
     # Check for reset callback from counter child

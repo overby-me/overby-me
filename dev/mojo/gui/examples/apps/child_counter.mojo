@@ -52,7 +52,7 @@ struct ChildCounterApp(Movable):
     var count: _SignalI32
     var child: ChildComponent
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.count = self.ctx.use_signal(0)
         self.ctx.setup_view(
@@ -76,12 +76,12 @@ struct ChildCounterApp(Movable):
             String("child-display"),
         )
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.count = take.count^
-        self.child = take.child^
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.count = move.count^
+        self.child = move.child^
 
-    fn render_parent(mut self) -> UInt32:
+    def render_parent(mut self) -> UInt32:
         """Build the parent VNode with a placeholder for the child slot.
 
         The child's content is managed separately via ChildComponent.flush().
@@ -91,7 +91,7 @@ struct ChildCounterApp(Movable):
         pvb.add_dyn_placeholder()
         return pvb.build()
 
-    fn build_child_vnode(mut self) -> UInt32:
+    def build_child_vnode(mut self) -> UInt32:
         """Build the child's VNode with current count value.
 
         Returns the VNode index for use with child.flush().
@@ -103,22 +103,22 @@ struct ChildCounterApp(Movable):
         return cvb.build()
 
 
-fn _cc_init() -> UnsafePointer[ChildCounterApp, MutExternalOrigin]:
+def _cc_init() -> UnsafePointer[ChildCounterApp, MutUntrackedOrigin]:
     var app_ptr = alloc[ChildCounterApp](1)
-    app_ptr.init_pointee_move(ChildCounterApp())
+    app_ptr.unsafe_write(ChildCounterApp())
     return app_ptr
 
 
-fn _cc_destroy(app_ptr: UnsafePointer[ChildCounterApp, MutExternalOrigin]):
+def _cc_destroy(app_ptr: UnsafePointer[ChildCounterApp, MutUntrackedOrigin]):
     app_ptr[0].ctx.destroy_child_component(app_ptr[0].child)
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _cc_rebuild(
+def _cc_rebuild(
     mut app: ChildCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the child-counter app.
 
@@ -175,7 +175,7 @@ fn _cc_rebuild(
     return Int32(writer_ptr[0].offset)
 
 
-fn _cc_handle_event(
+def _cc_handle_event(
     mut app: ChildCounterApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -183,9 +183,9 @@ fn _cc_handle_event(
     return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _cc_flush(
+def _cc_flush(
     mut app: ChildCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates.
 

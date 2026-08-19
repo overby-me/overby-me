@@ -22,29 +22,29 @@ from wasm_harness import (
 )
 
 
-fn _get_wasm() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def _create_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises -> Int:
     """Create a heap-allocated Runtime via WASM."""
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
-fn _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _destroy_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     """Destroy a heap-allocated Runtime via WASM."""
     w[].call_void("runtime_destroy", args_ptr(rt))
 
 
-fn _scope_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _scope_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     height: Int32,
     parent: Int32,
@@ -55,29 +55,29 @@ fn _scope_create(
     )
 
 
-fn _scope_destroy(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, id: Int
+def _scope_destroy(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, id: Int
 ) raises:
     """Destroy a scope."""
     w[].call_void("scope_destroy", args_ptr_i32(rt, Int32(id)))
 
 
-fn _signal_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, initial: Int32
+def _signal_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
 ) raises -> Int:
     """Create an Int32 signal and return its key as Int."""
     return Int(w[].call_i32("signal_create_i32", args_ptr_i32(rt, initial)))
 
 
-fn _signal_read(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_read(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     """Read an Int32 signal (with context tracking)."""
     return Int(w[].call_i32("signal_read_i32", args_ptr_i32(rt, Int32(key))))
 
 
-fn _signal_write(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _signal_write(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     key: Int,
     value: Int32,
@@ -86,22 +86,22 @@ fn _signal_write(
     w[].call_void("signal_write_i32", args_ptr_i32_i32(rt, Int32(key), value))
 
 
-fn _signal_destroy(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_destroy(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises:
     """Destroy a signal."""
     w[].call_void("signal_destroy", args_ptr_i32(rt, Int32(key)))
 
 
-fn _signal_contains(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_contains(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Bool:
     """Check whether a signal key is live."""
     return w[].call_i32("signal_contains", args_ptr_i32(rt, Int32(key))) != 0
 
 
-fn _memo_bool_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_bool_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: Bool,
@@ -120,15 +120,15 @@ fn _memo_bool_create(
     )
 
 
-fn _memo_bool_begin_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_bool_begin_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     """Begin Bool memo computation."""
     w[].call_void("memo_bool_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
-fn _memo_bool_end_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_bool_end_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Bool,
@@ -145,15 +145,15 @@ fn _memo_bool_end_compute(
     )
 
 
-fn _memo_bool_read(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_bool_read(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     """Read the Bool memo's cached value."""
     return w[].call_i32("memo_bool_read", args_ptr_i32(rt, Int32(memo_id))) != 0
 
 
-fn _memo_bool_is_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_bool_is_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     """Check whether the Bool memo needs recomputation."""
     return (
@@ -162,29 +162,29 @@ fn _memo_bool_is_dirty(
     )
 
 
-fn _memo_is_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_is_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     """Check whether any memo needs recomputation (type-agnostic)."""
     return w[].call_i32("memo_is_dirty", args_ptr_i32(rt, Int32(memo_id))) != 0
 
 
-fn _memo_destroy(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_destroy(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     """Destroy a memo."""
     w[].call_void("memo_destroy", args_ptr_i32(rt, Int32(memo_id)))
 
 
-fn _memo_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _memo_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Int:
     """Return the number of live memos."""
     return Int(w[].call_i32("memo_count", args_ptr(rt)))
 
 
-fn _memo_output_key(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_output_key(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     """Return the memo's output signal key."""
     return Int(
@@ -192,8 +192,8 @@ fn _memo_output_key(
     )
 
 
-fn _memo_context_id(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_context_id(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     """Return the memo's reactive context ID."""
     return Int(
@@ -201,8 +201,8 @@ fn _memo_context_id(
     )
 
 
-fn _scope_begin_render(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, scope_id: Int
+def _scope_begin_render(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, scope_id: Int
 ) raises -> Int:
     """Begin scope render and return prev scope."""
     return Int(
@@ -210,15 +210,15 @@ fn _scope_begin_render(
     )
 
 
-fn _scope_end_render(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, prev: Int
+def _scope_end_render(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, prev: Int
 ) raises:
     """End scope render."""
     w[].call_void("scope_end_render", args_ptr_i32(rt, Int32(prev)))
 
 
-fn _drain_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _drain_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Int:
     """Drain the dirty scope queue and return the count."""
     return Int(w[].call_i32("runtime_drain_dirty", args_ptr(rt)))
@@ -227,8 +227,8 @@ fn _drain_dirty(
 # ── 1. mb_create_returns_valid_id ────────────────────────────────────────────
 
 
-fn test_mb_create_returns_valid_id(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_create_returns_valid_id(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """memo ID is valid after creation."""
     var rt = _create_runtime(w)
@@ -250,8 +250,8 @@ fn test_mb_create_returns_valid_id(
 # ── 2. mb_starts_dirty ───────────────────────────────────────────────────────
 
 
-fn test_mb_starts_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_starts_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """initial dirty flag is True."""
     var rt = _create_runtime(w)
@@ -268,8 +268,8 @@ fn test_mb_starts_dirty(
 # ── 3. mb_initial_value ──────────────────────────────────────────────────────
 
 
-fn test_mb_initial_value(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_initial_value(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """peek returns initial value."""
     var rt = _create_runtime(w)
@@ -292,8 +292,8 @@ fn test_mb_initial_value(
 # ── 4. mb_compute_stores_value ───────────────────────────────────────────────
 
 
-fn test_mb_compute_stores_value(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_compute_stores_value(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """begin/end compute stores True."""
     var rt = _create_runtime(w)
@@ -317,8 +317,8 @@ fn test_mb_compute_stores_value(
 # ── 5. mb_compute_clears_dirty ───────────────────────────────────────────────
 
 
-fn test_mb_compute_clears_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_compute_clears_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """dirty cleared after compute."""
     var rt = _create_runtime(w)
@@ -340,8 +340,8 @@ fn test_mb_compute_clears_dirty(
 # ── 6. mb_signal_write_marks_dirty ───────────────────────────────────────────
 
 
-fn test_mb_signal_write_marks_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_signal_write_marks_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """writing subscribed signal dirties memo."""
     var rt = _create_runtime(w)
@@ -379,8 +379,8 @@ fn test_mb_signal_write_marks_dirty(
 # ── 7. mb_read_subscribes_context ────────────────────────────────────────────
 
 
-fn test_mb_read_subscribes_context(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_read_subscribes_context(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """reading in context subscribes scope to memo output."""
     var rt = _create_runtime(w)
@@ -418,8 +418,8 @@ fn test_mb_read_subscribes_context(
 # ── 8. mb_recompute_from_convenience ─────────────────────────────────────────
 
 
-fn test_mb_recompute_from_convenience(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_recompute_from_convenience(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """single-call recompute via begin+end."""
     var rt = _create_runtime(w)
@@ -443,8 +443,8 @@ fn test_mb_recompute_from_convenience(
 # ── 9. mb_peek_does_not_subscribe ────────────────────────────────────────────
 
 
-fn test_mb_peek_does_not_subscribe(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_peek_does_not_subscribe(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """peek has no subscription side effects.
 
@@ -500,8 +500,8 @@ fn test_mb_peek_does_not_subscribe(
 # ── 10. mb_destroy_cleans_up ─────────────────────────────────────────────────
 
 
-fn test_mb_destroy_cleans_up(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_destroy_cleans_up(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """memo count decremented and signals destroyed."""
     var rt = _create_runtime(w)
@@ -527,8 +527,8 @@ fn test_mb_destroy_cleans_up(
 # ── 11. mb_id_reuse_after_destroy ────────────────────────────────────────────
 
 
-fn test_mb_id_reuse_after_destroy(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_id_reuse_after_destroy(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """freed memo ID is reused by the slab allocator."""
     var rt = _create_runtime(w)
@@ -550,8 +550,8 @@ fn test_mb_id_reuse_after_destroy(
 # ── 12. mb_multiple_memos_independent ────────────────────────────────────────
 
 
-fn test_mb_multiple_memos_independent(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_multiple_memos_independent(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """two memos don't interfere."""
     var rt = _create_runtime(w)
@@ -588,8 +588,8 @@ fn test_mb_multiple_memos_independent(
 # ── 13. mb_dirty_propagates_through_chain ────────────────────────────────────
 
 
-fn test_mb_dirty_propagates_through_chain(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_dirty_propagates_through_chain(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """signal → memo_bool chain: writing signal dirties memo."""
     var rt = _create_runtime(w)
@@ -637,8 +637,8 @@ fn test_mb_dirty_propagates_through_chain(
 # ── 14. mb_str_conversion ────────────────────────────────────────────────────
 
 
-fn test_mb_str_conversion(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mb_str_conversion(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Bool memo values read as 1/0 (True/False at WASM level)."""
     var rt = _create_runtime(w)
@@ -669,7 +669,7 @@ fn test_mb_str_conversion(
 # ── Test runner ──────────────────────────────────────────────────────────────
 
 
-fn test_all(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
+def test_all(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     test_mb_create_returns_valid_id(w)
     test_mb_starts_dirty(w)
     test_mb_initial_value(w)
@@ -686,7 +686,7 @@ fn test_all(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
     test_mb_str_conversion(w)
 
 
-fn main() raises:
+def main() raises:
     from wasm_harness import get_instance
 
     var w = get_instance()

@@ -51,13 +51,13 @@ struct SNInnerContentChild(Movable):
 
     var child_ctx: ChildComponentContext
 
-    fn __init__(out self, var child_ctx: ChildComponentContext):
+    def __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
 
-    fn render(mut self, data: String) -> UInt32:
+    def render(mut self, data: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Inner: ") + data)
         return vb.build()
@@ -71,13 +71,13 @@ struct SNInnerSkeletonChild(Movable):
 
     var child_ctx: ChildComponentContext
 
-    fn __init__(out self, var child_ctx: ChildComponentContext):
+    def __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Inner loading..."))
         return vb.build()
@@ -96,7 +96,7 @@ struct SNOuterContentChild(Movable):
     var inner_content: SNInnerContentChild
     var inner_skeleton: SNInnerSkeletonChild
 
-    fn __init__(
+    def __init__(
         out self,
         var child_ctx: ChildComponentContext,
         var inner_content: SNInnerContentChild,
@@ -106,12 +106,12 @@ struct SNOuterContentChild(Movable):
         self.inner_content = inner_content^
         self.inner_skeleton = inner_skeleton^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
-        self.inner_content = take.inner_content^
-        self.inner_skeleton = take.inner_skeleton^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
+        self.inner_content = move.inner_content^
+        self.inner_skeleton = move.inner_skeleton^
 
-    fn render(mut self, data: String) -> UInt32:
+    def render(mut self, data: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Outer: ") + data)
         vb.add_dyn_placeholder()  # dyn_node[1] — inner content slot
@@ -127,13 +127,13 @@ struct SNOuterSkeletonChild(Movable):
 
     var child_ctx: ChildComponentContext
 
-    fn __init__(out self, var child_ctx: ChildComponentContext):
+    def __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Outer loading..."))
         return vb.build()
@@ -156,7 +156,7 @@ struct SuspenseNestApp(Movable):
     var outer_load_handler: UInt32
     var inner_load_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.ctx.use_suspense_boundary()
         self.outer_data = String("ready")
@@ -225,16 +225,16 @@ struct SuspenseNestApp(Movable):
         )
         self.outer_skeleton = SNOuterSkeletonChild(outer_skeleton_ctx^)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.outer_content = take.outer_content^
-        self.outer_skeleton = take.outer_skeleton^
-        self.outer_data = take.outer_data^
-        self.inner_data = take.inner_data^
-        self.outer_load_handler = take.outer_load_handler
-        self.inner_load_handler = take.inner_load_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.outer_content = move.outer_content^
+        self.outer_skeleton = move.outer_skeleton^
+        self.outer_data = move.outer_data^
+        self.inner_data = move.inner_data^
+        self.outer_load_handler = move.outer_load_handler
+        self.inner_load_handler = move.inner_load_handler
 
-    fn render_parent(mut self) -> UInt32:
+    def render_parent(mut self) -> UInt32:
         """Build the parent VNode with placeholders for both outer slots."""
         var pvb = self.ctx.render_builder()
         pvb.add_dyn_placeholder()  # dyn_node[0] — outer content slot
@@ -245,14 +245,14 @@ struct SuspenseNestApp(Movable):
 # ── SuspenseNestApp lifecycle functions ──────────────────────────────────────
 
 
-fn _sn_init() -> UnsafePointer[SuspenseNestApp, MutExternalOrigin]:
+def _sn_init() -> UnsafePointer[SuspenseNestApp, MutUntrackedOrigin]:
     var app_ptr = alloc[SuspenseNestApp](1)
-    app_ptr.init_pointee_move(SuspenseNestApp())
+    app_ptr.unsafe_write(SuspenseNestApp())
     return app_ptr
 
 
-fn _sn_destroy(
-    app_ptr: UnsafePointer[SuspenseNestApp, MutExternalOrigin],
+def _sn_destroy(
+    app_ptr: UnsafePointer[SuspenseNestApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(
         app_ptr[0].outer_content.inner_content.child_ctx
@@ -263,13 +263,13 @@ fn _sn_destroy(
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].outer_content.child_ctx)
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].outer_skeleton.child_ctx)
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _sn_rebuild(
+def _sn_rebuild(
     mut app: SuspenseNestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the suspense-nest app."""
     # 1. Render parent with placeholders
@@ -337,7 +337,7 @@ fn _sn_rebuild(
     return Int32(writer_ptr[0].offset)
 
 
-fn _sn_handle_event(
+def _sn_handle_event(
     mut app: SuspenseNestApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -352,7 +352,7 @@ fn _sn_handle_event(
         return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _sn_outer_resolve(
+def _sn_outer_resolve(
     mut app: SuspenseNestApp,
     data: String,
 ):
@@ -361,7 +361,7 @@ fn _sn_outer_resolve(
     app.ctx.set_pending(False)
 
 
-fn _sn_inner_resolve(
+def _sn_inner_resolve(
     mut app: SuspenseNestApp,
     data: String,
 ):
@@ -370,9 +370,9 @@ fn _sn_inner_resolve(
     app.outer_content.child_ctx.set_pending(False)
 
 
-fn _sn_flush(
+def _sn_flush(
     mut app: SuspenseNestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with nested suspense boundary logic.
 

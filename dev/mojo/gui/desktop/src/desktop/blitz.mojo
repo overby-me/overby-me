@@ -75,14 +75,14 @@ struct BlitzEvent(Copyable, Movable):
     var event_type: UInt8
     var value: String
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an invalid (empty) event."""
         self.valid = False
         self.handler_id = 0
         self.event_type = 0
         self.value = String("")
 
-    fn __init__(
+    def __init__(
         out self,
         valid: Bool,
         handler_id: UInt32,
@@ -94,17 +94,17 @@ struct BlitzEvent(Copyable, Movable):
         self.event_type = event_type
         self.value = value
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.valid = copy.valid
         self.handler_id = copy.handler_id
         self.event_type = copy.event_type
         self.value = copy.value
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.valid = take.valid
-        self.handler_id = take.handler_id
-        self.event_type = take.event_type
-        self.value = take.value^
+    def __init__(out self, *, deinit move: Self):
+        self.valid = move.valid
+        self.handler_id = move.handler_id
+        self.event_type = move.event_type
+        self.value = move.value^
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -116,18 +116,18 @@ comptime _LIB_NAME_DYLIB = "libmojo_blitz.dylib"
 comptime _LIB_NAME_DLL = "mojo_blitz.dll"
 
 
-fn _is_windows_target() -> Bool:
+def _is_windows_target() -> Bool:
     """Return True if the current compilation target is Windows.
 
     Uses the MOJO_TARGET_WINDOWS compile-time define, which must be passed
     via `-D MOJO_TARGET_WINDOWS` when cross-compiling for Windows.
     """
-    from std.sys.param_env import is_defined
+    from std.sys.defines import is_defined
 
     return is_defined["MOJO_TARGET_WINDOWS"]()
 
 
-fn _lib_name() -> String:
+def _lib_name() -> String:
     """Return the platform-appropriate shared library filename."""
 
     comptime if _is_windows_target():
@@ -136,7 +136,7 @@ fn _lib_name() -> String:
         return _LIB_NAME
 
 
-fn _path_sep() -> String:
+def _path_sep() -> String:
     """Return the platform-appropriate path separator."""
 
     comptime if _is_windows_target():
@@ -150,7 +150,7 @@ fn _path_sep() -> String:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn _find_library() -> String:
+def _find_library() -> String:
     """Search for the Blitz shim shared library.
 
     Search order:
@@ -167,26 +167,26 @@ fn _find_library() -> String:
     var name = _lib_name()
 
     var lib_dir = getenv("MOJO_BLITZ_LIB")
-    if len(lib_dir) > 0:
+    if (lib_dir).byte_length() > 0:
         return lib_dir + sep + name
 
     # 2. NIX_LDFLAGS — parse -L/nix/store/... paths
     var nix_flags = getenv("NIX_LDFLAGS")
-    if len(nix_flags) > 0:
+    if (nix_flags).byte_length() > 0:
         # Split on spaces and take the first -L. This was a hand-rolled
         # index walk, which 26.2.0 no longer allows: String has no range
         # __getitem__, only the byte= form used for single characters.
         for token in nix_flags.split(" "):
-            if len(token) > 2 and token.startswith("-L"):
+            if (token).byte_length() > 2 and token.startswith("-L"):
                 # No filesystem check here: the dynamic linker rejects the
                 # path if the library is not actually in it.
                 return token.removeprefix("-L") + sep + name
 
     # 3. LD_LIBRARY_PATH
     var ld_path = getenv("LD_LIBRARY_PATH")
-    if len(ld_path) > 0:
+    if (ld_path).byte_length() > 0:
         for dir_path in ld_path.split(":"):
-            if len(dir_path) > 0:
+            if (dir_path).byte_length() > 0:
                 return dir_path + sep + name
 
     # 4. Fall back to bare library name (let the linker search)
@@ -210,23 +210,25 @@ struct Blitz(Movable):
     """
 
     var _lib: _DLHandle
-    var _ctx: UnsafePointer[NoneType, MutAnyOrigin]
+    var _ctx: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]]
 
-    fn __init__(
-        out self, lib: _DLHandle, ctx: UnsafePointer[NoneType, MutAnyOrigin]
+    def __init__(
+        out self,
+        lib: _DLHandle,
+        ctx: UnsafePointer[NoneType, MutUntrackedOrigin],
     ):
         """Private initializer. Use Blitz.create() instead."""
         self._lib = lib
         self._ctx = ctx
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._lib = take._lib
-        self._ctx = take._ctx
+    def __init__(out self, *, deinit move: Self):
+        self._lib = move._lib
+        self._ctx = move._ctx
 
     # ── Factory ──────────────────────────────────────────────────────────
 
     @staticmethod
-    fn create(
+    def create(
         title: String, width: Int, height: Int, debug: Bool = False
     ) raises -> Self:
         """Create a Blitz application context with a native window.
@@ -250,11 +252,11 @@ struct Blitz(Movable):
         var lib = _DLHandle(lib_path)
 
         var title_ptr = title.unsafe_ptr()
-        var title_len = UInt32(len(title))
+        var title_len = UInt32((title).byte_length())
         var debug_flag = Int32(1) if debug else Int32(0)
 
         var ctx = lib.call[
-            "mblitz_create", UnsafePointer[NoneType, MutAnyOrigin]
+            "mblitz_create", UnsafePointer[NoneType, MutUntrackedOrigin]
         ](
             title_ptr,
             title_len,
@@ -267,7 +269,7 @@ struct Blitz(Movable):
 
     # ── Lifecycle ────────────────────────────────────────────────────────
 
-    fn step(self, blocking: Bool = False) -> Bool:
+    def step(self, blocking: Bool = False) -> Bool:
         """Process pending window/input events.
 
         Args:
@@ -282,7 +284,7 @@ struct Blitz(Movable):
         )
         return result != 0
 
-    fn is_alive(self) -> Bool:
+    def is_alive(self) -> Bool:
         """Check if the window is still open.
 
         Returns:
@@ -291,32 +293,32 @@ struct Blitz(Movable):
         var result = self._lib.call["mblitz_is_alive", Int32](self._ctx)
         return result != 0
 
-    fn request_redraw(self):
+    def request_redraw(self):
         """Request a redraw of the window.
 
         Call after applying mutations to trigger re-layout and re-paint.
         """
         self._lib.call["mblitz_request_redraw", NoneType](self._ctx)
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """Destroy the Blitz context and close the window.
 
         The context is invalid after this call.
         """
         if self._ctx:
             self._lib.call["mblitz_destroy", NoneType](self._ctx)
-            self._ctx = UnsafePointer[NoneType, MutAnyOrigin]()
+            self._ctx = None
 
     # ── Window management ────────────────────────────────────────────────
 
-    fn set_title(self, title: String):
+    def set_title(self, title: String):
         """Set the window title."""
         var title_ptr = title.unsafe_ptr()
         self._lib.call["mblitz_set_title", NoneType](
             self._ctx, title_ptr, UInt32(len(title))
         )
 
-    fn set_size(self, width: Int, height: Int):
+    def set_size(self, width: Int, height: Int):
         """Resize the window."""
         self._lib.call["mblitz_set_size", NoneType](
             self._ctx, UInt32(width), UInt32(height)
@@ -324,16 +326,16 @@ struct Blitz(Movable):
 
     # ── User-agent stylesheet ────────────────────────────────────────────
 
-    fn add_ua_stylesheet(self, css: String):
+    def add_ua_stylesheet(self, css: String):
         """Add a user-agent stylesheet (CSS string)."""
         var css_ptr = css.unsafe_ptr()
         self._lib.call["mblitz_add_ua_stylesheet", NoneType](
-            self._ctx, css_ptr, UInt32(len(css))
+            self._ctx, css_ptr, UInt32((css).byte_length())
         )
 
     # ── DOM node creation ────────────────────────────────────────────────
 
-    fn create_element(self, tag: String) -> UInt32:
+    def create_element(self, tag: String) -> UInt32:
         """Create an HTML element node (detached).
 
         Args:
@@ -344,10 +346,10 @@ struct Blitz(Movable):
         """
         var tag_ptr = tag.unsafe_ptr()
         return self._lib.call["mblitz_create_element", UInt32](
-            self._ctx, tag_ptr, UInt32(len(tag))
+            self._ctx, tag_ptr, UInt32((tag).byte_length())
         )
 
-    fn create_text_node(self, text: String) -> UInt32:
+    def create_text_node(self, text: String) -> UInt32:
         """Create a text node (detached).
 
         Args:
@@ -358,10 +360,10 @@ struct Blitz(Movable):
         """
         var text_ptr = text.unsafe_ptr()
         return self._lib.call["mblitz_create_text_node", UInt32](
-            self._ctx, text_ptr, UInt32(len(text))
+            self._ctx, text_ptr, UInt32(text.byte_length())
         )
 
-    fn create_placeholder(self) -> UInt32:
+    def create_placeholder(self) -> UInt32:
         """Create a comment/placeholder node (detached).
 
         Returns:
@@ -371,7 +373,7 @@ struct Blitz(Movable):
 
     # ── Templates ────────────────────────────────────────────────────────
 
-    fn register_template(self, tmpl_id: UInt32, root_id: UInt32):
+    def register_template(self, tmpl_id: UInt32, root_id: UInt32):
         """Register a template subtree for efficient cloning.
 
         Args:
@@ -382,7 +384,7 @@ struct Blitz(Movable):
             self._ctx, tmpl_id, root_id
         )
 
-    fn clone_template(self, tmpl_id: UInt32) -> UInt32:
+    def clone_template(self, tmpl_id: UInt32) -> UInt32:
         """Deep-clone a registered template.
 
         Args:
@@ -397,7 +399,7 @@ struct Blitz(Movable):
 
     # ── DOM tree mutations ───────────────────────────────────────────────
 
-    fn append_children(
+    def append_children(
         self,
         parent_id: UInt32,
         child_ids: UnsafePointer[UInt32, _],
@@ -414,7 +416,7 @@ struct Blitz(Movable):
             self._ctx, parent_id, child_ids, child_count
         )
 
-    fn insert_before(
+    def insert_before(
         self,
         anchor_id: UInt32,
         new_ids: UnsafePointer[UInt32, _],
@@ -431,7 +433,7 @@ struct Blitz(Movable):
             self._ctx, anchor_id, new_ids, new_count
         )
 
-    fn insert_after(
+    def insert_after(
         self,
         anchor_id: UInt32,
         new_ids: UnsafePointer[UInt32, _],
@@ -448,7 +450,7 @@ struct Blitz(Movable):
             self._ctx, anchor_id, new_ids, new_count
         )
 
-    fn replace_with(
+    def replace_with(
         self,
         old_id: UInt32,
         new_ids: UnsafePointer[UInt32, _],
@@ -465,7 +467,7 @@ struct Blitz(Movable):
             self._ctx, old_id, new_ids, new_count
         )
 
-    fn remove_node(self, node_id: UInt32):
+    def remove_node(self, node_id: UInt32):
         """Remove and drop a node from the DOM.
 
         Args:
@@ -475,7 +477,7 @@ struct Blitz(Movable):
 
     # ── DOM node attributes ──────────────────────────────────────────────
 
-    fn set_attribute(self, node_id: UInt32, name: String, value: String):
+    def set_attribute(self, node_id: UInt32, name: String, value: String):
         """Set an attribute on an element.
 
         Args:
@@ -489,12 +491,12 @@ struct Blitz(Movable):
             self._ctx,
             node_id,
             name_ptr,
-            UInt32(len(name)),
+            UInt32(name.byte_length()),
             value_ptr,
-            UInt32(len(value)),
+            UInt32(value.byte_length()),
         )
 
-    fn remove_attribute(self, node_id: UInt32, name: String):
+    def remove_attribute(self, node_id: UInt32, name: String):
         """Remove an attribute from an element.
 
         Args:
@@ -506,12 +508,12 @@ struct Blitz(Movable):
             self._ctx,
             node_id,
             name_ptr,
-            UInt32(len(name)),
+            UInt32(name.byte_length()),
         )
 
     # ── DOM text content ─────────────────────────────────────────────────
 
-    fn set_text_content(self, node_id: UInt32, text: String):
+    def set_text_content(self, node_id: UInt32, text: String):
         """Set the text content of a text node.
 
         Args:
@@ -520,12 +522,12 @@ struct Blitz(Movable):
         """
         var text_ptr = text.unsafe_ptr()
         self._lib.call["mblitz_set_text_content", NoneType](
-            self._ctx, node_id, text_ptr, UInt32(len(text))
+            self._ctx, node_id, text_ptr, UInt32(text.byte_length())
         )
 
     # ── DOM tree traversal ───────────────────────────────────────────────
 
-    fn node_at_path(
+    def node_at_path(
         self,
         start_id: UInt32,
         path: UnsafePointer[UInt8, _],
@@ -548,7 +550,7 @@ struct Blitz(Movable):
             self._ctx, start_id, path, path_len
         )
 
-    fn child_at(self, node_id: UInt32, index: UInt32) -> UInt32:
+    def child_at(self, node_id: UInt32, index: UInt32) -> UInt32:
         """Get the Nth child of a node.
 
         Args:
@@ -562,7 +564,7 @@ struct Blitz(Movable):
             self._ctx, node_id, index
         )
 
-    fn child_count(self, node_id: UInt32) -> UInt32:
+    def child_count(self, node_id: UInt32) -> UInt32:
         """Get the number of children of a node.
 
         Args:
@@ -575,7 +577,7 @@ struct Blitz(Movable):
 
     # ── Event handling ───────────────────────────────────────────────────
 
-    fn add_event_listener(
+    def add_event_listener(
         self, node_id: UInt32, handler_id: UInt32, event_name: String
     ):
         """Register an event handler on a node.
@@ -591,10 +593,10 @@ struct Blitz(Movable):
             node_id,
             handler_id,
             name_ptr,
-            UInt32(len(event_name)),
+            UInt32((event_name).byte_length()),
         )
 
-    fn remove_event_listener(self, node_id: UInt32, event_name: String):
+    def remove_event_listener(self, node_id: UInt32, event_name: String):
         """Remove an event handler from a node.
 
         Args:
@@ -606,10 +608,10 @@ struct Blitz(Movable):
             self._ctx,
             node_id,
             name_ptr,
-            UInt32(len(event_name)),
+            UInt32((event_name).byte_length()),
         )
 
-    fn poll_event(self) -> BlitzEvent:
+    def poll_event(self) -> BlitzEvent:
         """Poll the next event from the ring buffer.
 
         Uses `mblitz_poll_event_into` which writes event fields to
@@ -668,7 +670,9 @@ struct Blitz(Movable):
         if v_len > 0 and v_ptr_int != 0:
             var slot = alloc[Int](1)
             slot[0] = v_ptr_int
-            var v_ptr = slot.bitcast[UnsafePointer[UInt8, MutAnyOrigin]]()[0]
+            var v_ptr = slot.bitcast[
+                UnsafePointer[UInt8, MutUntrackedOrigin]
+            ]()[0]
             slot.free()
             for i in range(v_len):
                 value += chr(Int(v_ptr[i]))
@@ -680,7 +684,7 @@ struct Blitz(Movable):
             value=value,
         )
 
-    fn event_count(self) -> UInt32:
+    def event_count(self) -> UInt32:
         """Get the number of buffered events.
 
         Returns:
@@ -688,13 +692,13 @@ struct Blitz(Movable):
         """
         return self._lib.call["mblitz_event_count", UInt32](self._ctx)
 
-    fn event_clear(self):
+    def event_clear(self):
         """Clear all buffered events."""
         self._lib.call["mblitz_event_clear", NoneType](self._ctx)
 
     # ── Mutation batching ────────────────────────────────────────────────
 
-    fn begin_mutations(self):
+    def begin_mutations(self):
         """Begin a mutation batch.
 
         All DOM mutations between begin_mutations() and end_mutations()
@@ -702,13 +706,13 @@ struct Blitz(Movable):
         """
         self._lib.call["mblitz_begin_mutations", NoneType](self._ctx)
 
-    fn end_mutations(self):
+    def end_mutations(self):
         """End a mutation batch and flush deferred operations."""
         self._lib.call["mblitz_end_mutations", NoneType](self._ctx)
 
     # ── Stack operations (for mutation interpreter) ──────────────────────
 
-    fn stack_push(self, node_id: UInt32):
+    def stack_push(self, node_id: UInt32):
         """Push a node ID onto the interpreter stack.
 
         Args:
@@ -716,7 +720,7 @@ struct Blitz(Movable):
         """
         self._lib.call["mblitz_stack_push", NoneType](self._ctx, node_id)
 
-    fn stack_pop_append(self, parent_id: UInt32, count: UInt32):
+    def stack_pop_append(self, parent_id: UInt32, count: UInt32):
         """Pop N nodes from the stack and append them as children.
 
         Args:
@@ -727,7 +731,7 @@ struct Blitz(Movable):
             self._ctx, parent_id, count
         )
 
-    fn stack_pop_replace(self, old_id: UInt32, count: UInt32):
+    def stack_pop_replace(self, old_id: UInt32, count: UInt32):
         """Pop N nodes from the stack and replace an existing node.
 
         Args:
@@ -738,7 +742,7 @@ struct Blitz(Movable):
             self._ctx, old_id, count
         )
 
-    fn stack_pop_insert_before(self, anchor_id: UInt32, count: UInt32):
+    def stack_pop_insert_before(self, anchor_id: UInt32, count: UInt32):
         """Pop N nodes from the stack and insert before anchor.
 
         Args:
@@ -749,7 +753,7 @@ struct Blitz(Movable):
             self._ctx, anchor_id, count
         )
 
-    fn stack_pop_insert_after(self, anchor_id: UInt32, count: UInt32):
+    def stack_pop_insert_after(self, anchor_id: UInt32, count: UInt32):
         """Pop N nodes from the stack and insert after anchor.
 
         Args:
@@ -762,7 +766,7 @@ struct Blitz(Movable):
 
     # ── ID mapping ───────────────────────────────────────────────────────
 
-    fn assign_id(self, mojo_id: UInt32, blitz_node_id: UInt32):
+    def assign_id(self, mojo_id: UInt32, blitz_node_id: UInt32):
         """Assign a mojo-gui element ID to a Blitz node ID.
 
         Used by the mutation interpreter when processing OP_ASSIGN_ID.
@@ -777,17 +781,17 @@ struct Blitz(Movable):
 
     # ── Document root access ─────────────────────────────────────────────
 
-    fn root_node_id(self) -> UInt32:
+    def root_node_id(self) -> UInt32:
         """Get the document root node ID (always 0 in Blitz)."""
         return self._lib.call["mblitz_root_node_id", UInt32](self._ctx)
 
-    fn mount_point_id(self) -> UInt32:
+    def mount_point_id(self) -> UInt32:
         """Get the mount point node ID (where app DOM is attached)."""
         return self._lib.call["mblitz_mount_point_id", UInt32](self._ctx)
 
     # ── Layout ───────────────────────────────────────────────────────────
 
-    fn resolve_layout(self):
+    def resolve_layout(self):
         """Force synchronous layout computation."""
         self._lib.call["mblitz_resolve_layout", NoneType](self._ctx)
 
@@ -797,11 +801,11 @@ struct Blitz(Movable):
 
     # ── Debug / diagnostics ──────────────────────────────────────────────
 
-    fn print_tree(self):
+    def print_tree(self):
         """Print the DOM tree to stderr (for debugging)."""
         self._lib.call["mblitz_print_tree", NoneType](self._ctx)
 
-    fn set_debug_overlay(self, enabled: Bool):
+    def set_debug_overlay(self, enabled: Bool):
         """Toggle debug overlay visibility.
 
         Args:

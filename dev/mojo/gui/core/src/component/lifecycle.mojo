@@ -97,13 +97,13 @@ struct FragmentSlot(Copyable, Equatable, Writable):
     var current_frag: Int
     var mounted: Bool
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an uninitialized slot."""
         self.anchor_id = 0
         self.current_frag = -1
         self.mounted = False
 
-    fn __init__(out self, anchor_id: UInt32, initial_frag: Int):
+    def __init__(out self, anchor_id: UInt32, initial_frag: Int):
         """Create a slot with a known anchor and initial fragment.
 
         Args:
@@ -115,15 +115,15 @@ struct FragmentSlot(Copyable, Equatable, Writable):
         self.current_frag = initial_frag
         self.mounted = False
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.anchor_id = copy.anchor_id
         self.current_frag = copy.current_frag
         self.mounted = copy.mounted
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.anchor_id = take.anchor_id
-        self.current_frag = take.current_frag
-        self.mounted = take.mounted
+    def __init__(out self, *, deinit move: Self):
+        self.anchor_id = move.anchor_id
+        self.current_frag = move.current_frag
+        self.mounted = move.mounted
 
 
 # ── ConditionalSlot — State tracker for a single conditional VNode ────────────
@@ -166,13 +166,13 @@ struct ConditionalSlot(Copyable, Equatable, Writable):
     var current_vnode: Int
     var mounted: Bool
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an uninitialized slot."""
         self.anchor_id = 0
         self.current_vnode = -1
         self.mounted = False
 
-    fn __init__(out self, anchor_id: UInt32):
+    def __init__(out self, anchor_id: UInt32):
         """Create a slot with a known anchor (placeholder is in the DOM).
 
         Args:
@@ -183,25 +183,25 @@ struct ConditionalSlot(Copyable, Equatable, Writable):
         self.current_vnode = -1
         self.mounted = False
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.anchor_id = copy.anchor_id
         self.current_vnode = copy.current_vnode
         self.mounted = copy.mounted
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.anchor_id = take.anchor_id
-        self.current_vnode = take.current_vnode
-        self.mounted = take.mounted
+    def __init__(out self, *, deinit move: Self):
+        self.anchor_id = move.anchor_id
+        self.current_vnode = move.current_vnode
+        self.mounted = move.mounted
 
 
 # ── Conditional flush helper ──────────────────────────────────────────────────
 
 
-fn flush_conditional(
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutExternalOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutExternalOrigin],
+def flush_conditional(
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
+    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     slot: ConditionalSlot,
     new_vnode_idx: UInt32,
 ) -> ConditionalSlot:
@@ -254,11 +254,11 @@ fn flush_conditional(
     return result.copy()
 
 
-fn flush_conditional_empty(
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutExternalOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutExternalOrigin],
+def flush_conditional_empty(
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
+    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     slot: ConditionalSlot,
 ) -> ConditionalSlot:
     """Flush a conditional slot: hide the current branch (back to placeholder).
@@ -321,11 +321,11 @@ fn flush_conditional_empty(
 # ── Fragment flush helper ─────────────────────────────────────────────────────
 
 
-fn flush_fragment(
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutExternalOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutExternalOrigin],
+def flush_fragment(
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
+    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     mut slot: FragmentSlot,
     new_frag_idx: UInt32,
 ) -> FragmentSlot:
@@ -425,11 +425,11 @@ fn flush_fragment(
 # ── Single-VNode mount / diff helpers ─────────────────────────────────────────
 
 
-fn mount_vnode(
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutExternalOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutExternalOrigin],
+def mount_vnode(
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
+    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     vnode_idx: UInt32,
 ) -> Int32:
     """Initial render: create mutations for a VNode and append to root.
@@ -459,11 +459,11 @@ fn mount_vnode(
     return Int32(writer_ptr[0].offset)
 
 
-fn mount_vnode_to(
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutExternalOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutExternalOrigin],
+def mount_vnode_to(
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
+    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     vnode_idx: UInt32,
     parent_id: UInt32,
 ) -> Int32:
@@ -492,11 +492,11 @@ fn mount_vnode_to(
     return Int32(writer_ptr[0].offset)
 
 
-fn diff_and_finalize(
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutExternalOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutExternalOrigin],
+def diff_and_finalize(
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
+    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     old_idx: UInt32,
     new_idx: UInt32,
 ) -> Int32:
@@ -523,11 +523,11 @@ fn diff_and_finalize(
     return Int32(writer_ptr[0].offset)
 
 
-fn diff_no_finalize(
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutExternalOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutExternalOrigin],
+def diff_no_finalize(
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
+    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     old_idx: UInt32,
     new_idx: UInt32,
 ):
@@ -549,11 +549,11 @@ fn diff_no_finalize(
     engine.diff_node(old_idx, new_idx)
 
 
-fn create_no_finalize(
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutExternalOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutExternalOrigin],
+def create_no_finalize(
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
+    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     vnode_idx: UInt32,
 ) -> UInt32:
     """Create mutations for a VNode WITHOUT finalizing or appending.

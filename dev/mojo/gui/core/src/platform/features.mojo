@@ -127,7 +127,7 @@ struct PlatformFeatures(Copyable, Movable):
 
     # ── Constructor ───────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create a PlatformFeatures with all capabilities set to False.
 
         Renderers should create an instance, set the appropriate fields
@@ -147,7 +147,7 @@ struct PlatformFeatures(Copyable, Movable):
         self.has_xr_passthrough = False
         self.renderer_name = String("unknown")
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.has_dom = copy.has_dom
         self.has_css = copy.has_css
         self.has_gpu = copy.has_gpu
@@ -162,20 +162,20 @@ struct PlatformFeatures(Copyable, Movable):
         self.has_xr_passthrough = copy.has_xr_passthrough
         self.renderer_name = copy.renderer_name
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.has_dom = take.has_dom
-        self.has_css = take.has_css
-        self.has_gpu = take.has_gpu
-        self.has_multi_window = take.has_multi_window
-        self.has_native_chrome = take.has_native_chrome
-        self.has_clipboard = take.has_clipboard
-        self.has_filesystem = take.has_filesystem
-        self.has_unrestricted_network = take.has_unrestricted_network
-        self.has_accessibility = take.has_accessibility
-        self.has_xr = take.has_xr
-        self.has_xr_hand_tracking = take.has_xr_hand_tracking
-        self.has_xr_passthrough = take.has_xr_passthrough
-        self.renderer_name = take.renderer_name^
+    def __init__(out self, *, deinit move: Self):
+        self.has_dom = move.has_dom
+        self.has_css = move.has_css
+        self.has_gpu = move.has_gpu
+        self.has_multi_window = move.has_multi_window
+        self.has_native_chrome = move.has_native_chrome
+        self.has_clipboard = move.has_clipboard
+        self.has_filesystem = move.has_filesystem
+        self.has_unrestricted_network = move.has_unrestricted_network
+        self.has_accessibility = move.has_accessibility
+        self.has_xr = move.has_xr
+        self.has_xr_hand_tracking = move.has_xr_hand_tracking
+        self.has_xr_passthrough = move.has_xr_passthrough
+        self.renderer_name = move.renderer_name^
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -183,7 +183,7 @@ struct PlatformFeatures(Copyable, Movable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn web_features() -> PlatformFeatures:
+def web_features() -> PlatformFeatures:
     """Return the feature set for the web (WASM + browser) renderer.
 
     Web has full DOM and CSS support but is sandboxed: no multi-window,
@@ -206,7 +206,7 @@ fn web_features() -> PlatformFeatures:
     return f
 
 
-fn desktop_blitz_features() -> PlatformFeatures:
+def desktop_blitz_features() -> PlatformFeatures:
     """Return the feature set for the desktop Blitz renderer.
 
     Blitz provides DOM/CSS via Stylo + Taffy + Vello, native chrome via
@@ -229,7 +229,7 @@ fn desktop_blitz_features() -> PlatformFeatures:
     return f
 
 
-fn native_features() -> PlatformFeatures:
+def native_features() -> PlatformFeatures:
     """Return the feature set for the native widget renderer (future).
 
     Native renderers map DOM mutations to platform widgets (Cocoa, Win32,
@@ -253,7 +253,7 @@ fn native_features() -> PlatformFeatures:
     return f
 
 
-fn xr_native_features() -> PlatformFeatures:
+def xr_native_features() -> PlatformFeatures:
     """Return the feature set for the OpenXR native renderer.
 
     The XR native renderer uses the Blitz stack (same as desktop) but
@@ -281,7 +281,7 @@ fn xr_native_features() -> PlatformFeatures:
     return f
 
 
-fn xr_web_features() -> PlatformFeatures:
+def xr_web_features() -> PlatformFeatures:
     """Return the feature set for the WebXR browser renderer.
 
     The WebXR renderer extends the web renderer with XR session management
@@ -317,7 +317,7 @@ var _current_features: PlatformFeatures = PlatformFeatures()
 var _features_registered: Bool = False
 
 
-fn register_features(features: PlatformFeatures):
+def register_features(features: PlatformFeatures):
     """Register the active renderer's feature set.
 
     Called by the renderer during its init() phase. Subsequent calls
@@ -330,7 +330,7 @@ fn register_features(features: PlatformFeatures):
     _features_registered = True
 
 
-fn current_features() -> PlatformFeatures:
+def current_features() -> PlatformFeatures:
     """Return the currently registered platform features.
 
     If no renderer has registered features yet, returns a default
@@ -342,7 +342,7 @@ fn current_features() -> PlatformFeatures:
     return _current_features
 
 
-fn features_registered() -> Bool:
+def features_registered() -> Bool:
     """Return True if a renderer has registered its features.
 
     Useful for framework internals to detect whether platform
@@ -351,7 +351,7 @@ fn features_registered() -> Bool:
     return _features_registered
 
 
-fn default_features() -> PlatformFeatures:
+def default_features() -> PlatformFeatures:
     """Return a default feature set based on compile-time target detection.
 
     This provides a best-guess feature set without requiring renderer

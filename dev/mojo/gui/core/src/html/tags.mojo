@@ -77,7 +77,7 @@ comptime TAG_COUNT: Int = 40  # total number of known tags
 # ── Tag name lookup ──────────────────────────────────────────────────────────
 
 
-fn tag_name(tag: UInt8) -> String:
+def tag_name(tag: UInt8) -> String:
     """Return the HTML tag name string for a given tag constant.
 
     Used by the JS interpreter bridge to create the correct DOM elements.

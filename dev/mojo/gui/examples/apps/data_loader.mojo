@@ -51,13 +51,13 @@ struct DLContentChild(Movable):
 
     var child_ctx: ChildComponentContext
 
-    fn __init__(out self, var child_ctx: ChildComponentContext):
+    def __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
 
-    fn render(mut self, data: String) -> UInt32:
+    def render(mut self, data: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Data: ") + data)
         return vb.build()
@@ -71,13 +71,13 @@ struct DLSkeletonChild(Movable):
 
     var child_ctx: ChildComponentContext
 
-    fn __init__(out self, var child_ctx: ChildComponentContext):
+    def __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Loading..."))
         return vb.build()
@@ -97,7 +97,7 @@ struct DataLoaderApp(Movable):
     var data_text: String
     var load_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.ctx.use_suspense_boundary()
         self.data_text = String("(none)")
@@ -127,14 +127,14 @@ struct DataLoaderApp(Movable):
         )
         self.skeleton = DLSkeletonChild(skel_ctx^)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.content = take.content^
-        self.skeleton = take.skeleton^
-        self.data_text = take.data_text^
-        self.load_handler = take.load_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.content = move.content^
+        self.skeleton = move.skeleton^
+        self.data_text = move.data_text^
+        self.load_handler = move.load_handler
 
-    fn render_parent(mut self) -> UInt32:
+    def render_parent(mut self) -> UInt32:
         """Build the parent VNode with placeholders for both slots."""
         var pvb = self.ctx.render_builder()
         pvb.add_dyn_placeholder()  # dyn_node[0] — content slot
@@ -145,25 +145,25 @@ struct DataLoaderApp(Movable):
 # ── DataLoaderApp lifecycle functions ────────────────────────────────────────
 
 
-fn _dl_init() -> UnsafePointer[DataLoaderApp, MutExternalOrigin]:
+def _dl_init() -> UnsafePointer[DataLoaderApp, MutUntrackedOrigin]:
     var app_ptr = alloc[DataLoaderApp](1)
-    app_ptr.init_pointee_move(DataLoaderApp())
+    app_ptr.unsafe_write(DataLoaderApp())
     return app_ptr
 
 
-fn _dl_destroy(
-    app_ptr: UnsafePointer[DataLoaderApp, MutExternalOrigin],
+def _dl_destroy(
+    app_ptr: UnsafePointer[DataLoaderApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].content.child_ctx)
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].skeleton.child_ctx)
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _dl_rebuild(
+def _dl_rebuild(
     mut app: DataLoaderApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the data-loader app."""
     # 1. Render parent with placeholders
@@ -206,7 +206,7 @@ fn _dl_rebuild(
     return Int32(writer_ptr[0].offset)
 
 
-fn _dl_handle_event(
+def _dl_handle_event(
     mut app: DataLoaderApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -218,7 +218,7 @@ fn _dl_handle_event(
         return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _dl_resolve(
+def _dl_resolve(
     mut app: DataLoaderApp,
     data: String,
 ):
@@ -227,9 +227,9 @@ fn _dl_resolve(
     app.ctx.set_pending(False)
 
 
-fn _dl_flush(
+def _dl_flush(
     mut app: DataLoaderApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with suspense logic.
 

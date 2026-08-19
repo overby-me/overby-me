@@ -48,27 +48,27 @@ from wasm_harness import (
 )
 
 
-fn _get_wasm() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Int:
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
-fn _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _destroy_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_destroy", args_ptr(rt))
 
 
-fn _scope_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _scope_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     height: Int32,
     parent: Int32,
@@ -78,34 +78,34 @@ fn _scope_create(
     )
 
 
-fn _scope_begin_render(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, scope_id: Int
+def _scope_begin_render(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, scope_id: Int
 ) raises -> Int:
     return Int(
         w[].call_i32("scope_begin_render", args_ptr_i32(rt, Int32(scope_id)))
     )
 
 
-fn _scope_end_render(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, prev: Int
+def _scope_end_render(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, prev: Int
 ) raises:
     w[].call_void("scope_end_render", args_ptr_i32(rt, Int32(prev)))
 
 
-fn _signal_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, initial: Int32
+def _signal_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
 ) raises -> Int:
     return Int(w[].call_i32("signal_create_i32", args_ptr_i32(rt, initial)))
 
 
-fn _signal_read(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_read(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     return Int(w[].call_i32("signal_read_i32", args_ptr_i32(rt, Int32(key))))
 
 
-fn _signal_write(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _signal_write(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     key: Int,
     value: Int32,
@@ -113,20 +113,20 @@ fn _signal_write(
     w[].call_void("signal_write_i32", args_ptr_i32_i32(rt, Int32(key), value))
 
 
-fn _signal_peek(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_peek(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     return Int(w[].call_i32("signal_peek_i32", args_ptr_i32(rt, Int32(key))))
 
 
-fn _signal_version(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_version(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     return Int(w[].call_i32("signal_version", args_ptr_i32(rt, Int32(key))))
 
 
-fn _memo_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: Int32,
@@ -139,14 +139,14 @@ fn _memo_create(
     )
 
 
-fn _memo_begin_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_begin_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
-fn _memo_end_compute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_end_compute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Int32,
@@ -157,64 +157,64 @@ fn _memo_end_compute(
     )
 
 
-fn _memo_read(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_read(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     return Int(w[].call_i32("memo_read_i32", args_ptr_i32(rt, Int32(memo_id))))
 
 
-fn _memo_is_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_is_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return w[].call_i32("memo_is_dirty", args_ptr_i32(rt, Int32(memo_id))) != 0
 
 
-fn _memo_output_key(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_output_key(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     return Int(
         w[].call_i32("memo_output_key", args_ptr_i32(rt, Int32(memo_id)))
     )
 
 
-fn _memo_destroy(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, memo_id: Int
+def _memo_destroy(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_destroy", args_ptr_i32(rt, Int32(memo_id)))
 
 
-fn _has_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _has_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Bool:
     return w[].call_i32("runtime_has_dirty", args_ptr(rt)) != 0
 
 
-fn _drain_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _drain_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Int:
     return Int(w[].call_i32("runtime_drain_dirty", args_ptr(rt)))
 
 
-fn _begin_batch(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _begin_batch(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_begin_batch", args_ptr(rt))
 
 
-fn _end_batch(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _end_batch(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_end_batch", args_ptr(rt))
 
 
-fn _is_batching(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _is_batching(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Bool:
     return w[].call_i32("runtime_is_batching", args_ptr(rt)) != 0
 
 
-fn _signal_changed(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, key: Int
+def _signal_changed(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Bool:
     return (
         w[].call_i32("runtime_signal_changed", args_ptr_i32(rt, Int32(key)))
@@ -222,26 +222,26 @@ fn _signal_changed(
     )
 
 
-fn _clear_changed_signals(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _clear_changed_signals(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_clear_changed_signals", args_ptr(rt))
 
 
-fn _settle_scopes(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _settle_scopes(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_settle_scopes", args_ptr(rt))
 
 
-fn _effect_create(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, scope_id: Int
+def _effect_create(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, scope_id: Int
 ) raises -> Int:
     return Int(w[].call_i32("effect_create", args_ptr_i32(rt, Int32(scope_id))))
 
 
-fn _effect_is_pending(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, effect_id: Int
+def _effect_is_pending(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises -> Bool:
     return (
         w[].call_i32("effect_is_pending", args_ptr_i32(rt, Int32(effect_id)))
@@ -249,20 +249,20 @@ fn _effect_is_pending(
     )
 
 
-fn _effect_begin_run(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, effect_id: Int
+def _effect_begin_run(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises:
     w[].call_void("effect_begin_run", args_ptr_i32(rt, Int32(effect_id)))
 
 
-fn _effect_end_run(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int, effect_id: Int
+def _effect_end_run(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises:
     w[].call_void("effect_end_run", args_ptr_i32(rt, Int32(effect_id)))
 
 
-fn _create_signal_string(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_signal_string(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     initial: String,
 ) raises -> Int:
@@ -272,18 +272,18 @@ fn _create_signal_string(
     return Int(w[].call_i64("signal_create_string", args_ptr_ptr(rt, in_ptr)))
 
 
-fn _signal_string_key(packed: Int) raises -> Int:
+def _signal_string_key(packed: Int) raises -> Int:
     """Extract string_key (low 32 bits) from packed signal pair."""
     return packed & 0xFFFFFFFF
 
 
-fn _signal_version_key(packed: Int) raises -> Int:
+def _signal_version_key(packed: Int) raises -> Int:
     """Extract version_key (high 32 bits) from packed signal pair."""
     return (packed >> 32) & 0xFFFFFFFF
 
 
-fn _write_signal_string(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _write_signal_string(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     string_key: Int,
     version_key: Int,
@@ -298,8 +298,8 @@ fn _write_signal_string(
     )
 
 
-fn _peek_signal_string(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _peek_signal_string(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     string_key: Int,
 ) raises -> String:
@@ -313,8 +313,8 @@ fn _peek_signal_string(
 # ── Helper: subscribe scope/memo to a signal by reading during render ────────
 
 
-fn _subscribe_scope_to_signal(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _subscribe_scope_to_signal(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     signal_key: Int,
@@ -333,7 +333,7 @@ fn _subscribe_scope_to_signal(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_single_signal() raises:
+def test_batch_single_signal() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -371,7 +371,7 @@ fn test_batch_single_signal() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_multi_signal_same_memo() raises:
+def test_batch_multi_signal_same_memo() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -412,7 +412,7 @@ fn test_batch_multi_signal_same_memo() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_multi_signal_different_memos() raises:
+def test_batch_multi_signal_different_memos() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -463,7 +463,7 @@ fn test_batch_multi_signal_different_memos() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_defers_propagation() raises:
+def test_batch_defers_propagation() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -507,7 +507,7 @@ fn test_batch_defers_propagation() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_scope_dirty_after_end() raises:
+def test_batch_scope_dirty_after_end() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -543,7 +543,7 @@ fn test_batch_scope_dirty_after_end() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_read_sees_new_value() raises:
+def test_batch_read_sees_new_value() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
 
@@ -567,7 +567,7 @@ fn test_batch_read_sees_new_value() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_read_signal_subscribes() raises:
+def test_batch_read_signal_subscribes() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -601,7 +601,7 @@ fn test_batch_read_signal_subscribes() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_empty_noop() raises:
+def test_batch_empty_noop() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -625,7 +625,7 @@ fn test_batch_empty_noop() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_nested() raises:
+def test_batch_nested() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -666,7 +666,7 @@ fn test_batch_nested() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_nested_depth3() raises:
+def test_batch_nested_depth3() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -702,7 +702,7 @@ fn test_batch_nested_depth3() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_changed_signals_populated() raises:
+def test_batch_changed_signals_populated() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
 
@@ -736,7 +736,7 @@ fn test_batch_changed_signals_populated() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_string_signal() raises:
+def test_batch_string_signal() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -792,7 +792,7 @@ fn test_batch_string_signal() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_mixed_types() raises:
+def test_batch_mixed_types() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -836,7 +836,7 @@ fn test_batch_mixed_types() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_dedup_keys() raises:
+def test_batch_dedup_keys() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -873,7 +873,7 @@ fn test_batch_dedup_keys() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_effect_pending_after_end() raises:
+def test_batch_effect_pending_after_end() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -915,7 +915,7 @@ fn test_batch_effect_pending_after_end() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_memo_worklist_shared() raises:
+def test_batch_memo_worklist_shared() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -966,7 +966,7 @@ fn test_batch_memo_worklist_shared() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_chain_propagation() raises:
+def test_batch_chain_propagation() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -1022,7 +1022,7 @@ fn test_batch_chain_propagation() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_settle_after_batch() raises:
+def test_batch_settle_after_batch() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -1071,7 +1071,7 @@ fn test_batch_settle_after_batch() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_non_batch_still_works() raises:
+def test_batch_non_batch_still_works() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -1102,7 +1102,7 @@ fn test_batch_non_batch_still_works() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_end_without_begin() raises:
+def test_batch_end_without_begin() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
 
@@ -1124,7 +1124,7 @@ fn test_batch_end_without_begin() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_is_batching_flag() raises:
+def test_batch_is_batching_flag() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
 
@@ -1167,7 +1167,7 @@ fn test_batch_is_batching_flag() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_batch_large_batch() raises:
+def test_batch_large_batch() raises:
     var w = _get_wasm()
     var rt = _create_runtime(w)
     var scope = _scope_create(w, rt, 0, -1)
@@ -1223,7 +1223,7 @@ fn test_batch_large_batch() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn main() raises:
+def main() raises:
     var total = 22
     var passed = 0
     var failed = 0

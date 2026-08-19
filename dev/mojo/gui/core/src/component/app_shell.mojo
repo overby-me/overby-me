@@ -43,82 +43,86 @@ struct AppShell(Movable):
     manually wire CreateEngine, DiffEngine, etc.
     """
 
-    var runtime: UnsafePointer[Runtime, MutExternalOrigin]
-    var store: UnsafePointer[VNodeStore, MutExternalOrigin]
-    var eid_alloc: UnsafePointer[ElementIdAllocator, MutExternalOrigin]
+    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var store: UnsafePointer[VNodeStore, MutUntrackedOrigin]
+    var eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin]
     var scheduler: Scheduler
     var _alive: Bool
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an uninitialized shell.  Call `setup()` to allocate."""
-        self.runtime = UnsafePointer[Runtime, MutExternalOrigin]()
-        self.store = UnsafePointer[VNodeStore, MutExternalOrigin]()
-        self.eid_alloc = UnsafePointer[ElementIdAllocator, MutExternalOrigin]()
+        self.runtime = UnsafePointer[
+            Runtime, MutUntrackedOrigin
+        ].unsafe_dangling()
+        self.store = UnsafePointer[
+            VNodeStore, MutUntrackedOrigin
+        ].unsafe_dangling()
+        self.eid_alloc = UnsafePointer[
+            ElementIdAllocator, MutUntrackedOrigin
+        ].unsafe_dangling()
         self.scheduler = Scheduler()
         self._alive = False
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.runtime = take.runtime
-        self.store = take.store
-        self.eid_alloc = take.eid_alloc
-        self.scheduler = take.scheduler^
-        self._alive = take._alive
+    def __init__(out self, *, deinit move: Self):
+        self.runtime = move.runtime
+        self.store = move.store
+        self.eid_alloc = move.eid_alloc
+        self.scheduler = move.scheduler^
+        self._alive = move._alive
 
     # ── Setup / Teardown ─────────────────────────────────────────────
 
-    fn setup(mut self):
+    def setup(mut self):
         """Allocate all subsystems.  Must be called once before use."""
         self.runtime = create_runtime()
 
         self.store = alloc[VNodeStore](1)
-        self.store.init_pointee_move(VNodeStore())
+        self.store.unsafe_write(VNodeStore())
 
         self.eid_alloc = alloc[ElementIdAllocator](1)
-        self.eid_alloc.init_pointee_move(ElementIdAllocator())
+        self.eid_alloc.unsafe_write(ElementIdAllocator())
 
         self.scheduler = Scheduler()
         self._alive = True
 
-    fn destroy(mut self):
+    def destroy(mut self):
         """Free all resources.  Safe to call multiple times."""
         if not self._alive:
             return
         self._alive = False
 
-        if self.store != UnsafePointer[VNodeStore, MutExternalOrigin]():
-            self.store.destroy_pointee()
-            self.store.free()
-            self.store = UnsafePointer[VNodeStore, MutExternalOrigin]()
+        self.store.unsafe_deinit_pointee()
+        self.store.free()
+        self.store = UnsafePointer[
+            VNodeStore, MutUntrackedOrigin
+        ].unsafe_dangling()
 
-        if (
-            self.eid_alloc
-            != UnsafePointer[ElementIdAllocator, MutExternalOrigin]()
-        ):
-            self.eid_alloc.destroy_pointee()
-            self.eid_alloc.free()
-            self.eid_alloc = UnsafePointer[
-                ElementIdAllocator, MutExternalOrigin
-            ]()
+        self.eid_alloc.unsafe_deinit_pointee()
+        self.eid_alloc.free()
+        self.eid_alloc = UnsafePointer[
+            ElementIdAllocator, MutUntrackedOrigin
+        ].unsafe_dangling()
 
-        if self.runtime != UnsafePointer[Runtime, MutExternalOrigin]():
-            destroy_runtime(self.runtime)
-            self.runtime = UnsafePointer[Runtime, MutExternalOrigin]()
+        destroy_runtime(self.runtime)
+        self.runtime = UnsafePointer[
+            Runtime, MutUntrackedOrigin
+        ].unsafe_dangling()
 
-    fn is_alive(self) -> Bool:
+    def is_alive(self) -> Bool:
         """Check whether the shell has been set up and not yet destroyed."""
         return self._alive
 
     # ── Scope helpers ────────────────────────────────────────────────
 
-    fn create_root_scope(mut self) -> UInt32:
+    def create_root_scope(mut self) -> UInt32:
         """Create a root scope (height 0, no parent).  Returns scope ID."""
         return self.runtime[0].create_scope(0, -1)
 
-    fn create_child_scope(mut self, parent_id: UInt32) -> UInt32:
+    def create_child_scope(mut self, parent_id: UInt32) -> UInt32:
         """Create a child scope.  Returns scope ID."""
         return self.runtime[0].create_child_scope(parent_id)
 
-    fn destroy_child_scopes(mut self, scope_ids: List[UInt32]):
+    def destroy_child_scopes(mut self, scope_ids: List[UInt32]):
         """Destroy a list of child scopes and clean up their handlers.
 
         For each scope ID in the list:
@@ -139,127 +143,127 @@ struct AppShell(Movable):
             self.runtime[0].handlers.remove_for_scope(sid)
             self.runtime[0].destroy_scope(sid)
 
-    fn begin_render(mut self, scope_id: UInt32) -> Int:
+    def begin_render(mut self, scope_id: UInt32) -> Int:
         """Begin rendering a scope.  Returns previous scope ID (or -1)."""
         return self.runtime[0].begin_scope_render(scope_id)
 
-    fn end_render(mut self, prev_scope: Int):
+    def end_render(mut self, prev_scope: Int):
         """End rendering and restore the previous scope."""
         self.runtime[0].end_scope_render(prev_scope)
 
     # ── Signal helpers ───────────────────────────────────────────────
 
-    fn create_signal_i32(mut self, initial: Int32) -> UInt32:
+    def create_signal_i32(mut self, initial: Int32) -> UInt32:
         """Create an Int32 signal.  Returns its key."""
         return self.runtime[0].create_signal[Int32](initial)
 
-    fn read_signal_i32(mut self, key: UInt32) -> Int32:
+    def read_signal_i32(mut self, key: UInt32) -> Int32:
         """Read an Int32 signal (with context tracking)."""
         return self.runtime[0].read_signal[Int32](key)
 
-    fn peek_signal_i32(self, key: UInt32) -> Int32:
+    def peek_signal_i32(self, key: UInt32) -> Int32:
         """Read an Int32 signal without subscribing."""
         return self.runtime[0].peek_signal[Int32](key)
 
-    fn write_signal_i32(mut self, key: UInt32, value: Int32):
+    def write_signal_i32(mut self, key: UInt32, value: Int32):
         """Write a new value to an Int32 signal."""
         self.runtime[0].write_signal[Int32](key, value)
 
-    fn use_signal_i32(mut self, initial: Int32) -> UInt32:
+    def use_signal_i32(mut self, initial: Int32) -> UInt32:
         """Hook: create or retrieve an Int32 signal for the current scope."""
         return self.runtime[0].use_signal_i32(initial)
 
     # ── Memo helpers ─────────────────────────────────────────────────
 
-    fn create_memo_i32(mut self, scope_id: UInt32, initial: Int32) -> UInt32:
+    def create_memo_i32(mut self, scope_id: UInt32, initial: Int32) -> UInt32:
         """Create an Int32 memo.  Returns its ID."""
         return self.runtime[0].create_memo_i32(scope_id, initial)
 
-    fn memo_begin_compute(mut self, memo_id: UInt32):
+    def memo_begin_compute(mut self, memo_id: UInt32):
         """Begin memo computation (sets memo's context as current)."""
         self.runtime[0].memo_begin_compute(memo_id)
 
-    fn memo_end_compute_i32(mut self, memo_id: UInt32, value: Int32):
+    def memo_end_compute_i32(mut self, memo_id: UInt32, value: Int32):
         """End memo computation and cache the result."""
         self.runtime[0].memo_end_compute_i32(memo_id, value)
 
-    fn memo_read_i32(mut self, memo_id: UInt32) -> Int32:
+    def memo_read_i32(mut self, memo_id: UInt32) -> Int32:
         """Read a memo's cached value (with context tracking)."""
         return self.runtime[0].memo_read_i32(memo_id)
 
-    fn memo_is_dirty(self, memo_id: UInt32) -> Bool:
+    def memo_is_dirty(self, memo_id: UInt32) -> Bool:
         """Check whether the memo needs recomputation."""
         return self.runtime[0].memo_is_dirty(memo_id)
 
-    fn use_memo_i32(mut self, initial: Int32) -> UInt32:
+    def use_memo_i32(mut self, initial: Int32) -> UInt32:
         """Hook: create or retrieve an Int32 memo for the current scope."""
         return self.runtime[0].use_memo_i32(initial)
 
     # ── MemoBool helpers ─────────────────────────────────────────────
 
-    fn create_memo_bool(mut self, scope_id: UInt32, initial: Bool) -> UInt32:
+    def create_memo_bool(mut self, scope_id: UInt32, initial: Bool) -> UInt32:
         """Create a Bool memo.  Returns its ID."""
         return self.runtime[0].create_memo_bool(scope_id, initial)
 
-    fn memo_end_compute_bool(mut self, memo_id: UInt32, value: Bool):
+    def memo_end_compute_bool(mut self, memo_id: UInt32, value: Bool):
         """End Bool memo computation and cache the result."""
         self.runtime[0].memo_end_compute_bool(memo_id, value)
 
-    fn memo_read_bool(mut self, memo_id: UInt32) -> Bool:
+    def memo_read_bool(mut self, memo_id: UInt32) -> Bool:
         """Read a Bool memo's cached value (with context tracking)."""
         return self.runtime[0].memo_read_bool(memo_id)
 
-    fn use_memo_bool(mut self, initial: Bool) -> UInt32:
+    def use_memo_bool(mut self, initial: Bool) -> UInt32:
         """Hook: create or retrieve a Bool memo for the current scope."""
         return self.runtime[0].use_memo_bool(initial)
 
     # ── MemoString helpers ───────────────────────────────────────────
 
-    fn create_memo_string(
+    def create_memo_string(
         mut self, scope_id: UInt32, initial: String
     ) -> UInt32:
         """Create a String memo.  Returns its ID."""
         return self.runtime[0].create_memo_string(scope_id, initial)
 
-    fn memo_end_compute_string(mut self, memo_id: UInt32, value: String):
+    def memo_end_compute_string(mut self, memo_id: UInt32, value: String):
         """End String memo computation and cache the result."""
         self.runtime[0].memo_end_compute_string(memo_id, value)
 
-    fn memo_read_string(mut self, memo_id: UInt32) -> String:
+    def memo_read_string(mut self, memo_id: UInt32) -> String:
         """Read a String memo's cached value (with context tracking)."""
         return self.runtime[0].memo_read_string(memo_id)
 
-    fn memo_peek_string(self, memo_id: UInt32) -> String:
+    def memo_peek_string(self, memo_id: UInt32) -> String:
         """Read a String memo's cached value without subscribing."""
         return self.runtime[0].memo_peek_string(memo_id)
 
-    fn use_memo_string(mut self, initial: String) -> UInt32:
+    def use_memo_string(mut self, initial: String) -> UInt32:
         """Hook: create or retrieve a String memo for the current scope."""
         return self.runtime[0].use_memo_string(initial)
 
     # ── Effect helpers ───────────────────────────────────────────────
 
-    fn create_effect(mut self, scope_id: UInt32) -> UInt32:
+    def create_effect(mut self, scope_id: UInt32) -> UInt32:
         """Create an effect with a reactive context.  Returns its ID."""
         return self.runtime[0].create_effect(scope_id)
 
-    fn effect_begin_run(mut self, effect_id: UInt32):
+    def effect_begin_run(mut self, effect_id: UInt32):
         """Begin effect execution (sets effect's context as current)."""
         self.runtime[0].effect_begin_run(effect_id)
 
-    fn effect_end_run(mut self, effect_id: UInt32):
+    def effect_end_run(mut self, effect_id: UInt32):
         """End effect execution (clears pending, restores context)."""
         self.runtime[0].effect_end_run(effect_id)
 
-    fn effect_is_pending(self, effect_id: UInt32) -> Bool:
+    def effect_is_pending(self, effect_id: UInt32) -> Bool:
         """Check whether the effect needs re-execution."""
         return self.runtime[0].effect_is_pending(effect_id)
 
-    fn use_effect(mut self) -> UInt32:
+    def use_effect(mut self) -> UInt32:
         """Hook: create or retrieve an effect for the current scope."""
         return self.runtime[0].use_effect()
 
-    fn drain_pending_effects(self) -> List[UInt32]:
+    def drain_pending_effects(self) -> List[UInt32]:
         """Return a list of effect IDs that are currently pending.
 
         Does NOT clear pending flags — the caller must begin_run/end_run
@@ -267,19 +271,19 @@ struct AppShell(Movable):
         """
         return self.runtime[0].drain_pending_effects()
 
-    fn pending_effect_count(self) -> Int:
+    def pending_effect_count(self) -> Int:
         """Return the number of pending effects."""
         return self.runtime[0].pending_effect_count()
 
-    fn pending_effect_at(self, index: Int) -> UInt32:
+    def pending_effect_at(self, index: Int) -> UInt32:
         """Return the effect ID at the given index in the pending list."""
         return self.runtime[0].pending_effect_at(index)
 
     # ── Mount lifecycle ──────────────────────────────────────────────
 
-    fn mount(
+    def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         vnode_idx: UInt32,
     ) -> Int32:
         """Initial render: create mutations for a VNode, append to root (id 0),
@@ -304,9 +308,9 @@ struct AppShell(Movable):
         writer_ptr[0].finalize()
         return Int32(writer_ptr[0].offset)
 
-    fn mount_with_templates(
+    def mount_with_templates(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         vnode_idx: UInt32,
     ) -> Int32:
         """Initial render with template emission prepended.
@@ -341,9 +345,9 @@ struct AppShell(Movable):
 
     # ── Update lifecycle ─────────────────────────────────────────────
 
-    fn diff(
+    def diff(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         old_idx: UInt32,
         new_idx: UInt32,
     ):
@@ -359,8 +363,8 @@ struct AppShell(Movable):
         )
         engine.diff_node(old_idx, new_idx)
 
-    fn finalize(
-        self, writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin]
+    def finalize(
+        self, writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin]
     ) -> Int32:
         """Write the End sentinel and return the byte length."""
         writer_ptr[0].finalize()
@@ -368,26 +372,26 @@ struct AppShell(Movable):
 
     # ── Flush lifecycle ──────────────────────────────────────────────
 
-    fn has_dirty(self) -> Bool:
+    def has_dirty(self) -> Bool:
         """Check whether any scopes need re-rendering."""
         return self.runtime[0].has_dirty()
 
-    fn collect_dirty(mut self):
+    def collect_dirty(mut self):
         """Drain the runtime's dirty queue into the scheduler."""
         self.scheduler.collect(self.runtime)
 
-    fn next_dirty(mut self) -> UInt32:
+    def next_dirty(mut self) -> UInt32:
         """Return the next scope to render (lowest height first).
 
         Precondition: scheduler is not empty (call collect_dirty first).
         """
         return self.scheduler.next()
 
-    fn scheduler_empty(self) -> Bool:
+    def scheduler_empty(self) -> Bool:
         """Check if the scheduler has no more pending scopes."""
         return self.scheduler.is_empty()
 
-    fn consume_dirty(mut self) -> Bool:
+    def consume_dirty(mut self) -> Bool:
         """Collect all dirty scopes via the scheduler and consume them.
 
         Routes dirty scope processing through the height-ordered
@@ -408,7 +412,7 @@ struct AppShell(Movable):
             _ = self.next_dirty()
         return True
 
-    fn settle_scopes(mut self):
+    def settle_scopes(mut self):
         """Remove dirty scopes with no actual signal changes.
 
         After memo recomputation, some scopes may have been eagerly
@@ -423,23 +427,23 @@ struct AppShell(Movable):
 
     # ── Batch signal writes (Phase 38) ───────────────────────────────
 
-    fn begin_batch(mut self):
+    def begin_batch(mut self):
         """Enter batch mode for signal writes."""
         self.runtime[0].begin_batch()
 
-    fn end_batch(mut self):
+    def end_batch(mut self):
         """Exit batch mode and propagate all deferred writes."""
         self.runtime[0].end_batch()
 
-    fn is_batching(self) -> Bool:
+    def is_batching(self) -> Bool:
         """Return True if currently inside a batch."""
         return self.runtime[0].is_batching()
 
     # ── Fragment flush ───────────────────────────────────────────────
 
-    fn flush_fragment(
+    def flush_fragment(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         slot: FragmentSlot,
         new_frag_idx: UInt32,
     ) -> FragmentSlot:
@@ -477,8 +481,8 @@ struct AppShell(Movable):
 
     # ── Template emission ────────────────────────────────────────────
 
-    fn emit_templates(
-        self, writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin]
+    def emit_templates(
+        self, writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin]
     ):
         """Serialize all registered templates into the mutation buffer.
 
@@ -494,11 +498,11 @@ struct AppShell(Movable):
 
     # ── Event dispatch ───────────────────────────────────────────────
 
-    fn dispatch_event(mut self, handler_id: UInt32, event_type: UInt8) -> Bool:
+    def dispatch_event(mut self, handler_id: UInt32, event_type: UInt8) -> Bool:
         """Dispatch an event to a handler.  Returns True if executed."""
         return self.runtime[0].dispatch_event(handler_id, event_type)
 
-    fn dispatch_event_with_i32(
+    def dispatch_event_with_i32(
         mut self, handler_id: UInt32, event_type: UInt8, value: Int32
     ) -> Bool:
         """Dispatch an event with an Int32 payload."""
@@ -506,7 +510,7 @@ struct AppShell(Movable):
             handler_id, event_type, value
         )
 
-    fn dispatch_event_with_string(
+    def dispatch_event_with_string(
         mut self, handler_id: UInt32, event_type: UInt8, value: String
     ) -> Bool:
         """Dispatch an event with a String payload (Phase 20).
@@ -523,7 +527,7 @@ struct AppShell(Movable):
 # ── Module-level factory ─────────────────────────────────────────────────────
 
 
-fn app_shell_create() -> AppShell:
+def app_shell_create() -> AppShell:
     """Create and set up a new AppShell with all subsystems allocated."""
     var shell = AppShell()
     shell.setup()

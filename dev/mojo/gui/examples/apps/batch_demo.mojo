@@ -55,7 +55,7 @@ struct BatchDemoApp(Movable):
     var set_handler: UInt32
     var reset_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         # Create string signals without auto-subscribing the scope —
         # the scope subscribes to memo outputs and write_count instead.
@@ -82,16 +82,16 @@ struct BatchDemoApp(Movable):
         self.set_handler = self.ctx.view_event_handler_id(0)
         self.reset_handler = self.ctx.view_event_handler_id(1)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.first_name = take.first_name^
-        self.last_name = take.last_name^
-        self.full_name = take.full_name.copy()
-        self.write_count = take.write_count.copy()
-        self.set_handler = take.set_handler
-        self.reset_handler = take.reset_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.first_name = move.first_name^
+        self.last_name = move.last_name^
+        self.full_name = move.full_name.copy()
+        self.write_count = move.write_count.copy()
+        self.set_handler = move.set_handler
+        self.reset_handler = move.reset_handler
 
-    fn run_memos(mut self):
+    def run_memos(mut self):
         """Recompute the full_name memo if dirty.
 
         Chain: first_name + last_name → full_name (concatenation)
@@ -102,7 +102,7 @@ struct BatchDemoApp(Movable):
             var l = self.last_name.read()
             self.full_name.end_compute(f + String(" ") + l)
 
-    fn set_names(mut self, first: String, last: String):
+    def set_names(mut self, first: String, last: String):
         """Set both names and bump write_count in a single batch.
 
         All three signal writes happen inside begin_batch/end_batch,
@@ -114,7 +114,7 @@ struct BatchDemoApp(Movable):
         self.write_count += 1
         self.ctx.end_batch()
 
-    fn reset(mut self):
+    def reset(mut self):
         """Reset all state in a single batch.
 
         Writes first_name="", last_name="", write_count=0.
@@ -125,7 +125,7 @@ struct BatchDemoApp(Movable):
         self.write_count.set(0)
         self.ctx.end_batch()
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build a fresh VNode with 2 dyn_text slots."""
         var vb = self.ctx.render_builder()
         vb.add_dyn_text(String("Full: ") + self.full_name.peek())
@@ -136,23 +136,23 @@ struct BatchDemoApp(Movable):
 # ── BatchDemoApp lifecycle functions ─────────────────────────────────────────
 
 
-fn _bd_init() -> UnsafePointer[BatchDemoApp, MutExternalOrigin]:
+def _bd_init() -> UnsafePointer[BatchDemoApp, MutUntrackedOrigin]:
     var app_ptr = alloc[BatchDemoApp](1)
-    app_ptr.init_pointee_move(BatchDemoApp())
+    app_ptr.unsafe_write(BatchDemoApp())
     return app_ptr
 
 
-fn _bd_destroy(
-    app_ptr: UnsafePointer[BatchDemoApp, MutExternalOrigin],
+def _bd_destroy(
+    app_ptr: UnsafePointer[BatchDemoApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _bd_rebuild(
+def _bd_rebuild(
     mut app: BatchDemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the batch-demo app.
 
@@ -168,7 +168,7 @@ fn _bd_rebuild(
     return result
 
 
-fn _bd_handle_event(
+def _bd_handle_event(
     mut app: BatchDemoApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -176,9 +176,9 @@ fn _bd_handle_event(
     return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _bd_flush(
+def _bd_flush(
     mut app: BatchDemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with batch-aware memo chain.
 

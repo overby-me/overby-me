@@ -29,7 +29,7 @@ Import signatures are derived from `wasm-objdump -j Import -x build/out.wasm`:
 """
 
 from std.collections import Dict
-from std.memory import UnsafePointer, memcpy, memset_zero, alloc
+from std.memory import UnsafePointer, unsafe_memcpy, unsafe_memset_zero, alloc
 from std.pathlib import Path
 from std.ffi import OwnedDLHandle
 
@@ -45,6 +45,7 @@ from wasmtime_mojo import (
     WasmtimeMemory,
     WasmtimeExtern,
     WasmtimeCallback,
+    TrapPtr,
     ContextPtr,
     WASM_I32,
     WASM_I64,
@@ -115,9 +116,9 @@ struct SharedState(Movable):
     var free_map: Dict[Int, List[Int]]  # size → LIFO stack of freed pointers
     var reuse_enabled: Bool
 
-    fn __init__(out self):
+    def __init__(out self):
         self.bump_ptr = 0
-        self.context = ContextPtr()
+        self.context = ContextPtr.unsafe_dangling()
         self.memory = WasmtimeMemory()
         self.captured_stdout = List[String]()
         self.has_memory = False
@@ -126,18 +127,18 @@ struct SharedState(Movable):
         self.free_map = Dict[Int, List[Int]]()
         self.reuse_enabled = True
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.bump_ptr = take.bump_ptr
-        self.context = take.context
-        self.memory = take.memory
-        self.captured_stdout = take.captured_stdout^
-        self.has_memory = take.has_memory
-        self.mock_time = take.mock_time
-        self.ptr_size = take.ptr_size^
-        self.free_map = take.free_map^
-        self.reuse_enabled = take.reuse_enabled
+    def __init__(out self, *, deinit move: Self):
+        self.bump_ptr = move.bump_ptr
+        self.context = move.context
+        self.memory = move.memory
+        self.captured_stdout = move.captured_stdout^
+        self.has_memory = move.has_memory
+        self.mock_time = move.mock_time
+        self.ptr_size = move.ptr_size^
+        self.free_map = move.free_map^
+        self.reuse_enabled = move.reuse_enabled
 
-    fn aligned_alloc(mut self, align: Int, size: Int) -> Int:
+    def aligned_alloc(mut self, align: Int, size: Int) -> Int:
         """Allocate *size* bytes with the given alignment.
 
         If reuse is enabled, checks the size-class free list for an exact
@@ -170,7 +171,7 @@ struct SharedState(Movable):
 
         return ptr
 
-    fn aligned_free(mut self, ptr: Int):
+    def aligned_free(mut self, ptr: Int):
         """Free a previously allocated block.
 
         Looks up the block size from ptr_size and pushes the pointer onto
@@ -204,7 +205,7 @@ struct SharedState(Movable):
             b.append(ptr)
             self.free_map[size] = b^
 
-    fn heap_stats(self) raises -> Tuple[Int, Int, Int]:
+    def heap_stats(self) raises -> Tuple[Int, Int, Int]:
         """Return (heap_pointer, free_blocks, free_bytes)."""
         var blocks = 0
         var bytes = 0
@@ -228,163 +229,163 @@ struct SharedState(Movable):
 # Each callback has the wasmtime_func_callback_t signature:
 #   fn(env, caller, args, nargs, results, nresults) -> trap_ptr
 #
-# Return null pointer (UnsafePointer[NoneType, MutExternalOrigin]()) on success.
+# Return None (no trap) on success.
 # ---------------------------------------------------------------------------
 
 
 # Helper to get the SharedState from the env pointer.
 @always_inline
-fn _state(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-) -> UnsafePointer[SharedState, MutExternalOrigin]:
+def _state(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+) -> UnsafePointer[SharedState, MutUntrackedOrigin]:
     return env.bitcast[SharedState]()
 
 
 # -- func[0] KGEN_CompilerRT_AlignedAlloc: (i64, i64) -> i64 --------------
 
 
-fn _cb_aligned_alloc(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_aligned_alloc(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     var state = _state(env)
     var align = Int(args[0].get_i64())
     var size = Int(args[1].get_i64())
     var ptr = state[].aligned_alloc(align, size)
     results[0] = WasmtimeVal.from_i64(Int64(ptr))
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[1] KGEN_CompilerRT_AlignedFree: (i64) -> nil --------------------
 
 
-fn _cb_aligned_free(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_aligned_free(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     var state = _state(env)
     var ptr = Int(args[0].get_i64())
     state[].aligned_free(ptr)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[2] fmaf: (f32, f32, f32) -> f32 ---------------------------------
 
 
-fn _cb_fmaf(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_fmaf(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     var x = args[0].get_f32()
     var y = args[1].get_f32()
     var z = args[2].get_f32()
     # fused multiply-add (truncated to f32 precision)
     var r = x * y + z
     results[0] = WasmtimeVal.from_f32(r)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[3] fminf: (f32, f32) -> f32 -------------------------------------
 
 
-fn _cb_fminf(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_fminf(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     var x = args[0].get_f32()
     var y = args[1].get_f32()
     var r = y if x > y else x
     results[0] = WasmtimeVal.from_f32(r)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[4] fmaxf: (f32, f32) -> f32 -------------------------------------
 
 
-fn _cb_fmaxf(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_fmaxf(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     var x = args[0].get_f32()
     var y = args[1].get_f32()
     var r = x if x > y else y
     results[0] = WasmtimeVal.from_f32(r)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[5] fma: (f64, f64, f64) -> f64 ----------------------------------
 
 
-fn _cb_fma(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_fma(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     var x = args[0].get_f64()
     var y = args[1].get_f64()
     var z = args[2].get_f64()
     var r = x * y + z
     results[0] = WasmtimeVal.from_f64(r)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[6] fmin: (f64, f64) -> f64 --------------------------------------
 
 
-fn _cb_fmin(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_fmin(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     var x = args[0].get_f64()
     var y = args[1].get_f64()
     var r = y if x > y else x
     results[0] = WasmtimeVal.from_f64(r)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[7] fmax: (f64, f64) -> f64 --------------------------------------
 
 
-fn _cb_fmax(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_fmax(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     var x = args[0].get_f64()
     var y = args[1].get_f64()
     var r = x if x > y else y
     results[0] = WasmtimeVal.from_f64(r)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[8] write: (i64, i64, i64) -> i64 --------------------------------
@@ -394,89 +395,89 @@ fn _cb_fmax(
 # -- func[9] dup: (i32) -> i32 --------------------------------------------
 
 
-fn _cb_dup(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_dup(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     results[0] = WasmtimeVal.from_i32(1)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[11] fdopen: (i32, i64) -> i64 -----------------------------------
 
 
-fn _cb_fdopen(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_fdopen(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     results[0] = WasmtimeVal.from_i64(1)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[12] fflush: (i64) -> i32 ----------------------------------------
 
 
-fn _cb_fflush(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_fflush(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     results[0] = WasmtimeVal.from_i32(1)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[13] fclose: (i64) -> i32 ----------------------------------------
 
 
-fn _cb_fclose(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_fclose(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     results[0] = WasmtimeVal.from_i32(1)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[14] KGEN_CompilerRT_fprintf: (i64, i64, i64) -> i32 -------------
 
 
-fn _cb_fprintf(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_fprintf(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     results[0] = WasmtimeVal.from_i32(0)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[8] write: (i64, i64, i64) -> i64 --------------------------------
 
 
-fn _cb_write(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_write(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     var state = _state(env)
     var fd = Int(args[0].get_i64())
     var ptr = Int(args[1].get_i64())
@@ -484,11 +485,11 @@ fn _cb_write(
 
     if length == 0:
         results[0] = WasmtimeVal.from_i64(0)
-        return UnsafePointer[NoneType, MutExternalOrigin]()
+        return None
 
     if not state[].has_memory:
         results[0] = WasmtimeVal.from_i64(-1)
-        return UnsafePointer[NoneType, MutExternalOrigin]()
+        return None
 
     if fd == 1:
         # stdout — capture the written text
@@ -510,7 +511,7 @@ fn _cb_write(
     else:
         results[0] = WasmtimeVal.from_i64(-1)
 
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[14] clock_gettime: (i32, i64) -> i32 ----------------------------
@@ -521,21 +522,21 @@ fn _cb_write(
 # This keeps WASM test output reproducible.
 
 
-fn _cb_clock_gettime(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_clock_gettime(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     var state = _state(env)
     # args[0] = clockid (i32, ignored — we always return the mock clock)
     var ts_ptr = Int(args[1].get_i64())
 
     if not state[].has_memory:
         results[0] = WasmtimeVal.from_i32(-1)
-        return UnsafePointer[NoneType, MutExternalOrigin]()
+        return None
 
     # Write tv_sec (i64 LE) at ts_ptr and tv_nsec (i64 LE) at ts_ptr+8.
     # Use the mock_time as seconds so tests remain deterministic.
@@ -547,7 +548,7 @@ fn _cb_clock_gettime(
         results[0] = WasmtimeVal.from_i32(0)
     except:
         results[0] = WasmtimeVal.from_i32(-1)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # -- func[16] performance_now: () -> f64 -----------------------------------
@@ -556,19 +557,19 @@ fn _cb_clock_gettime(
 # so before/after pairs always yield a predictable delta.
 
 
-fn _cb_performance_now(
-    env: UnsafePointer[NoneType, MutExternalOrigin],
-    caller: UnsafePointer[NoneType, MutExternalOrigin],
-    args: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+def _cb_performance_now(
+    env: UnsafePointer[NoneType, MutUntrackedOrigin],
+    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
+    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutExternalOrigin],
+    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-) -> UnsafePointer[NoneType, MutExternalOrigin]:
+) abi("C") -> TrapPtr:
     var state = _state(env)
     var t = state[].mock_time
     state[].mock_time += 1.0
     results[0] = WasmtimeVal.from_f64(t)
-    return UnsafePointer[NoneType, MutExternalOrigin]()
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -592,9 +593,9 @@ struct WasmInstance(Movable):
     var _linker: Linker
     var _instance: WasmtimeInstance
     var _memory: WasmtimeMemory
-    var _state_ptr: UnsafePointer[SharedState, MutExternalOrigin]
+    var _state_ptr: UnsafePointer[SharedState, MutUntrackedOrigin]
 
-    fn __init__(out self, wasm_path: String) raises:
+    def __init__(out self, wasm_path: String) raises:
         """Create a WasmInstance by loading and instantiating the WASM binary.
 
         Args:
@@ -605,7 +606,7 @@ struct WasmInstance(Movable):
 
         # Allocate shared state on the heap
         self._state_ptr = alloc[SharedState](1)
-        self._state_ptr.init_pointee_move(SharedState())
+        self._state_ptr.unsafe_write(SharedState())
         var env = self._state_ptr.bitcast[NoneType]()
 
         # Create engine with module caching enabled.
@@ -815,45 +816,44 @@ struct WasmInstance(Movable):
         self._state_ptr[].memory = self._memory
         self._state_ptr[].has_memory = True
 
-    fn __del__(deinit self):
+    def __deinit__(deinit self):
         """Clean up: free the heap-allocated shared state."""
-        if self._state_ptr:
-            self._state_ptr.destroy_pointee()
-            self._state_ptr.free()
+        self._state_ptr.unsafe_deinit_pointee()
+        self._state_ptr.free()
 
-    fn __moveinit__(out self, deinit take: Self):
+    def __init__(out self, *, deinit move: Self):
         """Move constructor."""
-        self._engine = take._engine^
-        self._store = take._store^
-        self._module = take._module^
-        self._linker = take._linker^
-        self._instance = take._instance
-        self._memory = take._memory
-        self._state_ptr = take._state_ptr
+        self._engine = move._engine^
+        self._store = move._store^
+        self._module = move._module^
+        self._linker = move._linker^
+        self._instance = move._instance
+        self._memory = move._memory
+        self._state_ptr = move._state_ptr
 
     # ------------------------------------------------------------------
     # Raw memory helpers
     # ------------------------------------------------------------------
 
-    fn read_bytes(self, ptr: Int, length: Int) raises -> List[UInt8]:
+    def read_bytes(self, ptr: Int, length: Int) raises -> List[UInt8]:
         """Read *length* bytes from WASM memory at *ptr*."""
         return memory_read_bytes(
             self._store.context(), self._memory, ptr, length
         )
 
-    fn write_bytes(self, ptr: Int, data: List[UInt8]) raises:
+    def write_bytes(self, ptr: Int, data: List[UInt8]) raises:
         """Write *data* bytes into WASM memory at *ptr*."""
         memory_write_bytes(self._store.context(), self._memory, ptr, data)
 
-    fn read_i64_le(self, ptr: Int) raises -> Int64:
+    def read_i64_le(self, ptr: Int) raises -> Int64:
         """Read a little-endian i64 from WASM memory."""
         return memory_read_i64_le(self._store.context(), self._memory, ptr)
 
-    fn read_u64_le(self, ptr: Int) raises -> UInt64:
+    def read_u64_le(self, ptr: Int) raises -> UInt64:
         """Read a little-endian u64 from WASM memory."""
         return memory_read_u64_le(self._store.context(), self._memory, ptr)
 
-    fn write_i64_le(self, ptr: Int, value: Int64) raises:
+    def write_i64_le(self, ptr: Int, value: Int64) raises:
         """Write a little-endian i64 into WASM memory."""
         memory_write_i64_le(self._store.context(), self._memory, ptr, value)
 
@@ -861,11 +861,11 @@ struct WasmInstance(Movable):
     # Bump allocator wrappers
     # ------------------------------------------------------------------
 
-    fn aligned_alloc(self, align: Int, size: Int) -> Int:
+    def aligned_alloc(self, align: Int, size: Int) -> Int:
         """Bump-allocate *size* bytes with the given alignment."""
         return self._state_ptr[].aligned_alloc(align, size)
 
-    fn heap_stats(self) raises -> Tuple[Int, Int, Int]:
+    def heap_stats(self) raises -> Tuple[Int, Int, Int]:
         """Return (heap_pointer, free_blocks, free_bytes) from the JS-side allocator.
         """
         return self._state_ptr[].heap_stats()
@@ -874,7 +874,7 @@ struct WasmInstance(Movable):
     # String struct operations (mirrors runtime/strings.ts)
     # ------------------------------------------------------------------
 
-    fn write_string_struct(self, s: String) raises -> Int:
+    def write_string_struct(self, s: String) raises -> Int:
         """Allocate a Mojo String struct in WASM memory, populated with *s*.
 
         The struct is 24 bytes:
@@ -885,7 +885,7 @@ struct WasmInstance(Movable):
         Returns the WASM pointer to the struct.
         """
         var encoded = s.as_bytes()
-        var data_len = len(s)
+        var data_len = (s).byte_length()
 
         # Allocate data buffer (with null terminator)
         var data_ptr = self.aligned_alloc(1, data_len + 1)
@@ -907,7 +907,7 @@ struct WasmInstance(Movable):
 
         return struct_ptr
 
-    fn alloc_string_struct(self) raises -> Int:
+    def alloc_string_struct(self) raises -> Int:
         """Allocate a zero-initialized 24-byte Mojo String struct.
 
         Returns the WASM pointer to the struct.
@@ -921,7 +921,7 @@ struct WasmInstance(Movable):
         self.write_bytes(struct_ptr, zeros)
         return struct_ptr
 
-    fn read_string_struct(self, struct_ptr: Int) raises -> String:
+    def read_string_struct(self, struct_ptr: Int) raises -> String:
         """Read a Mojo String struct back into a Mojo String.
 
         Handles both heap-allocated strings and SSO (small string optimization)
@@ -953,11 +953,11 @@ struct WasmInstance(Movable):
     # Captured stdout access
     # ------------------------------------------------------------------
 
-    fn get_captured_stdout(self) raises -> List[String]:
+    def get_captured_stdout(self) raises -> List[String]:
         """Return the list of strings captured from WASM stdout writes."""
         return self._state_ptr[].captured_stdout.copy()
 
-    fn clear_captured_stdout(self) raises:
+    def clear_captured_stdout(self) raises:
         """Clear the captured stdout buffer."""
         self._state_ptr[].captured_stdout = List[String]()
 
@@ -965,7 +965,7 @@ struct WasmInstance(Movable):
     # WASM function calling
     # ------------------------------------------------------------------
 
-    fn get_func(self, name: String) raises -> WasmtimeFunc:
+    def get_func(self, name: String) raises -> WasmtimeFunc:
         """Look up an exported function by name.
 
         Args:
@@ -979,7 +979,7 @@ struct WasmInstance(Movable):
         """
         return instance_get_func(self._store.context(), self._instance, name)
 
-    fn call(
+    def call(
         self,
         name: String,
         args: List[WasmtimeVal],
@@ -1001,7 +1001,7 @@ struct WasmInstance(Movable):
         var func = self.get_func(name)
         return func_call(self._store.context(), func, args, nresults)
 
-    fn call_void(self, name: String, args: List[WasmtimeVal]) raises:
+    def call_void(self, name: String, args: List[WasmtimeVal]) raises:
         """Call an exported WASM function that returns no values.
 
         Args:
@@ -1014,7 +1014,7 @@ struct WasmInstance(Movable):
         var func = self.get_func(name)
         func_call_0(self._store.context(), func, args)
 
-    fn call_i32(self, name: String, args: List[WasmtimeVal]) raises -> Int32:
+    def call_i32(self, name: String, args: List[WasmtimeVal]) raises -> Int32:
         """Call an exported WASM function and return a single i32 result.
 
         Args:
@@ -1030,7 +1030,7 @@ struct WasmInstance(Movable):
         var func = self.get_func(name)
         return func_call_i32(self._store.context(), func, args)
 
-    fn call_i64(self, name: String, args: List[WasmtimeVal]) raises -> Int64:
+    def call_i64(self, name: String, args: List[WasmtimeVal]) raises -> Int64:
         """Call an exported WASM function and return a single i64 result.
 
         Args:
@@ -1046,7 +1046,7 @@ struct WasmInstance(Movable):
         var func = self.get_func(name)
         return func_call_i64(self._store.context(), func, args)
 
-    fn call_f32(self, name: String, args: List[WasmtimeVal]) raises -> Float32:
+    def call_f32(self, name: String, args: List[WasmtimeVal]) raises -> Float32:
         """Call an exported WASM function and return a single f32 result.
 
         Args:
@@ -1062,7 +1062,7 @@ struct WasmInstance(Movable):
         var func = self.get_func(name)
         return func_call_f32(self._store.context(), func, args)
 
-    fn call_f64(self, name: String, args: List[WasmtimeVal]) raises -> Float64:
+    def call_f64(self, name: String, args: List[WasmtimeVal]) raises -> Float64:
         """Call an exported WASM function and return a single f64 result.
 
         Args:
@@ -1084,44 +1084,44 @@ struct WasmInstance(Movable):
 # ---------------------------------------------------------------------------
 
 
-fn args_i32(a: Int32) -> List[WasmtimeVal]:
+def args_i32(a: Some[Intable]) -> List[WasmtimeVal]:
     """Build a single-i32 argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i32(a))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
     return v^
 
 
-fn args_i32_i32(a: Int32, b: Int32) -> List[WasmtimeVal]:
+def args_i32_i32(a: Some[Intable], b: Some[Intable]) -> List[WasmtimeVal]:
     """Build a two-i32 argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i32(a))
-    v.append(WasmtimeVal.from_i32(b))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(b))))
     return v^
 
 
-fn args_i64(a: Int64) -> List[WasmtimeVal]:
+def args_i64(a: Some[Intable]) -> List[WasmtimeVal]:
     """Build a single-i64 argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(a))
+    v.append(WasmtimeVal.from_i64(Int64(Int(a))))
     return v^
 
 
-fn args_i64_i64(a: Int64, b: Int64) -> List[WasmtimeVal]:
+def args_i64_i64(a: Some[Intable], b: Some[Intable]) -> List[WasmtimeVal]:
     """Build a two-i64 argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(a))
-    v.append(WasmtimeVal.from_i64(b))
+    v.append(WasmtimeVal.from_i64(Int64(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(b))))
     return v^
 
 
-fn args_f32(a: Float32) -> List[WasmtimeVal]:
+def args_f32(a: Float32) -> List[WasmtimeVal]:
     """Build a single-f32 argument list."""
     var v = List[WasmtimeVal]()
     v.append(WasmtimeVal.from_f32(a))
     return v^
 
 
-fn args_f32_f32(a: Float32, b: Float32) -> List[WasmtimeVal]:
+def args_f32_f32(a: Float32, b: Float32) -> List[WasmtimeVal]:
     """Build a two-f32 argument list."""
     var v = List[WasmtimeVal]()
     v.append(WasmtimeVal.from_f32(a))
@@ -1129,14 +1129,14 @@ fn args_f32_f32(a: Float32, b: Float32) -> List[WasmtimeVal]:
     return v^
 
 
-fn args_f64(a: Float64) -> List[WasmtimeVal]:
+def args_f64(a: Float64) -> List[WasmtimeVal]:
     """Build a single-f64 argument list."""
     var v = List[WasmtimeVal]()
     v.append(WasmtimeVal.from_f64(a))
     return v^
 
 
-fn args_f64_f64(a: Float64, b: Float64) -> List[WasmtimeVal]:
+def args_f64_f64(a: Float64, b: Float64) -> List[WasmtimeVal]:
     """Build a two-f64 argument list."""
     var v = List[WasmtimeVal]()
     v.append(WasmtimeVal.from_f64(a))
@@ -1144,16 +1144,18 @@ fn args_f64_f64(a: Float64, b: Float64) -> List[WasmtimeVal]:
     return v^
 
 
-fn args_i32_i32_i32(a: Int32, b: Int32, c: Int32) -> List[WasmtimeVal]:
+def args_i32_i32_i32(
+    a: Some[Intable], b: Some[Intable], c: Some[Intable]
+) -> List[WasmtimeVal]:
     """Build a three-i32 argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i32(a))
-    v.append(WasmtimeVal.from_i32(b))
-    v.append(WasmtimeVal.from_i32(c))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(b))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(c))))
     return v^
 
 
-fn args_f64_f64_f64(a: Float64, b: Float64, c: Float64) -> List[WasmtimeVal]:
+def args_f64_f64_f64(a: Float64, b: Float64, c: Float64) -> List[WasmtimeVal]:
     """Build a three-f64 argument list."""
     var v = List[WasmtimeVal]()
     v.append(WasmtimeVal.from_f64(a))
@@ -1162,253 +1164,302 @@ fn args_f64_f64_f64(a: Float64, b: Float64, c: Float64) -> List[WasmtimeVal]:
     return v^
 
 
-fn args_ptr(ptr: Int) -> List[WasmtimeVal]:
+def args_ptr(ptr: Some[Intable]) -> List[WasmtimeVal]:
     """Build a single-pointer (i64) argument list from an Int address."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
     return v^
 
 
-fn args_ptr_ptr(a: Int, b: Int) -> List[WasmtimeVal]:
+def args_ptr_ptr(a: Some[Intable], b: Some[Intable]) -> List[WasmtimeVal]:
     """Build a two-pointer (i64, i64) argument list from Int addresses."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(a)))
-    v.append(WasmtimeVal.from_i64(Int64(b)))
+    v.append(WasmtimeVal.from_i64(Int64(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(b))))
     return v^
 
 
-fn args_ptr_i32(ptr: Int, val: Int32) -> List[WasmtimeVal]:
+def args_ptr_i32(ptr: Some[Intable], val: Some[Intable]) -> List[WasmtimeVal]:
     """Build a (ptr, i32) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(val))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(val))))
     return v^
 
 
-fn args_ptr_i32_i32(ptr: Int, a: Int32, b: Int32) -> List[WasmtimeVal]:
+def args_ptr_i32_i32(
+    ptr: Some[Intable], a: Some[Intable], b: Some[Intable]
+) -> List[WasmtimeVal]:
     """Build a (ptr, i32, i32) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(a))
-    v.append(WasmtimeVal.from_i32(b))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(b))))
     return v^
 
 
-fn args_ptr_i32_i32_i32(
-    ptr: Int, a: Int32, b: Int32, c: Int32
+def args_ptr_i32_i32_i32(
+    ptr: Some[Intable], a: Some[Intable], b: Some[Intable], c: Some[Intable]
 ) -> List[WasmtimeVal]:
     """Build a (ptr, i32, i32, i32) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(a))
-    v.append(WasmtimeVal.from_i32(b))
-    v.append(WasmtimeVal.from_i32(c))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(b))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(c))))
     return v^
 
 
-fn args_ptr_i32_i32_i32_ptr(
-    ptr: Int, a: Int32, b: Int32, c: Int32, ptr2: Int
+def args_ptr_i32_i32_i32_ptr(
+    ptr: Some[Intable],
+    a: Some[Intable],
+    b: Some[Intable],
+    c: Some[Intable],
+    ptr2: Some[Intable],
 ) -> List[WasmtimeVal]:
     """Build a (ptr, i32, i32, i32, ptr) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(a))
-    v.append(WasmtimeVal.from_i32(b))
-    v.append(WasmtimeVal.from_i32(c))
-    v.append(WasmtimeVal.from_i64(Int64(ptr2)))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(b))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(c))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr2))))
     return v^
 
 
-fn args_ptr_i32_ptr(ptr: Int, val: Int32, ptr2: Int) -> List[WasmtimeVal]:
+def args_ptr_i32_ptr(
+    ptr: Some[Intable], val: Some[Intable], ptr2: Some[Intable]
+) -> List[WasmtimeVal]:
     """Build a (ptr, i32, ptr) argument list — i64, i32, i64."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(val))
-    v.append(WasmtimeVal.from_i64(Int64(ptr2)))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(val))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr2))))
     return v^
 
 
-fn args_ptr_i64_ptr(a: Int, b: Int64, c: Int) -> List[WasmtimeVal]:
+def args_ptr_i64_ptr(
+    a: Some[Intable], b: Some[Intable], c: Some[Intable]
+) -> List[WasmtimeVal]:
     """Build a (ptr, i64, ptr) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(a)))
-    v.append(WasmtimeVal.from_i64(b))
-    v.append(WasmtimeVal.from_i64(Int64(c)))
+    v.append(WasmtimeVal.from_i64(Int64(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(b))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(c))))
     return v^
 
 
-fn args_ptr_ptr_ptr(a: Int, b: Int, c: Int) -> List[WasmtimeVal]:
+def args_ptr_ptr_ptr(
+    a: Some[Intable], b: Some[Intable], c: Some[Intable]
+) -> List[WasmtimeVal]:
     """Build a three-pointer (i64, i64, i64) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(a)))
-    v.append(WasmtimeVal.from_i64(Int64(b)))
-    v.append(WasmtimeVal.from_i64(Int64(c)))
+    v.append(WasmtimeVal.from_i64(Int64(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(b))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(c))))
     return v^
 
 
-fn args_ptr_ptr_i32(a: Int, b: Int, c: Int32) -> List[WasmtimeVal]:
+def args_ptr_ptr_i32(
+    a: Some[Intable], b: Some[Intable], c: Some[Intable]
+) -> List[WasmtimeVal]:
     """Build a (ptr, ptr, i32) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(a)))
-    v.append(WasmtimeVal.from_i64(Int64(b)))
-    v.append(WasmtimeVal.from_i32(c))
+    v.append(WasmtimeVal.from_i64(Int64(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(b))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(c))))
     return v^
 
 
-fn args_ptr_ptr_i32_i32(
-    a: Int, b: Int, c: Int32, d: Int32
+def args_ptr_ptr_i32_i32(
+    a: Some[Intable], b: Some[Intable], c: Some[Intable], d: Some[Intable]
 ) -> List[WasmtimeVal]:
     """Build a (ptr, ptr, i32, i32) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(a)))
-    v.append(WasmtimeVal.from_i64(Int64(b)))
-    v.append(WasmtimeVal.from_i32(c))
-    v.append(WasmtimeVal.from_i32(d))
+    v.append(WasmtimeVal.from_i64(Int64(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(b))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(c))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(d))))
     return v^
 
 
-fn args_ptr_ptr_i32_i32_i32(
-    a: Int, b: Int, c: Int32, d: Int32, e: Int32
+def args_ptr_ptr_i32_i32_i32(
+    a: Some[Intable],
+    b: Some[Intable],
+    c: Some[Intable],
+    d: Some[Intable],
+    e: Some[Intable],
 ) -> List[WasmtimeVal]:
     """Build a (ptr, ptr, i32, i32, i32) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(a)))
-    v.append(WasmtimeVal.from_i64(Int64(b)))
-    v.append(WasmtimeVal.from_i32(c))
-    v.append(WasmtimeVal.from_i32(d))
-    v.append(WasmtimeVal.from_i32(e))
+    v.append(WasmtimeVal.from_i64(Int64(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(b))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(c))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(d))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(e))))
     return v^
 
 
-fn args_ptr_ptr_ptr_ptr(a: Int, b: Int, c: Int, d: Int) -> List[WasmtimeVal]:
+def args_ptr_ptr_ptr_ptr(
+    a: Some[Intable], b: Some[Intable], c: Some[Intable], d: Some[Intable]
+) -> List[WasmtimeVal]:
     """Build a four-pointer (i64, i64, i64, i64) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(a)))
-    v.append(WasmtimeVal.from_i64(Int64(b)))
-    v.append(WasmtimeVal.from_i64(Int64(c)))
-    v.append(WasmtimeVal.from_i64(Int64(d)))
+    v.append(WasmtimeVal.from_i64(Int64(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(b))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(c))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(d))))
     return v^
 
 
-fn args_ptr_ptr_ptr_ptr_i32(
-    a: Int, b: Int, c: Int, d: Int, e: Int32
+def args_ptr_ptr_ptr_ptr_i32(
+    a: Some[Intable],
+    b: Some[Intable],
+    c: Some[Intable],
+    d: Some[Intable],
+    e: Some[Intable],
 ) -> List[WasmtimeVal]:
     """Build a (ptr, ptr, ptr, ptr, i32) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(a)))
-    v.append(WasmtimeVal.from_i64(Int64(b)))
-    v.append(WasmtimeVal.from_i64(Int64(c)))
-    v.append(WasmtimeVal.from_i64(Int64(d)))
-    v.append(WasmtimeVal.from_i32(e))
+    v.append(WasmtimeVal.from_i64(Int64(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(b))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(c))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(d))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(e))))
     return v^
 
 
-fn args_ptr_ptr_ptr_ptr_i32_i32(
-    a: Int, b: Int, c: Int, d: Int, e: Int32, f: Int32
+def args_ptr_ptr_ptr_ptr_i32_i32(
+    a: Some[Intable],
+    b: Some[Intable],
+    c: Some[Intable],
+    d: Some[Intable],
+    e: Some[Intable],
+    f: Some[Intable],
 ) -> List[WasmtimeVal]:
     """Build a (ptr, ptr, ptr, ptr, i32, i32) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(a)))
-    v.append(WasmtimeVal.from_i64(Int64(b)))
-    v.append(WasmtimeVal.from_i64(Int64(c)))
-    v.append(WasmtimeVal.from_i64(Int64(d)))
-    v.append(WasmtimeVal.from_i32(e))
-    v.append(WasmtimeVal.from_i32(f))
+    v.append(WasmtimeVal.from_i64(Int64(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(b))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(c))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(d))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(e))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(f))))
     return v^
 
 
-fn args_ptr_i32_i32_ptr(
-    ptr: Int, a: Int32, b: Int32, ptr2: Int
+def args_ptr_i32_i32_ptr(
+    ptr: Some[Intable], a: Some[Intable], b: Some[Intable], ptr2: Some[Intable]
 ) -> List[WasmtimeVal]:
     """Build a (ptr, i32, i32, ptr) argument list — i64, i32, i32, i64."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(a))
-    v.append(WasmtimeVal.from_i32(b))
-    v.append(WasmtimeVal.from_i64(Int64(ptr2)))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(b))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr2))))
     return v^
 
 
-fn args_ptr_i32_i32_i32_i32(
-    ptr: Int, a: Int32, b: Int32, c: Int32, d: Int32
+def args_ptr_i32_i32_i32_i32(
+    ptr: Some[Intable],
+    a: Some[Intable],
+    b: Some[Intable],
+    c: Some[Intable],
+    d: Some[Intable],
 ) -> List[WasmtimeVal]:
     """Build a (ptr, i32, i32, i32, i32) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(a))
-    v.append(WasmtimeVal.from_i32(b))
-    v.append(WasmtimeVal.from_i32(c))
-    v.append(WasmtimeVal.from_i32(d))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(b))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(c))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(d))))
     return v^
 
 
-fn args_ptr_i32_i32_i32_ptr_ptr(
-    ptr: Int, a: Int32, b: Int32, c: Int32, ptr2: Int, ptr3: Int
+def args_ptr_i32_i32_i32_ptr_ptr(
+    ptr: Some[Intable],
+    a: Some[Intable],
+    b: Some[Intable],
+    c: Some[Intable],
+    ptr2: Some[Intable],
+    ptr3: Some[Intable],
 ) -> List[WasmtimeVal]:
     """Build a (ptr, i32, i32, i32, ptr, ptr) argument list."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(a))
-    v.append(WasmtimeVal.from_i32(b))
-    v.append(WasmtimeVal.from_i32(c))
-    v.append(WasmtimeVal.from_i64(Int64(ptr2)))
-    v.append(WasmtimeVal.from_i64(Int64(ptr3)))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(b))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(c))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr2))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr3))))
     return v^
 
 
-fn args_ptr_i32_ptr_ptr(
-    ptr: Int, val: Int32, ptr2: Int, ptr3: Int
+def args_ptr_i32_ptr_ptr(
+    ptr: Some[Intable],
+    val: Some[Intable],
+    ptr2: Some[Intable],
+    ptr3: Some[Intable],
 ) -> List[WasmtimeVal]:
     """Build a (ptr, i32, ptr, ptr) argument list — i64, i32, i64, i64."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(val))
-    v.append(WasmtimeVal.from_i64(Int64(ptr2)))
-    v.append(WasmtimeVal.from_i64(Int64(ptr3)))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(val))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr2))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr3))))
     return v^
 
 
-fn args_ptr_i32_ptr_i32(
-    ptr: Int, a: Int32, ptr2: Int, b: Int32
+def args_ptr_i32_ptr_i32(
+    ptr: Some[Intable], a: Some[Intable], ptr2: Some[Intable], b: Some[Intable]
 ) -> List[WasmtimeVal]:
     """Build a (ptr, i32, ptr, i32) argument list — i64, i32, i64, i32."""
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(a))
-    v.append(WasmtimeVal.from_i64(Int64(ptr2)))
-    v.append(WasmtimeVal.from_i32(b))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr2))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(b))))
     return v^
 
 
-fn args_ptr_i32_ptr_i32_i32(
-    ptr: Int, a: Int32, ptr2: Int, b: Int32, c: Int32
+def args_ptr_i32_ptr_i32_i32(
+    ptr: Some[Intable],
+    a: Some[Intable],
+    ptr2: Some[Intable],
+    b: Some[Intable],
+    c: Some[Intable],
 ) -> List[WasmtimeVal]:
     """Build a (ptr, i32, ptr, i32, i32) argument list — i64, i32, i64, i32, i32.
     """
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(a))
-    v.append(WasmtimeVal.from_i64(Int64(ptr2)))
-    v.append(WasmtimeVal.from_i32(b))
-    v.append(WasmtimeVal.from_i32(c))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr2))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(b))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(c))))
     return v^
 
 
-fn args_ptr_i32_ptr_ptr_i32(
-    ptr: Int, a: Int32, ptr2: Int, ptr3: Int, b: Int32
+def args_ptr_i32_ptr_ptr_i32(
+    ptr: Some[Intable],
+    a: Some[Intable],
+    ptr2: Some[Intable],
+    ptr3: Some[Intable],
+    b: Some[Intable],
 ) -> List[WasmtimeVal]:
     """Build a (ptr, i32, ptr, ptr, i32) argument list — i64, i32, i64, i64, i32.
     """
     var v = List[WasmtimeVal]()
-    v.append(WasmtimeVal.from_i64(Int64(ptr)))
-    v.append(WasmtimeVal.from_i32(a))
-    v.append(WasmtimeVal.from_i64(Int64(ptr2)))
-    v.append(WasmtimeVal.from_i64(Int64(ptr3)))
-    v.append(WasmtimeVal.from_i32(b))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(a))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr2))))
+    v.append(WasmtimeVal.from_i64(Int64(Int(ptr3))))
+    v.append(WasmtimeVal.from_i32(Int32(Int(b))))
     return v^
 
 
-fn no_args() -> List[WasmtimeVal]:
+def no_args() -> List[WasmtimeVal]:
     """Build an empty argument list."""
     return List[WasmtimeVal]()
 
@@ -1433,7 +1484,7 @@ fn no_args() -> List[WasmtimeVal]:
 # ---------------------------------------------------------------------------
 
 
-fn get_instance() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def get_instance() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     """Create a new WasmInstance and return a heap pointer to it.
 
     Returns:
@@ -1443,5 +1494,5 @@ fn get_instance() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
         Error: If the WASM binary cannot be loaded or instantiated.
     """
     var ptr = alloc[WasmInstance](1)
-    ptr.init_pointee_move(WasmInstance(WASM_PATH))
+    ptr.unsafe_write(WasmInstance(WASM_PATH))
     return ptr
