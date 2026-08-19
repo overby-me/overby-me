@@ -65,11 +65,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1786971797,
-        "narHash": "sha256-5+zU3MuO7Cwb4125fhwe6Z37/lAwM3mrPYcAuXO5FBE=",
+        "lastModified": 1787144311,
+        "narHash": "sha256-Q0xXP1SflZxGOssDpY+4DuLSQeOX5/MmOv3TBQandXc=",
         "ref": "refs/heads/main",
-        "rev": "8d1a6c77150f8b46c52c8c182aff01f4c2aae6a5",
-        "revCount": 30,
+        "rev": "a999c04672f3983b17c61838c2cd453a8afde8a7",
+        "revCount": 48,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
