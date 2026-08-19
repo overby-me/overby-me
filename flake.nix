@@ -17,23 +17,23 @@
   # not name, and the tree that evaluates the hosts names them instead.
   inputs.workspace-darwin = {
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/darwin";
-    inputs.nixpkgs.follows = "nixpkgs";
+    inputs.workspace.follows = "workspace";
   };
   inputs.workspace-disko = {
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/disko";
-    inputs.nixpkgs.follows = "nixpkgs";
+    inputs.workspace.follows = "workspace";
   };
   inputs.workspace-home-manager = {
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/home-manager";
-    inputs.nixpkgs.follows = "nixpkgs";
+    inputs.workspace.follows = "workspace";
   };
   inputs.workspace-nixos-hardware = {
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nixos-hardware";
-    inputs.nixpkgs.follows = "nixpkgs";
+    inputs.workspace.follows = "workspace";
   };
   inputs.workspace-nixos-raspberrypi = {
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nixos-raspberrypi";
-    inputs.nixpkgs.follows = "nixpkgs";
+    inputs.workspace.follows = "workspace";
   };
   # Direct upstreams, not integrations: an input that exports a default
   # package lands in pkgs under its own name, so declaring it is the whole
@@ -44,11 +44,11 @@
   };
   inputs.workspace-ragenix = {
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/ragenix";
-    inputs.nixpkgs.follows = "nixpkgs";
+    inputs.workspace.follows = "workspace";
   };
   inputs.workspace-system-manager = {
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/system-manager";
-    inputs.nixpkgs.follows = "nixpkgs";
+    inputs.workspace.follows = "workspace";
   };
   inputs.zen-browser = {
     # Pinned to the rev the retired integration had locked: zen tracks
