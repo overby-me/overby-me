@@ -42,5 +42,5 @@
     };
   };
 
-  outputs = inputs: {workspaceModule = inputs.workspace.workspaceIn ./. inputs;};
+  outputs = inputs: {workspaceModule = inputs.workspace.workspaceIn {inherit inputs;};};
 }
