@@ -1,14 +1,14 @@
 # The structural lint layer as a checked project.
 #
 # The pre-commit hooks run these rules only against changed files, and the
-# rule-test hook fires only when dev/ast-grep itself changes - so a nixpkgs
+# rule-test hook fires only when dev/ast-grep-rules itself changes - so a nixpkgs
 # bump that updates ast-grep or rebuilds the tree-sitter-mojo grammar could
 # break rules with nothing noticing until the next rule edit. A dead rule and
 # a clean tree are indistinguishable from scan output, which is how one
 # shipped silently once already. This check binds the fixture tests and a
 # full-tree scan to exactly the pinned inputs that can break them.
 #
-# `here` is where this directory sits inside `src`: `dev/ast-grep` when the
+# `here` is where this directory sits inside `src`: `dev/ast-grep-rules` when the
 # monorepo evaluates it, `.` in the published repo, whose root is this
 # directory. The same file serves both, so the check cannot pass in one place
 # and rot in the other.
@@ -25,7 +25,7 @@
       buildPhase = ''
         export HOME=$TMPDIR
         here=.
-        if [ -d dev/ast-grep ]; then here=dev/ast-grep; fi
+        if [ -d dev/ast-grep-rules ]; then here=dev/ast-grep-rules; fi
         cat > sgconfig.yml <<EOF
         ruleDirs:
           - $here/rules

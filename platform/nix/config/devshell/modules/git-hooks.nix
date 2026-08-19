@@ -61,8 +61,8 @@
         # A rule with zero findings and a broken rule are indistinguishable
         # from scan output alone; the fixture tests are what tell them apart,
         # so they run whenever a rule changes.
-        entry = "${pkgs.ast-grep}/bin/ast-grep test -t dev/ast-grep/tests --skip-snapshot-tests";
-        files = "^dev/ast-grep/";
+        entry = "${pkgs.ast-grep}/bin/ast-grep test -t dev/ast-grep-rules/tests --skip-snapshot-tests";
+        files = "^dev/ast-grep-rules/";
         pass_filenames = false;
       };
       statix.enable = true;
@@ -75,7 +75,7 @@
         # which would otherwise be reported here as unused.
         excludes = ["^apps/wiki/vendor/" "^safety/oxidized/"];
         # Structural rules that statix and clippy do not cover, in
-        # dev/ast-grep/rules. Scans whole files rather than the changed hunk,
+        # dev/ast-grep-rules/rules. Scans whole files rather than the changed hunk,
         # because a rule's ignore globs are how its exceptions are recorded and
         # those are path-based.
         entry = "${pkgs.ast-grep}/bin/ast-grep scan";

@@ -20,7 +20,7 @@ pkgs.writeText "sgconfig.yml" ''
   # it through the custom extension map, and the two compare unequal. That
   # failure is silent - the scan reports zero findings and exits 0.
   ruleDirs:
-    - dev/ast-grep/rules
+    - dev/ast-grep-rules/rules
 
   customLanguages:
     mojo:

@@ -2,7 +2,7 @@
 
 <!-- publish:begin -->
 > Part of the [overby.me monorepo](https://tangled.org/overby.me/overby.me), where this lives in
-> [`dev/ast-grep`](https://tangled.org/overby.me/overby.me/tree/main/dev/ast-grep) and where all development happens.
+> [`dev/ast-grep-rules`](https://tangled.org/overby.me/overby.me/tree/main/dev/ast-grep-rules) and where all development happens.
 >
 > It is also published on its own, as
 > [tangled.org/overby.me/ast-grep-rules](https://tangled.org/overby.me/ast-grep-rules) and

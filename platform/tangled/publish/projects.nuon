@@ -480,7 +480,8 @@
   {
     name: "ast-grep-rules"
     kind: "nix"
-    path: "dev/ast-grep"
+    path: "dev/ast-grep-rules"
     description: "Structural ast-grep rules for Rust, Nix and Mojo, with fixture tests and a pinned Mojo grammar"
+    formerPaths: [{path: "dev/ast-grep" deps: []}]
   }
 ]
