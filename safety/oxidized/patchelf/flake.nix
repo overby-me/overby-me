@@ -11,7 +11,7 @@
   inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "oxidized-patchelf";
       description = "A patchelf-compatible ELF binary patching tool written in Rust";
     };

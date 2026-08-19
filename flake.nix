@@ -55,7 +55,7 @@
   };
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       inherit inputs;
     };
 }

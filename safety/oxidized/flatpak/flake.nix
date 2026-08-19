@@ -11,7 +11,7 @@
   inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "oxidized-flatpak";
       description = "A Flatpak-compatible application sandboxing and distribution tool written in Rust";
     };

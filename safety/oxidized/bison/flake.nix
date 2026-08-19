@@ -11,7 +11,7 @@
   inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "oxidized-bison";
       description = "A POSIX yacc/bison-compatible parser generator written in Rust";
     };

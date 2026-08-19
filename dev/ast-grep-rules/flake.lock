@@ -41,11 +41,11 @@
     "nix-packages": {
       "flake": false,
       "locked": {
-        "lastModified": 1787134857,
-        "narHash": "sha256-IGGA/hEet8vWJe+PkyiYKdZ43bhnAa3IHCooeq4ctSA=",
+        "lastModified": 1787138371,
+        "narHash": "sha256-2yWjj7W7ynGy3eco/S6QdCukuXpLnf+6Y+x/+kvGuz0=",
         "ref": "refs/heads/main",
-        "rev": "01be400ad494d730ae73555c8d7b5e16258e3f75",
-        "revCount": 130,
+        "rev": "5ce8f180960a9afc47b399f53ebee409982f3acf",
+        "revCount": 131,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-packages"
       },
@@ -82,11 +82,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1787131175,
-        "narHash": "sha256-aZYBjQg9Ek2ANmmayOPZecHtIcIiGQXStgp34V2XWZc=",
+        "lastModified": 1787144311,
+        "narHash": "sha256-Q0xXP1SflZxGOssDpY+4DuLSQeOX5/MmOv3TBQandXc=",
         "ref": "refs/heads/main",
-        "rev": "cbe95892dcbeb841db25864c4da703435c28e943",
-        "revCount": 45,
+        "rev": "a999c04672f3983b17c61838c2cd453a8afde8a7",
+        "revCount": 48,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },

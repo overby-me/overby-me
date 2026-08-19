@@ -11,7 +11,7 @@
   inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "homepage";
       description = "The overby.me website, in Rust and Dioxus with WebGL screensavers";
     };

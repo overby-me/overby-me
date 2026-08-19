@@ -11,7 +11,7 @@
   inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "oxidized-sed";
       description = "A GNU sed-compatible stream editor written in Rust";
     };

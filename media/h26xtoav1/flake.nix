@@ -11,7 +11,7 @@
   inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "h26xtoav1";
       description = "A CLI tool to transcode H.264/H.265 video to AV1 using h264-decode, h265-decode, and rav1e";
       subdir = "h26xtoav1";

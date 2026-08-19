@@ -11,7 +11,7 @@
   inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "oxidized-pipewire";
       description = "A PipeWire-compatible multimedia graph daemon written in Rust";
       aliases = {

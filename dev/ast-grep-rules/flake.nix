@@ -23,7 +23,7 @@
   };
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       inherit inputs;
       withOverlays = [
         (final: _prev: {

@@ -11,7 +11,7 @@
   inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "oxidized-gcc";
       description = "A GCC-compatible C compiler written in Rust";
       cargoTestFlags = ["--lib" "--bins"];

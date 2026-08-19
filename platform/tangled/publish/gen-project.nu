@@ -129,7 +129,7 @@ def flake-text [
 ($inputs_block)
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = \"($name)\";
       description = \"($description)\";($extra)
     };

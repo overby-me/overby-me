@@ -16,7 +16,7 @@
   };
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "fe-c";
       description = "Gradual memory-safety hardening for unsafe Rust and mixed-language programs";
       toolchain = true;

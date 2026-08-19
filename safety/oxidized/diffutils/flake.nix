@@ -11,7 +11,7 @@
   inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "oxidized-diffutils";
       description = "A GNU diffutils-compatible suite of file comparison tools written in Rust";
       aliases = {

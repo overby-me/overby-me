@@ -11,7 +11,7 @@
   inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "tangled-cli";
       description = "Rust CLI for Tangled, a decentralized git collaboration platform built on the AT Protocol";
       nativeBuildInputs = ["pkg-config"];

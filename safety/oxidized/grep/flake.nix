@@ -11,7 +11,7 @@
   inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
   outputs = inputs:
-    inputs.workspace ./. {
+    inputs.workspace {
       name = "oxidized-grep";
       description = "A GNU grep-compatible pattern matching tool written in Rust";
       subdir = "grep";
