@@ -128,6 +128,17 @@
 
     All other commands are automatically rewritten by the Claude Code hook.
 
+    **rtk compresses output.** When a count, an exact listing, or completeness
+    matters, use `rtk proxy <cmd>` or the raw command; compressed output has
+    misreported counts before.
+
+    ## Long-Running Nix Commands
+
+    **Never leave a background nix evaluation running when a session ends;
+    stop it or wait for it.** An orphaned whole-tree eval OOM-killed a machine
+    on 2026-08-19. Prefer bounded tools (`just check`) over raw whole-tree
+    evaluation.
+
     ## Writing Style
 
     **Never use em dashes (`—`) in any output, commit messages, code comments, or
