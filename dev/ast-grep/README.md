@@ -65,6 +65,36 @@ built-in table, files resolve it through the custom extension map, and the
 two compare unequal. The scan reports zero findings and exits 0, which looks
 exactly like a clean tree.
 
+### From a Nix flake
+
+Take this repo as a source input and scan your tree in a check. The rules
+carry some `ignores:` globs naming monorepo paths; outside that tree they
+match nothing and are harmless.
+
+```nix
+inputs.ast-grep-rules = {
+  url = "git+https://tangled.org/overby.me/ast-grep-rules";
+  flake = false;
+};
+
+# checks.<system>.ast-grep = ...
+pkgs.runCommand "check-ast-grep" {nativeBuildInputs = [pkgs.ast-grep];} ''
+  cd ${self}
+  export HOME=$TMPDIR
+  cat > $TMPDIR/sgconfig.yml <<EOF
+  ruleDirs:
+    - ${inputs.ast-grep-rules}/rules
+  EOF
+  ast-grep scan -c $TMPDIR/sgconfig.yml .
+  touch $out
+''
+```
+
+For the Mojo rules, add the `customLanguages` block above with a built
+grammar; this repo's own [`flake.nix`](flake.nix) is the worked example of
+wiring `tree-sitter-mojo` in from
+[nix-packages](https://tangled.org/overby.me/nix-packages) via an overlay.
+
 ## Running the tests
 
 ```sh
