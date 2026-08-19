@@ -1,4 +1,4 @@
-{src, ...}: {
+_: {
   devShells.mojo-gui = pkgs: let
     inherit (pkgs) lib stdenv;
 
@@ -114,8 +114,13 @@
     # dev/mojo/wasmtime/src/ (the wasmtime_mojo package). Rather than
     # pulling the entire repo root, use lib.fileset to include only
     # the directories actually needed.
+    #
+    # The root is the repo root spelled as a path literal, not the `src`
+    # module argument: `src` is string-like, and lib.fileset takes paths
+    # only. It must stay the repo root either way, because the build
+    # phases below cd into dev/mojo/gui.
     monoSrc = lib.fileset.toSource {
-      root = src;
+      root = ../../..;
       fileset = lib.fileset.unions [
         ./.
         ../wasmtime/src

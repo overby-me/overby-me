@@ -1,4 +1,4 @@
-{src, ...}: {
+_: {
   devShells.mojo-wasm = pkgs: let
     inherit (pkgs) lib stdenv;
   in {
@@ -25,8 +25,12 @@
   # counterparts, and the other 32 only by hand.
   checks = pkgs: let
     inherit (pkgs) lib;
+    # The repo root as a path literal, not the `src` module argument:
+    # `src` is string-like and lib.fileset takes paths only. It must stay
+    # the repo root either way, because buildPhase cds into
+    # dev/mojo/wasm/web.
     monoSrc = lib.fileset.toSource {
-      root = src;
+      root = ../../..;
       fileset = lib.fileset.unions [
         ./.
         ../wasmtime/src
