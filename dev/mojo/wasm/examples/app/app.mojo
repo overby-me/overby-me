@@ -126,7 +126,7 @@ struct MultiViewApp(Movable):
     # Todo add handler ID (from the todo view — registered as a custom handler)
     var todo_add_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         """Initialize the multi-view app with all reactive state and views.
 
         Sets up:
@@ -206,21 +206,21 @@ struct MultiViewApp(Movable):
         # Navigate to initial route
         _ = self.router.navigate(String("/"))
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.router = take.router^
-        self.count = take.count^
-        self.counter_tmpl = take.counter_tmpl
-        self.counter_incr_handler = take.counter_incr_handler
-        self.counter_decr_handler = take.counter_decr_handler
-        self.todo_count = take.todo_count^
-        self.todo_next_id = take.todo_next_id
-        self.todo_tmpl = take.todo_tmpl
-        self.nav_counter_handler = take.nav_counter_handler
-        self.nav_todo_handler = take.nav_todo_handler
-        self.todo_add_handler = take.todo_add_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.router = move.router^
+        self.count = move.count^
+        self.counter_tmpl = move.counter_tmpl
+        self.counter_incr_handler = move.counter_incr_handler
+        self.counter_decr_handler = move.counter_decr_handler
+        self.todo_count = move.todo_count^
+        self.todo_next_id = move.todo_next_id
+        self.todo_tmpl = move.todo_tmpl
+        self.nav_counter_handler = move.nav_counter_handler
+        self.nav_todo_handler = move.nav_todo_handler
+        self.todo_add_handler = move.todo_add_handler
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build a fresh VNode for the app shell.
 
         The app shell always renders a placeholder for dyn_node[0] — the
@@ -233,7 +233,7 @@ struct MultiViewApp(Movable):
         vb.add_dyn_placeholder()
         return vb.build()
 
-    fn build_counter_view(mut self) -> UInt32:
+    def build_counter_view(mut self) -> UInt32:
         """Build the counter view VNode.
 
         Returns the VNode index in the store.
@@ -245,7 +245,7 @@ struct MultiViewApp(Movable):
         vb.add_dyn_event(String("click"), self.counter_decr_handler)
         return vb.index()
 
-    fn build_todo_view(mut self) -> UInt32:
+    def build_todo_view(mut self) -> UInt32:
         """Build the todo view VNode.
 
         Returns the VNode index in the store.
@@ -267,7 +267,7 @@ struct MultiViewApp(Movable):
         vb.add_dyn_event(String("click"), self.todo_add_handler)
         return vb.index()
 
-    fn build_view_for_branch(mut self) -> UInt32:
+    def build_view_for_branch(mut self) -> UInt32:
         """Build the VNode for the currently active branch.
 
         Returns the VNode index in the store.
@@ -279,7 +279,7 @@ struct MultiViewApp(Movable):
         # Fallback — should not happen with well-formed routes
         return self.build_counter_view()
 
-    fn navigate(mut self, path: String) -> Bool:
+    def navigate(mut self, path: String) -> Bool:
         """Navigate to a URL path.
 
         Updates the router and marks the app scope as dirty so the next
@@ -297,7 +297,7 @@ struct MultiViewApp(Movable):
             self.ctx.mark_dirty()
         return result
 
-    fn handle_event(mut self, handler_id: UInt32) -> Bool:
+    def handle_event(mut self, handler_id: UInt32) -> Bool:
         """Handle an event by handler ID.
 
         Routes navigation clicks and todo add button.
@@ -327,25 +327,25 @@ struct MultiViewApp(Movable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn multi_view_app_init() -> UnsafePointer[MultiViewApp, MutExternalOrigin]:
+def multi_view_app_init() -> UnsafePointer[MultiViewApp, MutUntrackedOrigin]:
     """Initialize the multi-view app.  Returns a pointer to the app state."""
     var app_ptr = alloc[MultiViewApp](1)
-    app_ptr.init_pointee_move(MultiViewApp())
+    app_ptr.unsafe_write(MultiViewApp())
     return app_ptr
 
 
-fn multi_view_app_destroy(
-    app_ptr: UnsafePointer[MultiViewApp, MutExternalOrigin],
+def multi_view_app_destroy(
+    app_ptr: UnsafePointer[MultiViewApp, MutUntrackedOrigin],
 ):
     """Destroy the multi-view app and free all resources."""
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn multi_view_app_rebuild(
+def multi_view_app_rebuild(
     mut app: MultiViewApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the multi-view app.
 
@@ -399,7 +399,7 @@ fn multi_view_app_rebuild(
     return Int32(writer_ptr[0].offset)
 
 
-fn multi_view_app_handle_event(
+def multi_view_app_handle_event(
     mut app: MultiViewApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -419,9 +419,9 @@ fn multi_view_app_handle_event(
     return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn multi_view_app_flush(
+def multi_view_app_flush(
     mut app: MultiViewApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates after event dispatch.
 
@@ -460,7 +460,7 @@ fn multi_view_app_flush(
     return app.ctx.finalize(writer_ptr)
 
 
-fn multi_view_app_navigate(
+def multi_view_app_navigate(
     mut app: MultiViewApp,
     path: String,
 ) -> Bool:

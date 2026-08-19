@@ -116,7 +116,7 @@ struct CounterApp(Movable):
     var detail_tmpl: UInt32
     var cond_slot: ConditionalSlot
 
-    fn __init__(out self):
+    def __init__(out self):
         """Initialize the counter app with all reactive state and view.
 
         Creates: ComponentContext (runtime, VNode store, element ID
@@ -169,14 +169,14 @@ struct CounterApp(Movable):
         )
         self.cond_slot = ConditionalSlot()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.count = take.count^
-        self.show_detail = take.show_detail^
-        self.detail_tmpl = take.detail_tmpl
-        self.cond_slot = take.cond_slot.copy()
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.count = move.count^
+        self.show_detail = move.show_detail^
+        self.detail_tmpl = move.detail_tmpl
+        self.cond_slot = move.cond_slot.copy()
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build a fresh VNode for the counter component.
 
         Uses render_builder() which auto-populates the event handler
@@ -197,7 +197,7 @@ struct CounterApp(Movable):
         vb.add_dyn_placeholder()
         return vb.build()
 
-    fn build_detail(mut self) -> UInt32:
+    def build_detail(mut self) -> UInt32:
         """Build the detail VNode (even/odd + doubled value).
 
         Only called when show_detail is True.
@@ -214,27 +214,27 @@ struct CounterApp(Movable):
         return vb.index()
 
 
-fn counter_app_init() -> UnsafePointer[CounterApp, MutExternalOrigin]:
+def counter_app_init() -> UnsafePointer[CounterApp, MutUntrackedOrigin]:
     """Initialize the counter app.  Returns a pointer to the app state.
 
     All setup happens in CounterApp.__init__() — this function just
     allocates the heap slot and moves the app into it.
     """
     var app_ptr = alloc[CounterApp](1)
-    app_ptr.init_pointee_move(CounterApp())
+    app_ptr.unsafe_write(CounterApp())
     return app_ptr
 
 
-fn counter_app_destroy(app_ptr: UnsafePointer[CounterApp, MutExternalOrigin]):
+def counter_app_destroy(app_ptr: UnsafePointer[CounterApp, MutUntrackedOrigin]):
     """Destroy the counter app and free all resources."""
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn counter_app_rebuild(
+def counter_app_rebuild(
     mut app: CounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the counter app.
 
@@ -262,7 +262,7 @@ fn counter_app_rebuild(
     return result
 
 
-fn counter_app_handle_event(
+def counter_app_handle_event(
     mut app: CounterApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -274,9 +274,9 @@ fn counter_app_handle_event(
     return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn counter_app_flush(
+def counter_app_flush(
     mut app: CounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates after event dispatch.
 

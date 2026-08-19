@@ -71,7 +71,7 @@ struct AttributeValue(Copyable, Equatable, Writable):
     # ── Named constructors ───────────────────────────────────────────
 
     @staticmethod
-    fn text(value: String) -> Self:
+    def text(value: String) -> Self:
         """Create a text attribute value."""
         return Self(
             kind=AVAL_TEXT,
@@ -83,7 +83,7 @@ struct AttributeValue(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn integer(value: Int64) -> Self:
+    def integer(value: Int64) -> Self:
         """Create an integer attribute value."""
         return Self(
             kind=AVAL_INT,
@@ -95,7 +95,7 @@ struct AttributeValue(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn floating(value: Float64) -> Self:
+    def floating(value: Float64) -> Self:
         """Create a float attribute value."""
         return Self(
             kind=AVAL_FLOAT,
@@ -107,7 +107,7 @@ struct AttributeValue(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn boolean(value: Bool) -> Self:
+    def boolean(value: Bool) -> Self:
         """Create a boolean attribute value."""
         return Self(
             kind=AVAL_BOOL,
@@ -119,7 +119,7 @@ struct AttributeValue(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn event(handler_id: UInt32) -> Self:
+    def event(handler_id: UInt32) -> Self:
         """Create an event handler attribute value."""
         return Self(
             kind=AVAL_EVENT,
@@ -131,7 +131,7 @@ struct AttributeValue(Copyable, Equatable, Writable):
         )
 
     @staticmethod
-    fn none() -> Self:
+    def none() -> Self:
         """Create a none/empty attribute value (for attribute removal)."""
         return Self(
             kind=AVAL_NONE,
@@ -144,7 +144,7 @@ struct AttributeValue(Copyable, Equatable, Writable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
+    def __init__(
         out self,
         kind: UInt8,
         text_value: String,
@@ -160,7 +160,7 @@ struct AttributeValue(Copyable, Equatable, Writable):
         self.bool_value = bool_value
         self.handler_id = handler_id
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.kind = copy.kind
         self.text_value = copy.text_value
         self.int_value = copy.int_value
@@ -168,37 +168,37 @@ struct AttributeValue(Copyable, Equatable, Writable):
         self.bool_value = copy.bool_value
         self.handler_id = copy.handler_id
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.kind = take.kind
-        self.text_value = take.text_value^
-        self.int_value = take.int_value
-        self.float_value = take.float_value
-        self.bool_value = take.bool_value
-        self.handler_id = take.handler_id
+    def __init__(out self, *, deinit move: Self):
+        self.kind = move.kind
+        self.text_value = move.text_value^
+        self.int_value = move.int_value
+        self.float_value = move.float_value
+        self.bool_value = move.bool_value
+        self.handler_id = move.handler_id
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn is_text(self) -> Bool:
+    def is_text(self) -> Bool:
         """Check whether this is a text attribute value."""
         return self.kind == AVAL_TEXT
 
-    fn is_int(self) -> Bool:
+    def is_int(self) -> Bool:
         """Check whether this is an integer attribute value."""
         return self.kind == AVAL_INT
 
-    fn is_float(self) -> Bool:
+    def is_float(self) -> Bool:
         """Check whether this is a float attribute value."""
         return self.kind == AVAL_FLOAT
 
-    fn is_bool(self) -> Bool:
+    def is_bool(self) -> Bool:
         """Check whether this is a boolean attribute value."""
         return self.kind == AVAL_BOOL
 
-    fn is_event(self) -> Bool:
+    def is_event(self) -> Bool:
         """Check whether this is an event handler attribute value."""
         return self.kind == AVAL_EVENT
 
-    fn is_none(self) -> Bool:
+    def is_none(self) -> Bool:
         """Check whether this is a none/empty attribute value."""
         return self.kind == AVAL_NONE
 
@@ -223,7 +223,7 @@ struct DynamicAttr(Copyable, Equatable, Writable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
+    def __init__(
         out self,
         name: String,
         var value: AttributeValue,
@@ -235,7 +235,7 @@ struct DynamicAttr(Copyable, Equatable, Writable):
         self.value = value^
         self.element_id = element_id
 
-    fn __init__(
+    def __init__(
         out self,
         name: String,
         namespace: String,
@@ -248,23 +248,23 @@ struct DynamicAttr(Copyable, Equatable, Writable):
         self.value = value^
         self.element_id = element_id
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.name = copy.name
         self.namespace = copy.namespace
         self.value = copy.value.copy()
         self.element_id = copy.element_id
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.name = take.name^
-        self.namespace = take.namespace^
-        self.value = take.value^
-        self.element_id = take.element_id
+    def __init__(out self, *, deinit move: Self):
+        self.name = move.name^
+        self.namespace = move.namespace^
+        self.value = move.value^
+        self.element_id = move.element_id
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn has_namespace(self) -> Bool:
+    def has_namespace(self) -> Bool:
         """Check whether this attribute has a namespace."""
-        return len(self.namespace) > 0
+        return self.namespace.byte_length() > 0
 
 
 # ── DynamicNode ──────────────────────────────────────────────────────────────
@@ -286,36 +286,36 @@ struct DynamicNode(Copyable, Equatable, Writable):
     # ── Named constructors ───────────────────────────────────────────
 
     @staticmethod
-    fn text_node(text: String) -> Self:
+    def text_node(text: String) -> Self:
         """Create a dynamic text node."""
         return Self(kind=DNODE_TEXT, text=text)
 
     @staticmethod
-    fn placeholder() -> Self:
+    def placeholder() -> Self:
         """Create a dynamic placeholder node."""
         return Self(kind=DNODE_PLACEHOLDER, text=String(""))
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self, kind: UInt8, text: String):
+    def __init__(out self, kind: UInt8, text: String):
         self.kind = kind
         self.text = text
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.kind = copy.kind
         self.text = copy.text
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.kind = take.kind
-        self.text = take.text^
+    def __init__(out self, *, deinit move: Self):
+        self.kind = move.kind
+        self.text = move.text^
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn is_text(self) -> Bool:
+    def is_text(self) -> Bool:
         """Check whether this is a text node."""
         return self.kind == DNODE_TEXT
 
-    fn is_placeholder(self) -> Bool:
+    def is_placeholder(self) -> Bool:
         """Check whether this is a placeholder."""
         return self.kind == DNODE_PLACEHOLDER
 
@@ -391,7 +391,7 @@ struct VNode(Copyable):
     # ── Named constructors ───────────────────────────────────────────
 
     @staticmethod
-    fn template_ref(template_id: UInt32) -> Self:
+    def template_ref(template_id: UInt32) -> Self:
         """Create a TemplateRef VNode for the given template.
 
         Dynamic nodes and attributes can be added after construction
@@ -412,7 +412,7 @@ struct VNode(Copyable):
         )
 
     @staticmethod
-    fn template_ref_keyed(template_id: UInt32, key: String) -> Self:
+    def template_ref_keyed(template_id: UInt32, key: String) -> Self:
         """Create a keyed TemplateRef VNode."""
         return Self(
             kind=VNODE_TEMPLATE_REF,
@@ -429,7 +429,7 @@ struct VNode(Copyable):
         )
 
     @staticmethod
-    fn text_node(text: String) -> Self:
+    def text_node(text: String) -> Self:
         """Create a Text VNode."""
         return Self(
             kind=VNODE_TEXT,
@@ -446,7 +446,7 @@ struct VNode(Copyable):
         )
 
     @staticmethod
-    fn placeholder(element_id: UInt32) -> Self:
+    def placeholder(element_id: UInt32) -> Self:
         """Create a Placeholder VNode."""
         return Self(
             kind=VNODE_PLACEHOLDER,
@@ -463,7 +463,7 @@ struct VNode(Copyable):
         )
 
     @staticmethod
-    fn fragment() -> Self:
+    def fragment() -> Self:
         """Create an empty Fragment VNode.
 
         Children are added via push_fragment_child.
@@ -484,7 +484,7 @@ struct VNode(Copyable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
+    def __init__(
         out self,
         kind: UInt8,
         template_id: UInt32,
@@ -510,7 +510,7 @@ struct VNode(Copyable):
         self.dyn_node_ids = dyn_node_ids^
         self.dyn_attr_ids = dyn_attr_ids^
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.kind = copy.kind
         self.template_id = copy.template_id
         self.dynamic_nodes = copy.dynamic_nodes.copy()
@@ -523,80 +523,80 @@ struct VNode(Copyable):
         self.dyn_node_ids = copy.dyn_node_ids.copy()
         self.dyn_attr_ids = copy.dyn_attr_ids.copy()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.kind = take.kind
-        self.template_id = take.template_id
-        self.dynamic_nodes = take.dynamic_nodes^
-        self.dynamic_attrs = take.dynamic_attrs^
-        self.key = take.key^
-        self.text = take.text^
-        self.element_id = take.element_id
-        self.fragment_children = take.fragment_children^
-        self.root_ids = take.root_ids^
-        self.dyn_node_ids = take.dyn_node_ids^
-        self.dyn_attr_ids = take.dyn_attr_ids^
+    def __init__(out self, *, deinit move: Self):
+        self.kind = move.kind
+        self.template_id = move.template_id
+        self.dynamic_nodes = move.dynamic_nodes^
+        self.dynamic_attrs = move.dynamic_attrs^
+        self.key = move.key^
+        self.text = move.text^
+        self.element_id = move.element_id
+        self.fragment_children = move.fragment_children^
+        self.root_ids = move.root_ids^
+        self.dyn_node_ids = move.dyn_node_ids^
+        self.dyn_attr_ids = move.dyn_attr_ids^
 
     # ── Kind queries ─────────────────────────────────────────────────
 
-    fn is_template_ref(self) -> Bool:
+    def is_template_ref(self) -> Bool:
         """Check whether this is a TemplateRef VNode."""
         return self.kind == VNODE_TEMPLATE_REF
 
-    fn is_text(self) -> Bool:
+    def is_text(self) -> Bool:
         """Check whether this is a Text VNode."""
         return self.kind == VNODE_TEXT
 
-    fn is_placeholder(self) -> Bool:
+    def is_placeholder(self) -> Bool:
         """Check whether this is a Placeholder VNode."""
         return self.kind == VNODE_PLACEHOLDER
 
-    fn is_fragment(self) -> Bool:
+    def is_fragment(self) -> Bool:
         """Check whether this is a Fragment VNode."""
         return self.kind == VNODE_FRAGMENT
 
     # ── Key ──────────────────────────────────────────────────────────
 
-    fn has_key(self) -> Bool:
+    def has_key(self) -> Bool:
         """Check whether this VNode has a key."""
-        return len(self.key) > 0
+        return self.key.byte_length() > 0
 
     # ── Dynamic content (for TemplateRef) ────────────────────────────
 
-    fn dynamic_node_count(self) -> Int:
+    def dynamic_node_count(self) -> Int:
         """Return the number of dynamic nodes."""
         return len(self.dynamic_nodes)
 
-    fn dynamic_attr_count(self) -> Int:
+    def dynamic_attr_count(self) -> Int:
         """Return the number of dynamic attributes."""
         return len(self.dynamic_attrs)
 
-    fn push_dynamic_node(mut self, var node: DynamicNode):
+    def push_dynamic_node(mut self, var node: DynamicNode):
         """Append a dynamic node to this TemplateRef VNode."""
         self.dynamic_nodes.append(node^)
 
-    fn push_dynamic_attr(mut self, var attr: DynamicAttr):
+    def push_dynamic_attr(mut self, var attr: DynamicAttr):
         """Append a dynamic attribute to this TemplateRef VNode."""
         self.dynamic_attrs.append(attr^)
 
-    fn get_dynamic_node_kind(self, index: Int) -> UInt8:
+    def get_dynamic_node_kind(self, index: Int) -> UInt8:
         """Return the kind of the dynamic node at `index`."""
         return self.dynamic_nodes[index].kind
 
-    fn get_dynamic_attr_kind(self, index: Int) -> UInt8:
+    def get_dynamic_attr_kind(self, index: Int) -> UInt8:
         """Return the attribute value kind of the dynamic attr at `index`."""
         return self.dynamic_attrs[index].value.kind
 
-    fn get_dynamic_attr_element_id(self, index: Int) -> UInt32:
+    def get_dynamic_attr_element_id(self, index: Int) -> UInt32:
         """Return the element_id of the dynamic attr at `index`."""
         return self.dynamic_attrs[index].element_id
 
     # ── Fragment children ────────────────────────────────────────────
 
-    fn fragment_child_count(self) -> Int:
+    def fragment_child_count(self) -> Int:
         """Return the number of children in this Fragment VNode."""
         return len(self.fragment_children)
 
-    fn push_fragment_child(mut self, child_index: UInt32):
+    def push_fragment_child(mut self, child_index: UInt32):
         """Append a child VNode index to this Fragment VNode.
 
         The child_index refers to a VNode stored externally (e.g. in a
@@ -604,61 +604,61 @@ struct VNode(Copyable):
         """
         self.fragment_children.append(child_index)
 
-    fn get_fragment_child(self, index: Int) -> UInt32:
+    def get_fragment_child(self, index: Int) -> UInt32:
         """Return the VNode index of the child at position `index`."""
         return self.fragment_children[index]
 
     # ── Mount state (populated by create engine) ─────────────────────
 
-    fn is_mounted(self) -> Bool:
+    def is_mounted(self) -> Bool:
         """Check whether this VNode has been mounted (has assigned ElementIds).
         """
         return len(self.root_ids) > 0 or self.element_id != 0
 
-    fn root_id_count(self) -> Int:
+    def root_id_count(self) -> Int:
         """Return the number of root ElementIds assigned to this VNode."""
         return len(self.root_ids)
 
-    fn get_root_id(self, index: Int) -> UInt32:
+    def get_root_id(self, index: Int) -> UInt32:
         """Return the root ElementId at position `index`."""
         return self.root_ids[index]
 
-    fn push_root_id(mut self, id: UInt32):
+    def push_root_id(mut self, id: UInt32):
         """Append a root ElementId (called by create engine)."""
         self.root_ids.append(id)
 
-    fn dyn_node_id_count(self) -> Int:
+    def dyn_node_id_count(self) -> Int:
         """Return the number of dynamic node ElementIds."""
         return len(self.dyn_node_ids)
 
-    fn get_dyn_node_id(self, index: Int) -> UInt32:
+    def get_dyn_node_id(self, index: Int) -> UInt32:
         """Return the dynamic node ElementId at position `index`."""
         return self.dyn_node_ids[index]
 
-    fn push_dyn_node_id(mut self, id: UInt32):
+    def push_dyn_node_id(mut self, id: UInt32):
         """Append a dynamic node ElementId (called by create engine)."""
         self.dyn_node_ids.append(id)
 
-    fn dyn_attr_id_count(self) -> Int:
+    def dyn_attr_id_count(self) -> Int:
         """Return the number of dynamic attribute target ElementIds."""
         return len(self.dyn_attr_ids)
 
-    fn get_dyn_attr_id(self, index: Int) -> UInt32:
+    def get_dyn_attr_id(self, index: Int) -> UInt32:
         """Return the dynamic attribute target ElementId at position `index`."""
         return self.dyn_attr_ids[index]
 
-    fn push_dyn_attr_id(mut self, id: UInt32):
+    def push_dyn_attr_id(mut self, id: UInt32):
         """Append a dynamic attribute target ElementId (called by create engine).
         """
         self.dyn_attr_ids.append(id)
 
-    fn clear_mount_state(mut self):
+    def clear_mount_state(mut self):
         """Clear all mount state (for recycling/replacement)."""
         self.root_ids.clear()
         self.dyn_node_ids.clear()
         self.dyn_attr_ids.clear()
 
-    fn transfer_mount_state_to(self, mut target: VNode):
+    def transfer_mount_state_to(self, mut target: VNode):
         """Copy this VNode's mount state to `target`.
 
         Used by the diff engine when the old and new VNodes share the
@@ -688,19 +688,19 @@ struct VNodeStore(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         self._nodes = List[VNode]()
 
-    fn __init__(out self, *, capacity: Int):
+    def __init__(out self, *, capacity: Int):
         """Create a store with pre-allocated capacity."""
         self._nodes = List[VNode](capacity=capacity)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._nodes = take._nodes^
+    def __init__(out self, *, deinit move: Self):
+        self._nodes = move._nodes^
 
     # ── Push ─────────────────────────────────────────────────────────
 
-    fn push(mut self, var node: VNode) -> UInt32:
+    def push(mut self, var node: VNode) -> UInt32:
         """Add a VNode to the store and return its index."""
         var idx = UInt32(len(self._nodes))
         self._nodes.append(node^)
@@ -708,62 +708,64 @@ struct VNodeStore(Movable):
 
     # ── Access ───────────────────────────────────────────────────────
 
-    fn get_ptr(self, index: UInt32) -> UnsafePointer[VNode, MutExternalOrigin]:
+    def get_ptr(
+        self, index: UInt32
+    ) -> UnsafePointer[VNode, MutUntrackedOrigin]:
         """Return a pointer to the VNode at `index`.
 
         Valid until the store is mutated.
         """
         var ptr = self._nodes.unsafe_ptr() + Int(index)
-        return UnsafePointer[VNode, MutExternalOrigin](
+        return UnsafePointer[VNode, MutUntrackedOrigin](
             unsafe_from_address=Int(ptr)
         )
 
-    fn kind(self, index: UInt32) -> UInt8:
+    def kind(self, index: UInt32) -> UInt8:
         """Return the kind tag of the VNode at `index`."""
         return self._nodes[Int(index)].kind
 
-    fn template_id(self, index: UInt32) -> UInt32:
+    def template_id(self, index: UInt32) -> UInt32:
         """Return the template_id of the VNode at `index`."""
         return self._nodes[Int(index)].template_id
 
-    fn element_id(self, index: UInt32) -> UInt32:
+    def element_id(self, index: UInt32) -> UInt32:
         """Return the element_id of the Placeholder VNode at `index`."""
         return self._nodes[Int(index)].element_id
 
-    fn has_key(self, index: UInt32) -> Bool:
+    def has_key(self, index: UInt32) -> Bool:
         """Check if the VNode at `index` has a key."""
         return self._nodes[Int(index)].has_key()
 
-    fn dynamic_node_count(self, index: UInt32) -> Int:
+    def dynamic_node_count(self, index: UInt32) -> Int:
         """Return the dynamic node count of the VNode at `index`."""
         return self._nodes[Int(index)].dynamic_node_count()
 
-    fn dynamic_attr_count(self, index: UInt32) -> Int:
+    def dynamic_attr_count(self, index: UInt32) -> Int:
         """Return the dynamic attribute count of the VNode at `index`."""
         return self._nodes[Int(index)].dynamic_attr_count()
 
-    fn fragment_child_count(self, index: UInt32) -> Int:
+    def fragment_child_count(self, index: UInt32) -> Int:
         """Return the fragment child count of the VNode at `index`."""
         return self._nodes[Int(index)].fragment_child_count()
 
-    fn get_fragment_child(self, vnode_index: UInt32, child_pos: Int) -> UInt32:
+    def get_fragment_child(self, vnode_index: UInt32, child_pos: Int) -> UInt32:
         """Return the fragment child VNode index at position `child_pos`."""
         return self._nodes[Int(vnode_index)].get_fragment_child(child_pos)
 
-    fn get_dynamic_node_kind(
+    def get_dynamic_node_kind(
         self, vnode_index: UInt32, dyn_index: Int
     ) -> UInt8:
         """Return the kind of the dynamic node at position `dyn_index`."""
         return self._nodes[Int(vnode_index)].get_dynamic_node_kind(dyn_index)
 
-    fn get_dynamic_attr_kind(
+    def get_dynamic_attr_kind(
         self, vnode_index: UInt32, attr_index: Int
     ) -> UInt8:
         """Return the value kind of the dynamic attr at position `attr_index`.
         """
         return self._nodes[Int(vnode_index)].get_dynamic_attr_kind(attr_index)
 
-    fn get_dynamic_attr_element_id(
+    def get_dynamic_attr_element_id(
         self, vnode_index: UInt32, attr_index: Int
     ) -> UInt32:
         """Return the element_id of the dynamic attr at position `attr_index`.
@@ -774,26 +776,26 @@ struct VNodeStore(Movable):
 
     # ── Mutations on stored VNodes ───────────────────────────────────
 
-    fn push_dynamic_node(mut self, vnode_index: UInt32, var node: DynamicNode):
+    def push_dynamic_node(mut self, vnode_index: UInt32, var node: DynamicNode):
         """Append a dynamic node to the VNode at `vnode_index`."""
         self._nodes[Int(vnode_index)].push_dynamic_node(node^)
 
-    fn push_dynamic_attr(mut self, vnode_index: UInt32, var attr: DynamicAttr):
+    def push_dynamic_attr(mut self, vnode_index: UInt32, var attr: DynamicAttr):
         """Append a dynamic attribute to the VNode at `vnode_index`."""
         self._nodes[Int(vnode_index)].push_dynamic_attr(attr^)
 
-    fn push_fragment_child(mut self, vnode_index: UInt32, child_index: UInt32):
+    def push_fragment_child(mut self, vnode_index: UInt32, child_index: UInt32):
         """Append a child VNode index to the Fragment at `vnode_index`."""
         self._nodes[Int(vnode_index)].push_fragment_child(child_index)
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn count(self) -> Int:
+    def count(self) -> Int:
         """Return the number of VNodes in the store."""
         return len(self._nodes)
 
     # ── Bulk operations ──────────────────────────────────────────────
 
-    fn clear(mut self):
+    def clear(mut self):
         """Remove all VNodes."""
         self._nodes.clear()

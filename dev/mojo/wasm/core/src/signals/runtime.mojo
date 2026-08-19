@@ -23,13 +23,13 @@
 #   - When a signal is written, all subscribers are marked dirty.
 #
 # Memory layout per signal slot:
-#   - value_ptr    : UnsafePointer[UInt8, MutExternalOrigin]  — type-erased value storage
+#   - value_ptr    : UnsafePointer[UInt8, MutUntrackedOrigin]  — type-erased value storage
 #   - value_size   : Int                   — byte size of the stored value
 #   - subscribers  : List[UInt32]          — context IDs subscribed to this signal
 #   - version      : UInt32               — monotonic write counter (for staleness checks)
 
 from std.sys import size_of
-from std.memory import UnsafePointer, memcpy, alloc
+from std.memory import UnsafePointer, unsafe_memcpy, alloc
 from scope import ScopeArena, ScopeState, HOOK_SIGNAL, HOOK_MEMO, HOOK_EFFECT
 from vdom import TemplateRegistry, VNodeStore
 from .memo import MemoStore, MemoEntry, MEMO_NO_STRING
@@ -64,22 +64,24 @@ from events import (
 struct SignalEntry(Copyable):
     """Type-erased storage for a single signal's value + subscribers."""
 
-    var value_ptr: UnsafePointer[UInt8, MutExternalOrigin]
+    var value_ptr: UnsafePointer[UInt8, MutUntrackedOrigin]
     var value_size: Int
     var subscribers: List[UInt32]
     var version: UInt32
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an empty (uninitialised) entry."""
-        self.value_ptr = UnsafePointer[UInt8, MutExternalOrigin]()
+        self.value_ptr = UnsafePointer[
+            UInt8, MutUntrackedOrigin
+        ].unsafe_dangling()
         self.value_size = 0
         self.subscribers = List[UInt32]()
         self.version = 0
 
-    fn __init__(
-        out self, ptr: UnsafePointer[UInt8, MutExternalOrigin], size: Int
+    def __init__(
+        out self, ptr: UnsafePointer[UInt8, MutUntrackedOrigin], size: Int
     ):
         """Create an entry that owns `size` bytes at `ptr`."""
         self.value_ptr = ptr
@@ -87,60 +89,60 @@ struct SignalEntry(Copyable):
         self.subscribers = List[UInt32]()
         self.version = 0
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.value_size = copy.value_size
         self.subscribers = copy.subscribers.copy()
         self.version = copy.version
-        if copy.value_ptr and copy.value_size > 0:
+        if copy.value_size > 0:
             self.value_ptr = alloc[UInt8](copy.value_size)
-            memcpy(
+            unsafe_memcpy(
                 dest=self.value_ptr, src=copy.value_ptr, count=copy.value_size
             )
         else:
-            self.value_ptr = UnsafePointer[UInt8, MutExternalOrigin]()
+            self.value_ptr = UnsafePointer[
+                UInt8, MutUntrackedOrigin
+            ].unsafe_dangling()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.value_ptr = take.value_ptr
-        self.value_size = take.value_size
-        self.subscribers = take.subscribers^
-        self.version = take.version
+    def __init__(out self, *, deinit move: Self):
+        self.value_ptr = move.value_ptr
+        self.value_size = move.value_size
+        self.subscribers = move.subscribers^
+        self.version = move.version
 
-    fn __del__(deinit self):
+    def __deinit__(deinit self):
         """Destroy the entry, freeing value storage."""
-        if self.value_ptr != UnsafePointer[UInt8, MutExternalOrigin]():
+        if self.value_size > 0:
             self.value_ptr.free()
 
     # ── Value access ─────────────────────────────────────────────────
 
     @always_inline
-    fn read_value[T: Copyable & AnyType](self) -> T:
+    def read_value[T: Copyable & AnyType](self) -> T:
         """Reinterpret the raw bytes as T and return a copy."""
         return self.value_ptr.bitcast[T]()[0].copy()
 
     @always_inline
-    fn write_value[
-        T: Copyable & ImplicitlyDestructible & AnyType
-    ](mut self, value: T):
+    def write_value[T: Copyable & Deinitable & AnyType](mut self, value: T):
         """Overwrite the stored bytes with `value` and bump version."""
         var tmp = alloc[T](1)
-        tmp.init_pointee_copy(value)
-        memcpy(
+        tmp.unsafe_write(value.copy())
+        unsafe_memcpy(
             dest=self.value_ptr, src=tmp.bitcast[UInt8](), count=self.value_size
         )
-        tmp.destroy_pointee()
+        tmp.unsafe_deinit_pointee()
         tmp.free()
         self.version += 1
 
     # ── Subscriber management ────────────────────────────────────────
 
-    fn subscribe(mut self, context_id: UInt32):
+    def subscribe(mut self, context_id: UInt32):
         """Add `context_id` to the subscriber set (idempotent)."""
         for i in range(len(self.subscribers)):
             if self.subscribers[i] == context_id:
                 return  # already subscribed
         self.subscribers.append(context_id)
 
-    fn unsubscribe(mut self, context_id: UInt32):
+    def unsubscribe(mut self, context_id: UInt32):
         """Remove `context_id` from the subscriber set."""
         for i in range(len(self.subscribers)):
             if self.subscribers[i] == context_id:
@@ -151,7 +153,7 @@ struct SignalEntry(Copyable):
                 _ = self.subscribers.pop()
                 return
 
-    fn subscriber_count(self) -> Int:
+    def subscriber_count(self) -> Int:
         """Return the number of subscribed contexts."""
         return len(self.subscribers)
 
@@ -184,22 +186,22 @@ struct SignalStore(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         self._entries = List[SignalEntry]()
         self._states = List[SignalSlotState]()
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._entries = take._entries^
-        self._states = take._states^
-        self._free_head = take._free_head
-        self._count = take._count
+    def __init__(out self, *, deinit move: Self):
+        self._entries = move._entries^
+        self._states = move._states^
+        self._free_head = move._free_head
+        self._count = move._count
 
     # ── Create / Destroy ─────────────────────────────────────────────
 
-    fn create[
-        T: Copyable & ImplicitlyDestructible & AnyType
+    def create[
+        T: Copyable & Deinitable & AnyType
     ](mut self, initial: T) -> UInt32:
         """Create a new signal with `initial` value.  Returns its key."""
         var sz = size_of[T]()
@@ -207,9 +209,9 @@ struct SignalStore(Movable):
         # Allocate value storage and copy initial value into it
         var ptr = alloc[UInt8](sz)
         var tmp = alloc[T](1)
-        tmp.init_pointee_copy(initial)
-        memcpy(dest=ptr, src=tmp.bitcast[UInt8](), count=sz)
-        tmp.destroy_pointee()
+        tmp.unsafe_write(initial.copy())
+        unsafe_memcpy(dest=ptr, src=tmp.bitcast[UInt8](), count=sz)
+        tmp.unsafe_deinit_pointee()
         tmp.free()
 
         var entry = SignalEntry(ptr, sz)
@@ -228,7 +230,7 @@ struct SignalStore(Movable):
             self._count += 1
             return UInt32(idx)
 
-    fn destroy(mut self, key: UInt32):
+    def destroy(mut self, key: UInt32):
         """Remove the signal at `key`, freeing its storage."""
         var idx = Int(key)
         if idx < 0 or idx >= len(self._entries):
@@ -246,7 +248,7 @@ struct SignalStore(Movable):
     # ── Read / Write ─────────────────────────────────────────────────
 
     @always_inline
-    fn read[T: Copyable & AnyType](self, key: UInt32) -> T:
+    def read[T: Copyable & AnyType](self, key: UInt32) -> T:
         """Read the signal value at `key` as type T.
 
         This does NOT perform subscriber tracking — call `read_tracked`
@@ -254,7 +256,7 @@ struct SignalStore(Movable):
         """
         return self._entries[Int(key)].read_value[T]()
 
-    fn read_tracked[
+    def read_tracked[
         T: Copyable & AnyType
     ](mut self, key: UInt32, context_id: UInt32) -> T:
         """Read the signal value and subscribe `context_id`.
@@ -266,8 +268,8 @@ struct SignalStore(Movable):
         self._entries[Int(key)].subscribe(context_id)
         return self._entries[Int(key)].read_value[T]()
 
-    fn write[
-        T: Copyable & ImplicitlyDestructible & AnyType
+    def write[
+        T: Copyable & Deinitable & AnyType
     ](mut self, key: UInt32, value: T):
         """Write a new value to the signal at `key`.
 
@@ -276,25 +278,25 @@ struct SignalStore(Movable):
         """
         self._entries[Int(key)].write_value[T](value)
 
-    fn peek[T: Copyable & AnyType](self, key: UInt32) -> T:
+    def peek[T: Copyable & AnyType](self, key: UInt32) -> T:
         """Read without subscribing.  Alias for `read`."""
         return self.read[T](key)
 
     # ── Subscriber queries ───────────────────────────────────────────
 
-    fn subscribe(mut self, key: UInt32, context_id: UInt32):
+    def subscribe(mut self, key: UInt32, context_id: UInt32):
         """Manually subscribe `context_id` to the signal at `key`."""
         self._entries[Int(key)].subscribe(context_id)
 
-    fn unsubscribe(mut self, key: UInt32, context_id: UInt32):
+    def unsubscribe(mut self, key: UInt32, context_id: UInt32):
         """Remove `context_id` from the signal's subscriber set."""
         self._entries[Int(key)].unsubscribe(context_id)
 
-    fn subscriber_count(self, key: UInt32) -> Int:
+    def subscriber_count(self, key: UInt32) -> Int:
         """Return how many contexts are subscribed to signal `key`."""
         return self._entries[Int(key)].subscriber_count()
 
-    fn get_subscribers(self, key: UInt32) -> List[UInt32]:
+    def get_subscribers(self, key: UInt32) -> List[UInt32]:
         """Return a copy of the subscriber list for signal `key`.
 
         The caller typically iterates this to mark scopes dirty after
@@ -302,17 +304,17 @@ struct SignalStore(Movable):
         """
         return self._entries[Int(key)].subscribers.copy()
 
-    fn version(self, key: UInt32) -> UInt32:
+    def version(self, key: UInt32) -> UInt32:
         """Return the write-version counter for signal `key`."""
         return self._entries[Int(key)].version
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn signal_count(self) -> Int:
+    def signal_count(self) -> Int:
         """Number of live signals."""
         return self._count
 
-    fn contains(self, key: UInt32) -> Bool:
+    def contains(self, key: UInt32) -> Bool:
         """Check whether `key` is a live signal."""
         var idx = Int(key)
         if idx < 0 or idx >= len(self._states):
@@ -326,7 +328,7 @@ struct SignalStore(Movable):
 #
 # The SignalStore uses type-erased raw-byte storage (memcpy), which is
 # correct for fixed-size value types like Int32 but unsafe for types
-# with ownership semantics like String (double-free, dangling pointers).
+# with ownership semantics like String (double-dangling pointers).
 #
 # StringStore solves this by storing Strings in a proper List[String]
 # with slab-style free-list reuse.  Each SignalString gets:
@@ -365,21 +367,21 @@ struct StringStore(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         self._entries = List[String]()
         self._states = List[_StringSlotState]()
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._entries = take._entries^
-        self._states = take._states^
-        self._free_head = take._free_head
-        self._count = take._count
+    def __init__(out self, *, deinit move: Self):
+        self._entries = move._entries^
+        self._states = move._states^
+        self._free_head = move._free_head
+        self._count = move._count
 
     # ── Create / Destroy ─────────────────────────────────────────────
 
-    fn create(mut self, initial: String) -> UInt32:
+    def create(mut self, initial: String) -> UInt32:
         """Store a new string and return its key."""
         if self._free_head != -1:
             var idx = self._free_head
@@ -395,7 +397,7 @@ struct StringStore(Movable):
             self._count += 1
             return UInt32(idx)
 
-    fn destroy(mut self, key: UInt32):
+    def destroy(mut self, key: UInt32):
         """Remove the string at `key`, freeing its slot for reuse."""
         var idx = Int(key)
         if idx < 0 or idx >= len(self._entries):
@@ -412,11 +414,11 @@ struct StringStore(Movable):
 
     # ── Read / Write ─────────────────────────────────────────────────
 
-    fn read(self, key: UInt32) -> String:
+    def read(self, key: UInt32) -> String:
         """Read the string at `key`.  Returns a copy."""
         return self._entries[Int(key)]
 
-    fn write(mut self, key: UInt32, value: String):
+    def write(mut self, key: UInt32, value: String):
         """Write a new string value at `key`.
 
         Does NOT handle reactivity — the caller must bump the companion
@@ -426,11 +428,11 @@ struct StringStore(Movable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn count(self) -> Int:
+    def count(self) -> Int:
         """Number of live string entries."""
         return self._count
 
-    fn contains(self, key: UInt32) -> Bool:
+    def contains(self, key: UInt32) -> Bool:
         """Check whether `key` is a live string slot."""
         var idx = Int(key)
         if idx < 0 or idx >= len(self._states):
@@ -491,7 +493,7 @@ struct Runtime(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         self.signals = SignalStore()
         self.strings = StringStore()
         self.scopes = ScopeArena()
@@ -511,35 +513,35 @@ struct Runtime(Movable):
         self._batch_depth = 0
         self._batch_keys = List[UInt32]()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.signals = take.signals^
-        self.strings = take.strings^
-        self.scopes = take.scopes^
-        self.templates = take.templates^
-        self.vnodes = take.vnodes^
-        self.handlers = take.handlers^
-        self.memos = take.memos^
-        self.effects = take.effects^
-        self.current_context = take.current_context
-        self.current_scope = take.current_scope
-        self.dirty_scopes = take.dirty_scopes^
-        self._memo_ctx_ids = take._memo_ctx_ids^
-        self._memo_ids = take._memo_ids^
-        self._effect_ctx_ids = take._effect_ctx_ids^
-        self._effect_ids = take._effect_ids^
-        self._changed_signals = take._changed_signals^
-        self._batch_depth = take._batch_depth
-        self._batch_keys = take._batch_keys^
+    def __init__(out self, *, deinit move: Self):
+        self.signals = move.signals^
+        self.strings = move.strings^
+        self.scopes = move.scopes^
+        self.templates = move.templates^
+        self.vnodes = move.vnodes^
+        self.handlers = move.handlers^
+        self.memos = move.memos^
+        self.effects = move.effects^
+        self.current_context = move.current_context
+        self.current_scope = move.current_scope
+        self.dirty_scopes = move.dirty_scopes^
+        self._memo_ctx_ids = move._memo_ctx_ids^
+        self._memo_ids = move._memo_ids^
+        self._effect_ctx_ids = move._effect_ctx_ids^
+        self._effect_ids = move._effect_ids^
+        self._changed_signals = move._changed_signals^
+        self._batch_depth = move._batch_depth
+        self._batch_keys = move._batch_keys^
 
     # ── Context management ───────────────────────────────────────────
 
     @always_inline
-    fn has_context(self) -> Bool:
+    def has_context(self) -> Bool:
         """Check whether a reactive context is currently active."""
         return self.current_context != -1
 
     @always_inline
-    fn get_context(self) -> UInt32:
+    def get_context(self) -> UInt32:
         """Return the current reactive context ID.
 
         Precondition: `has_context()` is True.
@@ -547,16 +549,16 @@ struct Runtime(Movable):
         return UInt32(self.current_context)
 
     @always_inline
-    fn set_context(mut self, context_id: UInt32):
+    def set_context(mut self, context_id: UInt32):
         """Set the current reactive context."""
         self.current_context = Int(context_id)
 
     @always_inline
-    fn clear_context(mut self):
+    def clear_context(mut self):
         """Clear the current reactive context."""
         self.current_context = -1
 
-    fn push_context(mut self, context_id: UInt32) -> Int:
+    def push_context(mut self, context_id: UInt32) -> Int:
         """Push a new context, returning the previous one (for restore).
 
         Usage:
@@ -568,26 +570,26 @@ struct Runtime(Movable):
         self.current_context = Int(context_id)
         return prev
 
-    fn restore_context(mut self, prev: Int):
+    def restore_context(mut self, prev: Int):
         """Restore a previously saved context."""
         self.current_context = prev
 
     # ── Signal operations (convenience wrappers) ─────────────────────
 
-    fn create_signal[
-        T: Copyable & ImplicitlyDestructible & AnyType
+    def create_signal[
+        T: Copyable & Deinitable & AnyType
     ](mut self, initial: T) -> UInt32:
         """Create a signal and return its key."""
         return self.signals.create[T](initial)
 
-    fn read_signal[T: Copyable & AnyType](mut self, key: UInt32) -> T:
+    def read_signal[T: Copyable & AnyType](mut self, key: UInt32) -> T:
         """Read a signal, auto-subscribing the current context if any."""
         if self.has_context():
             return self.signals.read_tracked[T](key, self.get_context())
         return self.signals.read[T](key)
 
-    fn write_signal[
-        T: Copyable & ImplicitlyDestructible & AnyType
+    def write_signal[
+        T: Copyable & Deinitable & AnyType
     ](mut self, key: UInt32, value: T):
         """Write a signal and propagate dirtiness through memo chains.
 
@@ -735,11 +737,11 @@ struct Runtime(Movable):
                 if not found2:
                     self.dirty_scopes.append(sub_ctx)
 
-    fn peek_signal[T: Copyable & AnyType](self, key: UInt32) -> T:
+    def peek_signal[T: Copyable & AnyType](self, key: UInt32) -> T:
         """Read a signal without subscribing."""
         return self.signals.peek[T](key)
 
-    fn destroy_signal(mut self, key: UInt32):
+    def destroy_signal(mut self, key: UInt32):
         """Destroy a signal, cleaning up subscribers."""
         self.signals.destroy(key)
 
@@ -750,7 +752,9 @@ struct Runtime(Movable):
     # subscriber tracking and dirty-marking; the StringStore provides
     # safe heap-string storage.
 
-    fn create_signal_string(mut self, initial: String) -> Tuple[UInt32, UInt32]:
+    def create_signal_string(
+        mut self, initial: String
+    ) -> Tuple[UInt32, UInt32]:
         """Create a string signal and return (string_key, version_key).
 
         The version signal starts at 0; it is bumped on every write.
@@ -767,7 +771,7 @@ struct Runtime(Movable):
         var version_key = self.signals.create[Int32](Int32(0))
         return Tuple(string_key, version_key)
 
-    fn peek_signal_string(self, string_key: UInt32) -> String:
+    def peek_signal_string(self, string_key: UInt32) -> String:
         """Read a string signal's value WITHOUT subscribing.
 
         Args:
@@ -778,7 +782,7 @@ struct Runtime(Movable):
         """
         return self.strings.read(string_key)
 
-    fn read_signal_string(
+    def read_signal_string(
         mut self, string_key: UInt32, version_key: UInt32
     ) -> String:
         """Read a string signal's value AND subscribe the current context.
@@ -797,7 +801,7 @@ struct Runtime(Movable):
         _ = self.read_signal[Int32](version_key)
         return self.strings.read(string_key)
 
-    fn write_signal_string(
+    def write_signal_string(
         mut self, string_key: UInt32, version_key: UInt32, value: String
     ):
         """Write a new string value and notify subscribers.
@@ -834,7 +838,9 @@ struct Runtime(Movable):
         var ver = self.peek_signal[Int32](version_key)
         self.write_signal[Int32](version_key, ver + 1)
 
-    fn destroy_signal_string(mut self, string_key: UInt32, version_key: UInt32):
+    def destroy_signal_string(
+        mut self, string_key: UInt32, version_key: UInt32
+    ):
         """Destroy a string signal, freeing both the string and version.
 
         Args:
@@ -844,13 +850,13 @@ struct Runtime(Movable):
         self.strings.destroy(string_key)
         self.signals.destroy(version_key)
 
-    fn string_signal_count(self) -> Int:
+    def string_signal_count(self) -> Int:
         """Return the number of live string signals in the StringStore."""
         return self.strings.count()
 
     # ── Hook-based string signal creation ────────────────────────────
 
-    fn use_signal_string(mut self, initial: String) -> Tuple[UInt32, UInt32]:
+    def use_signal_string(mut self, initial: String) -> Tuple[UInt32, UInt32]:
         """Hook: create or retrieve a string signal for the current scope.
 
         On first render: creates a new string signal (string_key +
@@ -885,21 +891,21 @@ struct Runtime(Movable):
 
     # ── Dirty queue ──────────────────────────────────────────────────
 
-    fn drain_dirty(mut self) -> List[UInt32]:
+    def drain_dirty(mut self) -> List[UInt32]:
         """Return and clear the dirty-scope queue."""
         var result = self.dirty_scopes^
         self.dirty_scopes = List[UInt32]()
         return result^
 
-    fn has_dirty(self) -> Bool:
+    def has_dirty(self) -> Bool:
         """Check whether any scopes need re-rendering."""
         return len(self.dirty_scopes) > 0
 
-    fn dirty_count(self) -> Int:
+    def dirty_count(self) -> Int:
         """Number of scopes in the dirty queue."""
         return len(self.dirty_scopes)
 
-    fn mark_scope_dirty(mut self, scope_id: UInt32):
+    def mark_scope_dirty(mut self, scope_id: UInt32):
         """Manually add a scope to the dirty queue.
 
         Used by non-signal state changes (e.g. router navigation triggered
@@ -922,7 +928,7 @@ struct Runtime(Movable):
 
     # ── Changed-signals tracking (Phase 37) ──────────────────────────
 
-    fn signal_changed_this_cycle(self, key: UInt32) -> Bool:
+    def signal_changed_this_cycle(self, key: UInt32) -> Bool:
         """Check whether a signal was written with a new value this flush cycle.
 
         Returns True if `key` appears in `_changed_signals`, meaning
@@ -934,7 +940,7 @@ struct Runtime(Movable):
                 return True
         return False
 
-    fn clear_changed_signals(mut self):
+    def clear_changed_signals(mut self):
         """Reset the changed-signals set.
 
         Called at the end of `settle_scopes()` to prepare for the next
@@ -944,7 +950,7 @@ struct Runtime(Movable):
 
     # ── Batch signal writes (Phase 38) ───────────────────────────────
 
-    fn begin_batch(mut self):
+    def begin_batch(mut self):
         """Enter batch mode.  Signal writes store values but defer propagation.
 
         Can be nested — only the outermost `end_batch()` triggers
@@ -952,7 +958,7 @@ struct Runtime(Movable):
         """
         self._batch_depth += 1
 
-    fn end_batch(mut self):
+    def end_batch(mut self):
         """Exit batch mode.  On the outermost call, run a single combined
         propagation pass over all signals written during the batch.
 
@@ -1079,11 +1085,11 @@ struct Runtime(Movable):
         # Clear batch state
         self._batch_keys = List[UInt32]()
 
-    fn is_batching(self) -> Bool:
+    def is_batching(self) -> Bool:
         """Return True if currently inside a begin_batch/end_batch bracket."""
         return self._batch_depth > 0
 
-    fn settle_scopes(mut self):
+    def settle_scopes(mut self):
         """Remove dirty scopes whose subscribed signals all have unchanged values.
 
         After memo recomputation, some scopes may have been eagerly marked
@@ -1139,7 +1145,7 @@ struct Runtime(Movable):
         self.dirty_scopes = keep^
         self._changed_signals = List[UInt32]()
 
-    fn memo_did_value_change(self, memo_id: UInt32) -> Bool:
+    def memo_did_value_change(self, memo_id: UInt32) -> Bool:
         """Check whether the last end_compute changed the memo's value.
 
         Forwarding method for WASM exports and tests.
@@ -1148,42 +1154,42 @@ struct Runtime(Movable):
 
     # ── Scope management ─────────────────────────────────────────────
 
-    fn create_scope(mut self, height: UInt32, parent_id: Int) -> UInt32:
+    def create_scope(mut self, height: UInt32, parent_id: Int) -> UInt32:
         """Create a new scope and return its ID."""
         return self.scopes.create(height, parent_id)
 
-    fn create_child_scope(mut self, parent_id: UInt32) -> UInt32:
+    def create_child_scope(mut self, parent_id: UInt32) -> UInt32:
         """Create a child scope whose height is parent.height + 1."""
         return self.scopes.create_child(parent_id)
 
-    fn destroy_scope(mut self, id: UInt32):
+    def destroy_scope(mut self, id: UInt32):
         """Destroy a scope, freeing its slot for reuse."""
         self.scopes.destroy(id)
 
-    fn scope_count(self) -> Int:
+    def scope_count(self) -> Int:
         """Return the number of live scopes."""
         return self.scopes.count()
 
-    fn scope_contains(self, id: UInt32) -> Bool:
+    def scope_contains(self, id: UInt32) -> Bool:
         """Check whether `id` is a live scope."""
         return self.scopes.contains(id)
 
     # ── Scope rendering ──────────────────────────────────────────────
 
     @always_inline
-    fn has_scope(self) -> Bool:
+    def has_scope(self) -> Bool:
         """Check whether a scope is currently active (being rendered)."""
         return self.current_scope != -1
 
     @always_inline
-    fn get_scope(self) -> UInt32:
+    def get_scope(self) -> UInt32:
         """Return the current scope ID.
 
         Precondition: `has_scope()` is True.
         """
         return UInt32(self.current_scope)
 
-    fn begin_scope_render(mut self, scope_id: UInt32) -> Int:
+    def begin_scope_render(mut self, scope_id: UInt32) -> Int:
         """Begin rendering a scope.
 
         Sets the current scope, begins the render pass on the scope state,
@@ -1201,7 +1207,7 @@ struct Runtime(Movable):
         self.set_context(scope_id | SCOPE_CONTEXT_TAG)
         return prev_scope
 
-    fn end_scope_render(mut self, prev_scope: Int):
+    def end_scope_render(mut self, prev_scope: Int):
         """End rendering the current scope and restore the previous scope.
 
         Clears the reactive context and restores the previous scope/context.
@@ -1214,7 +1220,7 @@ struct Runtime(Movable):
 
     # ── Hook-based signal creation ───────────────────────────────────
 
-    fn use_signal_i32(mut self, initial: Int32) -> UInt32:
+    def use_signal_i32(mut self, initial: Int32) -> UInt32:
         """Hook: create or retrieve an Int32 signal for the current scope.
 
         On first render: creates a new signal with `initial`, stores its
@@ -1235,7 +1241,7 @@ struct Runtime(Movable):
             # Re-render — return existing signal key
             return self.scopes.next_hook(scope_id)
 
-    fn use_effect(mut self) -> UInt32:
+    def use_effect(mut self) -> UInt32:
         """Hook: create or retrieve an effect for the current scope.
 
         Follows the same pattern as use_signal_i32 and use_memo_i32:
@@ -1256,7 +1262,7 @@ struct Runtime(Movable):
             # Re-render — return existing effect ID
             return self.scopes.next_hook(scope_id)
 
-    fn use_memo_i32(mut self, initial: Int32) -> UInt32:
+    def use_memo_i32(mut self, initial: Int32) -> UInt32:
         """Hook: create or retrieve an Int32 memo for the current scope.
 
         On first render: creates a new memo, stores its ID in the scope's
@@ -1277,7 +1283,7 @@ struct Runtime(Movable):
             # Re-render — return existing memo ID
             return self.scopes.next_hook(scope_id)
 
-    fn use_memo_bool(mut self, initial: Bool) -> UInt32:
+    def use_memo_bool(mut self, initial: Bool) -> UInt32:
         """Hook: create or retrieve a Bool memo for the current scope.
 
         On first render: creates a new memo, stores its ID in the scope's
@@ -1296,7 +1302,7 @@ struct Runtime(Movable):
         else:
             return self.scopes.next_hook(scope_id)
 
-    fn use_memo_string(mut self, initial: String) -> UInt32:
+    def use_memo_string(mut self, initial: String) -> UInt32:
         """Hook: create or retrieve a String memo for the current scope.
 
         On first render: creates a new memo, stores its ID in the scope's
@@ -1317,7 +1323,7 @@ struct Runtime(Movable):
 
     # ── Event handler management ─────────────────────────────────────
 
-    fn register_handler(mut self, entry: HandlerEntry) -> UInt32:
+    def register_handler(mut self, entry: HandlerEntry) -> UInt32:
         """Register an event handler and return its stable ID.
 
         The handler ID is used in AVAL_EVENT attribute values and by
@@ -1325,11 +1331,11 @@ struct Runtime(Movable):
         """
         return self.handlers.register(entry)
 
-    fn remove_handler(mut self, id: UInt32):
+    def remove_handler(mut self, id: UInt32):
         """Remove an event handler by ID."""
         self.handlers.remove(id)
 
-    fn dispatch_event(mut self, handler_id: UInt32, event_type: UInt8) -> Bool:
+    def dispatch_event(mut self, handler_id: UInt32, event_type: UInt8) -> Bool:
         """Dispatch an event to the handler at `handler_id`.
 
         Executes the handler's action (e.g. signal write) and returns
@@ -1398,7 +1404,7 @@ struct Runtime(Movable):
 
         return False
 
-    fn dispatch_event_with_i32(
+    def dispatch_event_with_i32(
         mut self, handler_id: UInt32, event_type: UInt8, value: Int32
     ) -> Bool:
         """Dispatch an event with an Int32 payload (e.g. from input).
@@ -1427,7 +1433,7 @@ struct Runtime(Movable):
         # Fall back to normal dispatch for other action types
         return self.dispatch_event(handler_id, event_type)
 
-    fn dispatch_event_with_string(
+    def dispatch_event_with_string(
         mut self, handler_id: UInt32, event_type: UInt8, value: String
     ) -> Bool:
         """Dispatch an event with a String payload (e.g. from input).
@@ -1479,13 +1485,13 @@ struct Runtime(Movable):
         # Fall back to normal dispatch for other action types
         return self.dispatch_event(handler_id, event_type)
 
-    fn handler_count(self) -> Int:
+    def handler_count(self) -> Int:
         """Return the number of live event handlers."""
         return self.handlers.count()
 
     # ── Memo operations ──────────────────────────────────────────────
 
-    fn create_memo_i32(mut self, scope_id: UInt32, initial: Int32) -> UInt32:
+    def create_memo_i32(mut self, scope_id: UInt32, initial: Int32) -> UInt32:
         """Create a memo with an initial cached value.
 
         Allocates a reactive context (a scope-level context ID via a
@@ -1506,7 +1512,7 @@ struct Runtime(Movable):
         self._memo_ids.append(memo_id)
         return memo_id
 
-    fn memo_begin_compute(mut self, memo_id: UInt32):
+    def memo_begin_compute(mut self, memo_id: UInt32):
         """Begin memo computation.
 
         Sets the memo's reactive context as the current context so that
@@ -1534,7 +1540,7 @@ struct Runtime(Movable):
         self.signals.write[Int32](entry.context_id, Int32(prev))
         self.current_context = Int(entry.context_id)
 
-    fn memo_end_compute_i32(mut self, memo_id: UInt32, value: Int32):
+    def memo_end_compute_i32(mut self, memo_id: UInt32, value: Int32):
         """End memo computation and store the result.
 
         Writes the computed value to the memo's output signal and clears
@@ -1567,7 +1573,7 @@ struct Runtime(Movable):
         var prev = Int(self.signals.read[Int32](entry.context_id))
         self.current_context = prev
 
-    fn memo_read_i32(mut self, memo_id: UInt32) -> Int32:
+    def memo_read_i32(mut self, memo_id: UInt32) -> Int32:
         """Read the memo's cached value.
 
         Subscribes the current reactive context (if any) to the memo's
@@ -1586,13 +1592,13 @@ struct Runtime(Movable):
             )
         return self.signals.read[Int32](entry.output_key)
 
-    fn memo_is_dirty(self, memo_id: UInt32) -> Bool:
+    def memo_is_dirty(self, memo_id: UInt32) -> Bool:
         """Check whether the memo needs recomputation."""
         if not self.memos.contains(memo_id):
             return False
         return self.memos.is_dirty(memo_id)
 
-    fn destroy_memo(mut self, memo_id: UInt32):
+    def destroy_memo(mut self, memo_id: UInt32):
         """Destroy a memo, cleaning up its context and output signal.
 
         Removes the context→memo mapping, destroys the context signal
@@ -1622,25 +1628,25 @@ struct Runtime(Movable):
         # Destroy the memo entry
         self.memos.destroy(memo_id)
 
-    fn memo_count(self) -> Int:
+    def memo_count(self) -> Int:
         """Return the number of live memos."""
         return self.memos.count()
 
-    fn memo_output_key(self, memo_id: UInt32) -> UInt32:
+    def memo_output_key(self, memo_id: UInt32) -> UInt32:
         """Return the output signal key of the memo (for testing)."""
         return self.memos.output_key(memo_id)
 
-    fn memo_context_id(self, memo_id: UInt32) -> UInt32:
+    def memo_context_id(self, memo_id: UInt32) -> UInt32:
         """Return the reactive context ID of the memo (for testing)."""
         return self.memos.context_id(memo_id)
 
-    fn memo_string_key(self, memo_id: UInt32) -> UInt32:
+    def memo_string_key(self, memo_id: UInt32) -> UInt32:
         """Return the StringStore key of the memo (for testing)."""
         return self.memos.string_key(memo_id)
 
     # ── MemoBool operations ──────────────────────────────────────────
 
-    fn create_memo_bool(mut self, scope_id: UInt32, initial: Bool) -> UInt32:
+    def create_memo_bool(mut self, scope_id: UInt32, initial: Bool) -> UInt32:
         """Create a Bool memo with an initial cached value.
 
         Allocates a reactive context and an output signal (stored as
@@ -1661,7 +1667,7 @@ struct Runtime(Movable):
         self._memo_ids.append(memo_id)
         return memo_id
 
-    fn memo_end_compute_bool(mut self, memo_id: UInt32, value: Bool):
+    def memo_end_compute_bool(mut self, memo_id: UInt32, value: Bool):
         """End Bool memo computation and store the result.
 
         Writes the computed Bool value (as Int32 0/1) to the memo's
@@ -1693,7 +1699,7 @@ struct Runtime(Movable):
         var prev = Int(self.signals.read[Int32](entry.context_id))
         self.current_context = prev
 
-    fn memo_read_bool(mut self, memo_id: UInt32) -> Bool:
+    def memo_read_bool(mut self, memo_id: UInt32) -> Bool:
         """Read the Bool memo's cached value.
 
         Subscribes the current reactive context (if any) to the memo's
@@ -1712,7 +1718,7 @@ struct Runtime(Movable):
 
     # ── MemoString operations ────────────────────────────────────────
 
-    fn create_memo_string(
+    def create_memo_string(
         mut self, scope_id: UInt32, initial: String
     ) -> UInt32:
         """Create a String memo with an initial cached value.
@@ -1733,7 +1739,7 @@ struct Runtime(Movable):
         self._memo_ids.append(memo_id)
         return memo_id
 
-    fn memo_end_compute_string(mut self, memo_id: UInt32, value: String):
+    def memo_end_compute_string(mut self, memo_id: UInt32, value: String):
         """End String memo computation and store the result.
 
         Writes the computed string to the StringStore, bumps the version
@@ -1764,7 +1770,7 @@ struct Runtime(Movable):
         var prev = Int(self.signals.read[Int32](entry.context_id))
         self.current_context = prev
 
-    fn memo_read_string(mut self, memo_id: UInt32) -> String:
+    def memo_read_string(mut self, memo_id: UInt32) -> String:
         """Read the String memo's cached value (with context tracking).
 
         Subscribes the current reactive context (if any) to the memo's
@@ -1784,7 +1790,7 @@ struct Runtime(Movable):
         _ = self.signals.read[Int32](entry.output_key)
         return self.strings.read(entry.string_key)
 
-    fn memo_peek_string(self, memo_id: UInt32) -> String:
+    def memo_peek_string(self, memo_id: UInt32) -> String:
         """Read the String memo's cached value WITHOUT subscribing.
 
         Returns a copy of the cached String value.
@@ -1796,7 +1802,7 @@ struct Runtime(Movable):
 
     # ── Effect operations ────────────────────────────────────────────
 
-    fn create_effect(mut self, scope_id: UInt32) -> UInt32:
+    def create_effect(mut self, scope_id: UInt32) -> UInt32:
         """Create an effect with a reactive context.
 
         Allocates a "context signal" (a dummy Int32 signal whose key
@@ -1813,7 +1819,7 @@ struct Runtime(Movable):
         self._effect_ids.append(effect_id)
         return effect_id
 
-    fn effect_begin_run(mut self, effect_id: UInt32):
+    def effect_begin_run(mut self, effect_id: UInt32):
         """Begin effect execution.
 
         Sets the effect's reactive context as the current context so that
@@ -1838,7 +1844,7 @@ struct Runtime(Movable):
         self.signals.write[Int32](entry.context_id, Int32(prev))
         self.current_context = Int(entry.context_id)
 
-    fn effect_end_run(mut self, effect_id: UInt32):
+    def effect_end_run(mut self, effect_id: UInt32):
         """End effect execution.
 
         Clears the pending flag and running flag.
@@ -1853,13 +1859,13 @@ struct Runtime(Movable):
         var prev = Int(self.signals.read[Int32](entry.context_id))
         self.current_context = prev
 
-    fn effect_is_pending(self, effect_id: UInt32) -> Bool:
+    def effect_is_pending(self, effect_id: UInt32) -> Bool:
         """Check whether the effect needs re-execution."""
         if not self.effects.contains(effect_id):
             return False
         return self.effects.is_pending(effect_id)
 
-    fn destroy_effect(mut self, effect_id: UInt32):
+    def destroy_effect(mut self, effect_id: UInt32):
         """Destroy an effect, cleaning up its context signal.
 
         Removes the context→effect mapping, destroys the context signal,
@@ -1884,15 +1890,15 @@ struct Runtime(Movable):
         # Destroy the effect entry
         self.effects.destroy(effect_id)
 
-    fn effect_count(self) -> Int:
+    def effect_count(self) -> Int:
         """Return the number of live effects."""
         return self.effects.count()
 
-    fn effect_context_id(self, effect_id: UInt32) -> UInt32:
+    def effect_context_id(self, effect_id: UInt32) -> UInt32:
         """Return the reactive context ID of the effect (for testing)."""
         return self.effects.context_id(effect_id)
 
-    fn drain_pending_effects(self) -> List[UInt32]:
+    def drain_pending_effects(self) -> List[UInt32]:
         """Return a list of effect IDs that are currently pending.
 
         Does NOT clear pending flags — the caller must begin_run/end_run
@@ -1900,11 +1906,11 @@ struct Runtime(Movable):
         """
         return self.effects.pending_effects()
 
-    fn pending_effect_count(self) -> Int:
+    def pending_effect_count(self) -> Int:
         """Return the number of pending effects."""
         return len(self.effects.pending_effects())
 
-    fn pending_effect_at(self, index: Int) -> UInt32:
+    def pending_effect_at(self, index: Int) -> UInt32:
         """Return the effect ID at the given index in the pending list.
 
         This is a convenience for WASM export (avoids returning a List).
@@ -1921,14 +1927,14 @@ struct Runtime(Movable):
 # These helpers create and access the heap-allocated instance.
 
 
-fn create_runtime() -> UnsafePointer[Runtime, MutExternalOrigin]:
+def create_runtime() -> UnsafePointer[Runtime, MutUntrackedOrigin]:
     """Allocate a Runtime on the heap and return a pointer to it."""
     var ptr = alloc[Runtime](1)
-    ptr.init_pointee_move(Runtime())
+    ptr.unsafe_write(Runtime())
     return ptr
 
 
-fn destroy_runtime(ptr: UnsafePointer[Runtime, MutExternalOrigin]):
+def destroy_runtime(ptr: UnsafePointer[Runtime, MutUntrackedOrigin]):
     """Destroy and free a heap-allocated Runtime."""
-    ptr.destroy_pointee()
+    ptr.unsafe_deinit_pointee()
     ptr.free()

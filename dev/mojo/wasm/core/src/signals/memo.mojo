@@ -60,7 +60,7 @@ struct MemoEntry(Copyable, Equatable, Writable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an empty (default) memo entry."""
         self.context_id = 0
         self.output_key = 0
@@ -70,7 +70,7 @@ struct MemoEntry(Copyable, Equatable, Writable):
         self.computing = False
         self.value_changed = True
 
-    fn __init__(
+    def __init__(
         out self,
         context_id: UInt32,
         output_key: UInt32,
@@ -93,7 +93,7 @@ struct MemoEntry(Copyable, Equatable, Writable):
         self.computing = False
         self.value_changed = True
 
-    fn __init__(
+    def __init__(
         out self,
         context_id: UInt32,
         output_key: UInt32,
@@ -119,7 +119,7 @@ struct MemoEntry(Copyable, Equatable, Writable):
         self.computing = False
         self.value_changed = True
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.context_id = copy.context_id
         self.output_key = copy.output_key
         self.string_key = copy.string_key
@@ -128,14 +128,14 @@ struct MemoEntry(Copyable, Equatable, Writable):
         self.computing = copy.computing
         self.value_changed = copy.value_changed
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.context_id = take.context_id
-        self.output_key = take.output_key
-        self.string_key = take.string_key
-        self.scope_id = take.scope_id
-        self.dirty = take.dirty
-        self.computing = take.computing
-        self.value_changed = take.value_changed
+    def __init__(out self, *, deinit move: Self):
+        self.context_id = move.context_id
+        self.output_key = move.output_key
+        self.string_key = move.string_key
+        self.scope_id = move.scope_id
+        self.dirty = move.dirty
+        self.computing = move.computing
+        self.value_changed = move.value_changed
 
 
 # ── Slot state for the memo store ────────────────────────────────────────────
@@ -174,21 +174,21 @@ struct MemoStore(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         self._entries = List[MemoEntry]()
         self._states = List[MemoSlotState]()
         self._free_head = -1
         self._count = 0
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._entries = take._entries^
-        self._states = take._states^
-        self._free_head = take._free_head
-        self._count = take._count
+    def __init__(out self, *, deinit move: Self):
+        self._entries = move._entries^
+        self._states = move._states^
+        self._free_head = move._free_head
+        self._count = move._count
 
     # ── Create / Destroy ─────────────────────────────────────────────
 
-    fn create(
+    def create(
         mut self,
         context_id: UInt32,
         output_key: UInt32,
@@ -222,7 +222,7 @@ struct MemoStore(Movable):
             self._count += 1
             return UInt32(idx)
 
-    fn create(
+    def create(
         mut self,
         context_id: UInt32,
         output_key: UInt32,
@@ -260,7 +260,7 @@ struct MemoStore(Movable):
             self._count += 1
             return UInt32(idx)
 
-    fn destroy(mut self, id: UInt32):
+    def destroy(mut self, id: UInt32):
         """Remove the memo at `id`, freeing its slot for reuse.
 
         Destroying a non-existent or already-freed memo is a no-op.
@@ -281,26 +281,26 @@ struct MemoStore(Movable):
 
     # ── Access ───────────────────────────────────────────────────────
 
-    fn get(self, id: UInt32) -> MemoEntry:
+    def get(self, id: UInt32) -> MemoEntry:
         """Return a copy of the memo entry at `id`.
 
         Precondition: `contains(id)` is True.
         """
         return self._entries[Int(id)].copy()
 
-    fn get_ptr(
+    def get_ptr(
         mut self, id: UInt32
-    ) -> UnsafePointer[MemoEntry, MutExternalOrigin]:
+    ) -> UnsafePointer[MemoEntry, MutUntrackedOrigin]:
         """Return a pointer to the memo entry at `id`.
 
         The pointer is valid until the next mutation of the store.
         Precondition: `contains(id)` is True.
         """
-        return UnsafePointer.address_of(self._entries[Int(id)])
+        return UnsafePointer(to=self._entries[Int(id)])
 
     # ── Dirty tracking ───────────────────────────────────────────────
 
-    fn mark_dirty(mut self, id: UInt32):
+    def mark_dirty(mut self, id: UInt32):
         """Mark the memo as needing recomputation.
 
         Called when an input signal that the memo depends on is written.
@@ -312,7 +312,7 @@ struct MemoStore(Movable):
             return
         self._entries[idx].dirty = True
 
-    fn clear_dirty(mut self, id: UInt32):
+    def clear_dirty(mut self, id: UInt32):
         """Clear the dirty flag (called after successful recomputation)."""
         var idx = Int(id)
         if idx < 0 or idx >= len(self._entries):
@@ -321,7 +321,7 @@ struct MemoStore(Movable):
             return
         self._entries[idx].dirty = False
 
-    fn is_dirty(self, id: UInt32) -> Bool:
+    def is_dirty(self, id: UInt32) -> Bool:
         """Check whether the memo needs recomputation.
 
         Precondition: `contains(id)` is True.
@@ -330,7 +330,7 @@ struct MemoStore(Movable):
 
     # ── Computing state ──────────────────────────────────────────────
 
-    fn set_computing(mut self, id: UInt32, computing: Bool):
+    def set_computing(mut self, id: UInt32, computing: Bool):
         """Set the computing flag on the memo.
 
         True while the memo is inside a begin_compute / end_compute bracket.
@@ -342,7 +342,7 @@ struct MemoStore(Movable):
             return
         self._entries[idx].computing = computing
 
-    fn is_computing(self, id: UInt32) -> Bool:
+    def is_computing(self, id: UInt32) -> Bool:
         """Check whether the memo is currently being computed.
 
         Precondition: `contains(id)` is True.
@@ -351,28 +351,28 @@ struct MemoStore(Movable):
 
     # ── Field accessors ──────────────────────────────────────────────
 
-    fn context_id(self, id: UInt32) -> UInt32:
+    def context_id(self, id: UInt32) -> UInt32:
         """Return the reactive context ID of the memo.
 
         Precondition: `contains(id)` is True.
         """
         return self._entries[Int(id)].context_id
 
-    fn output_key(self, id: UInt32) -> UInt32:
+    def output_key(self, id: UInt32) -> UInt32:
         """Return the output signal key of the memo.
 
         Precondition: `contains(id)` is True.
         """
         return self._entries[Int(id)].output_key
 
-    fn scope_id(self, id: UInt32) -> UInt32:
+    def scope_id(self, id: UInt32) -> UInt32:
         """Return the owning scope ID of the memo.
 
         Precondition: `contains(id)` is True.
         """
         return self._entries[Int(id)].scope_id
 
-    fn string_key(self, id: UInt32) -> UInt32:
+    def string_key(self, id: UInt32) -> UInt32:
         """Return the StringStore key of the memo (0 for non-string memos).
 
         Precondition: `contains(id)` is True.
@@ -381,11 +381,11 @@ struct MemoStore(Movable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn count(self) -> Int:
+    def count(self) -> Int:
         """Return the number of live memos."""
         return self._count
 
-    fn contains(self, id: UInt32) -> Bool:
+    def contains(self, id: UInt32) -> Bool:
         """Check whether `id` is a live memo."""
         var idx = Int(id)
         if idx < 0 or idx >= len(self._states):
@@ -394,7 +394,7 @@ struct MemoStore(Movable):
 
     # ── Bulk operations ──────────────────────────────────────────────
 
-    fn remove_for_scope(mut self, scope_id: UInt32) -> List[UInt32]:
+    def remove_for_scope(mut self, scope_id: UInt32) -> List[UInt32]:
         """Remove all memos belonging to the given scope.
 
         Returns a list of the destroyed memo IDs so the caller (Runtime)
@@ -410,7 +410,7 @@ struct MemoStore(Movable):
                     self.destroy(UInt32(i))
         return destroyed^
 
-    fn memos_for_scope(self, scope_id: UInt32) -> List[UInt32]:
+    def memos_for_scope(self, scope_id: UInt32) -> List[UInt32]:
         """Return a list of memo IDs belonging to the given scope."""
         var result = List[UInt32]()
         for i in range(len(self._entries)):
@@ -421,7 +421,7 @@ struct MemoStore(Movable):
 
     # ── Value-changed tracking ───────────────────────────────────────
 
-    fn set_value_changed(mut self, id: UInt32, changed: Bool):
+    def set_value_changed(mut self, id: UInt32, changed: Bool):
         """Set the value_changed flag after end_compute.
 
         Called by the runtime after comparing old vs new value in
@@ -435,7 +435,7 @@ struct MemoStore(Movable):
             return
         self._entries[idx].value_changed = changed
 
-    fn did_value_change(self, id: UInt32) -> Bool:
+    def did_value_change(self, id: UInt32) -> Bool:
         """Check whether the last end_compute changed the memo's value.
 
         Returns True if the memo's output changed on its most recent
@@ -450,7 +450,7 @@ struct MemoStore(Movable):
             return True  # conservative default
         return self._entries[idx].value_changed
 
-    fn clear(mut self):
+    def clear(mut self):
         """Remove all memos."""
         self._entries.clear()
         self._states.clear()

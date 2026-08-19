@@ -29,34 +29,34 @@ struct ElementId(Copyable, Equatable, Hashable, Writable):
 
     # ── Additional constructors ──────────────────────────────────────
 
-    fn __init__(out self, id: Int):
+    def __init__(out self, id: Int):
         self.id = UInt32(id)
 
     # ── Queries ──────────────────────────────────────────────────────
 
     @always_inline
-    fn is_root(self) -> Bool:
+    def is_root(self) -> Bool:
         """Check whether this is the root element (id == 0)."""
         return self.id == 0
 
     @always_inline
-    fn is_valid(self) -> Bool:
+    def is_valid(self) -> Bool:
         """Check whether this is a non-root, potentially valid ID."""
         return self.id != 0
 
     @always_inline
-    fn as_u32(self) -> UInt32:
+    def as_u32(self) -> UInt32:
         """Return the raw u32 value."""
         return self.id
 
     @always_inline
-    fn as_int(self) -> Int:
+    def as_int(self) -> Int:
         """Return the raw value as Int."""
         return Int(self.id)
 
     # ── Trait implementations ────────────────────────────────────────
 
-    fn write_to[W: Writer](self, mut w: W):
+    def write_to(self, mut w: Some[Writer]):
         """Write the value through a Writer, as Writable requires.
 
         Delegates to __str__ so String(self) keeps producing the value
@@ -64,7 +64,7 @@ struct ElementId(Copyable, Equatable, Hashable, Writable):
         """
         w.write(self.__str__())
 
-    fn __str__(self) -> String:
+    def __str__(self) -> String:
         return String("ElementId(") + String(self.id) + String(")")
 
 
@@ -107,7 +107,7 @@ struct ElementIdAllocator(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an allocator.  Slot 0 is auto-reserved."""
         self._slots = List[_SlotState]()
         self._free_head = -1
@@ -115,19 +115,19 @@ struct ElementIdAllocator(Movable):
         # Reserve slot 0 so user IDs start at 1
         self._reserve_root()
 
-    fn __init__(out self, *, capacity: Int):
+    def __init__(out self, *, capacity: Int):
         """Create an allocator with pre-allocated capacity."""
         self._slots = List[_SlotState](capacity=capacity)
         self._free_head = -1
         self._count = 0
         self._reserve_root()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._slots = take._slots^
-        self._free_head = take._free_head
-        self._count = take._count
+    def __init__(out self, *, deinit move: Self):
+        self._slots = move._slots^
+        self._free_head = move._free_head
+        self._count = move._count
 
-    fn _reserve_root(mut self):
+    def _reserve_root(mut self):
         """Reserve slot 0 for the root element."""
         # Append an occupied slot at index 0
         self._slots.append(_SlotState(occupied=True, next_free=-1))
@@ -135,7 +135,7 @@ struct ElementIdAllocator(Movable):
 
     # ── Core API ─────────────────────────────────────────────────────
 
-    fn alloc(mut self) -> ElementId:
+    def alloc(mut self) -> ElementId:
         """Allocate a new ElementId.  O(1).
 
         Freed IDs are reused.  The returned ID is guaranteed to be > 0.
@@ -154,7 +154,7 @@ struct ElementIdAllocator(Movable):
             self._count += 1
             return ElementId(UInt32(idx))
 
-    fn free(mut self, id: ElementId):
+    def free(mut self, id: ElementId):
         """Free an ElementId for reuse.  O(1).
 
         Freeing the root ID (0) is a no-op.
@@ -171,7 +171,7 @@ struct ElementIdAllocator(Movable):
         self._free_head = idx
         self._count -= 1
 
-    fn is_alive(self, id: ElementId) -> Bool:
+    def is_alive(self, id: ElementId) -> Bool:
         """Check whether the given ID is currently allocated."""
         var idx = id.as_int()
         if idx < 0 or idx >= len(self._slots):
@@ -180,15 +180,15 @@ struct ElementIdAllocator(Movable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn count(self) -> Int:
+    def count(self) -> Int:
         """Return the number of allocated IDs (including the reserved root)."""
         return self._count
 
-    fn user_count(self) -> Int:
+    def user_count(self) -> Int:
         """Return the number of user-allocated IDs (excluding root)."""
         return self._count - 1
 
-    fn next_id(self) -> ElementId:
+    def next_id(self) -> ElementId:
         """Return the ID that the next `alloc()` will return.
 
         Useful for pre-computing IDs before allocation.
@@ -197,7 +197,7 @@ struct ElementIdAllocator(Movable):
             return ElementId(UInt32(self._free_head))
         return ElementId(UInt32(len(self._slots)))
 
-    fn clear(mut self):
+    def clear(mut self):
         """Free all IDs.  Slot 0 is re-reserved."""
         self._slots.clear()
         self._free_head = -1

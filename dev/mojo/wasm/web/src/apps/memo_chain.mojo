@@ -57,7 +57,7 @@ struct MemoChainApp(Movable):
     var label: MemoString
     var incr_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.input = self.ctx.use_signal(0)
         self.doubled = self.ctx.use_memo(0)
@@ -81,15 +81,15 @@ struct MemoChainApp(Movable):
         )
         self.incr_handler = self.ctx.view_event_handler_id(0)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.input = take.input.copy()
-        self.doubled = take.doubled.copy()
-        self.is_big = take.is_big.copy()
-        self.label = take.label.copy()
-        self.incr_handler = take.incr_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.input = move.input.copy()
+        self.doubled = move.doubled.copy()
+        self.is_big = move.is_big.copy()
+        self.label = move.label.copy()
+        self.incr_handler = move.incr_handler
 
-    fn run_memos(mut self):
+    def run_memos(mut self):
         """Recompute all memos in dependency order.
 
         Chain: input → doubled (input * 2)
@@ -122,7 +122,7 @@ struct MemoChainApp(Movable):
             else:
                 self.label.end_compute(String("small"))
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build a fresh VNode with 4 dyn_text slots."""
         var vb = self.ctx.render_builder()
         vb.add_dyn_text(String("Input: ") + String(self.input.peek()))
@@ -138,23 +138,23 @@ struct MemoChainApp(Movable):
 # ── MemoChainApp lifecycle functions ─────────────────────────────────────────
 
 
-fn _mc_init() -> UnsafePointer[MemoChainApp, MutExternalOrigin]:
+def _mc_init() -> UnsafePointer[MemoChainApp, MutUntrackedOrigin]:
     var app_ptr = alloc[MemoChainApp](1)
-    app_ptr.init_pointee_move(MemoChainApp())
+    app_ptr.unsafe_write(MemoChainApp())
     return app_ptr
 
 
-fn _mc_destroy(
-    app_ptr: UnsafePointer[MemoChainApp, MutExternalOrigin],
+def _mc_destroy(
+    app_ptr: UnsafePointer[MemoChainApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _mc_rebuild(
+def _mc_rebuild(
     mut app: MemoChainApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the memo-chain app.
 
@@ -171,7 +171,7 @@ fn _mc_rebuild(
     return result
 
 
-fn _mc_handle_event(
+def _mc_handle_event(
     mut app: MemoChainApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -179,9 +179,9 @@ fn _mc_handle_event(
     return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _mc_flush(
+def _mc_flush(
     mut app: MemoChainApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with memo chain recomputation.
 

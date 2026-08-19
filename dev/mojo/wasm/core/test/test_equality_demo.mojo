@@ -44,15 +44,15 @@ from wasm_harness import (
 )
 
 
-fn _load() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_eq(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_eq(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create an EqualityDemoApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("eq_init", no_args()))
@@ -61,8 +61,8 @@ fn _create_eq(
     return Tuple(app, buf)
 
 
-fn _create_eq_no_rebuild(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_eq_no_rebuild(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create an EqualityDemoApp without mounting.  Returns (app_ptr, buf_ptr).
     """
@@ -71,8 +71,8 @@ fn _create_eq_no_rebuild(
     return Tuple(app, buf)
 
 
-fn _destroy_eq(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _destroy_eq(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -81,8 +81,8 @@ fn _destroy_eq(
     w[].call_void("eq_destroy", args_ptr(app))
 
 
-fn _flush(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _flush(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -90,8 +90,8 @@ fn _flush(
     return w[].call_i32("eq_flush", args_ptr_ptr_i32(app, buf, 8192))
 
 
-fn _handle_event(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _handle_event(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -99,8 +99,8 @@ fn _handle_event(
     return w[].call_i32("eq_handle_event", args_ptr_i32_i32(app, handler_id, 0))
 
 
-fn _incr(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _incr(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises:
     """Increment input via the button handler."""
@@ -108,8 +108,8 @@ fn _incr(
     _ = _handle_event(w, app, hid)
 
 
-fn _decr(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _decr(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises:
     """Decrement input via the button handler."""
@@ -117,22 +117,22 @@ fn _decr(
     _ = _handle_event(w, app, hid)
 
 
-fn _input(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _input(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("eq_input_value", args_ptr(app))
 
 
-fn _clamped(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _clamped(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("eq_clamped_value", args_ptr(app))
 
 
-fn _label_text(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _label_text(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
@@ -140,50 +140,50 @@ fn _label_text(
     return w[].read_string_struct(out_ptr)
 
 
-fn _clamped_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _clamped_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("eq_clamped_dirty", args_ptr(app)) != 0
 
 
-fn _label_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _label_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("eq_label_dirty", args_ptr(app)) != 0
 
 
-fn _clamped_changed(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _clamped_changed(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("eq_clamped_changed", args_ptr(app)) != 0
 
 
-fn _label_changed(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _label_changed(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("eq_label_changed", args_ptr(app)) != 0
 
 
-fn _has_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _has_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("eq_has_dirty", args_ptr(app)) != 0
 
 
-fn _scope_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _scope_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("eq_scope_count", args_ptr(app))
 
 
-fn _memo_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("eq_memo_count", args_ptr(app))
@@ -192,8 +192,8 @@ fn _memo_count(
 # ── Helper: increment N times and flush ───────────────────────────────────────
 
 
-fn _incr_and_flush(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _incr_and_flush(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
     n: Int,
@@ -204,8 +204,8 @@ fn _incr_and_flush(
     return _flush(w, app, buf)
 
 
-fn _decr_and_flush(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _decr_and_flush(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
     n: Int,
@@ -221,7 +221,7 @@ fn _decr_and_flush(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_initial_state() raises:
+def test_eq_initial_state() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -241,7 +241,7 @@ fn test_eq_initial_state() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_incr_within_range() raises:
+def test_eq_incr_within_range() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -264,7 +264,7 @@ fn test_eq_incr_within_range() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_incr_across_threshold() raises:
+def test_eq_incr_across_threshold() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -293,7 +293,7 @@ fn test_eq_incr_across_threshold() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_incr_at_max() raises:
+def test_eq_incr_at_max() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -320,7 +320,7 @@ fn test_eq_incr_at_max() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_incr_above_max() raises:
+def test_eq_incr_above_max() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -344,7 +344,7 @@ fn test_eq_incr_above_max() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_decr_within_range() raises:
+def test_eq_decr_within_range() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -367,7 +367,7 @@ fn test_eq_decr_within_range() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_decr_across_threshold() raises:
+def test_eq_decr_across_threshold() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -395,7 +395,7 @@ fn test_eq_decr_across_threshold() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_decr_at_min() raises:
+def test_eq_decr_at_min() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -416,7 +416,7 @@ fn test_eq_decr_at_min() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_decr_below_min() raises:
+def test_eq_decr_below_min() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -441,7 +441,7 @@ fn test_eq_decr_below_min() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_full_cycle() raises:
+def test_eq_full_cycle() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -481,7 +481,7 @@ fn test_eq_full_cycle() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_label_stable_after_clamped_stable() raises:
+def test_eq_label_stable_after_clamped_stable() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -513,7 +513,7 @@ fn test_eq_label_stable_after_clamped_stable() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_scope_settled_when_all_stable() raises:
+def test_eq_scope_settled_when_all_stable() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -541,7 +541,7 @@ fn test_eq_scope_settled_when_all_stable() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_scope_dirty_when_label_changed() raises:
+def test_eq_scope_dirty_when_label_changed() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -564,7 +564,7 @@ fn test_eq_scope_dirty_when_label_changed() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_flush_returns_zero_when_clean() raises:
+def test_eq_flush_returns_zero_when_clean() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -582,7 +582,7 @@ fn test_eq_flush_returns_zero_when_clean() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_flush_returns_nonzero_when_changed() raises:
+def test_eq_flush_returns_nonzero_when_changed() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -601,7 +601,7 @@ fn test_eq_flush_returns_nonzero_when_changed() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_handle_event_marks_dirty() raises:
+def test_eq_handle_event_marks_dirty() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -620,7 +620,7 @@ fn test_eq_handle_event_marks_dirty() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_memo_count() raises:
+def test_eq_memo_count() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -636,7 +636,7 @@ fn test_eq_memo_count() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_destroy_clean() raises:
+def test_eq_destroy_clean() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -651,7 +651,7 @@ fn test_eq_destroy_clean() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_initial_compute_values() raises:
+def test_eq_initial_compute_values() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -677,7 +677,7 @@ fn test_eq_initial_compute_values() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_eq_consecutive_stable_flushes() raises:
+def test_eq_consecutive_stable_flushes() raises:
     var w = _load()
     var t = _create_eq(w)
     var app = t[0]
@@ -711,7 +711,7 @@ fn test_eq_consecutive_stable_flushes() raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn main() raises:
+def main() raises:
     var passed = 0
     var failed = 0
     var total = 20

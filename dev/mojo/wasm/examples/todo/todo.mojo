@@ -161,20 +161,20 @@ struct TodoItem(Copyable):
     var text: String
     var completed: Bool
 
-    fn __init__(out self, id: Int32, text: String, completed: Bool):
+    def __init__(out self, id: Int32, text: String, completed: Bool):
         self.id = id
         self.text = text
         self.completed = completed
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.id = copy.id
         self.text = copy.text
         self.completed = copy.completed
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.id = take.id
-        self.text = take.text^
-        self.completed = take.completed
+    def __init__(out self, *, deinit move: Self):
+        self.id = move.id
+        self.text = move.text^
+        self.completed = move.completed
 
 
 # App-defined action tags for ItemBuilder.add_custom_event() dispatch.
@@ -222,7 +222,7 @@ struct TodoApp(Movable):
     var empty_msg_tmpl: UInt32
     var empty_msg_slot: ConditionalSlot
 
-    fn __init__(out self):
+    def __init__(out self):
         """Initialize the todo app with all reactive state, templates, and handlers.
 
         Creates: ComponentContext (runtime, VNode store, element ID
@@ -315,29 +315,29 @@ struct TodoApp(Movable):
         self.data = List[TodoItem]()
         self.next_id = 1
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.list_version = take.list_version^
-        self.items = take.items^
-        self.data = take.data^
-        self.next_id = take.next_id
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.list_version = move.list_version^
+        self.items = move.items^
+        self.data = move.data^
+        self.next_id = move.next_id
         self.input_text = (
-            take.input_text.copy()
+            move.input_text.copy()
         )  # SignalString is Copyable (not ImplicitlyCopyable)
-        self.add_handler = take.add_handler
-        self.enter_handler = take.enter_handler
-        self.empty_msg_tmpl = take.empty_msg_tmpl
-        self.empty_msg_slot = take.empty_msg_slot.copy()
+        self.add_handler = move.add_handler
+        self.enter_handler = move.enter_handler
+        self.empty_msg_tmpl = move.empty_msg_tmpl
+        self.empty_msg_slot = move.empty_msg_slot.copy()
 
-    fn add_item(mut self, text: String):
+    def add_item(mut self, text: String):
         """Add a new item and bump the list version signal."""
-        if len(text) == 0:
+        if text.byte_length() == 0:
             return
         self.data.append(TodoItem(self.next_id, text, False))
         self.next_id += 1
         self._bump_version()
 
-    fn remove_item(mut self, item_id: Int32):
+    def remove_item(mut self, item_id: Int32):
         """Remove an item by ID and bump the list version signal."""
         for i in range(len(self.data)):
             if self.data[i].id == item_id:
@@ -349,7 +349,7 @@ struct TodoApp(Movable):
                 self._bump_version()
                 return
 
-    fn toggle_item(mut self, item_id: Int32):
+    def toggle_item(mut self, item_id: Int32):
         """Toggle an item's completed status and bump the list version signal.
         """
         for i in range(len(self.data)):
@@ -358,11 +358,11 @@ struct TodoApp(Movable):
                 self._bump_version()
                 return
 
-    fn _bump_version(mut self):
+    def _bump_version(mut self):
         """Increment the list version signal to trigger re-render."""
         self.list_version += 1
 
-    fn build_item_vnode(mut self, item: TodoItem) -> UInt32:
+    def build_item_vnode(mut self, item: TodoItem) -> UInt32:
         """Build a keyed VNode for a single todo item.
 
         Uses Phase 17 ItemBuilder + Phase 18 conditional helpers:
@@ -399,7 +399,7 @@ struct TodoApp(Movable):
 
         return ib.index()
 
-    fn build_items_fragment(mut self) -> UInt32:
+    def build_items_fragment(mut self) -> UInt32:
         """Build a Fragment VNode containing keyed item children.
 
         Uses KeyedList.begin_rebuild() to destroy old child scopes,
@@ -412,7 +412,7 @@ struct TodoApp(Movable):
             self.items.push_child(self.ctx, frag_idx, item_idx)
         return frag_idx
 
-    fn handle_event(mut self, handler_id: UInt32) -> Bool:
+    def handle_event(mut self, handler_id: UInt32) -> Bool:
         """Dispatch an event by handler ID.
 
         Phase 22: Both the Add button (onclick_custom) and Enter key
@@ -429,7 +429,7 @@ struct TodoApp(Movable):
         if handler_id == self.add_handler or handler_id == self.enter_handler:
             # Phase 20.5: WASM-driven Add — read signal, add item, clear
             var input = self.input_text.peek()
-            if len(input) > 0:
+            if input.byte_length() > 0:
                 self.add_item(input)
                 self.input_text.set(String(""))
             return True
@@ -444,7 +444,7 @@ struct TodoApp(Movable):
                 return True
         return False
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build the app shell VNode using render_builder (auto-populates).
 
         Phase 20.5: Uses render_builder() which auto-populates all
@@ -465,7 +465,7 @@ struct TodoApp(Movable):
 
         return vb.build()
 
-    fn build_empty_message(mut self) -> UInt32:
+    def build_empty_message(mut self) -> UInt32:
         """Build the empty state message VNode (Phase 28).
 
         Returns the VNode index in the store.
@@ -474,27 +474,27 @@ struct TodoApp(Movable):
         return vb.index()
 
 
-fn todo_app_init() -> UnsafePointer[TodoApp, MutExternalOrigin]:
+def todo_app_init() -> UnsafePointer[TodoApp, MutUntrackedOrigin]:
     """Initialize the todo app.  Returns a pointer to the app state.
 
     All setup happens in TodoApp.__init__() — this function just
     allocates the heap slot and moves the app into it.
     """
     var app_ptr = alloc[TodoApp](1)
-    app_ptr.init_pointee_move(TodoApp())
+    app_ptr.unsafe_write(TodoApp())
     return app_ptr
 
 
-fn todo_app_destroy(app_ptr: UnsafePointer[TodoApp, MutExternalOrigin]):
+def todo_app_destroy(app_ptr: UnsafePointer[TodoApp, MutUntrackedOrigin]):
     """Destroy the todo app and free all resources."""
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn todo_app_rebuild(
+def todo_app_rebuild(
     mut app: TodoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the todo app.
 
@@ -554,9 +554,9 @@ fn todo_app_rebuild(
     return Int32(writer_ptr[0].offset)
 
 
-fn todo_app_flush(
+def todo_app_flush(
     mut app: TodoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates after a list mutation or input clear.
 

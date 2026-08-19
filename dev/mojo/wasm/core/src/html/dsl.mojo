@@ -122,7 +122,7 @@ from .tags import (
 #     ib.add_class_if(selected == row.id, String("danger"))
 
 
-fn class_if(condition: Bool, name: String) -> String:
+def class_if(condition: Bool, name: String) -> String:
     """Return the class name if condition is True, empty string otherwise.
 
     A concise alternative to if/else blocks for conditional CSS classes.
@@ -143,7 +143,7 @@ fn class_if(condition: Bool, name: String) -> String:
     return String("")
 
 
-fn class_when(
+def class_when(
     condition: Bool, true_class: String, false_class: String
 ) -> String:
     """Return one of two class names based on a condition.
@@ -166,7 +166,7 @@ fn class_when(
     return false_class
 
 
-fn text_when(condition: Bool, true_text: String, false_text: String) -> String:
+def text_when(condition: Bool, true_text: String, false_text: String) -> String:
     """Return one of two strings based on a condition.
 
     General-purpose conditional text helper.
@@ -211,7 +211,7 @@ comptime NODE_BIND_VALUE: UInt8 = 7  # Value binding (SignalString → dynamic a
 comptime DYN_TEXT_AUTO: UInt32 = 0xFFFFFFFF
 
 
-struct Node(Copyable):
+struct Node(Copyable, Deinitable):
     """A declarative description of a UI element tree node.
 
     Node is a tagged union that can represent static text, HTML elements
@@ -239,10 +239,15 @@ struct Node(Copyable):
     var operand: Int32  # event handler operand (EVENT only, 0 otherwise)
     var items: List[Node]  # children + inline attrs (ELEMENT only)
 
+    def __deinit__(deinit self):
+        # Explicit: the compiler cannot synthesize a destructor through the
+        # Node -> List[Node] -> Node recursion, but it can check one.
+        pass
+
     # ── Named constructors ───────────────────────────────────────────
 
     @staticmethod
-    fn text_node(s: String) -> Self:
+    def text_node(s: String) -> Self:
         """Create a static text node."""
         return Self(
             kind=NODE_TEXT,
@@ -255,7 +260,7 @@ struct Node(Copyable):
         )
 
     @staticmethod
-    fn element_node(html_tag: UInt8, var items: List[Node]) -> Self:
+    def element_node(html_tag: UInt8, var items: List[Node]) -> Self:
         """Create an element node with the given tag and items.
 
         Items can include children (text, element, dyn_text, dyn_node)
@@ -272,7 +277,7 @@ struct Node(Copyable):
         )
 
     @staticmethod
-    fn element_node_empty(html_tag: UInt8) -> Self:
+    def element_node_empty(html_tag: UInt8) -> Self:
         """Create an element node with no children or attributes."""
         return Self(
             kind=NODE_ELEMENT,
@@ -285,7 +290,7 @@ struct Node(Copyable):
         )
 
     @staticmethod
-    fn dynamic_text_node(index: UInt32) -> Self:
+    def dynamic_text_node(index: UInt32) -> Self:
         """Create a dynamic text placeholder (fills a DynamicText slot)."""
         return Self(
             kind=NODE_DYN_TEXT,
@@ -298,7 +303,7 @@ struct Node(Copyable):
         )
 
     @staticmethod
-    fn dynamic_node_slot(index: UInt32) -> Self:
+    def dynamic_node_slot(index: UInt32) -> Self:
         """Create a dynamic node placeholder (fills a Dynamic slot)."""
         return Self(
             kind=NODE_DYN_NODE,
@@ -311,7 +316,7 @@ struct Node(Copyable):
         )
 
     @staticmethod
-    fn static_attr_node(name: String, value: String) -> Self:
+    def static_attr_node(name: String, value: String) -> Self:
         """Create a static attribute (name=value)."""
         return Self(
             kind=NODE_STATIC_ATTR,
@@ -324,7 +329,7 @@ struct Node(Copyable):
         )
 
     @staticmethod
-    fn dynamic_attr_node(index: UInt32) -> Self:
+    def dynamic_attr_node(index: UInt32) -> Self:
         """Create a dynamic attribute placeholder (fills a dynamic attr slot).
         """
         return Self(
@@ -338,7 +343,7 @@ struct Node(Copyable):
         )
 
     @staticmethod
-    fn event_node(
+    def event_node(
         event_name: String, action: UInt8, signal_key: UInt32, operand: Int32
     ) -> Self:
         """Create an inline event handler node.
@@ -369,7 +374,7 @@ struct Node(Copyable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
+    def __init__(
         out self,
         kind: UInt8,
         tag: UInt8,
@@ -387,7 +392,7 @@ struct Node(Copyable):
         self.operand = operand
         self.items = items^
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.kind = copy.kind
         self.tag = copy.tag
         self.text = copy.text
@@ -396,50 +401,50 @@ struct Node(Copyable):
         self.operand = copy.operand
         self.items = copy.items.copy()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.kind = take.kind
-        self.tag = take.tag
-        self.text = take.text^
-        self.attr_value = take.attr_value^
-        self.dynamic_index = take.dynamic_index
-        self.operand = take.operand
-        self.items = take.items^
+    def __init__(out self, *, deinit move: Self):
+        self.kind = move.kind
+        self.tag = move.tag
+        self.text = move.text^
+        self.attr_value = move.attr_value^
+        self.dynamic_index = move.dynamic_index
+        self.operand = move.operand
+        self.items = move.items^
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn is_text(self) -> Bool:
+    def is_text(self) -> Bool:
         """Check whether this is a static text node."""
         return self.kind == NODE_TEXT
 
-    fn is_element(self) -> Bool:
+    def is_element(self) -> Bool:
         """Check whether this is an element node."""
         return self.kind == NODE_ELEMENT
 
-    fn is_dyn_text(self) -> Bool:
+    def is_dyn_text(self) -> Bool:
         """Check whether this is a dynamic text placeholder."""
         return self.kind == NODE_DYN_TEXT
 
-    fn is_dyn_node(self) -> Bool:
+    def is_dyn_node(self) -> Bool:
         """Check whether this is a dynamic node placeholder."""
         return self.kind == NODE_DYN_NODE
 
-    fn is_static_attr(self) -> Bool:
+    def is_static_attr(self) -> Bool:
         """Check whether this is a static attribute."""
         return self.kind == NODE_STATIC_ATTR
 
-    fn is_dyn_attr(self) -> Bool:
+    def is_dyn_attr(self) -> Bool:
         """Check whether this is a dynamic attribute placeholder."""
         return self.kind == NODE_DYN_ATTR
 
-    fn is_event(self) -> Bool:
+    def is_event(self) -> Bool:
         """Check whether this is an inline event handler node."""
         return self.kind == NODE_EVENT
 
-    fn is_bind_value(self) -> Bool:
+    def is_bind_value(self) -> Bool:
         """Check whether this is a value binding node."""
         return self.kind == NODE_BIND_VALUE
 
-    fn is_attr(self) -> Bool:
+    def is_attr(self) -> Bool:
         """Check whether this is any kind of attribute (static, dynamic, event, or binding).
         """
         return (
@@ -449,15 +454,15 @@ struct Node(Copyable):
             or self.kind == NODE_BIND_VALUE
         )
 
-    fn is_child(self) -> Bool:
+    def is_child(self) -> Bool:
         """Check whether this is a child node (not an attribute)."""
         return not self.is_attr()
 
-    fn item_count(self) -> Int:
+    def item_count(self) -> Int:
         """Return the number of items (children + attrs) in an element."""
         return len(self.items)
 
-    fn child_count(self) -> Int:
+    def child_count(self) -> Int:
         """Return the number of child nodes (excluding attrs) in an element."""
         var count = 0
         for i in range(len(self.items)):
@@ -465,7 +470,7 @@ struct Node(Copyable):
                 count += 1
         return count
 
-    fn attr_count(self) -> Int:
+    def attr_count(self) -> Int:
         """Return the number of attributes (excluding children) in an element.
         """
         var count = 0
@@ -474,7 +479,7 @@ struct Node(Copyable):
                 count += 1
         return count
 
-    fn static_attr_count(self) -> Int:
+    def static_attr_count(self) -> Int:
         """Return the number of static attributes in an element."""
         var count = 0
         for i in range(len(self.items)):
@@ -482,7 +487,7 @@ struct Node(Copyable):
                 count += 1
         return count
 
-    fn event_count(self) -> Int:
+    def event_count(self) -> Int:
         """Return the number of inline event handler nodes in an element."""
         var count = 0
         for i in range(len(self.items)):
@@ -490,7 +495,7 @@ struct Node(Copyable):
                 count += 1
         return count
 
-    fn bind_value_count(self) -> Int:
+    def bind_value_count(self) -> Int:
         """Return the number of value binding nodes in an element."""
         var count = 0
         for i in range(len(self.items)):
@@ -498,7 +503,7 @@ struct Node(Copyable):
                 count += 1
         return count
 
-    fn dynamic_attr_count(self) -> Int:
+    def dynamic_attr_count(self) -> Int:
         """Return the number of dynamic attribute placeholders in an element.
 
         Includes explicit dyn_attr, inline event, and value binding nodes.
@@ -515,7 +520,7 @@ struct Node(Copyable):
 
     # ── Mutation ─────────────────────────────────────────────────────
 
-    fn add_item(mut self, var item: Node):
+    def add_item(mut self, var item: Node):
         """Append an item (child or attribute) to this element node."""
         self.items.append(item^)
 
@@ -527,7 +532,7 @@ struct Node(Copyable):
 # ── Leaf constructors ────────────────────────────────────────────────────────
 
 
-fn text(s: String) -> Node:
+def text(s: String) -> Node:
     """Create a static text node.
 
     Usage: `text("Hello, world!")`
@@ -535,7 +540,7 @@ fn text(s: String) -> Node:
     return Node.text_node(s)
 
 
-fn dyn_text(index: Int) -> Node:
+def dyn_text(index: Int) -> Node:
     """Create a dynamic text placeholder with an explicit slot index.
 
     The `index` identifies which slot in the VNode's dynamic_nodes list
@@ -546,7 +551,7 @@ fn dyn_text(index: Int) -> Node:
     return Node.dynamic_text_node(UInt32(index))
 
 
-fn dyn_text() -> Node:
+def dyn_text() -> Node:
     """Create an auto-numbered dynamic text placeholder.
 
     The slot index will be auto-assigned by `ComponentContext.setup_view()`
@@ -562,7 +567,7 @@ fn dyn_text() -> Node:
     return Node.dynamic_text_node(DYN_TEXT_AUTO)
 
 
-fn dyn_node(index: Int) -> Node:
+def dyn_node(index: Int) -> Node:
     """Create a dynamic node placeholder.
 
     The `index` identifies which slot in the VNode's dynamic_nodes list
@@ -573,7 +578,7 @@ fn dyn_node(index: Int) -> Node:
     return Node.dynamic_node_slot(UInt32(index))
 
 
-fn attr(name: String, value: String) -> Node:
+def attr(name: String, value: String) -> Node:
     """Create a static attribute.
 
     Usage: `attr("class", "container")`
@@ -581,7 +586,7 @@ fn attr(name: String, value: String) -> Node:
     return Node.static_attr_node(name, value)
 
 
-fn dyn_attr(index: Int) -> Node:
+def dyn_attr(index: Int) -> Node:
     """Create a dynamic attribute placeholder.
 
     The `index` identifies which slot in the VNode's dynamic_attrs list
@@ -606,7 +611,7 @@ fn dyn_attr(index: Int) -> Node:
 # `add_dyn_text_attr()` — analogous to `class_if()` and `class_when()`.
 
 
-fn attr_if(condition: Bool, value: String) -> String:
+def attr_if(condition: Bool, value: String) -> String:
     """Return `value` if condition is True, empty string otherwise.
 
     A general-purpose conditional attribute value helper, similar to
@@ -627,7 +632,7 @@ fn attr_if(condition: Bool, value: String) -> String:
     return String("")
 
 
-fn attr_when(
+def attr_when(
     condition: Bool, true_value: String, false_value: String
 ) -> String:
     """Return one of two attribute values based on a condition.
@@ -670,7 +675,7 @@ from events.registry import (
 from signals.handle import SignalI32, SignalBool, SignalString
 
 
-fn onclick_add(signal: SignalI32, delta: Int32) -> Node:
+def onclick_add(signal: SignalI32, delta: Int32) -> Node:
     """Create an inline click handler that adds `delta` to a signal.
 
     Equivalent to Dioxus: `onclick: move |_| signal += delta`
@@ -683,7 +688,7 @@ fn onclick_add(signal: SignalI32, delta: Int32) -> Node:
     )
 
 
-fn onclick_sub(signal: SignalI32, delta: Int32) -> Node:
+def onclick_sub(signal: SignalI32, delta: Int32) -> Node:
     """Create an inline click handler that subtracts `delta` from a signal.
 
     Equivalent to Dioxus: `onclick: move |_| signal -= delta`
@@ -696,7 +701,7 @@ fn onclick_sub(signal: SignalI32, delta: Int32) -> Node:
     )
 
 
-fn onclick_set(signal: SignalI32, value: Int32) -> Node:
+def onclick_set(signal: SignalI32, value: Int32) -> Node:
     """Create an inline click handler that sets a signal to a fixed value.
 
     Equivalent to Dioxus: `onclick: move |_| signal.set(value)`
@@ -709,7 +714,7 @@ fn onclick_set(signal: SignalI32, value: Int32) -> Node:
     )
 
 
-fn onclick_toggle(signal: SignalI32) -> Node:
+def onclick_toggle(signal: SignalI32) -> Node:
     """Create an inline click handler that toggles a boolean signal (0 ↔ 1).
 
     Equivalent to Dioxus: `onclick: move |_| signal.toggle()`
@@ -720,7 +725,7 @@ fn onclick_toggle(signal: SignalI32) -> Node:
     return Node.event_node(String("click"), ACTION_SIGNAL_TOGGLE, signal.key, 0)
 
 
-fn onclick_toggle(signal: SignalBool) -> Node:
+def onclick_toggle(signal: SignalBool) -> Node:
     """Create an inline click handler that toggles a boolean signal (0 ↔ 1).
 
     Overload accepting SignalBool directly (stored as Int32 internally).
@@ -733,7 +738,7 @@ fn onclick_toggle(signal: SignalBool) -> Node:
     return Node.event_node(String("click"), ACTION_SIGNAL_TOGGLE, signal.key, 0)
 
 
-fn onclick_custom() -> Node:
+def onclick_custom() -> Node:
     """Create an inline click handler with custom action (app-defined logic).
 
     The handler is registered with ACTION_CUSTOM.  When dispatched, the
@@ -755,7 +760,7 @@ fn onclick_custom() -> Node:
     return Node.event_node(String("click"), ACTION_CUSTOM, 0, 0)
 
 
-fn onkeydown_enter_custom() -> Node:
+def onkeydown_enter_custom() -> Node:
     """Create an inline keydown handler that fires only on Enter key.
 
     Phase 22: Enables WASM-driven Enter key handling.  The handler is
@@ -783,7 +788,7 @@ fn onkeydown_enter_custom() -> Node:
     return Node.event_node(String("keydown"), ACTION_KEY_ENTER_CUSTOM, 0, 0)
 
 
-fn on_event(
+def on_event(
     event_name: String, signal: SignalI32, action: UInt8, operand: Int32
 ) -> Node:
     """Create an inline event handler for any event type and action.
@@ -811,7 +816,7 @@ fn on_event(
 # in operand — exactly matching HandlerEntry.signal_set_string().
 
 
-fn oninput_set_string(signal: SignalString) -> Node:
+def oninput_set_string(signal: SignalString) -> Node:
     """Create an inline input handler that sets a SignalString from the input value.
 
     Equivalent to Dioxus: `oninput: move |e| signal.set(e.value())`
@@ -837,7 +842,7 @@ fn oninput_set_string(signal: SignalString) -> Node:
     )
 
 
-fn onchange_set_string(signal: SignalString) -> Node:
+def onchange_set_string(signal: SignalString) -> Node:
     """Create an inline change handler that sets a SignalString from the input value.
 
     Like `oninput_set_string` but fires on the "change" event (when the
@@ -875,7 +880,7 @@ fn onchange_set_string(signal: SignalString) -> Node:
 #   operand      → Int32(version_key) (companion version signal key)
 
 
-fn bind_value(signal: SignalString) -> Node:
+def bind_value(signal: SignalString) -> Node:
     """Create a value binding that syncs an input's value to a SignalString.
 
     Produces a NODE_BIND_VALUE node with attr_name="value".  When used
@@ -911,7 +916,7 @@ fn bind_value(signal: SignalString) -> Node:
     )
 
 
-fn bind_attr(attr_name: String, signal: SignalString) -> Node:
+def bind_attr(attr_name: String, signal: SignalString) -> Node:
     """Create a value binding for an arbitrary attribute name.
 
     Like `bind_value()` but lets you specify the attribute name.
@@ -941,7 +946,7 @@ fn bind_attr(attr_name: String, signal: SignalString) -> Node:
 # ── Generic element constructor ──────────────────────────────────────────────
 
 
-fn el(html_tag: UInt8, var items: List[Node]) -> Node:
+def el(html_tag: UInt8, var items: List[Node]) -> Node:
     """Create an element node with the given HTML tag and items.
 
     Items can be a mix of children and attributes in any order.
@@ -952,7 +957,7 @@ fn el(html_tag: UInt8, var items: List[Node]) -> Node:
     return Node.element_node(html_tag, items^)
 
 
-fn el_empty(html_tag: UInt8) -> Node:
+def el_empty(html_tag: UInt8) -> Node:
     """Create an empty element node (no children, no attributes).
 
     Usage: `el_empty(TAG_BR)`
@@ -963,77 +968,77 @@ fn el_empty(html_tag: UInt8) -> Node:
 # ── Tag helpers — Layout / Sectioning ────────────────────────────────────────
 
 
-fn el_div(var items: List[Node]) -> Node:
+def el_div(var items: List[Node]) -> Node:
     """Create a `<div>` element."""
     return Node.element_node(TAG_DIV, items^)
 
 
-fn el_div() -> Node:
+def el_div() -> Node:
     """Create an empty `<div>` element."""
     return Node.element_node_empty(TAG_DIV)
 
 
-fn el_span(var items: List[Node]) -> Node:
+def el_span(var items: List[Node]) -> Node:
     """Create a `<span>` element."""
     return Node.element_node(TAG_SPAN, items^)
 
 
-fn el_span() -> Node:
+def el_span() -> Node:
     """Create an empty `<span>` element."""
     return Node.element_node_empty(TAG_SPAN)
 
 
-fn el_p(var items: List[Node]) -> Node:
+def el_p(var items: List[Node]) -> Node:
     """Create a `<p>` element."""
     return Node.element_node(TAG_P, items^)
 
 
-fn el_p() -> Node:
+def el_p() -> Node:
     """Create an empty `<p>` element."""
     return Node.element_node_empty(TAG_P)
 
 
-fn el_section(var items: List[Node]) -> Node:
+def el_section(var items: List[Node]) -> Node:
     """Create a `<section>` element."""
     return Node.element_node(TAG_SECTION, items^)
 
 
-fn el_section() -> Node:
+def el_section() -> Node:
     """Create an empty `<section>` element."""
     return Node.element_node_empty(TAG_SECTION)
 
 
-fn el_header(var items: List[Node]) -> Node:
+def el_header(var items: List[Node]) -> Node:
     """Create a `<header>` element."""
     return Node.element_node(TAG_HEADER, items^)
 
 
-fn el_header() -> Node:
+def el_header() -> Node:
     """Create an empty `<header>` element."""
     return Node.element_node_empty(TAG_HEADER)
 
 
-fn el_footer(var items: List[Node]) -> Node:
+def el_footer(var items: List[Node]) -> Node:
     """Create a `<footer>` element."""
     return Node.element_node(TAG_FOOTER, items^)
 
 
-fn el_footer() -> Node:
+def el_footer() -> Node:
     """Create an empty `<footer>` element."""
     return Node.element_node_empty(TAG_FOOTER)
 
 
-fn el_nav(var items: List[Node]) -> Node:
+def el_nav(var items: List[Node]) -> Node:
     """Create a `<nav>` element."""
     return Node.element_node(TAG_NAV, items^)
 
 
-fn el_nav() -> Node:
+def el_nav() -> Node:
     """Create an empty `<nav>` element."""
     return Node.element_node_empty(TAG_NAV)
 
 
-fn el_main(var items: List[Node]) -> Node:
+def el_main(var items: List[Node]) -> Node:
     """Create a `<main>` element.
 
     Named `el_main` (not `main_`) to follow the `el_` prefix convention.
@@ -1041,27 +1046,27 @@ fn el_main(var items: List[Node]) -> Node:
     return Node.element_node(TAG_MAIN, items^)
 
 
-fn el_main() -> Node:
+def el_main() -> Node:
     """Create an empty `<main>` element."""
     return Node.element_node_empty(TAG_MAIN)
 
 
-fn el_article(var items: List[Node]) -> Node:
+def el_article(var items: List[Node]) -> Node:
     """Create an `<article>` element."""
     return Node.element_node(TAG_ARTICLE, items^)
 
 
-fn el_article() -> Node:
+def el_article() -> Node:
     """Create an empty `<article>` element."""
     return Node.element_node_empty(TAG_ARTICLE)
 
 
-fn el_aside(var items: List[Node]) -> Node:
+def el_aside(var items: List[Node]) -> Node:
     """Create an `<aside>` element."""
     return Node.element_node(TAG_ASIDE, items^)
 
 
-fn el_aside() -> Node:
+def el_aside() -> Node:
     """Create an empty `<aside>` element."""
     return Node.element_node_empty(TAG_ASIDE)
 
@@ -1069,62 +1074,62 @@ fn el_aside() -> Node:
 # ── Tag helpers — Headings ───────────────────────────────────────────────────
 
 
-fn el_h1(var items: List[Node]) -> Node:
+def el_h1(var items: List[Node]) -> Node:
     """Create an `<h1>` element."""
     return Node.element_node(TAG_H1, items^)
 
 
-fn el_h1() -> Node:
+def el_h1() -> Node:
     """Create an empty `<h1>` element."""
     return Node.element_node_empty(TAG_H1)
 
 
-fn el_h2(var items: List[Node]) -> Node:
+def el_h2(var items: List[Node]) -> Node:
     """Create an `<h2>` element."""
     return Node.element_node(TAG_H2, items^)
 
 
-fn el_h2() -> Node:
+def el_h2() -> Node:
     """Create an empty `<h2>` element."""
     return Node.element_node_empty(TAG_H2)
 
 
-fn el_h3(var items: List[Node]) -> Node:
+def el_h3(var items: List[Node]) -> Node:
     """Create an `<h3>` element."""
     return Node.element_node(TAG_H3, items^)
 
 
-fn el_h3() -> Node:
+def el_h3() -> Node:
     """Create an empty `<h3>` element."""
     return Node.element_node_empty(TAG_H3)
 
 
-fn el_h4(var items: List[Node]) -> Node:
+def el_h4(var items: List[Node]) -> Node:
     """Create an `<h4>` element."""
     return Node.element_node(TAG_H4, items^)
 
 
-fn el_h4() -> Node:
+def el_h4() -> Node:
     """Create an empty `<h4>` element."""
     return Node.element_node_empty(TAG_H4)
 
 
-fn el_h5(var items: List[Node]) -> Node:
+def el_h5(var items: List[Node]) -> Node:
     """Create an `<h5>` element."""
     return Node.element_node(TAG_H5, items^)
 
 
-fn el_h5() -> Node:
+def el_h5() -> Node:
     """Create an empty `<h5>` element."""
     return Node.element_node_empty(TAG_H5)
 
 
-fn el_h6(var items: List[Node]) -> Node:
+def el_h6(var items: List[Node]) -> Node:
     """Create an `<h6>` element."""
     return Node.element_node(TAG_H6, items^)
 
 
-fn el_h6() -> Node:
+def el_h6() -> Node:
     """Create an empty `<h6>` element."""
     return Node.element_node_empty(TAG_H6)
 
@@ -1132,32 +1137,32 @@ fn el_h6() -> Node:
 # ── Tag helpers — Lists ──────────────────────────────────────────────────────
 
 
-fn el_ul(var items: List[Node]) -> Node:
+def el_ul(var items: List[Node]) -> Node:
     """Create a `<ul>` element."""
     return Node.element_node(TAG_UL, items^)
 
 
-fn el_ul() -> Node:
+def el_ul() -> Node:
     """Create an empty `<ul>` element."""
     return Node.element_node_empty(TAG_UL)
 
 
-fn el_ol(var items: List[Node]) -> Node:
+def el_ol(var items: List[Node]) -> Node:
     """Create an `<ol>` element."""
     return Node.element_node(TAG_OL, items^)
 
 
-fn el_ol() -> Node:
+def el_ol() -> Node:
     """Create an empty `<ol>` element."""
     return Node.element_node_empty(TAG_OL)
 
 
-fn el_li(var items: List[Node]) -> Node:
+def el_li(var items: List[Node]) -> Node:
     """Create a `<li>` element."""
     return Node.element_node(TAG_LI, items^)
 
 
-fn el_li() -> Node:
+def el_li() -> Node:
     """Create an empty `<li>` element."""
     return Node.element_node_empty(TAG_LI)
 
@@ -1165,72 +1170,72 @@ fn el_li() -> Node:
 # ── Tag helpers — Interactive ────────────────────────────────────────────────
 
 
-fn el_button(var items: List[Node]) -> Node:
+def el_button(var items: List[Node]) -> Node:
     """Create a `<button>` element."""
     return Node.element_node(TAG_BUTTON, items^)
 
 
-fn el_button() -> Node:
+def el_button() -> Node:
     """Create an empty `<button>` element."""
     return Node.element_node_empty(TAG_BUTTON)
 
 
-fn el_input(var items: List[Node]) -> Node:
+def el_input(var items: List[Node]) -> Node:
     """Create an `<input>` element."""
     return Node.element_node(TAG_INPUT, items^)
 
 
-fn el_input() -> Node:
+def el_input() -> Node:
     """Create an empty `<input>` element."""
     return Node.element_node_empty(TAG_INPUT)
 
 
-fn el_form(var items: List[Node]) -> Node:
+def el_form(var items: List[Node]) -> Node:
     """Create a `<form>` element."""
     return Node.element_node(TAG_FORM, items^)
 
 
-fn el_form() -> Node:
+def el_form() -> Node:
     """Create an empty `<form>` element."""
     return Node.element_node_empty(TAG_FORM)
 
 
-fn el_textarea(var items: List[Node]) -> Node:
+def el_textarea(var items: List[Node]) -> Node:
     """Create a `<textarea>` element."""
     return Node.element_node(TAG_TEXTAREA, items^)
 
 
-fn el_textarea() -> Node:
+def el_textarea() -> Node:
     """Create an empty `<textarea>` element."""
     return Node.element_node_empty(TAG_TEXTAREA)
 
 
-fn el_select(var items: List[Node]) -> Node:
+def el_select(var items: List[Node]) -> Node:
     """Create a `<select>` element."""
     return Node.element_node(TAG_SELECT, items^)
 
 
-fn el_select() -> Node:
+def el_select() -> Node:
     """Create an empty `<select>` element."""
     return Node.element_node_empty(TAG_SELECT)
 
 
-fn el_option(var items: List[Node]) -> Node:
+def el_option(var items: List[Node]) -> Node:
     """Create an `<option>` element."""
     return Node.element_node(TAG_OPTION, items^)
 
 
-fn el_option() -> Node:
+def el_option() -> Node:
     """Create an empty `<option>` element."""
     return Node.element_node_empty(TAG_OPTION)
 
 
-fn el_label(var items: List[Node]) -> Node:
+def el_label(var items: List[Node]) -> Node:
     """Create a `<label>` element."""
     return Node.element_node(TAG_LABEL, items^)
 
 
-fn el_label() -> Node:
+def el_label() -> Node:
     """Create an empty `<label>` element."""
     return Node.element_node_empty(TAG_LABEL)
 
@@ -1238,22 +1243,22 @@ fn el_label() -> Node:
 # ── Tag helpers — Links / Media ──────────────────────────────────────────────
 
 
-fn el_a(var items: List[Node]) -> Node:
+def el_a(var items: List[Node]) -> Node:
     """Create an `<a>` element."""
     return Node.element_node(TAG_A, items^)
 
 
-fn el_a() -> Node:
+def el_a() -> Node:
     """Create an empty `<a>` element."""
     return Node.element_node_empty(TAG_A)
 
 
-fn el_img(var items: List[Node]) -> Node:
+def el_img(var items: List[Node]) -> Node:
     """Create an `<img>` element."""
     return Node.element_node(TAG_IMG, items^)
 
 
-fn el_img() -> Node:
+def el_img() -> Node:
     """Create an empty `<img>` element."""
     return Node.element_node_empty(TAG_IMG)
 
@@ -1261,62 +1266,62 @@ fn el_img() -> Node:
 # ── Tag helpers — Table ──────────────────────────────────────────────────────
 
 
-fn el_table(var items: List[Node]) -> Node:
+def el_table(var items: List[Node]) -> Node:
     """Create a `<table>` element."""
     return Node.element_node(TAG_TABLE, items^)
 
 
-fn el_table() -> Node:
+def el_table() -> Node:
     """Create an empty `<table>` element."""
     return Node.element_node_empty(TAG_TABLE)
 
 
-fn el_thead(var items: List[Node]) -> Node:
+def el_thead(var items: List[Node]) -> Node:
     """Create a `<thead>` element."""
     return Node.element_node(TAG_THEAD, items^)
 
 
-fn el_thead() -> Node:
+def el_thead() -> Node:
     """Create an empty `<thead>` element."""
     return Node.element_node_empty(TAG_THEAD)
 
 
-fn el_tbody(var items: List[Node]) -> Node:
+def el_tbody(var items: List[Node]) -> Node:
     """Create a `<tbody>` element."""
     return Node.element_node(TAG_TBODY, items^)
 
 
-fn el_tbody() -> Node:
+def el_tbody() -> Node:
     """Create an empty `<tbody>` element."""
     return Node.element_node_empty(TAG_TBODY)
 
 
-fn el_tr(var items: List[Node]) -> Node:
+def el_tr(var items: List[Node]) -> Node:
     """Create a `<tr>` element."""
     return Node.element_node(TAG_TR, items^)
 
 
-fn el_tr() -> Node:
+def el_tr() -> Node:
     """Create an empty `<tr>` element."""
     return Node.element_node_empty(TAG_TR)
 
 
-fn el_td(var items: List[Node]) -> Node:
+def el_td(var items: List[Node]) -> Node:
     """Create a `<td>` element."""
     return Node.element_node(TAG_TD, items^)
 
 
-fn el_td() -> Node:
+def el_td() -> Node:
     """Create an empty `<td>` element."""
     return Node.element_node_empty(TAG_TD)
 
 
-fn el_th(var items: List[Node]) -> Node:
+def el_th(var items: List[Node]) -> Node:
     """Create a `<th>` element."""
     return Node.element_node(TAG_TH, items^)
 
 
-fn el_th() -> Node:
+def el_th() -> Node:
     """Create an empty `<th>` element."""
     return Node.element_node_empty(TAG_TH)
 
@@ -1324,52 +1329,52 @@ fn el_th() -> Node:
 # ── Tag helpers — Inline / Formatting ────────────────────────────────────────
 
 
-fn el_strong(var items: List[Node]) -> Node:
+def el_strong(var items: List[Node]) -> Node:
     """Create a `<strong>` element."""
     return Node.element_node(TAG_STRONG, items^)
 
 
-fn el_strong() -> Node:
+def el_strong() -> Node:
     """Create an empty `<strong>` element."""
     return Node.element_node_empty(TAG_STRONG)
 
 
-fn el_em(var items: List[Node]) -> Node:
+def el_em(var items: List[Node]) -> Node:
     """Create an `<em>` element."""
     return Node.element_node(TAG_EM, items^)
 
 
-fn el_em() -> Node:
+def el_em() -> Node:
     """Create an empty `<em>` element."""
     return Node.element_node_empty(TAG_EM)
 
 
-fn el_br() -> Node:
+def el_br() -> Node:
     """Create a `<br>` element (void element, no children)."""
     return Node.element_node_empty(TAG_BR)
 
 
-fn el_hr() -> Node:
+def el_hr() -> Node:
     """Create an `<hr>` element (void element, no children)."""
     return Node.element_node_empty(TAG_HR)
 
 
-fn el_pre(var items: List[Node]) -> Node:
+def el_pre(var items: List[Node]) -> Node:
     """Create a `<pre>` element."""
     return Node.element_node(TAG_PRE, items^)
 
 
-fn el_pre() -> Node:
+def el_pre() -> Node:
     """Create an empty `<pre>` element."""
     return Node.element_node_empty(TAG_PRE)
 
 
-fn el_code(var items: List[Node]) -> Node:
+def el_code(var items: List[Node]) -> Node:
     """Create a `<code>` element."""
     return Node.element_node(TAG_CODE, items^)
 
 
-fn el_code() -> Node:
+def el_code() -> Node:
     """Create an empty `<code>` element."""
     return Node.element_node_empty(TAG_CODE)
 
@@ -1404,14 +1409,14 @@ fn el_code() -> Node:
 # ── Layout / Sectioning — multi-arg overloads ────────────────────────────────
 
 
-fn el_div(var a: Node) -> Node:
+def el_div(var a: Node) -> Node:
     """Create a `<div>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_DIV, items^)
 
 
-fn el_div(var a: Node, var b: Node) -> Node:
+def el_div(var a: Node, var b: Node) -> Node:
     """Create a `<div>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1419,7 +1424,7 @@ fn el_div(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_DIV, items^)
 
 
-fn el_div(var a: Node, var b: Node, var c: Node) -> Node:
+def el_div(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<div>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1428,7 +1433,7 @@ fn el_div(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_DIV, items^)
 
 
-fn el_div(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_div(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<div>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1438,7 +1443,7 @@ fn el_div(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_DIV, items^)
 
 
-fn el_div(
+def el_div(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<div>` with 5 children/attrs."""
@@ -1451,14 +1456,14 @@ fn el_div(
     return Node.element_node(TAG_DIV, items^)
 
 
-fn el_span(var a: Node) -> Node:
+def el_span(var a: Node) -> Node:
     """Create a `<span>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_SPAN, items^)
 
 
-fn el_span(var a: Node, var b: Node) -> Node:
+def el_span(var a: Node, var b: Node) -> Node:
     """Create a `<span>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1466,7 +1471,7 @@ fn el_span(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_SPAN, items^)
 
 
-fn el_span(var a: Node, var b: Node, var c: Node) -> Node:
+def el_span(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<span>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1475,7 +1480,7 @@ fn el_span(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_SPAN, items^)
 
 
-fn el_span(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_span(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<span>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1485,7 +1490,7 @@ fn el_span(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_SPAN, items^)
 
 
-fn el_span(
+def el_span(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<span>` with 5 children/attrs."""
@@ -1498,14 +1503,14 @@ fn el_span(
     return Node.element_node(TAG_SPAN, items^)
 
 
-fn el_p(var a: Node) -> Node:
+def el_p(var a: Node) -> Node:
     """Create a `<p>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_P, items^)
 
 
-fn el_p(var a: Node, var b: Node) -> Node:
+def el_p(var a: Node, var b: Node) -> Node:
     """Create a `<p>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1513,7 +1518,7 @@ fn el_p(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_P, items^)
 
 
-fn el_p(var a: Node, var b: Node, var c: Node) -> Node:
+def el_p(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<p>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1522,7 +1527,7 @@ fn el_p(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_P, items^)
 
 
-fn el_p(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_p(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<p>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1532,7 +1537,7 @@ fn el_p(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_P, items^)
 
 
-fn el_p(
+def el_p(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<p>` with 5 children/attrs."""
@@ -1545,14 +1550,14 @@ fn el_p(
     return Node.element_node(TAG_P, items^)
 
 
-fn el_section(var a: Node) -> Node:
+def el_section(var a: Node) -> Node:
     """Create a `<section>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_SECTION, items^)
 
 
-fn el_section(var a: Node, var b: Node) -> Node:
+def el_section(var a: Node, var b: Node) -> Node:
     """Create a `<section>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1560,7 +1565,7 @@ fn el_section(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_SECTION, items^)
 
 
-fn el_section(var a: Node, var b: Node, var c: Node) -> Node:
+def el_section(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<section>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1569,7 +1574,7 @@ fn el_section(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_SECTION, items^)
 
 
-fn el_section(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_section(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<section>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1579,7 +1584,7 @@ fn el_section(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_SECTION, items^)
 
 
-fn el_section(
+def el_section(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<section>` with 5 children/attrs."""
@@ -1592,14 +1597,14 @@ fn el_section(
     return Node.element_node(TAG_SECTION, items^)
 
 
-fn el_header(var a: Node) -> Node:
+def el_header(var a: Node) -> Node:
     """Create a `<header>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_HEADER, items^)
 
 
-fn el_header(var a: Node, var b: Node) -> Node:
+def el_header(var a: Node, var b: Node) -> Node:
     """Create a `<header>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1607,7 +1612,7 @@ fn el_header(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_HEADER, items^)
 
 
-fn el_header(var a: Node, var b: Node, var c: Node) -> Node:
+def el_header(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<header>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1616,7 +1621,7 @@ fn el_header(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_HEADER, items^)
 
 
-fn el_header(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_header(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<header>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1626,7 +1631,7 @@ fn el_header(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_HEADER, items^)
 
 
-fn el_header(
+def el_header(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<header>` with 5 children/attrs."""
@@ -1639,14 +1644,14 @@ fn el_header(
     return Node.element_node(TAG_HEADER, items^)
 
 
-fn el_footer(var a: Node) -> Node:
+def el_footer(var a: Node) -> Node:
     """Create a `<footer>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_FOOTER, items^)
 
 
-fn el_footer(var a: Node, var b: Node) -> Node:
+def el_footer(var a: Node, var b: Node) -> Node:
     """Create a `<footer>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1654,7 +1659,7 @@ fn el_footer(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_FOOTER, items^)
 
 
-fn el_footer(var a: Node, var b: Node, var c: Node) -> Node:
+def el_footer(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<footer>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1663,7 +1668,7 @@ fn el_footer(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_FOOTER, items^)
 
 
-fn el_footer(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_footer(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<footer>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1673,7 +1678,7 @@ fn el_footer(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_FOOTER, items^)
 
 
-fn el_footer(
+def el_footer(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<footer>` with 5 children/attrs."""
@@ -1686,14 +1691,14 @@ fn el_footer(
     return Node.element_node(TAG_FOOTER, items^)
 
 
-fn el_nav(var a: Node) -> Node:
+def el_nav(var a: Node) -> Node:
     """Create a `<nav>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_NAV, items^)
 
 
-fn el_nav(var a: Node, var b: Node) -> Node:
+def el_nav(var a: Node, var b: Node) -> Node:
     """Create a `<nav>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1701,7 +1706,7 @@ fn el_nav(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_NAV, items^)
 
 
-fn el_nav(var a: Node, var b: Node, var c: Node) -> Node:
+def el_nav(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<nav>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1710,7 +1715,7 @@ fn el_nav(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_NAV, items^)
 
 
-fn el_nav(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_nav(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<nav>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1720,7 +1725,7 @@ fn el_nav(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_NAV, items^)
 
 
-fn el_nav(
+def el_nav(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<nav>` with 5 children/attrs."""
@@ -1733,14 +1738,14 @@ fn el_nav(
     return Node.element_node(TAG_NAV, items^)
 
 
-fn el_main(var a: Node) -> Node:
+def el_main(var a: Node) -> Node:
     """Create a `<main>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_MAIN, items^)
 
 
-fn el_main(var a: Node, var b: Node) -> Node:
+def el_main(var a: Node, var b: Node) -> Node:
     """Create a `<main>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1748,7 +1753,7 @@ fn el_main(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_MAIN, items^)
 
 
-fn el_main(var a: Node, var b: Node, var c: Node) -> Node:
+def el_main(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<main>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1757,7 +1762,7 @@ fn el_main(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_MAIN, items^)
 
 
-fn el_main(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_main(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<main>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1767,7 +1772,7 @@ fn el_main(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_MAIN, items^)
 
 
-fn el_main(
+def el_main(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<main>` with 5 children/attrs."""
@@ -1780,14 +1785,14 @@ fn el_main(
     return Node.element_node(TAG_MAIN, items^)
 
 
-fn el_article(var a: Node) -> Node:
+def el_article(var a: Node) -> Node:
     """Create an `<article>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_ARTICLE, items^)
 
 
-fn el_article(var a: Node, var b: Node) -> Node:
+def el_article(var a: Node, var b: Node) -> Node:
     """Create an `<article>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1795,7 +1800,7 @@ fn el_article(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_ARTICLE, items^)
 
 
-fn el_article(var a: Node, var b: Node, var c: Node) -> Node:
+def el_article(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<article>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1804,7 +1809,7 @@ fn el_article(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_ARTICLE, items^)
 
 
-fn el_article(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_article(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<article>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1814,7 +1819,7 @@ fn el_article(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_ARTICLE, items^)
 
 
-fn el_article(
+def el_article(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<article>` with 5 children/attrs."""
@@ -1827,14 +1832,14 @@ fn el_article(
     return Node.element_node(TAG_ARTICLE, items^)
 
 
-fn el_aside(var a: Node) -> Node:
+def el_aside(var a: Node) -> Node:
     """Create an `<aside>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_ASIDE, items^)
 
 
-fn el_aside(var a: Node, var b: Node) -> Node:
+def el_aside(var a: Node, var b: Node) -> Node:
     """Create an `<aside>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1842,7 +1847,7 @@ fn el_aside(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_ASIDE, items^)
 
 
-fn el_aside(var a: Node, var b: Node, var c: Node) -> Node:
+def el_aside(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<aside>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1851,7 +1856,7 @@ fn el_aside(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_ASIDE, items^)
 
 
-fn el_aside(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_aside(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<aside>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1861,7 +1866,7 @@ fn el_aside(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_ASIDE, items^)
 
 
-fn el_aside(
+def el_aside(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<aside>` with 5 children/attrs."""
@@ -1877,14 +1882,14 @@ fn el_aside(
 # ── Headings — multi-arg overloads ───────────────────────────────────────────
 
 
-fn el_h1(var a: Node) -> Node:
+def el_h1(var a: Node) -> Node:
     """Create an `<h1>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_H1, items^)
 
 
-fn el_h1(var a: Node, var b: Node) -> Node:
+def el_h1(var a: Node, var b: Node) -> Node:
     """Create an `<h1>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1892,7 +1897,7 @@ fn el_h1(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_H1, items^)
 
 
-fn el_h1(var a: Node, var b: Node, var c: Node) -> Node:
+def el_h1(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<h1>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1901,7 +1906,7 @@ fn el_h1(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_H1, items^)
 
 
-fn el_h1(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_h1(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<h1>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1911,7 +1916,7 @@ fn el_h1(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_H1, items^)
 
 
-fn el_h1(
+def el_h1(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<h1>` with 5 children/attrs."""
@@ -1924,14 +1929,14 @@ fn el_h1(
     return Node.element_node(TAG_H1, items^)
 
 
-fn el_h2(var a: Node) -> Node:
+def el_h2(var a: Node) -> Node:
     """Create an `<h2>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_H2, items^)
 
 
-fn el_h2(var a: Node, var b: Node) -> Node:
+def el_h2(var a: Node, var b: Node) -> Node:
     """Create an `<h2>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1939,7 +1944,7 @@ fn el_h2(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_H2, items^)
 
 
-fn el_h2(var a: Node, var b: Node, var c: Node) -> Node:
+def el_h2(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<h2>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1948,7 +1953,7 @@ fn el_h2(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_H2, items^)
 
 
-fn el_h2(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_h2(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<h2>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1958,7 +1963,7 @@ fn el_h2(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_H2, items^)
 
 
-fn el_h2(
+def el_h2(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<h2>` with 5 children/attrs."""
@@ -1971,14 +1976,14 @@ fn el_h2(
     return Node.element_node(TAG_H2, items^)
 
 
-fn el_h3(var a: Node) -> Node:
+def el_h3(var a: Node) -> Node:
     """Create an `<h3>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_H3, items^)
 
 
-fn el_h3(var a: Node, var b: Node) -> Node:
+def el_h3(var a: Node, var b: Node) -> Node:
     """Create an `<h3>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1986,7 +1991,7 @@ fn el_h3(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_H3, items^)
 
 
-fn el_h3(var a: Node, var b: Node, var c: Node) -> Node:
+def el_h3(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<h3>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -1995,7 +2000,7 @@ fn el_h3(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_H3, items^)
 
 
-fn el_h3(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_h3(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<h3>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2005,7 +2010,7 @@ fn el_h3(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_H3, items^)
 
 
-fn el_h3(
+def el_h3(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<h3>` with 5 children/attrs."""
@@ -2018,14 +2023,14 @@ fn el_h3(
     return Node.element_node(TAG_H3, items^)
 
 
-fn el_h4(var a: Node) -> Node:
+def el_h4(var a: Node) -> Node:
     """Create an `<h4>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_H4, items^)
 
 
-fn el_h4(var a: Node, var b: Node) -> Node:
+def el_h4(var a: Node, var b: Node) -> Node:
     """Create an `<h4>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2033,7 +2038,7 @@ fn el_h4(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_H4, items^)
 
 
-fn el_h4(var a: Node, var b: Node, var c: Node) -> Node:
+def el_h4(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<h4>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2042,7 +2047,7 @@ fn el_h4(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_H4, items^)
 
 
-fn el_h4(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_h4(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<h4>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2052,7 +2057,7 @@ fn el_h4(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_H4, items^)
 
 
-fn el_h4(
+def el_h4(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<h4>` with 5 children/attrs."""
@@ -2065,14 +2070,14 @@ fn el_h4(
     return Node.element_node(TAG_H4, items^)
 
 
-fn el_h5(var a: Node) -> Node:
+def el_h5(var a: Node) -> Node:
     """Create an `<h5>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_H5, items^)
 
 
-fn el_h5(var a: Node, var b: Node) -> Node:
+def el_h5(var a: Node, var b: Node) -> Node:
     """Create an `<h5>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2080,7 +2085,7 @@ fn el_h5(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_H5, items^)
 
 
-fn el_h5(var a: Node, var b: Node, var c: Node) -> Node:
+def el_h5(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<h5>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2089,7 +2094,7 @@ fn el_h5(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_H5, items^)
 
 
-fn el_h5(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_h5(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<h5>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2099,7 +2104,7 @@ fn el_h5(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_H5, items^)
 
 
-fn el_h5(
+def el_h5(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<h5>` with 5 children/attrs."""
@@ -2112,14 +2117,14 @@ fn el_h5(
     return Node.element_node(TAG_H5, items^)
 
 
-fn el_h6(var a: Node) -> Node:
+def el_h6(var a: Node) -> Node:
     """Create an `<h6>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_H6, items^)
 
 
-fn el_h6(var a: Node, var b: Node) -> Node:
+def el_h6(var a: Node, var b: Node) -> Node:
     """Create an `<h6>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2127,7 +2132,7 @@ fn el_h6(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_H6, items^)
 
 
-fn el_h6(var a: Node, var b: Node, var c: Node) -> Node:
+def el_h6(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<h6>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2136,7 +2141,7 @@ fn el_h6(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_H6, items^)
 
 
-fn el_h6(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_h6(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<h6>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2146,7 +2151,7 @@ fn el_h6(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_H6, items^)
 
 
-fn el_h6(
+def el_h6(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<h6>` with 5 children/attrs."""
@@ -2162,14 +2167,14 @@ fn el_h6(
 # ── Lists — multi-arg overloads ──────────────────────────────────────────────
 
 
-fn el_ul(var a: Node) -> Node:
+def el_ul(var a: Node) -> Node:
     """Create a `<ul>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_UL, items^)
 
 
-fn el_ul(var a: Node, var b: Node) -> Node:
+def el_ul(var a: Node, var b: Node) -> Node:
     """Create a `<ul>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2177,7 +2182,7 @@ fn el_ul(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_UL, items^)
 
 
-fn el_ul(var a: Node, var b: Node, var c: Node) -> Node:
+def el_ul(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<ul>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2186,7 +2191,7 @@ fn el_ul(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_UL, items^)
 
 
-fn el_ul(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_ul(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<ul>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2196,7 +2201,7 @@ fn el_ul(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_UL, items^)
 
 
-fn el_ul(
+def el_ul(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<ul>` with 5 children/attrs."""
@@ -2209,14 +2214,14 @@ fn el_ul(
     return Node.element_node(TAG_UL, items^)
 
 
-fn el_ol(var a: Node) -> Node:
+def el_ol(var a: Node) -> Node:
     """Create an `<ol>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_OL, items^)
 
 
-fn el_ol(var a: Node, var b: Node) -> Node:
+def el_ol(var a: Node, var b: Node) -> Node:
     """Create an `<ol>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2224,7 +2229,7 @@ fn el_ol(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_OL, items^)
 
 
-fn el_ol(var a: Node, var b: Node, var c: Node) -> Node:
+def el_ol(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<ol>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2233,7 +2238,7 @@ fn el_ol(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_OL, items^)
 
 
-fn el_ol(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_ol(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<ol>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2243,7 +2248,7 @@ fn el_ol(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_OL, items^)
 
 
-fn el_ol(
+def el_ol(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<ol>` with 5 children/attrs."""
@@ -2256,14 +2261,14 @@ fn el_ol(
     return Node.element_node(TAG_OL, items^)
 
 
-fn el_li(var a: Node) -> Node:
+def el_li(var a: Node) -> Node:
     """Create a `<li>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_LI, items^)
 
 
-fn el_li(var a: Node, var b: Node) -> Node:
+def el_li(var a: Node, var b: Node) -> Node:
     """Create a `<li>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2271,7 +2276,7 @@ fn el_li(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_LI, items^)
 
 
-fn el_li(var a: Node, var b: Node, var c: Node) -> Node:
+def el_li(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<li>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2280,7 +2285,7 @@ fn el_li(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_LI, items^)
 
 
-fn el_li(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_li(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<li>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2290,7 +2295,7 @@ fn el_li(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_LI, items^)
 
 
-fn el_li(
+def el_li(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<li>` with 5 children/attrs."""
@@ -2306,14 +2311,14 @@ fn el_li(
 # ── Interactive — multi-arg overloads ────────────────────────────────────────
 
 
-fn el_button(var a: Node) -> Node:
+def el_button(var a: Node) -> Node:
     """Create a `<button>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_BUTTON, items^)
 
 
-fn el_button(var a: Node, var b: Node) -> Node:
+def el_button(var a: Node, var b: Node) -> Node:
     """Create a `<button>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2321,7 +2326,7 @@ fn el_button(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_BUTTON, items^)
 
 
-fn el_button(var a: Node, var b: Node, var c: Node) -> Node:
+def el_button(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<button>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2330,7 +2335,7 @@ fn el_button(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_BUTTON, items^)
 
 
-fn el_button(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_button(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<button>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2340,7 +2345,7 @@ fn el_button(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_BUTTON, items^)
 
 
-fn el_button(
+def el_button(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<button>` with 5 children/attrs."""
@@ -2353,14 +2358,14 @@ fn el_button(
     return Node.element_node(TAG_BUTTON, items^)
 
 
-fn el_input(var a: Node) -> Node:
+def el_input(var a: Node) -> Node:
     """Create an `<input>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_INPUT, items^)
 
 
-fn el_input(var a: Node, var b: Node) -> Node:
+def el_input(var a: Node, var b: Node) -> Node:
     """Create an `<input>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2368,7 +2373,7 @@ fn el_input(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_INPUT, items^)
 
 
-fn el_input(var a: Node, var b: Node, var c: Node) -> Node:
+def el_input(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<input>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2377,7 +2382,7 @@ fn el_input(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_INPUT, items^)
 
 
-fn el_input(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_input(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<input>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2387,7 +2392,7 @@ fn el_input(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_INPUT, items^)
 
 
-fn el_input(
+def el_input(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<input>` with 5 children/attrs."""
@@ -2400,14 +2405,14 @@ fn el_input(
     return Node.element_node(TAG_INPUT, items^)
 
 
-fn el_form(var a: Node) -> Node:
+def el_form(var a: Node) -> Node:
     """Create a `<form>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_FORM, items^)
 
 
-fn el_form(var a: Node, var b: Node) -> Node:
+def el_form(var a: Node, var b: Node) -> Node:
     """Create a `<form>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2415,7 +2420,7 @@ fn el_form(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_FORM, items^)
 
 
-fn el_form(var a: Node, var b: Node, var c: Node) -> Node:
+def el_form(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<form>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2424,7 +2429,7 @@ fn el_form(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_FORM, items^)
 
 
-fn el_form(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_form(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<form>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2434,7 +2439,7 @@ fn el_form(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_FORM, items^)
 
 
-fn el_form(
+def el_form(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<form>` with 5 children/attrs."""
@@ -2447,14 +2452,14 @@ fn el_form(
     return Node.element_node(TAG_FORM, items^)
 
 
-fn el_textarea(var a: Node) -> Node:
+def el_textarea(var a: Node) -> Node:
     """Create a `<textarea>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_TEXTAREA, items^)
 
 
-fn el_textarea(var a: Node, var b: Node) -> Node:
+def el_textarea(var a: Node, var b: Node) -> Node:
     """Create a `<textarea>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2462,7 +2467,7 @@ fn el_textarea(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_TEXTAREA, items^)
 
 
-fn el_textarea(var a: Node, var b: Node, var c: Node) -> Node:
+def el_textarea(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<textarea>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2471,7 +2476,7 @@ fn el_textarea(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_TEXTAREA, items^)
 
 
-fn el_textarea(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_textarea(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<textarea>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2481,7 +2486,7 @@ fn el_textarea(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_TEXTAREA, items^)
 
 
-fn el_textarea(
+def el_textarea(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<textarea>` with 5 children/attrs."""
@@ -2494,14 +2499,14 @@ fn el_textarea(
     return Node.element_node(TAG_TEXTAREA, items^)
 
 
-fn el_select(var a: Node) -> Node:
+def el_select(var a: Node) -> Node:
     """Create a `<select>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_SELECT, items^)
 
 
-fn el_select(var a: Node, var b: Node) -> Node:
+def el_select(var a: Node, var b: Node) -> Node:
     """Create a `<select>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2509,7 +2514,7 @@ fn el_select(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_SELECT, items^)
 
 
-fn el_select(var a: Node, var b: Node, var c: Node) -> Node:
+def el_select(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<select>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2518,7 +2523,7 @@ fn el_select(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_SELECT, items^)
 
 
-fn el_select(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_select(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<select>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2528,7 +2533,7 @@ fn el_select(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_SELECT, items^)
 
 
-fn el_select(
+def el_select(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<select>` with 5 children/attrs."""
@@ -2541,14 +2546,14 @@ fn el_select(
     return Node.element_node(TAG_SELECT, items^)
 
 
-fn el_option(var a: Node) -> Node:
+def el_option(var a: Node) -> Node:
     """Create an `<option>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_OPTION, items^)
 
 
-fn el_option(var a: Node, var b: Node) -> Node:
+def el_option(var a: Node, var b: Node) -> Node:
     """Create an `<option>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2556,7 +2561,7 @@ fn el_option(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_OPTION, items^)
 
 
-fn el_option(var a: Node, var b: Node, var c: Node) -> Node:
+def el_option(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<option>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2565,7 +2570,7 @@ fn el_option(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_OPTION, items^)
 
 
-fn el_option(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_option(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<option>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2575,7 +2580,7 @@ fn el_option(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_OPTION, items^)
 
 
-fn el_option(
+def el_option(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<option>` with 5 children/attrs."""
@@ -2588,14 +2593,14 @@ fn el_option(
     return Node.element_node(TAG_OPTION, items^)
 
 
-fn el_label(var a: Node) -> Node:
+def el_label(var a: Node) -> Node:
     """Create a `<label>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_LABEL, items^)
 
 
-fn el_label(var a: Node, var b: Node) -> Node:
+def el_label(var a: Node, var b: Node) -> Node:
     """Create a `<label>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2603,7 +2608,7 @@ fn el_label(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_LABEL, items^)
 
 
-fn el_label(var a: Node, var b: Node, var c: Node) -> Node:
+def el_label(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<label>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2612,7 +2617,7 @@ fn el_label(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_LABEL, items^)
 
 
-fn el_label(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_label(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<label>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2622,7 +2627,7 @@ fn el_label(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_LABEL, items^)
 
 
-fn el_label(
+def el_label(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<label>` with 5 children/attrs."""
@@ -2638,14 +2643,14 @@ fn el_label(
 # ── Links / Media — multi-arg overloads ──────────────────────────────────────
 
 
-fn el_a(var a: Node) -> Node:
+def el_a(var a: Node) -> Node:
     """Create an `<a>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_A, items^)
 
 
-fn el_a(var a: Node, var b: Node) -> Node:
+def el_a(var a: Node, var b: Node) -> Node:
     """Create an `<a>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2653,7 +2658,7 @@ fn el_a(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_A, items^)
 
 
-fn el_a(var a: Node, var b: Node, var c: Node) -> Node:
+def el_a(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<a>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2662,7 +2667,7 @@ fn el_a(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_A, items^)
 
 
-fn el_a(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_a(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<a>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2672,7 +2677,7 @@ fn el_a(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_A, items^)
 
 
-fn el_a(
+def el_a(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<a>` with 5 children/attrs."""
@@ -2685,14 +2690,14 @@ fn el_a(
     return Node.element_node(TAG_A, items^)
 
 
-fn el_img(var a: Node) -> Node:
+def el_img(var a: Node) -> Node:
     """Create an `<img>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_IMG, items^)
 
 
-fn el_img(var a: Node, var b: Node) -> Node:
+def el_img(var a: Node, var b: Node) -> Node:
     """Create an `<img>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2700,7 +2705,7 @@ fn el_img(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_IMG, items^)
 
 
-fn el_img(var a: Node, var b: Node, var c: Node) -> Node:
+def el_img(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<img>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2709,7 +2714,7 @@ fn el_img(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_IMG, items^)
 
 
-fn el_img(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_img(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<img>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2719,7 +2724,7 @@ fn el_img(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_IMG, items^)
 
 
-fn el_img(
+def el_img(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<img>` with 5 children/attrs."""
@@ -2735,14 +2740,14 @@ fn el_img(
 # ── Table — multi-arg overloads ──────────────────────────────────────────────
 
 
-fn el_table(var a: Node) -> Node:
+def el_table(var a: Node) -> Node:
     """Create a `<table>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_TABLE, items^)
 
 
-fn el_table(var a: Node, var b: Node) -> Node:
+def el_table(var a: Node, var b: Node) -> Node:
     """Create a `<table>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2750,7 +2755,7 @@ fn el_table(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_TABLE, items^)
 
 
-fn el_table(var a: Node, var b: Node, var c: Node) -> Node:
+def el_table(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<table>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2759,7 +2764,7 @@ fn el_table(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_TABLE, items^)
 
 
-fn el_table(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_table(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<table>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2769,7 +2774,7 @@ fn el_table(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_TABLE, items^)
 
 
-fn el_table(
+def el_table(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<table>` with 5 children/attrs."""
@@ -2782,14 +2787,14 @@ fn el_table(
     return Node.element_node(TAG_TABLE, items^)
 
 
-fn el_thead(var a: Node) -> Node:
+def el_thead(var a: Node) -> Node:
     """Create a `<thead>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_THEAD, items^)
 
 
-fn el_thead(var a: Node, var b: Node) -> Node:
+def el_thead(var a: Node, var b: Node) -> Node:
     """Create a `<thead>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2797,7 +2802,7 @@ fn el_thead(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_THEAD, items^)
 
 
-fn el_thead(var a: Node, var b: Node, var c: Node) -> Node:
+def el_thead(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<thead>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2806,7 +2811,7 @@ fn el_thead(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_THEAD, items^)
 
 
-fn el_thead(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_thead(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<thead>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2816,7 +2821,7 @@ fn el_thead(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_THEAD, items^)
 
 
-fn el_thead(
+def el_thead(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<thead>` with 5 children/attrs."""
@@ -2829,14 +2834,14 @@ fn el_thead(
     return Node.element_node(TAG_THEAD, items^)
 
 
-fn el_tbody(var a: Node) -> Node:
+def el_tbody(var a: Node) -> Node:
     """Create a `<tbody>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_TBODY, items^)
 
 
-fn el_tbody(var a: Node, var b: Node) -> Node:
+def el_tbody(var a: Node, var b: Node) -> Node:
     """Create a `<tbody>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2844,7 +2849,7 @@ fn el_tbody(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_TBODY, items^)
 
 
-fn el_tbody(var a: Node, var b: Node, var c: Node) -> Node:
+def el_tbody(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<tbody>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2853,7 +2858,7 @@ fn el_tbody(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_TBODY, items^)
 
 
-fn el_tbody(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_tbody(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<tbody>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2863,7 +2868,7 @@ fn el_tbody(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_TBODY, items^)
 
 
-fn el_tbody(
+def el_tbody(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<tbody>` with 5 children/attrs."""
@@ -2876,14 +2881,14 @@ fn el_tbody(
     return Node.element_node(TAG_TBODY, items^)
 
 
-fn el_tr(var a: Node) -> Node:
+def el_tr(var a: Node) -> Node:
     """Create a `<tr>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_TR, items^)
 
 
-fn el_tr(var a: Node, var b: Node) -> Node:
+def el_tr(var a: Node, var b: Node) -> Node:
     """Create a `<tr>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2891,7 +2896,7 @@ fn el_tr(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_TR, items^)
 
 
-fn el_tr(var a: Node, var b: Node, var c: Node) -> Node:
+def el_tr(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<tr>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2900,7 +2905,7 @@ fn el_tr(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_TR, items^)
 
 
-fn el_tr(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_tr(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<tr>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2910,7 +2915,7 @@ fn el_tr(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_TR, items^)
 
 
-fn el_tr(
+def el_tr(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<tr>` with 5 children/attrs."""
@@ -2923,14 +2928,14 @@ fn el_tr(
     return Node.element_node(TAG_TR, items^)
 
 
-fn el_td(var a: Node) -> Node:
+def el_td(var a: Node) -> Node:
     """Create a `<td>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_TD, items^)
 
 
-fn el_td(var a: Node, var b: Node) -> Node:
+def el_td(var a: Node, var b: Node) -> Node:
     """Create a `<td>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2938,7 +2943,7 @@ fn el_td(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_TD, items^)
 
 
-fn el_td(var a: Node, var b: Node, var c: Node) -> Node:
+def el_td(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<td>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2947,7 +2952,7 @@ fn el_td(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_TD, items^)
 
 
-fn el_td(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_td(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<td>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2957,7 +2962,7 @@ fn el_td(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_TD, items^)
 
 
-fn el_td(
+def el_td(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<td>` with 5 children/attrs."""
@@ -2970,14 +2975,14 @@ fn el_td(
     return Node.element_node(TAG_TD, items^)
 
 
-fn el_th(var a: Node) -> Node:
+def el_th(var a: Node) -> Node:
     """Create a `<th>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_TH, items^)
 
 
-fn el_th(var a: Node, var b: Node) -> Node:
+def el_th(var a: Node, var b: Node) -> Node:
     """Create a `<th>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2985,7 +2990,7 @@ fn el_th(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_TH, items^)
 
 
-fn el_th(var a: Node, var b: Node, var c: Node) -> Node:
+def el_th(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<th>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -2994,7 +2999,7 @@ fn el_th(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_TH, items^)
 
 
-fn el_th(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_th(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<th>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3004,7 +3009,7 @@ fn el_th(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_TH, items^)
 
 
-fn el_th(
+def el_th(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<th>` with 5 children/attrs."""
@@ -3020,14 +3025,14 @@ fn el_th(
 # ── Inline / Formatting — multi-arg overloads ────────────────────────────────
 
 
-fn el_strong(var a: Node) -> Node:
+def el_strong(var a: Node) -> Node:
     """Create a `<strong>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_STRONG, items^)
 
 
-fn el_strong(var a: Node, var b: Node) -> Node:
+def el_strong(var a: Node, var b: Node) -> Node:
     """Create a `<strong>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3035,7 +3040,7 @@ fn el_strong(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_STRONG, items^)
 
 
-fn el_strong(var a: Node, var b: Node, var c: Node) -> Node:
+def el_strong(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<strong>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3044,7 +3049,7 @@ fn el_strong(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_STRONG, items^)
 
 
-fn el_strong(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_strong(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<strong>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3054,7 +3059,7 @@ fn el_strong(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_STRONG, items^)
 
 
-fn el_strong(
+def el_strong(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<strong>` with 5 children/attrs."""
@@ -3067,14 +3072,14 @@ fn el_strong(
     return Node.element_node(TAG_STRONG, items^)
 
 
-fn el_em(var a: Node) -> Node:
+def el_em(var a: Node) -> Node:
     """Create an `<em>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_EM, items^)
 
 
-fn el_em(var a: Node, var b: Node) -> Node:
+def el_em(var a: Node, var b: Node) -> Node:
     """Create an `<em>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3082,7 +3087,7 @@ fn el_em(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_EM, items^)
 
 
-fn el_em(var a: Node, var b: Node, var c: Node) -> Node:
+def el_em(var a: Node, var b: Node, var c: Node) -> Node:
     """Create an `<em>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3091,7 +3096,7 @@ fn el_em(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_EM, items^)
 
 
-fn el_em(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_em(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create an `<em>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3101,7 +3106,7 @@ fn el_em(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_EM, items^)
 
 
-fn el_em(
+def el_em(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create an `<em>` with 5 children/attrs."""
@@ -3114,14 +3119,14 @@ fn el_em(
     return Node.element_node(TAG_EM, items^)
 
 
-fn el_pre(var a: Node) -> Node:
+def el_pre(var a: Node) -> Node:
     """Create a `<pre>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_PRE, items^)
 
 
-fn el_pre(var a: Node, var b: Node) -> Node:
+def el_pre(var a: Node, var b: Node) -> Node:
     """Create a `<pre>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3129,7 +3134,7 @@ fn el_pre(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_PRE, items^)
 
 
-fn el_pre(var a: Node, var b: Node, var c: Node) -> Node:
+def el_pre(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<pre>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3138,7 +3143,7 @@ fn el_pre(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_PRE, items^)
 
 
-fn el_pre(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_pre(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<pre>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3148,7 +3153,7 @@ fn el_pre(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_PRE, items^)
 
 
-fn el_pre(
+def el_pre(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<pre>` with 5 children/attrs."""
@@ -3161,14 +3166,14 @@ fn el_pre(
     return Node.element_node(TAG_PRE, items^)
 
 
-fn el_code(var a: Node) -> Node:
+def el_code(var a: Node) -> Node:
     """Create a `<code>` with 1 child/attr."""
     var items = List[Node]()
     items.append(a^)
     return Node.element_node(TAG_CODE, items^)
 
 
-fn el_code(var a: Node, var b: Node) -> Node:
+def el_code(var a: Node, var b: Node) -> Node:
     """Create a `<code>` with 2 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3176,7 +3181,7 @@ fn el_code(var a: Node, var b: Node) -> Node:
     return Node.element_node(TAG_CODE, items^)
 
 
-fn el_code(var a: Node, var b: Node, var c: Node) -> Node:
+def el_code(var a: Node, var b: Node, var c: Node) -> Node:
     """Create a `<code>` with 3 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3185,7 +3190,7 @@ fn el_code(var a: Node, var b: Node, var c: Node) -> Node:
     return Node.element_node(TAG_CODE, items^)
 
 
-fn el_code(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
+def el_code(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     """Create a `<code>` with 4 children/attrs."""
     var items = List[Node]()
     items.append(a^)
@@ -3195,7 +3200,7 @@ fn el_code(var a: Node, var b: Node, var c: Node, var d: Node) -> Node:
     return Node.element_node(TAG_CODE, items^)
 
 
-fn el_code(
+def el_code(
     var a: Node, var b: Node, var c: Node, var d: Node, var e: Node
 ) -> Node:
     """Create a `<code>` with 5 children/attrs."""
@@ -3213,7 +3218,7 @@ fn el_code(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn to_template(node: Node, name: String) -> Template:
+def to_template(node: Node, name: String) -> Template:
     """Convert a Node tree into a Template.
 
     The root node should typically be an ELEMENT node (e.g. from `el_div`).
@@ -3236,7 +3241,7 @@ fn to_template(node: Node, name: String) -> Template:
     return builder.build()
 
 
-fn to_template_multi(roots: List[Node], name: String) -> Template:
+def to_template_multi(roots: List[Node], name: String) -> Template:
     """Convert multiple root Nodes into a single Template.
 
     Used for templates that have more than one root node (e.g. a fragment
@@ -3255,7 +3260,7 @@ fn to_template_multi(roots: List[Node], name: String) -> Template:
     return builder.build()
 
 
-fn _build_node(mut builder: TemplateBuilder, node: Node, parent: Int):
+def _build_node(mut builder: TemplateBuilder, node: Node, parent: Int):
     """Recursively walk a Node tree and emit TemplateBuilder calls.
 
     For ELEMENT nodes:
@@ -3336,15 +3341,15 @@ struct VNodeBuilder(Movable):
         var idx = vb.index()
     """
 
-    var _store: UnsafePointer[VNodeStore, MutExternalOrigin]
+    var _store: UnsafePointer[VNodeStore, MutUntrackedOrigin]
     var _vnode_idx: UInt32
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
+    def __init__(
         out self,
         template_id: UInt32,
-        store: UnsafePointer[VNodeStore, MutExternalOrigin],
+        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     ):
         """Create a new TemplateRef VNode in the store.
 
@@ -3355,11 +3360,11 @@ struct VNodeBuilder(Movable):
         self._store = store
         self._vnode_idx = store[0].push(VNode.template_ref(template_id))
 
-    fn __init__(
+    def __init__(
         out self,
         template_id: UInt32,
         key: String,
-        store: UnsafePointer[VNodeStore, MutExternalOrigin],
+        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     ):
         """Create a new keyed TemplateRef VNode in the store.
 
@@ -3373,13 +3378,13 @@ struct VNodeBuilder(Movable):
             VNode.template_ref_keyed(template_id, key)
         )
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._store = take._store
-        self._vnode_idx = take._vnode_idx
+    def __init__(out self, *, deinit move: Self):
+        self._store = move._store
+        self._vnode_idx = move._vnode_idx
 
     # ── Dynamic text nodes ───────────────────────────────────────────
 
-    fn add_dyn_text(mut self, value: String):
+    def add_dyn_text(mut self, value: String):
         """Add a dynamic text node (fills the next DynamicText slot).
 
         Call in order corresponding to DYN_TEXT placeholders in the template
@@ -3389,7 +3394,7 @@ struct VNodeBuilder(Movable):
             self._vnode_idx, DynamicNode.text_node(value)
         )
 
-    fn add_dyn_placeholder(mut self):
+    def add_dyn_placeholder(mut self):
         """Add a dynamic placeholder node (fills the next Dynamic slot).
 
         Used for conditional content that is currently absent.
@@ -3400,7 +3405,7 @@ struct VNodeBuilder(Movable):
 
     # ── Dynamic attributes ───────────────────────────────────────────
 
-    fn add_dyn_event(mut self, event_name: String, handler_id: UInt32):
+    def add_dyn_event(mut self, event_name: String, handler_id: UInt32):
         """Add a dynamic event handler attribute.
 
         Args:
@@ -3414,7 +3419,7 @@ struct VNodeBuilder(Movable):
             ),
         )
 
-    fn add_dyn_event_on(
+    def add_dyn_event_on(
         mut self, event_name: String, handler_id: UInt32, element_id: UInt32
     ):
         """Add a dynamic event handler targeting a specific template element.
@@ -3431,7 +3436,7 @@ struct VNodeBuilder(Movable):
             ),
         )
 
-    fn add_dyn_text_attr(mut self, name: String, value: String):
+    def add_dyn_text_attr(mut self, name: String, value: String):
         """Add a dynamic text attribute (e.g. class, id, href).
 
         Args:
@@ -3443,7 +3448,7 @@ struct VNodeBuilder(Movable):
             DynamicAttr(name, AttributeValue.text(value), UInt32(0)),
         )
 
-    fn add_dyn_text_attr_on(
+    def add_dyn_text_attr_on(
         mut self, name: String, value: String, element_id: UInt32
     ):
         """Add a dynamic text attribute targeting a specific template element.
@@ -3458,7 +3463,7 @@ struct VNodeBuilder(Movable):
             DynamicAttr(name, AttributeValue.text(value), element_id),
         )
 
-    fn add_dyn_int_attr(mut self, name: String, value: Int64):
+    def add_dyn_int_attr(mut self, name: String, value: Int64):
         """Add a dynamic integer attribute.
 
         Args:
@@ -3470,7 +3475,7 @@ struct VNodeBuilder(Movable):
             DynamicAttr(name, AttributeValue.integer(value), UInt32(0)),
         )
 
-    fn add_dyn_float_attr(mut self, name: String, value: Float64):
+    def add_dyn_float_attr(mut self, name: String, value: Float64):
         """Add a dynamic float attribute.
 
         Args:
@@ -3482,7 +3487,7 @@ struct VNodeBuilder(Movable):
             DynamicAttr(name, AttributeValue.floating(value), UInt32(0)),
         )
 
-    fn add_dyn_bool_attr(mut self, name: String, value: Bool):
+    def add_dyn_bool_attr(mut self, name: String, value: Bool):
         """Add a dynamic boolean attribute (e.g. disabled, checked, hidden).
 
         When `value` is True, emits SetAttribute(name, "") — the presence
@@ -3510,7 +3515,7 @@ struct VNodeBuilder(Movable):
                 DynamicAttr(name, AttributeValue.none(), UInt32(0)),
             )
 
-    fn add_dyn_none_attr(mut self, name: String):
+    def add_dyn_none_attr(mut self, name: String):
         """Add a dynamic none/removal attribute.
 
         Used to remove a previously-set attribute during diffing.
@@ -3525,11 +3530,11 @@ struct VNodeBuilder(Movable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn index(self) -> UInt32:
+    def index(self) -> UInt32:
         """Return the VNode's index in the VNodeStore."""
         return self._vnode_idx
 
-    fn store(self) -> UnsafePointer[VNodeStore, MutExternalOrigin]:
+    def store(self) -> UnsafePointer[VNodeStore, MutUntrackedOrigin]:
         """Return the VNodeStore pointer."""
         return self._store
 
@@ -3539,7 +3544,7 @@ struct VNodeBuilder(Movable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn count_nodes(node: Node) -> Int:
+def count_nodes(node: Node) -> Int:
     """Recursively count the total number of nodes in a tree.
 
     Includes the node itself and all descendants.  Attribute nodes
@@ -3557,7 +3562,7 @@ fn count_nodes(node: Node) -> Int:
         return 1  # TEXT, DYN_TEXT, DYN_NODE
 
 
-fn count_all_items(node: Node) -> Int:
+def count_all_items(node: Node) -> Int:
     """Recursively count all items (children + attrs) in the tree.
 
     Includes every Node in the tree including attribute nodes.
@@ -3571,7 +3576,7 @@ fn count_all_items(node: Node) -> Int:
         return 1
 
 
-fn count_dynamic_text_slots(node: Node) -> Int:
+def count_dynamic_text_slots(node: Node) -> Int:
     """Count the total number of DYN_TEXT nodes in the tree."""
     if node.kind == NODE_DYN_TEXT:
         return 1
@@ -3585,7 +3590,7 @@ fn count_dynamic_text_slots(node: Node) -> Int:
         return 0
 
 
-fn count_dynamic_node_slots(node: Node) -> Int:
+def count_dynamic_node_slots(node: Node) -> Int:
     """Count the total number of DYN_NODE nodes in the tree."""
     if node.kind == NODE_DYN_NODE:
         return 1
@@ -3599,7 +3604,7 @@ fn count_dynamic_node_slots(node: Node) -> Int:
         return 0
 
 
-fn count_dynamic_attr_slots(node: Node) -> Int:
+def count_dynamic_attr_slots(node: Node) -> Int:
     """Count the total number of DYN_ATTR, EVENT, and BIND_VALUE nodes in the tree.
     """
     if node.kind == NODE_ELEMENT:
@@ -3618,7 +3623,7 @@ fn count_dynamic_attr_slots(node: Node) -> Int:
         return 0
 
 
-fn count_static_attr_nodes(node: Node) -> Int:
+def count_static_attr_nodes(node: Node) -> Int:
     """Count the total number of STATIC_ATTR nodes in the tree."""
     if node.kind == NODE_ELEMENT:
         var total = 0

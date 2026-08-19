@@ -72,19 +72,19 @@ struct ChildComponentContext(Movable):
 
     var child: ChildComponent
     var scope_id: UInt32
-    var runtime: UnsafePointer[Runtime, MutExternalOrigin]
-    var store: UnsafePointer[VNodeStore, MutExternalOrigin]
-    var eid_alloc: UnsafePointer[ElementIdAllocator, MutExternalOrigin]
+    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var store: UnsafePointer[VNodeStore, MutUntrackedOrigin]
+    var eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
+    def __init__(
         out self,
         var child: ChildComponent,
         scope_id: UInt32,
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
-        store: UnsafePointer[VNodeStore, MutExternalOrigin],
-        eid_alloc: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+        eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
     ):
         """Create a ChildComponentContext from an existing ChildComponent.
 
@@ -101,16 +101,16 @@ struct ChildComponentContext(Movable):
         self.eid_alloc = eid_alloc
         self.child = child^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child = take.child^
-        self.scope_id = take.scope_id
-        self.runtime = take.runtime
-        self.store = take.store
-        self.eid_alloc = take.eid_alloc
+    def __init__(out self, *, deinit move: Self):
+        self.child = move.child^
+        self.scope_id = move.scope_id
+        self.runtime = move.runtime
+        self.store = move.store
+        self.eid_alloc = move.eid_alloc
 
     # ── Signal creation (under child scope) ──────────────────────────
 
-    fn use_signal(mut self, initial: Int32) -> SignalI32:
+    def use_signal(mut self, initial: Int32) -> SignalI32:
         """Create an Int32 signal under the child scope.
 
         The signal is created directly on the Runtime (no hook cursor).
@@ -129,7 +129,7 @@ struct ChildComponentContext(Movable):
         self.runtime[0].signals.subscribe(key, self.scope_id)
         return SignalI32(key, self.runtime)
 
-    fn use_signal_bool(mut self, initial: Bool) -> SignalBool:
+    def use_signal_bool(mut self, initial: Bool) -> SignalBool:
         """Create a Bool signal under the child scope.
 
         Stored as Int32 (1 for True, 0 for False) internally.
@@ -149,7 +149,7 @@ struct ChildComponentContext(Movable):
         self.runtime[0].signals.subscribe(key, self.scope_id)
         return SignalBool(key, self.runtime)
 
-    fn use_signal_string(mut self, initial: String) -> SignalString:
+    def use_signal_string(mut self, initial: String) -> SignalString:
         """Create a String signal under the child scope.
 
         Creates both the string entry in the StringStore and a companion
@@ -166,7 +166,7 @@ struct ChildComponentContext(Movable):
         self.runtime[0].signals.subscribe(keys[1], self.scope_id)
         return SignalString(keys[0], keys[1], self.runtime)
 
-    fn use_memo(mut self, initial: Int32) -> MemoI32:
+    def use_memo(mut self, initial: Int32) -> MemoI32:
         """Create a memo under the child scope.
 
         The memo's reactive context is separate from the child scope.
@@ -182,7 +182,7 @@ struct ChildComponentContext(Movable):
         var memo_id = self.runtime[0].create_memo_i32(self.scope_id, initial)
         return MemoI32(memo_id, self.runtime)
 
-    fn use_memo_bool(mut self, initial: Bool) -> MemoBool:
+    def use_memo_bool(mut self, initial: Bool) -> MemoBool:
         """Create a Bool memo under the child scope.
 
         The memo's reactive context is separate from the child scope.
@@ -198,7 +198,7 @@ struct ChildComponentContext(Movable):
         var memo_id = self.runtime[0].create_memo_bool(self.scope_id, initial)
         return MemoBool(memo_id, self.runtime)
 
-    fn use_memo_string(mut self, initial: String) -> MemoString:
+    def use_memo_string(mut self, initial: String) -> MemoString:
         """Create a String memo under the child scope.
 
         The memo's reactive context is separate from the child scope.
@@ -216,7 +216,7 @@ struct ChildComponentContext(Movable):
 
     # ── Context consumption ──────────────────────────────────────────
 
-    fn consume_context(self, key: UInt32) -> Tuple[Bool, Int32]:
+    def consume_context(self, key: UInt32) -> Tuple[Bool, Int32]:
         """Look up a context value walking up from the child scope.
 
         Starts at the child scope and walks up the parent chain until
@@ -230,7 +230,7 @@ struct ChildComponentContext(Movable):
         """
         return self.runtime[0].scopes.consume_context(self.scope_id, key)
 
-    fn has_context(self, key: UInt32) -> Bool:
+    def has_context(self, key: UInt32) -> Bool:
         """Check whether a context value is reachable from the child scope.
 
         Args:
@@ -241,7 +241,7 @@ struct ChildComponentContext(Movable):
         """
         return self.consume_context(key)[0]
 
-    fn consume_signal_i32(self, key: UInt32) -> SignalI32:
+    def consume_signal_i32(self, key: UInt32) -> SignalI32:
         """Look up a SignalI32 from an ancestor's context.
 
         Retrieves the signal key stored by `provide_signal_i32()` and
@@ -257,7 +257,7 @@ struct ChildComponentContext(Movable):
         var result = self.consume_context(key)
         return SignalI32(UInt32(result[1]), self.runtime)
 
-    fn consume_signal_bool(self, key: UInt32) -> SignalBool:
+    def consume_signal_bool(self, key: UInt32) -> SignalBool:
         """Look up a SignalBool from an ancestor's context.
 
         Args:
@@ -269,7 +269,7 @@ struct ChildComponentContext(Movable):
         var result = self.consume_context(key)
         return SignalBool(UInt32(result[1]), self.runtime)
 
-    fn consume_signal_string(self, key: UInt32) -> SignalString:
+    def consume_signal_string(self, key: UInt32) -> SignalString:
         """Look up a SignalString from an ancestor's context.
 
         Retrieves both the string key (at `key`) and version key
@@ -291,7 +291,7 @@ struct ChildComponentContext(Movable):
 
     # ── Context provision (at child scope) ───────────────────────────
 
-    fn provide_context(mut self, key: UInt32, value: Int32):
+    def provide_context(mut self, key: UInt32, value: Int32):
         """Provide a context value at the child scope.
 
         Grandchild scopes (if any) can consume this value by walking
@@ -303,7 +303,7 @@ struct ChildComponentContext(Movable):
         """
         self.runtime[0].scopes.provide_context(self.scope_id, key, value)
 
-    fn provide_signal_i32(mut self, key: UInt32, signal: SignalI32):
+    def provide_signal_i32(mut self, key: UInt32, signal: SignalI32):
         """Provide a SignalI32 to descendants via child scope context.
 
         Args:
@@ -312,7 +312,7 @@ struct ChildComponentContext(Movable):
         """
         self.provide_context(key, Int32(signal.key))
 
-    fn provide_signal_bool(mut self, key: UInt32, signal: SignalBool):
+    def provide_signal_bool(mut self, key: UInt32, signal: SignalBool):
         """Provide a SignalBool to descendants via child scope context.
 
         Args:
@@ -321,7 +321,7 @@ struct ChildComponentContext(Movable):
         """
         self.provide_context(key, Int32(signal.key))
 
-    fn provide_signal_string(mut self, key: UInt32, signal: SignalString):
+    def provide_signal_string(mut self, key: UInt32, signal: SignalString):
         """Provide a SignalString to descendants via child scope context.
 
         Stores the string key at `key` and the version key at `key + 1`.
@@ -335,7 +335,7 @@ struct ChildComponentContext(Movable):
 
     # ── Rendering ────────────────────────────────────────────────────
 
-    fn render_builder(self) -> ChildRenderBuilder:
+    def render_builder(self) -> ChildRenderBuilder:
         """Create a ChildRenderBuilder for this child's template.
 
         The caller fills in dynamic text values and calls `build()` to
@@ -348,7 +348,7 @@ struct ChildComponentContext(Movable):
 
     # ── Slot / flush delegation ──────────────────────────────────────
 
-    fn init_slot(mut self, anchor_id: UInt32):
+    def init_slot(mut self, anchor_id: UInt32):
         """Initialize the ConditionalSlot after parent mount.
 
         After the parent mounts, extract the anchor ElementId from the
@@ -360,9 +360,9 @@ struct ChildComponentContext(Movable):
         """
         self.child.init_slot(anchor_id)
 
-    fn flush(
+    def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
         new_vnode_idx: UInt32,
     ):
         """Flush the child: create or diff its VNode in the DOM.
@@ -384,9 +384,9 @@ struct ChildComponentContext(Movable):
             new_vnode_idx,
         )
 
-    fn flush_empty(
+    def flush_empty(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
     ):
         """Hide the child: remove its DOM content, restore placeholder.
 
@@ -403,7 +403,7 @@ struct ChildComponentContext(Movable):
 
     # ── State queries ────────────────────────────────────────────────
 
-    fn is_dirty(self) -> Bool:
+    def is_dirty(self) -> Bool:
         """Check if the child scope is dirty.
 
         Checks the Runtime's dirty_scopes queue for this scope ID.
@@ -419,25 +419,25 @@ struct ChildComponentContext(Movable):
                 return True
         return False
 
-    fn is_mounted(self) -> Bool:
+    def is_mounted(self) -> Bool:
         """Check whether the child's VNode is currently in the DOM."""
         return self.child.is_mounted()
 
-    fn has_rendered(self) -> Bool:
+    def has_rendered(self) -> Bool:
         """Check whether this child has been rendered at least once."""
         return self.child.has_rendered()
 
-    fn is_slot_initialized(self) -> Bool:
+    def is_slot_initialized(self) -> Bool:
         """Check whether the slot has been initialized with an anchor."""
         return self.child.is_slot_initialized()
 
     # ── Template / scope accessors ───────────────────────────────────
 
-    fn template_id(self) -> UInt32:
+    def template_id(self) -> UInt32:
         """Return the child's registered template ID."""
         return self.child.template_id
 
-    fn event_handler_id(self, index: Int) -> UInt32:
+    def event_handler_id(self, index: Int) -> UInt32:
         """Return the handler ID for the Nth event in this child.
 
         Args:
@@ -448,17 +448,17 @@ struct ChildComponentContext(Movable):
         """
         return self.child.event_handler_id(index)
 
-    fn event_count(self) -> Int:
+    def event_count(self) -> Int:
         """Return the number of event bindings on this child."""
         return self.child.event_count()
 
-    fn auto_binding_count(self) -> Int:
+    def auto_binding_count(self) -> Int:
         """Return the number of auto-bindings on this child."""
         return self.child.auto_binding_count()
 
     # ── Error boundary ───────────────────────────────────────────────
 
-    fn use_error_boundary(mut self):
+    def use_error_boundary(mut self):
         """Mark this child scope as an error boundary.
 
         When a descendant scope reports an error via ``report_error()``,
@@ -472,7 +472,7 @@ struct ChildComponentContext(Movable):
         """
         self.runtime[0].scopes.set_error_boundary(self.scope_id, True)
 
-    fn has_error(self) -> Bool:
+    def has_error(self) -> Bool:
         """Check whether this child scope (as a boundary) has captured an error.
 
         Returns:
@@ -480,7 +480,7 @@ struct ChildComponentContext(Movable):
         """
         return self.runtime[0].scopes.has_error(self.scope_id)
 
-    fn error_message(self) -> String:
+    def error_message(self) -> String:
         """Get the error message captured by this boundary.
 
         Returns:
@@ -488,7 +488,7 @@ struct ChildComponentContext(Movable):
         """
         return self.runtime[0].scopes.get_error_message(self.scope_id)
 
-    fn clear_error(mut self):
+    def clear_error(mut self):
         """Clear the error state on this boundary scope.
 
         After clearing, the next flush should render normal children
@@ -500,7 +500,7 @@ struct ChildComponentContext(Movable):
 
     # ── Error reporting ──────────────────────────────────────────────
 
-    fn report_error(self, message: String) -> Int:
+    def report_error(self, message: String) -> Int:
         """Propagate an error from this child scope to the nearest boundary.
 
         First checks whether this child scope itself is a boundary —
@@ -530,11 +530,11 @@ struct ChildComponentContext(Movable):
 
     # ── Suspense ─────────────────────────────────────────────────────
 
-    fn use_suspense_boundary(mut self):
+    def use_suspense_boundary(mut self):
         """Mark this child scope as a suspense boundary."""
         self.runtime[0].scopes.set_suspense_boundary(self.scope_id, True)
 
-    fn set_pending(self, pending: Bool):
+    def set_pending(self, pending: Bool):
         """Set the pending (loading) state on this child scope.
 
         Marks the nearest suspense boundary ancestor dirty.
@@ -551,17 +551,17 @@ struct ChildComponentContext(Movable):
         elif self.runtime[0].scopes.is_suspense_boundary(self.scope_id):
             self.runtime[0].mark_scope_dirty(self.scope_id)
 
-    fn has_pending(self) -> Bool:
+    def has_pending(self) -> Bool:
         """Check whether any descendant of this child scope is pending."""
         return self.runtime[0].scopes.has_pending_descendant(self.scope_id)
 
-    fn is_pending(self) -> Bool:
+    def is_pending(self) -> Bool:
         """Check whether this child scope itself is pending."""
         return self.runtime[0].scopes.is_pending(self.scope_id)
 
     # ── Destroy ──────────────────────────────────────────────────────
 
-    fn destroy(self):
+    def destroy(self):
         """Destroy the child scope, its signals, and handlers.
 
         Delegates to the underlying ChildComponent.destroy() with the

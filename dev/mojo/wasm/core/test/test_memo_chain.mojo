@@ -41,15 +41,15 @@ from wasm_harness import (
 )
 
 
-fn _load() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_mc(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_mc(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a MemoChainApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("mc_init", no_args()))
@@ -58,8 +58,8 @@ fn _create_mc(
     return Tuple(app, buf)
 
 
-fn _create_mc_no_rebuild(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_mc_no_rebuild(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a MemoChainApp without mounting.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("mc_init", no_args()))
@@ -67,8 +67,8 @@ fn _create_mc_no_rebuild(
     return Tuple(app, buf)
 
 
-fn _destroy_mc(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _destroy_mc(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -77,8 +77,8 @@ fn _destroy_mc(
     w[].call_void("mc_destroy", args_ptr(app))
 
 
-fn _flush(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _flush(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -86,8 +86,8 @@ fn _flush(
     return w[].call_i32("mc_flush", args_ptr_ptr_i32(app, buf, 8192))
 
 
-fn _handle_event(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _handle_event(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -95,8 +95,8 @@ fn _handle_event(
     return w[].call_i32("mc_handle_event", args_ptr_i32_i32(app, handler_id, 0))
 
 
-fn _incr(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _incr(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises:
     """Increment input via the button handler."""
@@ -104,8 +104,8 @@ fn _incr(
     _ = _handle_event(w, app, hid)
 
 
-fn _label_text(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _label_text(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     """Read the label text from the app."""
@@ -114,8 +114,8 @@ fn _label_text(
     return w[].read_string_struct(out_ptr)
 
 
-fn _is_big(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _is_big(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     """Read the is_big memo value."""
@@ -125,8 +125,8 @@ fn _is_big(
 # ── Test: init creates app ───────────────────────────────────────────────────
 
 
-fn test_mc_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_init_creates_app(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero pointer."""
     var app = Int(w[].call_i64("mc_init", no_args()))
@@ -137,8 +137,8 @@ fn test_mc_init_creates_app(
 # ── Test: input starts at 0 ─────────────────────────────────────────────────
 
 
-fn test_mc_input_starts_at_0(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_input_starts_at_0(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Input signal is 0 after init + rebuild."""
     var t = _create_mc(w)
@@ -151,8 +151,8 @@ fn test_mc_input_starts_at_0(
 # ── Test: doubled starts at 0 ───────────────────────────────────────────────
 
 
-fn test_mc_doubled_starts_at_0(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_doubled_starts_at_0(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Doubled memo is 0 after init + rebuild."""
     var t = _create_mc(w)
@@ -165,8 +165,8 @@ fn test_mc_doubled_starts_at_0(
 # ── Test: is_big starts false ────────────────────────────────────────────────
 
 
-fn test_mc_is_big_starts_false(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_is_big_starts_false(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """The is_big memo is False after init + rebuild."""
     var t = _create_mc(w)
@@ -179,8 +179,8 @@ fn test_mc_is_big_starts_false(
 # ── Test: label starts "small" ───────────────────────────────────────────────
 
 
-fn test_mc_label_starts_small(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_label_starts_small(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Label memo is 'small' after init + rebuild."""
     var t = _create_mc(w)
@@ -194,8 +194,8 @@ fn test_mc_label_starts_small(
 # ── Test: all memos start dirty ──────────────────────────────────────────────
 
 
-fn test_mc_all_memos_start_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_all_memos_start_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """All three memos are dirty before first rebuild."""
     var t = _create_mc_no_rebuild(w)
@@ -219,8 +219,8 @@ fn test_mc_all_memos_start_dirty(
 # ── Test: rebuild settles all memos ──────────────────────────────────────────
 
 
-fn test_mc_rebuild_settles_all(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_rebuild_settles_all(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After rebuild, all three memos are clean."""
     var t = _create_mc(w)
@@ -244,8 +244,8 @@ fn test_mc_rebuild_settles_all(
 # ── Test: rebuild values correct ─────────────────────────────────────────────
 
 
-fn test_mc_rebuild_values_correct(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_rebuild_values_correct(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After rebuild: doubled=0, is_big=false, label='small'."""
     var t = _create_mc(w)
@@ -261,8 +261,8 @@ fn test_mc_rebuild_values_correct(
 # ── Test: increment to 1 ────────────────────────────────────────────────────
 
 
-fn test_mc_increment_to_1(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_increment_to_1(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 1 increment: input=1, doubled=2, is_big=false, label='small'."""
     var t = _create_mc(w)
@@ -281,8 +281,8 @@ fn test_mc_increment_to_1(
 # ── Test: increment to 4 ────────────────────────────────────────────────────
 
 
-fn test_mc_increment_to_4(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_increment_to_4(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 4 increments: input=4, doubled=8, is_big=false, label='small'."""
     var t = _create_mc(w)
@@ -302,8 +302,8 @@ fn test_mc_increment_to_4(
 # ── Test: increment to 5 crosses threshold ───────────────────────────────────
 
 
-fn test_mc_increment_to_5_crosses_threshold(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_increment_to_5_crosses_threshold(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 5 increments: input=5, doubled=10, is_big=true, label='BIG'."""
     var t = _create_mc(w)
@@ -323,8 +323,8 @@ fn test_mc_increment_to_5_crosses_threshold(
 # ── Test: increment to 6 stays big ──────────────────────────────────────────
 
 
-fn test_mc_increment_to_6_stays_big(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_increment_to_6_stays_big(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 6 increments: input=6, doubled=12, is_big=true, label='BIG'."""
     var t = _create_mc(w)
@@ -344,8 +344,8 @@ fn test_mc_increment_to_6_stays_big(
 # ── Test: chain propagation order ────────────────────────────────────────────
 
 
-fn test_mc_chain_propagation_order(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_chain_propagation_order(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Chain order: doubled before is_big before label.
 
@@ -370,8 +370,8 @@ fn test_mc_chain_propagation_order(
 # ── Test: 10 increments all correct ─────────────────────────────────────────
 
 
-fn test_mc_10_increments_all_correct(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_10_increments_all_correct(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 10 increments: input=10, doubled=20, is_big=true, label='BIG'."""
     var t = _create_mc(w)
@@ -396,8 +396,8 @@ fn test_mc_10_increments_all_correct(
 # ── Test: flush returns 0 when clean ─────────────────────────────────────────
 
 
-fn test_mc_flush_returns_0_when_clean(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_flush_returns_0_when_clean(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush returns 0 when no state changes have occurred."""
     var t = _create_mc(w)
@@ -411,8 +411,8 @@ fn test_mc_flush_returns_0_when_clean(
 # ── Test: memo count is 3 ───────────────────────────────────────────────────
 
 
-fn test_mc_memo_count_is_3(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_memo_count_is_3(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Three live memos (doubled + is_big + label)."""
     var t = _create_mc(w)
@@ -426,8 +426,8 @@ fn test_mc_memo_count_is_3(
 # ── Test: scope count is 1 ──────────────────────────────────────────────────
 
 
-fn test_mc_scope_count_is_1(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_scope_count_is_1(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Single root scope."""
     var t = _create_mc(w)
@@ -441,8 +441,8 @@ fn test_mc_scope_count_is_1(
 # ── Test: destroy does not crash ─────────────────────────────────────────────
 
 
-fn test_mc_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_destroy_does_not_crash(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy after normal use does not crash."""
     var t = _create_mc(w)
@@ -457,8 +457,8 @@ fn test_mc_destroy_does_not_crash(
 # ── Test: rapid 20 increments ───────────────────────────────────────────────
 
 
-fn test_mc_rapid_20_increments(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_rapid_20_increments(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """20 increments with flush after each — all derived state correct."""
     var t = _create_mc(w)
@@ -486,8 +486,8 @@ fn test_mc_rapid_20_increments(
 # ── Test: threshold boundary exact ───────────────────────────────────────────
 
 
-fn test_mc_threshold_boundary_exact(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_threshold_boundary_exact(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Threshold: input=4→doubled=8→small, input=5→doubled=10→BIG.
 
@@ -518,8 +518,8 @@ fn test_mc_threshold_boundary_exact(
 # ── Test: all memos dirty after increment (Phase 36) ────────────────────────
 
 
-fn test_mc_all_memos_dirty_after_increment(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_all_memos_dirty_after_increment(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment, all three memos are independently dirty.
 
@@ -569,8 +569,8 @@ fn test_mc_all_memos_dirty_after_increment(
 # ── Test: partial recompute (Phase 36) ──────────────────────────────────────
 
 
-fn test_mc_partial_recompute(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_mc_partial_recompute(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment, flush recomputes all independently-dirty memos.
 
@@ -629,7 +629,7 @@ fn test_mc_partial_recompute(
 # ── Test runner ──────────────────────────────────────────────────────────────
 
 
-fn main() raises:
+def main() raises:
     var wp = _load()
 
     print("test_memo_chain — MemoChainApp mixed-type memo chain (Phase 35.3):")

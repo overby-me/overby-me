@@ -43,15 +43,15 @@ from wasm_harness import (
 )
 
 
-fn _load() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_en(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_en(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create an ErrorNestApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("en_init", no_args()))
@@ -60,8 +60,8 @@ fn _create_en(
     return Tuple(app, buf)
 
 
-fn _destroy_en(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _destroy_en(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -70,8 +70,8 @@ fn _destroy_en(
     w[].call_void("en_destroy", args_ptr(app))
 
 
-fn _flush(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _flush(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -79,8 +79,8 @@ fn _flush(
     return w[].call_i32("en_flush", args_ptr_ptr_i32(app, buf, 8192))
 
 
-fn _handle_event(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _handle_event(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -91,8 +91,8 @@ fn _handle_event(
 # ── Test: init creates app ───────────────────────────────────────────────────
 
 
-fn test_en_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_init_creates_app(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero pointer."""
     var app = Int(w[].call_i64("en_init", no_args()))
@@ -103,8 +103,8 @@ fn test_en_init_creates_app(
 # ── Test: no errors initially ────────────────────────────────────────────────
 
 
-fn test_en_no_errors_initially(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_no_errors_initially(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Both boundaries have no error after init."""
     var t = _create_en(w)
@@ -118,8 +118,8 @@ fn test_en_no_errors_initially(
 # ── Test: all normal mounted after rebuild ───────────────────────────────────
 
 
-fn test_en_all_normal_mounted_after_rebuild(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_all_normal_mounted_after_rebuild(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Outer normal + inner normal are mounted after rebuild."""
     var t = _create_en(w)
@@ -133,8 +133,8 @@ fn test_en_all_normal_mounted_after_rebuild(
 # ── Test: no fallbacks initially ─────────────────────────────────────────────
 
 
-fn test_en_no_fallbacks_initially(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_no_fallbacks_initially(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Both fallbacks are hidden after initial rebuild."""
     var t = _create_en(w)
@@ -148,8 +148,8 @@ fn test_en_no_fallbacks_initially(
 # ── Test: inner crash sets inner error ───────────────────────────────────────
 
 
-fn test_en_inner_crash_sets_inner_error(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_inner_crash_sets_inner_error(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Inner crash handler sets inner has_error to true."""
     var t = _create_en(w)
@@ -164,8 +164,8 @@ fn test_en_inner_crash_sets_inner_error(
 # ── Test: inner crash preserves outer ────────────────────────────────────────
 
 
-fn test_en_inner_crash_preserves_outer(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_inner_crash_preserves_outer(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Inner crash does not set outer error."""
     var t = _create_en(w)
@@ -180,8 +180,8 @@ fn test_en_inner_crash_preserves_outer(
 # ── Test: flush after inner crash ────────────────────────────────────────────
 
 
-fn test_en_flush_after_inner_crash(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_flush_after_inner_crash(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After inner crash + flush: inner fallback shown, inner normal hidden,
     outer normal still mounted."""
@@ -201,8 +201,8 @@ fn test_en_flush_after_inner_crash(
 # ── Test: inner retry clears inner error ─────────────────────────────────────
 
 
-fn test_en_inner_retry_clears_inner_error(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_inner_retry_clears_inner_error(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Inner retry handler clears the inner error state."""
     var t = _create_en(w)
@@ -222,8 +222,8 @@ fn test_en_inner_retry_clears_inner_error(
 # ── Test: flush after inner retry ────────────────────────────────────────────
 
 
-fn test_en_flush_after_inner_retry(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_flush_after_inner_retry(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After inner crash + flush + inner retry + flush: inner normal restored.
     """
@@ -246,8 +246,8 @@ fn test_en_flush_after_inner_retry(
 # ── Test: outer crash sets outer error ───────────────────────────────────────
 
 
-fn test_en_outer_crash_sets_outer_error(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_outer_crash_sets_outer_error(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Outer crash handler sets outer has_error to true."""
     var t = _create_en(w)
@@ -262,8 +262,8 @@ fn test_en_outer_crash_sets_outer_error(
 # ── Test: flush after outer crash ────────────────────────────────────────────
 
 
-fn test_en_flush_after_outer_crash(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_flush_after_outer_crash(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After outer crash + flush: outer fallback shown, outer normal hidden
     (inner boundary + children also hidden)."""
@@ -283,8 +283,8 @@ fn test_en_flush_after_outer_crash(
 # ── Test: outer retry restores outer normal ──────────────────────────────────
 
 
-fn test_en_outer_retry_restores_outer_normal(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_outer_retry_restores_outer_normal(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After outer crash + flush + outer retry + flush: outer normal +
     inner boundary visible again."""
@@ -308,8 +308,8 @@ fn test_en_outer_retry_restores_outer_normal(
 # ── Test: inner crash then outer crash ───────────────────────────────────────
 
 
-fn test_en_inner_crash_then_outer_crash(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_inner_crash_then_outer_crash(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Both errors set; outer fallback takes precedence visually."""
     var t = _create_en(w)
@@ -335,8 +335,8 @@ fn test_en_inner_crash_then_outer_crash(
 # ── Test: outer retry reveals inner error ────────────────────────────────────
 
 
-fn test_en_outer_retry_reveals_inner_error(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_outer_retry_reveals_inner_error(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After outer retry, inner still in error (inner fallback shown)."""
     var t = _create_en(w)
@@ -366,8 +366,8 @@ fn test_en_outer_retry_reveals_inner_error(
 # ── Test: inner retry after outer retry — full recovery ──────────────────────
 
 
-fn test_en_inner_retry_after_outer_retry(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_inner_retry_after_outer_retry(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Full recovery: inner crash → outer crash → outer retry → inner retry."""
     var t = _create_en(w)
@@ -402,8 +402,8 @@ fn test_en_inner_retry_after_outer_retry(
 # ── Test: multiple inner crash/retry cycles ──────────────────────────────────
 
 
-fn test_en_multiple_inner_crash_retry_cycles(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_multiple_inner_crash_retry_cycles(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Five inner crash/retry cycles all succeed."""
     var t = _create_en(w)
@@ -434,8 +434,8 @@ fn test_en_multiple_inner_crash_retry_cycles(
 # ── Test: multiple outer crash/retry cycles ──────────────────────────────────
 
 
-fn test_en_multiple_outer_crash_retry_cycles(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_multiple_outer_crash_retry_cycles(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Five outer crash/retry cycles all succeed."""
     var t = _create_en(w)
@@ -466,8 +466,8 @@ fn test_en_multiple_outer_crash_retry_cycles(
 # ── Test: mixed crash/retry sequence ─────────────────────────────────────────
 
 
-fn test_en_mixed_crash_retry_sequence(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_mixed_crash_retry_sequence(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Mixed: inner→outer→outer_retry→inner_retry — full recovery."""
     var t = _create_en(w)
@@ -507,8 +507,8 @@ fn test_en_mixed_crash_retry_sequence(
 # ── Test: destroy does not crash ─────────────────────────────────────────────
 
 
-fn test_en_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_destroy_does_not_crash(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy after normal lifecycle does not crash."""
     var t = _create_en(w)
@@ -520,8 +520,8 @@ fn test_en_destroy_does_not_crash(
 # ── Test: destroy with active error ──────────────────────────────────────────
 
 
-fn test_en_destroy_with_active_error(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_destroy_with_active_error(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy while both errors are active does not crash."""
     var t = _create_en(w)
@@ -539,8 +539,8 @@ fn test_en_destroy_with_active_error(
 # ── Test: scope count ────────────────────────────────────────────────────────
 
 
-fn test_en_scope_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_scope_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Five scopes: root + outer_normal + inner_normal + inner_fallback +
     outer_fallback."""
@@ -555,8 +555,8 @@ fn test_en_scope_count(
 # ── Test: scope IDs are distinct ─────────────────────────────────────────────
 
 
-fn test_en_scope_ids_distinct(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_scope_ids_distinct(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """All five scope IDs are distinct."""
     var t = _create_en(w)
@@ -583,8 +583,8 @@ fn test_en_scope_ids_distinct(
 # ── Test: handler IDs are valid and distinct ─────────────────────────────────
 
 
-fn test_en_handler_ids_valid(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_handler_ids_valid(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Four handler IDs are all distinct and non-negative."""
     var t = _create_en(w)
@@ -610,8 +610,8 @@ fn test_en_handler_ids_valid(
 # ── Test: flush returns 0 when clean ─────────────────────────────────────────
 
 
-fn test_en_flush_returns_0_when_clean(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_en_flush_returns_0_when_clean(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush without any state change returns 0."""
     var t = _create_en(w)
@@ -627,7 +627,7 @@ fn test_en_flush_returns_0_when_clean(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn main() raises:
+def main() raises:
     var wp = _load()
 
     print(

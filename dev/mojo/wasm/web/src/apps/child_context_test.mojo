@@ -38,7 +38,7 @@ struct ChildContextTestApp(Movable):
     var child_count: _SignalI32  # consumed from parent context
     var child_show_hex: SignalBool  # child-owned local state
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.count = self.ctx.use_signal(0)
         self.ctx.setup_view(
@@ -62,20 +62,20 @@ struct ChildContextTestApp(Movable):
         self.child_count = self.child_ctx.consume_signal_i32(_CCT_PROP_COUNT)
         self.child_show_hex = self.child_ctx.use_signal_bool(False)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.count = take.count^
-        self.child_ctx = take.child_ctx^
-        self.child_count = take.child_count^
-        self.child_show_hex = take.child_show_hex^
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.count = move.count^
+        self.child_ctx = move.child_ctx^
+        self.child_count = move.child_count^
+        self.child_show_hex = move.child_show_hex^
 
-    fn render_parent(mut self) -> UInt32:
+    def render_parent(mut self) -> UInt32:
         """Build the parent VNode with a placeholder for the child slot."""
         var pvb = self.ctx.render_builder()
         pvb.add_dyn_placeholder()
         return pvb.build()
 
-    fn render_child(mut self) -> UInt32:
+    def render_child(mut self) -> UInt32:
         """Build the child's VNode with current count value."""
         var cvb = self.child_ctx.render_builder()
         var val = self.child_count.peek()
@@ -86,24 +86,24 @@ struct ChildContextTestApp(Movable):
         return cvb.build()
 
 
-fn _cct_init() -> UnsafePointer[ChildContextTestApp, MutExternalOrigin]:
+def _cct_init() -> UnsafePointer[ChildContextTestApp, MutUntrackedOrigin]:
     var app_ptr = alloc[ChildContextTestApp](1)
-    app_ptr.init_pointee_move(ChildContextTestApp())
+    app_ptr.unsafe_write(ChildContextTestApp())
     return app_ptr
 
 
-fn _cct_destroy(
-    app_ptr: UnsafePointer[ChildContextTestApp, MutExternalOrigin],
+def _cct_destroy(
+    app_ptr: UnsafePointer[ChildContextTestApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].child_ctx)
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _cct_rebuild(
+def _cct_rebuild(
     mut app: ChildContextTestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the child-context test app."""
     # 1. Render parent with placeholder
@@ -141,7 +141,7 @@ fn _cct_rebuild(
     return Int32(writer_ptr[0].offset)
 
 
-fn _cct_handle_event(
+def _cct_handle_event(
     mut app: ChildContextTestApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -149,9 +149,9 @@ fn _cct_handle_event(
     return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _cct_flush(
+def _cct_flush(
     mut app: ChildContextTestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates."""
     var parent_dirty = app.ctx.consume_dirty()

@@ -30,22 +30,22 @@ from wasm_harness import (
 )
 
 
-fn _get_wasm() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def _create_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises -> Int:
     """Create a heap-allocated Runtime via WASM."""
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
-fn _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _destroy_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     """Destroy a heap-allocated Runtime via WASM."""
     w[].call_void("runtime_destroy", args_ptr(rt))
@@ -54,8 +54,8 @@ fn _destroy_runtime(
 # ── Registry — initial state ─────────────────────────────────────────────────
 
 
-fn test_registry_initial_state(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_registry_initial_state(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -71,8 +71,8 @@ fn test_registry_initial_state(
 # ── Registry — register and query ────────────────────────────────────────────
 
 
-fn test_register_single_handler(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_register_single_handler(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -102,8 +102,8 @@ fn test_register_single_handler(
     _destroy_runtime(w, rt)
 
 
-fn test_register_multiple_handlers(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_register_multiple_handlers(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -168,8 +168,8 @@ fn test_register_multiple_handlers(
 # ── Registry — query fields ──────────────────────────────────────────────────
 
 
-fn test_query_signal_add_fields(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_query_signal_add_fields(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -210,8 +210,8 @@ fn test_query_signal_add_fields(
     _destroy_runtime(w, rt)
 
 
-fn test_query_signal_set_fields(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_query_signal_set_fields(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -247,8 +247,8 @@ fn test_query_signal_set_fields(
     _destroy_runtime(w, rt)
 
 
-fn test_query_signal_sub_fields(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_query_signal_sub_fields(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -279,8 +279,8 @@ fn test_query_signal_sub_fields(
     _destroy_runtime(w, rt)
 
 
-fn test_query_signal_toggle_fields(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_query_signal_toggle_fields(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -314,8 +314,8 @@ fn test_query_signal_toggle_fields(
     _destroy_runtime(w, rt)
 
 
-fn test_query_signal_set_input_fields(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_query_signal_set_input_fields(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -344,8 +344,8 @@ fn test_query_signal_set_input_fields(
     _destroy_runtime(w, rt)
 
 
-fn test_query_custom_handler_fields(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_query_custom_handler_fields(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -378,8 +378,8 @@ fn test_query_custom_handler_fields(
     _destroy_runtime(w, rt)
 
 
-fn test_query_noop_handler_fields(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_query_noop_handler_fields(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -410,8 +410,8 @@ fn test_query_noop_handler_fields(
 # ── Registry — remove ────────────────────────────────────────────────────────
 
 
-fn test_remove_handler(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_remove_handler(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -463,8 +463,8 @@ fn test_remove_handler(
     _destroy_runtime(w, rt)
 
 
-fn test_remove_nonexistent_is_noop(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_remove_nonexistent_is_noop(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -486,8 +486,8 @@ fn test_remove_nonexistent_is_noop(
     _destroy_runtime(w, rt)
 
 
-fn test_double_remove_is_noop(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_double_remove_is_noop(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -518,8 +518,8 @@ fn test_double_remove_is_noop(
 # ── Registry — slot reuse after remove ───────────────────────────────────────
 
 
-fn test_slot_reuse_after_remove(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_slot_reuse_after_remove(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -596,8 +596,8 @@ fn test_slot_reuse_after_remove(
     _destroy_runtime(w, rt)
 
 
-fn test_multiple_slot_reuse(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_multiple_slot_reuse(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -665,8 +665,8 @@ fn test_multiple_slot_reuse(
 # ── Registry — contains with out-of-bounds ID ────────────────────────────────
 
 
-fn test_contains_out_of_bounds(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_contains_out_of_bounds(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -687,8 +687,8 @@ fn test_contains_out_of_bounds(
 # ── Dispatch — signal_add ────────────────────────────────────────────────────
 
 
-fn test_dispatch_signal_add(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_dispatch_signal_add(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -723,8 +723,8 @@ fn test_dispatch_signal_add(
 # ── Dispatch — signal_sub ────────────────────────────────────────────────────
 
 
-fn test_dispatch_signal_sub(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_dispatch_signal_sub(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -753,8 +753,8 @@ fn test_dispatch_signal_sub(
 # ── Dispatch — signal_set ────────────────────────────────────────────────────
 
 
-fn test_dispatch_signal_set(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_dispatch_signal_set(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -783,8 +783,8 @@ fn test_dispatch_signal_set(
 # ── Dispatch — signal_toggle ─────────────────────────────────────────────────
 
 
-fn test_dispatch_signal_toggle(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_dispatch_signal_toggle(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -820,8 +820,8 @@ fn test_dispatch_signal_toggle(
 # ── Dispatch — signal_set_input (with i32 payload) ───────────────────────────
 
 
-fn test_dispatch_signal_set_input(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_dispatch_signal_set_input(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -854,8 +854,8 @@ fn test_dispatch_signal_set_input(
 # ── Dispatch — marks scope dirty ─────────────────────────────────────────────
 
 
-fn test_dispatch_marks_scope_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_dispatch_marks_scope_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -895,8 +895,8 @@ fn test_dispatch_marks_scope_dirty(
 # ── Dispatch — multiple dispatches accumulate ────────────────────────────────
 
 
-fn test_dispatch_multiple_accumulate(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_dispatch_multiple_accumulate(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -928,8 +928,8 @@ fn test_dispatch_multiple_accumulate(
 # ── Dispatch — drain dirty ───────────────────────────────────────────────────
 
 
-fn test_dispatch_and_drain_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_dispatch_and_drain_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -971,8 +971,8 @@ fn test_dispatch_and_drain_dirty(
 # ── Edge case — negative operand ─────────────────────────────────────────────
 
 
-fn test_negative_operand(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_negative_operand(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -1005,8 +1005,8 @@ fn test_negative_operand(
     _destroy_runtime(w, rt)
 
 
-fn test_int32_min_max_operand(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_int32_min_max_operand(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -1048,8 +1048,8 @@ fn test_int32_min_max_operand(
 # ── Stress — many handlers ───────────────────────────────────────────────────
 
 
-fn test_stress_100_handlers(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_stress_100_handlers(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -1099,8 +1099,8 @@ fn test_stress_100_handlers(
     _destroy_runtime(w, rt)
 
 
-fn test_stress_register_remove_cycle(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_stress_register_remove_cycle(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Register and remove handlers in a tight loop to exercise free list."""
     var rt = _create_runtime(w)
@@ -1141,8 +1141,8 @@ fn test_stress_register_remove_cycle(
 # ── Dispatch — full counter scenario ─────────────────────────────────────────
 
 
-fn test_dispatch_counter_scenario(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_dispatch_counter_scenario(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Simulate a counter component: scope with signal + click handler."""
     var rt = _create_runtime(w)
@@ -1219,8 +1219,8 @@ fn test_dispatch_counter_scenario(
 # ── Phase 20 — dispatch_event_with_string (SignalString) ─────────────────────
 
 
-fn test_query_signal_set_string_fields(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_query_signal_set_string_fields(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Verify handler fields for ACTION_SIGNAL_SET_STRING (action=6)."""
     var rt = _create_runtime(w)
@@ -1271,8 +1271,8 @@ fn test_query_signal_set_string_fields(
     _destroy_runtime(w, rt)
 
 
-fn test_dispatch_signal_set_string(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_dispatch_signal_set_string(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Dispatch_event_with_string writes the string to the SignalString."""
     var rt = _create_runtime(w)
@@ -1326,8 +1326,8 @@ fn test_dispatch_signal_set_string(
     _destroy_runtime(w, rt)
 
 
-fn test_dispatch_signal_set_string_empty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_dispatch_signal_set_string_empty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Dispatch_event_with_string handles empty string payload."""
     var rt = _create_runtime(w)
@@ -1376,8 +1376,8 @@ fn test_dispatch_signal_set_string_empty(
     _destroy_runtime(w, rt)
 
 
-fn test_dispatch_signal_set_string_overwrite(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_dispatch_signal_set_string_overwrite(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Multiple dispatches overwrite the SignalString value each time."""
     var rt = _create_runtime(w)
@@ -1437,8 +1437,8 @@ fn test_dispatch_signal_set_string_overwrite(
     _destroy_runtime(w, rt)
 
 
-fn test_dispatch_signal_set_string_marks_scope_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_dispatch_signal_set_string_marks_scope_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Dispatch_event_with_string marks subscribing scopes dirty via version signal.
     """
@@ -1497,8 +1497,8 @@ fn test_dispatch_signal_set_string_marks_scope_dirty(
     _destroy_runtime(w, rt)
 
 
-fn test_dispatch_signal_set_string_fallback(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_dispatch_signal_set_string_fallback(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Dispatch_event_with_string falls back to normal dispatch for non-string actions.
     """
@@ -1536,7 +1536,7 @@ fn test_dispatch_signal_set_string_fallback(
     _destroy_runtime(w, rt)
 
 
-fn main() raises:
+def main() raises:
     from wasm_harness import get_instance
 
     var w = get_instance()

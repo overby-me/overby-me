@@ -92,7 +92,7 @@ struct _ChildEventInfo(Copyable, Movable):
     var signal_key: UInt32
     var operand: Int32
 
-    fn __init__(
+    def __init__(
         out self,
         event_name: String,
         action: UInt8,
@@ -104,17 +104,17 @@ struct _ChildEventInfo(Copyable, Movable):
         self.signal_key = signal_key
         self.operand = operand
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.event_name = copy.event_name
         self.action = copy.action
         self.signal_key = copy.signal_key
         self.operand = copy.operand
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.event_name = take.event_name^
-        self.action = take.action
-        self.signal_key = take.signal_key
-        self.operand = take.operand
+    def __init__(out self, *, deinit move: Self):
+        self.event_name = move.event_name^
+        self.action = move.action
+        self.signal_key = move.signal_key
+        self.operand = move.operand
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -132,17 +132,17 @@ struct ChildEventBinding(Copyable, Movable):
     var event_name: String
     var handler_id: UInt32
 
-    fn __init__(out self, event_name: String, handler_id: UInt32):
+    def __init__(out self, event_name: String, handler_id: UInt32):
         self.event_name = event_name
         self.handler_id = handler_id
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.event_name = copy.event_name
         self.handler_id = copy.handler_id
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.event_name = take.event_name^
-        self.handler_id = take.handler_id
+    def __init__(out self, *, deinit move: Self):
+        self.event_name = move.event_name^
+        self.handler_id = move.handler_id
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -170,7 +170,7 @@ struct ChildAutoBinding(Copyable, Movable):
     var version_key: UInt32
 
     @staticmethod
-    fn event(event_name: String, handler_id: UInt32) -> Self:
+    def event(event_name: String, handler_id: UInt32) -> Self:
         """Create an event auto-binding."""
         return Self(
             kind=CHILD_BIND_EVENT,
@@ -182,7 +182,7 @@ struct ChildAutoBinding(Copyable, Movable):
         )
 
     @staticmethod
-    fn value(
+    def value(
         attr_name: String, string_key: UInt32, version_key: UInt32
     ) -> Self:
         """Create a value binding auto-binding."""
@@ -195,7 +195,7 @@ struct ChildAutoBinding(Copyable, Movable):
             version_key=version_key,
         )
 
-    fn __init__(
+    def __init__(
         out self,
         kind: UInt8,
         event_name: String,
@@ -211,7 +211,7 @@ struct ChildAutoBinding(Copyable, Movable):
         self.string_key = string_key
         self.version_key = version_key
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.kind = copy.kind
         self.event_name = copy.event_name
         self.handler_id = copy.handler_id
@@ -219,19 +219,19 @@ struct ChildAutoBinding(Copyable, Movable):
         self.string_key = copy.string_key
         self.version_key = copy.version_key
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.kind = take.kind
-        self.event_name = take.event_name^
-        self.handler_id = take.handler_id
-        self.attr_name = take.attr_name^
-        self.string_key = take.string_key
-        self.version_key = take.version_key
+    def __init__(out self, *, deinit move: Self):
+        self.kind = move.kind
+        self.event_name = move.event_name^
+        self.handler_id = move.handler_id
+        self.attr_name = move.attr_name^
+        self.string_key = move.string_key
+        self.version_key = move.version_key
 
-    fn is_event(self) -> Bool:
+    def is_event(self) -> Bool:
         """Check whether this is an event binding."""
         return self.kind == CHILD_BIND_EVENT
 
-    fn is_value(self) -> Bool:
+    def is_value(self) -> Bool:
         """Check whether this is a value binding."""
         return self.kind == CHILD_BIND_VALUE
 
@@ -257,13 +257,13 @@ struct ChildRenderBuilder(Movable):
     var _vb: VNodeBuilder
     var _auto_bindings: List[ChildAutoBinding]
     var _events: List[ChildEventBinding]
-    var _runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    var _runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
 
-    fn __init__(
+    def __init__(
         out self,
         var vb: VNodeBuilder,
         var auto_bindings: List[ChildAutoBinding],
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ):
         """Construct with auto-bindings (events + value bindings)."""
         self._vb = vb^
@@ -271,7 +271,7 @@ struct ChildRenderBuilder(Movable):
         self._events = List[ChildEventBinding]()
         self._runtime = runtime
 
-    fn __init__(
+    def __init__(
         out self,
         var vb: VNodeBuilder,
         var events: List[ChildEventBinding],
@@ -280,48 +280,50 @@ struct ChildRenderBuilder(Movable):
         self._vb = vb^
         self._auto_bindings = List[ChildAutoBinding]()
         self._events = events^
-        self._runtime = UnsafePointer[Runtime, MutExternalOrigin]()
+        self._runtime = UnsafePointer[
+            Runtime, MutUntrackedOrigin
+        ].unsafe_dangling()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._vb = take._vb^
-        self._auto_bindings = take._auto_bindings^
-        self._events = take._events^
-        self._runtime = take._runtime
+    def __init__(out self, *, deinit move: Self):
+        self._vb = move._vb^
+        self._auto_bindings = move._auto_bindings^
+        self._events = move._events^
+        self._runtime = move._runtime
 
     # ── Dynamic text ─────────────────────────────────────────────────
 
-    fn add_dyn_text(mut self, value: String):
+    def add_dyn_text(mut self, value: String):
         """Add a dynamic text node (fills the next DynamicText slot)."""
         self._vb.add_dyn_text(value)
 
-    fn add_dyn_placeholder(mut self):
+    def add_dyn_placeholder(mut self):
         """Add a dynamic placeholder node."""
         self._vb.add_dyn_placeholder()
 
-    fn add_dyn_text_signal(mut self, signal: SignalString):
+    def add_dyn_text_signal(mut self, signal: SignalString):
         """Add a dynamic text node from a SignalString value."""
         self._vb.add_dyn_text(signal.get())
 
     # ── Dynamic attributes (manual) ─────────────────────────────────
 
-    fn add_dyn_text_attr(mut self, name: String, value: String):
+    def add_dyn_text_attr(mut self, name: String, value: String):
         """Add a dynamic text attribute (e.g. class, id, href)."""
         self._vb.add_dyn_text_attr(name, value)
 
-    fn add_dyn_bool_attr(mut self, name: String, value: Bool):
+    def add_dyn_bool_attr(mut self, name: String, value: Bool):
         """Add a dynamic boolean attribute (e.g. disabled, checked)."""
         self._vb.add_dyn_bool_attr(name, value)
 
     # ── Conditional class helpers ────────────────────────────────────
 
-    fn add_class_if(mut self, condition: Bool, class_name: String):
+    def add_class_if(mut self, condition: Bool, class_name: String):
         """Add a conditional CSS class attribute."""
         if condition:
             self._vb.add_dyn_text_attr(String("class"), class_name)
         else:
             self._vb.add_dyn_text_attr(String("class"), String(""))
 
-    fn add_class_when(
+    def add_class_when(
         mut self,
         condition: Bool,
         true_class: String,
@@ -335,7 +337,7 @@ struct ChildRenderBuilder(Movable):
 
     # ── Build ────────────────────────────────────────────────────────
 
-    fn build(mut self) -> UInt32:
+    def build(mut self) -> UInt32:
         """Finalize the VNode by auto-adding all registered bindings.
 
         Adds dynamic attributes for each ChildAutoBinding in tree-walk
@@ -403,7 +405,7 @@ struct ChildComponent(Copyable, Movable):
     var _event_bindings: List[ChildEventBinding]
     var _auto_bindings: List[ChildAutoBinding]
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an uninitialized ChildComponent."""
         self.scope_id = 0
         self.template_id = 0
@@ -412,7 +414,7 @@ struct ChildComponent(Copyable, Movable):
         self._event_bindings = List[ChildEventBinding]()
         self._auto_bindings = List[ChildAutoBinding]()
 
-    fn __init__(
+    def __init__(
         out self,
         scope_id: UInt32,
         template_id: UInt32,
@@ -434,7 +436,7 @@ struct ChildComponent(Copyable, Movable):
         self._event_bindings = event_bindings^
         self._auto_bindings = auto_bindings^
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.scope_id = copy.scope_id
         self.template_id = copy.template_id
         self.current_vnode = copy.current_vnode
@@ -442,17 +444,17 @@ struct ChildComponent(Copyable, Movable):
         self._event_bindings = copy._event_bindings.copy()
         self._auto_bindings = copy._auto_bindings.copy()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.scope_id = take.scope_id
-        self.template_id = take.template_id
-        self.current_vnode = take.current_vnode
-        self.slot = take.slot.copy()
-        self._event_bindings = take._event_bindings^
-        self._auto_bindings = take._auto_bindings^
+    def __init__(out self, *, deinit move: Self):
+        self.scope_id = move.scope_id
+        self.template_id = move.template_id
+        self.current_vnode = move.current_vnode
+        self.slot = move.slot.copy()
+        self._event_bindings = move._event_bindings^
+        self._auto_bindings = move._auto_bindings^
 
     # ── Slot initialization ──────────────────────────────────────────
 
-    fn init_slot(mut self, anchor_id: UInt32):
+    def init_slot(mut self, anchor_id: UInt32):
         """Initialize the ConditionalSlot with the anchor from dyn_node_ids.
 
         After the parent mounts, extract the anchor ElementId from the
@@ -466,16 +468,16 @@ struct ChildComponent(Copyable, Movable):
         """
         self.slot = ConditionalSlot(anchor_id)
 
-    fn is_slot_initialized(self) -> Bool:
+    def is_slot_initialized(self) -> Bool:
         """Check whether the slot has been initialized with an anchor."""
         return self.slot.anchor_id != 0 or self.slot.mounted
 
     # ── Render ───────────────────────────────────────────────────────
 
-    fn render_builder(
+    def render_builder(
         self,
-        store: UnsafePointer[VNodeStore, MutExternalOrigin],
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
+        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ) -> ChildRenderBuilder:
         """Create a ChildRenderBuilder for this component's template.
 
@@ -495,9 +497,9 @@ struct ChildComponent(Copyable, Movable):
         else:
             return ChildRenderBuilder(vb^, self._event_bindings.copy())
 
-    fn vnode_builder(
+    def vnode_builder(
         self,
-        store: UnsafePointer[VNodeStore, MutExternalOrigin],
+        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     ) -> VNodeBuilder:
         """Create a raw VNodeBuilder for this component's template.
 
@@ -515,12 +517,12 @@ struct ChildComponent(Copyable, Movable):
 
     # ── Flush (DOM lifecycle) ────────────────────────────────────────
 
-    fn flush(
+    def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-        eid_ptr: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-        rt_ptr: UnsafePointer[Runtime, MutExternalOrigin],
-        store_ptr: UnsafePointer[VNodeStore, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+        rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
+        store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
         new_vnode_idx: UInt32,
     ):
         """Flush the child: create or diff its VNode in the DOM.
@@ -546,12 +548,12 @@ struct ChildComponent(Copyable, Movable):
         )
         self.current_vnode = Int(new_vnode_idx)
 
-    fn flush_via_context(
+    def flush_via_context(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-        eid_alloc: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
-        store: UnsafePointer[VNodeStore, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
         new_vnode_idx: UInt32,
     ):
         """Flush the child using context pointers (convenience alias).
@@ -568,12 +570,12 @@ struct ChildComponent(Copyable, Movable):
         """
         self.flush(writer_ptr, eid_alloc, runtime, store, new_vnode_idx)
 
-    fn flush_empty(
+    def flush_empty(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
-        eid_ptr: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-        rt_ptr: UnsafePointer[Runtime, MutExternalOrigin],
-        store_ptr: UnsafePointer[VNodeStore, MutExternalOrigin],
+        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+        rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
+        store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     ):
         """Hide the child: remove its DOM content, restore placeholder.
 
@@ -596,19 +598,19 @@ struct ChildComponent(Copyable, Movable):
 
     # ── State queries ────────────────────────────────────────────────
 
-    fn is_mounted(self) -> Bool:
+    def is_mounted(self) -> Bool:
         """Check whether the child's VNode is currently in the DOM."""
         return self.slot.mounted
 
-    fn has_rendered(self) -> Bool:
+    def has_rendered(self) -> Bool:
         """Check whether this child has been rendered at least once."""
         return self.current_vnode >= 0
 
     # ── Dirty tracking ───────────────────────────────────────────────
 
-    fn is_dirty(
+    def is_dirty(
         self,
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ) -> Bool:
         """Check if the child's scope is dirty.
 
@@ -625,7 +627,7 @@ struct ChildComponent(Copyable, Movable):
 
     # ── Handler query ────────────────────────────────────────────────
 
-    fn event_handler_id(self, index: Int) -> UInt32:
+    def event_handler_id(self, index: Int) -> UInt32:
         """Return the handler ID for the Nth event in this child.
 
         Args:
@@ -636,19 +638,19 @@ struct ChildComponent(Copyable, Movable):
         """
         return self._event_bindings[index].handler_id
 
-    fn event_count(self) -> Int:
+    def event_count(self) -> Int:
         """Return the number of event bindings on this child."""
         return len(self._event_bindings)
 
-    fn auto_binding_count(self) -> Int:
+    def auto_binding_count(self) -> Int:
         """Return the number of auto-bindings on this child."""
         return len(self._auto_bindings)
 
     # ── Destroy ──────────────────────────────────────────────────────
 
-    fn destroy(
+    def destroy(
         self,
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ):
         """Destroy the child scope and clean up its handlers.
 

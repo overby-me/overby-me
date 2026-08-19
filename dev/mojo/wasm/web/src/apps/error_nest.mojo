@@ -50,13 +50,13 @@ struct ENInnerNormalChild(Movable):
 
     var child_ctx: ChildComponentContext
 
-    fn __init__(out self, var child_ctx: ChildComponentContext):
+    def __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Inner: working"))
         return vb.build()
@@ -70,13 +70,13 @@ struct ENInnerFallbackChild(Movable):
 
     var child_ctx: ChildComponentContext
 
-    fn __init__(out self, var child_ctx: ChildComponentContext):
+    def __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
 
-    fn render(mut self, error_msg: String) -> UInt32:
+    def render(mut self, error_msg: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Inner error: ") + error_msg)
         return vb.build()
@@ -95,7 +95,7 @@ struct ENOuterNormalChild(Movable):
     var inner_normal: ENInnerNormalChild
     var inner_fallback: ENInnerFallbackChild
 
-    fn __init__(
+    def __init__(
         out self,
         var child_ctx: ChildComponentContext,
         var inner_normal: ENInnerNormalChild,
@@ -105,12 +105,12 @@ struct ENOuterNormalChild(Movable):
         self.inner_normal = inner_normal^
         self.inner_fallback = inner_fallback^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
-        self.inner_normal = take.inner_normal^
-        self.inner_fallback = take.inner_fallback^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
+        self.inner_normal = move.inner_normal^
+        self.inner_fallback = move.inner_fallback^
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Status: OK"))
         vb.add_dyn_placeholder()  # dyn_node[1] — inner normal slot
@@ -126,13 +126,13 @@ struct ENOuterFallbackChild(Movable):
 
     var child_ctx: ChildComponentContext
 
-    fn __init__(out self, var child_ctx: ChildComponentContext):
+    def __init__(out self, var child_ctx: ChildComponentContext):
         self.child_ctx = child_ctx^
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.child_ctx = take.child_ctx^
+    def __init__(out self, *, deinit move: Self):
+        self.child_ctx = move.child_ctx^
 
-    fn render(mut self, error_msg: String) -> UInt32:
+    def render(mut self, error_msg: String) -> UInt32:
         var vb = self.child_ctx.render_builder()
         vb.add_dyn_text(String("Outer error: ") + error_msg)
         return vb.build()
@@ -155,7 +155,7 @@ struct ErrorNestApp(Movable):
     var outer_retry_handler: UInt32
     var inner_retry_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.ctx.use_error_boundary()
 
@@ -236,16 +236,16 @@ struct ErrorNestApp(Movable):
         self.outer_retry_handler = outer_fallback_ctx.event_handler_id(0)
         self.outer_fallback = ENOuterFallbackChild(outer_fallback_ctx^)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.outer_normal = take.outer_normal^
-        self.outer_fallback = take.outer_fallback^
-        self.outer_crash_handler = take.outer_crash_handler
-        self.inner_crash_handler = take.inner_crash_handler
-        self.outer_retry_handler = take.outer_retry_handler
-        self.inner_retry_handler = take.inner_retry_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.outer_normal = move.outer_normal^
+        self.outer_fallback = move.outer_fallback^
+        self.outer_crash_handler = move.outer_crash_handler
+        self.inner_crash_handler = move.inner_crash_handler
+        self.outer_retry_handler = move.outer_retry_handler
+        self.inner_retry_handler = move.inner_retry_handler
 
-    fn render_parent(mut self) -> UInt32:
+    def render_parent(mut self) -> UInt32:
         """Build the parent VNode with placeholders for both outer slots."""
         var pvb = self.ctx.render_builder()
         pvb.add_dyn_placeholder()  # dyn_node[0] — outer normal slot
@@ -256,14 +256,14 @@ struct ErrorNestApp(Movable):
 # ── ErrorNestApp lifecycle functions ─────────────────────────────────────────
 
 
-fn _en_init() -> UnsafePointer[ErrorNestApp, MutExternalOrigin]:
+def _en_init() -> UnsafePointer[ErrorNestApp, MutUntrackedOrigin]:
     var app_ptr = alloc[ErrorNestApp](1)
-    app_ptr.init_pointee_move(ErrorNestApp())
+    app_ptr.unsafe_write(ErrorNestApp())
     return app_ptr
 
 
-fn _en_destroy(
-    app_ptr: UnsafePointer[ErrorNestApp, MutExternalOrigin],
+def _en_destroy(
+    app_ptr: UnsafePointer[ErrorNestApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(
         app_ptr[0].outer_normal.inner_normal.child_ctx
@@ -274,13 +274,13 @@ fn _en_destroy(
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].outer_normal.child_ctx)
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].outer_fallback.child_ctx)
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _en_rebuild(
+def _en_rebuild(
     mut app: ErrorNestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the error-nest app."""
     # 1. Render parent with placeholder
@@ -344,7 +344,7 @@ fn _en_rebuild(
     return Int32(writer_ptr[0].offset)
 
 
-fn _en_handle_event(
+def _en_handle_event(
     mut app: ErrorNestApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -370,9 +370,9 @@ fn _en_handle_event(
         return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _en_flush(
+def _en_flush(
     mut app: ErrorNestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with nested error boundary logic.
 

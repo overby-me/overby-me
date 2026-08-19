@@ -133,7 +133,7 @@ from events.registry import (
 )
 
 
-fn test_text_node() -> Int32:
+def test_text_node() -> Int32:
     """Test: text() creates a NODE_TEXT with correct content."""
     var n = text(String("hello"))
     if n.kind != NODE_TEXT:
@@ -151,7 +151,7 @@ fn test_text_node() -> Int32:
     return 1
 
 
-fn test_dyn_text_node() -> Int32:
+def test_dyn_text_node() -> Int32:
     """Test: dyn_text() creates a NODE_DYN_TEXT with correct index."""
     var n = dyn_text(3)
     if n.kind != NODE_DYN_TEXT:
@@ -165,7 +165,7 @@ fn test_dyn_text_node() -> Int32:
     return 1
 
 
-fn test_dyn_node_slot() -> Int32:
+def test_dyn_node_slot() -> Int32:
     """Test: dyn_node() creates a NODE_DYN_NODE with correct index."""
     var n = dyn_node(5)
     if n.kind != NODE_DYN_NODE:
@@ -177,7 +177,7 @@ fn test_dyn_node_slot() -> Int32:
     return 1
 
 
-fn test_static_attr() -> Int32:
+def test_static_attr() -> Int32:
     """Test: attr() creates a NODE_STATIC_ATTR with name and value."""
     var n = attr(String("class"), String("container"))
     if n.kind != NODE_STATIC_ATTR:
@@ -195,7 +195,7 @@ fn test_static_attr() -> Int32:
     return 1
 
 
-fn test_dyn_attr() -> Int32:
+def test_dyn_attr() -> Int32:
     """Test: dyn_attr() creates a NODE_DYN_ATTR with correct index."""
     var n = dyn_attr(2)
     if n.kind != NODE_DYN_ATTR:
@@ -209,7 +209,7 @@ fn test_dyn_attr() -> Int32:
     return 1
 
 
-fn test_empty_element() -> Int32:
+def test_empty_element() -> Int32:
     """Test: el_div() with no args creates an empty element."""
     var n = el_div()
     if n.kind != NODE_ELEMENT:
@@ -225,7 +225,7 @@ fn test_empty_element() -> Int32:
     return 1
 
 
-fn test_element_with_children() -> Int32:
+def test_element_with_children() -> Int32:
     """Test: el_div with text children."""
     var n = el_div([text(String("hello")), text(String("world"))])
     if n.kind != NODE_ELEMENT:
@@ -241,7 +241,7 @@ fn test_element_with_children() -> Int32:
     return 1
 
 
-fn test_element_with_attrs() -> Int32:
+def test_element_with_attrs() -> Int32:
     """Test: el_div with attributes only."""
     var n = el_div(
         [
@@ -260,7 +260,7 @@ fn test_element_with_attrs() -> Int32:
     return 1
 
 
-fn test_element_mixed() -> Int32:
+def test_element_mixed() -> Int32:
     """Test: element with a mix of attrs, children, and dynamic slots."""
     var n = el_div(
         [
@@ -284,7 +284,7 @@ fn test_element_mixed() -> Int32:
     return 1
 
 
-fn test_nested_elements() -> Int32:
+def test_nested_elements() -> Int32:
     """Test: deeply nested element tree."""
     var n = el_div(
         [
@@ -306,7 +306,7 @@ fn test_nested_elements() -> Int32:
     return 1
 
 
-fn test_counter_template() -> Int32:
+def test_counter_template() -> Int32:
     """Test: build counter template via DSL and verify structure.
 
     Builds the same template as CounterApp does manually:
@@ -380,7 +380,7 @@ fn test_counter_template() -> Int32:
     return 1
 
 
-fn test_to_template_simple() -> Int32:
+def test_to_template_simple() -> Int32:
     """Test: simple div with static text converts to valid template."""
     var view = el_div([text(String("hello"))])
     var rt_ptr = create_runtime()
@@ -411,7 +411,7 @@ fn test_to_template_simple() -> Int32:
     return 1
 
 
-fn test_to_template_attrs() -> Int32:
+def test_to_template_attrs() -> Int32:
     """Test: element with static and dynamic attrs converts correctly."""
     var view = el_div(
         [
@@ -446,7 +446,7 @@ fn test_to_template_attrs() -> Int32:
     return 1
 
 
-fn test_to_template_multi_root() -> Int32:
+def test_to_template_multi_root() -> Int32:
     """Test: multiple root nodes via to_template_multi."""
     var roots: List[Node] = [
         el_h1([text(String("Title"))]),
@@ -470,11 +470,11 @@ fn test_to_template_multi_root() -> Int32:
     return 1
 
 
-fn test_vnode_builder() -> Int32:
+def test_vnode_builder() -> Int32:
     """Test: VNodeBuilder creates a VNode with correct dynamic content."""
     var rt_ptr = create_runtime()
     var store_ptr = alloc[VNodeStore](1)
-    store_ptr.init_pointee_move(VNodeStore())
+    store_ptr.unsafe_write(VNodeStore())
 
     # Register a template (we just need an ID)
     var view = el_div([dyn_text(0), dyn_attr(0), dyn_attr(1)])
@@ -490,42 +490,42 @@ fn test_vnode_builder() -> Int32:
 
     # Verify VNode
     if store_ptr[0].kind(idx) != VNODE_TEMPLATE_REF:
-        store_ptr.destroy_pointee()
+        store_ptr.unsafe_deinit_pointee()
         store_ptr.free()
         destroy_runtime(rt_ptr)
         return 0
 
     if store_ptr[0].template_id(idx) != tmpl_id:
-        store_ptr.destroy_pointee()
+        store_ptr.unsafe_deinit_pointee()
         store_ptr.free()
         destroy_runtime(rt_ptr)
         return 0
 
     # 1 dynamic text node
     if store_ptr[0].dynamic_node_count(idx) != 1:
-        store_ptr.destroy_pointee()
+        store_ptr.unsafe_deinit_pointee()
         store_ptr.free()
         destroy_runtime(rt_ptr)
         return 0
 
     # 2 dynamic attrs (event + text attr)
     if store_ptr[0].dynamic_attr_count(idx) != 2:
-        store_ptr.destroy_pointee()
+        store_ptr.unsafe_deinit_pointee()
         store_ptr.free()
         destroy_runtime(rt_ptr)
         return 0
 
-    store_ptr.destroy_pointee()
+    store_ptr.unsafe_deinit_pointee()
     store_ptr.free()
     destroy_runtime(rt_ptr)
     return 1
 
 
-fn test_vnode_builder_keyed() -> Int32:
+def test_vnode_builder_keyed() -> Int32:
     """Test: keyed VNodeBuilder creates a keyed VNode."""
     var rt_ptr = create_runtime()
     var store_ptr = alloc[VNodeStore](1)
-    store_ptr.init_pointee_move(VNodeStore())
+    store_ptr.unsafe_write(VNodeStore())
 
     var view = el_div([text(String("item"))])
     var template = to_template(view, String("dsl-keyed"))
@@ -535,18 +535,18 @@ fn test_vnode_builder_keyed() -> Int32:
     var idx = vb.index()
 
     if not store_ptr[0].has_key(idx):
-        store_ptr.destroy_pointee()
+        store_ptr.unsafe_deinit_pointee()
         store_ptr.free()
         destroy_runtime(rt_ptr)
         return 0
 
-    store_ptr.destroy_pointee()
+    store_ptr.unsafe_deinit_pointee()
     store_ptr.free()
     destroy_runtime(rt_ptr)
     return 1
 
 
-fn test_all_tag_helpers() -> Int32:
+def test_all_tag_helpers() -> Int32:
     """Test: every tag helper produces the correct tag constant."""
     # Layout / Sectioning
     if el_div().tag != TAG_DIV:
@@ -638,7 +638,7 @@ fn test_all_tag_helpers() -> Int32:
     return 1
 
 
-fn test_count_utilities() -> Int32:
+def test_count_utilities() -> Int32:
     """Test: count_* utility functions on a non-trivial tree."""
     var tree = el_div(
         [
@@ -677,7 +677,7 @@ fn test_count_utilities() -> Int32:
     return 1
 
 
-fn test_template_equivalence() -> Int32:
+def test_template_equivalence() -> Int32:
     """Test: DSL-built template matches manually-built template.
 
     Builds the counter template both ways and verifies they have
@@ -781,7 +781,7 @@ fn test_template_equivalence() -> Int32:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_onclick_custom_node() -> Int32:
+def test_onclick_custom_node() -> Int32:
     """Test: onclick_custom creates a NODE_EVENT with ACTION_CUSTOM."""
     var n = onclick_custom()
 
@@ -808,7 +808,7 @@ fn test_onclick_custom_node() -> Int32:
     return 1
 
 
-fn test_onclick_custom_in_element() -> Int32:
+def test_onclick_custom_in_element() -> Int32:
     """Test: onclick_custom inside an element counts as a dynamic attr."""
     var n = el_button(
         text(String("Add")),
@@ -830,7 +830,7 @@ fn test_onclick_custom_in_element() -> Int32:
     return 1
 
 
-fn test_onclick_custom_with_binding() -> Int32:
+def test_onclick_custom_with_binding() -> Int32:
     """Test: onclick_custom + bind_value + oninput_set_string in sibling elements.
     """
     var rt_ptr = create_runtime()
@@ -879,7 +879,7 @@ fn test_onclick_custom_with_binding() -> Int32:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_oninput_set_string_node() -> Int32:
+def test_oninput_set_string_node() -> Int32:
     """Test: oninput_set_string creates a NODE_EVENT with correct fields."""
     var rt_ptr = create_runtime()
     var keys = rt_ptr[0].create_signal_string(String("hello"))
@@ -920,7 +920,7 @@ fn test_oninput_set_string_node() -> Int32:
     return 1
 
 
-fn test_onchange_set_string_node() -> Int32:
+def test_onchange_set_string_node() -> Int32:
     """Test: onchange_set_string creates a NODE_EVENT with correct fields."""
     var rt_ptr = create_runtime()
     var keys = rt_ptr[0].create_signal_string(String("world"))
@@ -953,7 +953,7 @@ fn test_onchange_set_string_node() -> Int32:
     return 1
 
 
-fn test_oninput_in_element() -> Int32:
+def test_oninput_in_element() -> Int32:
     """Test: oninput_set_string inside an element counts as a dynamic attr."""
     var rt_ptr = create_runtime()
     var keys = rt_ptr[0].create_signal_string(String(""))
@@ -987,7 +987,7 @@ fn test_oninput_in_element() -> Int32:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_bind_value_node() -> Int32:
+def test_bind_value_node() -> Int32:
     """Test: bind_value creates a NODE_BIND_VALUE with attr_name='value'."""
     var rt_ptr = create_runtime()
     var keys = rt_ptr[0].create_signal_string(String("initial"))
@@ -1028,7 +1028,7 @@ fn test_bind_value_node() -> Int32:
     return 1
 
 
-fn test_bind_attr_node() -> Int32:
+def test_bind_attr_node() -> Int32:
     """Test: bind_attr creates a NODE_BIND_VALUE with custom attr name."""
     var rt_ptr = create_runtime()
     var keys = rt_ptr[0].create_signal_string(String("hint"))
@@ -1057,7 +1057,7 @@ fn test_bind_attr_node() -> Int32:
     return 1
 
 
-fn test_bind_value_in_element() -> Int32:
+def test_bind_value_in_element() -> Int32:
     """Test: bind_value inside an element counts as a dynamic attr."""
     var rt_ptr = create_runtime()
     var keys = rt_ptr[0].create_signal_string(String("text"))
@@ -1086,7 +1086,7 @@ fn test_bind_value_in_element() -> Int32:
     return 1
 
 
-fn test_two_way_binding_element() -> Int32:
+def test_two_way_binding_element() -> Int32:
     """Test: bind_value + oninput_set_string together in an element."""
     var rt_ptr = create_runtime()
     var keys = rt_ptr[0].create_signal_string(String(""))
@@ -1124,7 +1124,7 @@ fn test_two_way_binding_element() -> Int32:
     return 1
 
 
-fn test_bind_value_to_template() -> Int32:
+def test_bind_value_to_template() -> Int32:
     """Test: bind_value converts to a TATTR_DYNAMIC in the template."""
     var rt_ptr = create_runtime()
     var keys = rt_ptr[0].create_signal_string(String("test"))
@@ -1152,7 +1152,7 @@ fn test_bind_value_to_template() -> Int32:
     return 1
 
 
-fn test_two_way_to_template() -> Int32:
+def test_two_way_to_template() -> Int32:
     """Test: bind_value + oninput_set_string converts to 2 TATTR_DYNAMICs."""
     var rt_ptr = create_runtime()
     var keys = rt_ptr[0].create_signal_string(String(""))
@@ -1183,7 +1183,7 @@ fn test_two_way_to_template() -> Int32:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_onkeydown_enter_custom_node() -> Int32:
+def test_onkeydown_enter_custom_node() -> Int32:
     """Test: onkeydown_enter_custom creates a NODE_EVENT with ACTION_KEY_ENTER_CUSTOM.
     """
     var n = onkeydown_enter_custom()
@@ -1209,7 +1209,7 @@ fn test_onkeydown_enter_custom_node() -> Int32:
     return 1
 
 
-fn test_onkeydown_enter_custom_in_element() -> Int32:
+def test_onkeydown_enter_custom_in_element() -> Int32:
     """Test: onkeydown_enter_custom inside an input counts as a dynamic attr."""
     var n = el_input(
         attr(String("type"), String("text")),
@@ -1227,7 +1227,7 @@ fn test_onkeydown_enter_custom_in_element() -> Int32:
     return 1
 
 
-fn test_onkeydown_enter_custom_with_binding() -> Int32:
+def test_onkeydown_enter_custom_with_binding() -> Int32:
     """Test: onkeydown_enter_custom + bind_value + oninput + onclick_custom (Phase 22 TodoApp pattern).
     """
     var rt_ptr = create_runtime()

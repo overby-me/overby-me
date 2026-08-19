@@ -58,7 +58,7 @@ struct TemplateAttribute(Copyable):
     # ── Static constructor ───────────────────────────────────────────
 
     @staticmethod
-    fn static_attr(name: String, value: String) -> Self:
+    def static_attr(name: String, value: String) -> Self:
         """Create a static attribute with a known name and value."""
         return Self(
             kind=TATTR_STATIC,
@@ -70,7 +70,7 @@ struct TemplateAttribute(Copyable):
     # ── Dynamic constructor ──────────────────────────────────────────
 
     @staticmethod
-    fn dynamic_attr(index: UInt32) -> Self:
+    def dynamic_attr(index: UInt32) -> Self:
         """Create a dynamic attribute placeholder."""
         return Self(
             kind=TATTR_DYNAMIC,
@@ -81,7 +81,7 @@ struct TemplateAttribute(Copyable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
+    def __init__(
         out self,
         kind: UInt8,
         name: String,
@@ -93,25 +93,25 @@ struct TemplateAttribute(Copyable):
         self.value = value
         self.dynamic_index = dynamic_index
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.kind = copy.kind
         self.name = copy.name
         self.value = copy.value
         self.dynamic_index = copy.dynamic_index
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.kind = take.kind
-        self.name = take.name^
-        self.value = take.value^
-        self.dynamic_index = take.dynamic_index
+    def __init__(out self, *, deinit move: Self):
+        self.kind = move.kind
+        self.name = move.name^
+        self.value = move.value^
+        self.dynamic_index = move.dynamic_index
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn is_static(self) -> Bool:
+    def is_static(self) -> Bool:
         """Check whether this is a static attribute."""
         return self.kind == TATTR_STATIC
 
-    fn is_dynamic(self) -> Bool:
+    def is_dynamic(self) -> Bool:
         """Check whether this is a dynamic attribute placeholder."""
         return self.kind == TATTR_DYNAMIC
 
@@ -150,7 +150,7 @@ struct TemplateNode(Copyable):
     # ── Named constructors ───────────────────────────────────────────
 
     @staticmethod
-    fn element(html_tag: UInt8) -> Self:
+    def element(html_tag: UInt8) -> Self:
         """Create an Element node with the given HTML tag."""
         return Self(
             kind=TNODE_ELEMENT,
@@ -163,7 +163,7 @@ struct TemplateNode(Copyable):
         )
 
     @staticmethod
-    fn static_text(text: String) -> Self:
+    def static_text(text: String) -> Self:
         """Create a static Text node."""
         return Self(
             kind=TNODE_TEXT,
@@ -176,7 +176,7 @@ struct TemplateNode(Copyable):
         )
 
     @staticmethod
-    fn dynamic(index: UInt32) -> Self:
+    def dynamic(index: UInt32) -> Self:
         """Create a Dynamic node placeholder."""
         return Self(
             kind=TNODE_DYNAMIC,
@@ -189,7 +189,7 @@ struct TemplateNode(Copyable):
         )
 
     @staticmethod
-    fn dynamic_text(index: UInt32) -> Self:
+    def dynamic_text(index: UInt32) -> Self:
         """Create a DynamicText node placeholder."""
         return Self(
             kind=TNODE_DYNAMIC_TEXT,
@@ -203,7 +203,7 @@ struct TemplateNode(Copyable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
+    def __init__(
         out self,
         kind: UInt8,
         html_tag: UInt8,
@@ -221,7 +221,7 @@ struct TemplateNode(Copyable):
         self.text = text
         self.dynamic_index = dynamic_index
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.kind = copy.kind
         self.html_tag = copy.html_tag
         self.children = copy.children.copy()
@@ -230,54 +230,54 @@ struct TemplateNode(Copyable):
         self.text = copy.text
         self.dynamic_index = copy.dynamic_index
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.kind = take.kind
-        self.html_tag = take.html_tag
-        self.children = take.children^
-        self.first_attr = take.first_attr
-        self.num_attrs = take.num_attrs
-        self.text = take.text^
-        self.dynamic_index = take.dynamic_index
+    def __init__(out self, *, deinit move: Self):
+        self.kind = move.kind
+        self.html_tag = move.html_tag
+        self.children = move.children^
+        self.first_attr = move.first_attr
+        self.num_attrs = move.num_attrs
+        self.text = move.text^
+        self.dynamic_index = move.dynamic_index
 
     # ── Kind queries ─────────────────────────────────────────────────
 
-    fn is_element(self) -> Bool:
+    def is_element(self) -> Bool:
         """Check whether this is an Element node."""
         return self.kind == TNODE_ELEMENT
 
-    fn is_text(self) -> Bool:
+    def is_text(self) -> Bool:
         """Check whether this is a static Text node."""
         return self.kind == TNODE_TEXT
 
-    fn is_dynamic(self) -> Bool:
+    def is_dynamic(self) -> Bool:
         """Check whether this is a Dynamic node placeholder."""
         return self.kind == TNODE_DYNAMIC
 
-    fn is_dynamic_text(self) -> Bool:
+    def is_dynamic_text(self) -> Bool:
         """Check whether this is a DynamicText node placeholder."""
         return self.kind == TNODE_DYNAMIC_TEXT
 
     # ── Child management (for Element nodes) ─────────────────────────
 
-    fn child_count(self) -> Int:
+    def child_count(self) -> Int:
         """Return the number of child nodes."""
         return len(self.children)
 
-    fn child_at(self, index: Int) -> UInt32:
+    def child_at(self, index: Int) -> UInt32:
         """Return the node index of the child at position `index`."""
         return self.children[index]
 
-    fn add_child(mut self, child_index: UInt32):
+    def add_child(mut self, child_index: UInt32):
         """Append a child node index."""
         self.children.append(child_index)
 
     # ── Attribute range (for Element nodes) ──────────────────────────
 
-    fn attr_count(self) -> Int:
+    def attr_count(self) -> Int:
         """Return the number of attributes on this node."""
         return Int(self.num_attrs)
 
-    fn set_attr_range(mut self, first: UInt32, count: UInt32):
+    def set_attr_range(mut self, first: UInt32, count: UInt32):
         """Set the attribute index range for this node.
 
         Attributes are stored contiguously in the owning Template's
@@ -309,7 +309,7 @@ struct Template(Copyable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self, name: String):
+    def __init__(out self, name: String):
         """Create an empty template with the given name."""
         self.id = 0
         self.name = name
@@ -317,7 +317,7 @@ struct Template(Copyable):
         self.attrs = List[TemplateAttribute]()
         self.root_indices = List[UInt32]()
 
-    fn __init__(
+    def __init__(
         out self,
         id: UInt32,
         name: String,
@@ -332,108 +332,108 @@ struct Template(Copyable):
         self.attrs = attrs^
         self.root_indices = root_indices^
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.id = copy.id
         self.name = copy.name
         self.nodes = copy.nodes.copy()
         self.attrs = copy.attrs.copy()
         self.root_indices = copy.root_indices.copy()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.id = take.id
-        self.name = take.name^
-        self.nodes = take.nodes^
-        self.attrs = take.attrs^
-        self.root_indices = take.root_indices^
+    def __init__(out self, *, deinit move: Self):
+        self.id = move.id
+        self.name = move.name^
+        self.nodes = move.nodes^
+        self.attrs = move.attrs^
+        self.root_indices = move.root_indices^
 
     # ── Node access ──────────────────────────────────────────────────
 
-    fn node_count(self) -> Int:
+    def node_count(self) -> Int:
         """Return the total number of nodes in this template."""
         return len(self.nodes)
 
-    fn root_count(self) -> Int:
+    def root_count(self) -> Int:
         """Return the number of root-level nodes."""
         return len(self.root_indices)
 
-    fn attr_total_count(self) -> Int:
+    def attr_total_count(self) -> Int:
         """Return the total number of attributes across all nodes."""
         return len(self.attrs)
 
-    fn get_node_ptr(
+    def get_node_ptr(
         self, index: Int
-    ) -> UnsafePointer[TemplateNode, MutExternalOrigin]:
+    ) -> UnsafePointer[TemplateNode, MutUntrackedOrigin]:
         """Return a pointer to the node at `index`.
 
         The pointer is valid until the next mutation of the template.
         """
         var ptr = self.nodes.unsafe_ptr() + index
-        return UnsafePointer[TemplateNode, MutExternalOrigin](
+        return UnsafePointer[TemplateNode, MutUntrackedOrigin](
             unsafe_from_address=Int(ptr)
         )
 
-    fn get_root_index(self, i: Int) -> UInt32:
+    def get_root_index(self, i: Int) -> UInt32:
         """Return the node index of the i-th root node."""
         return self.root_indices[i]
 
-    fn get_attr(self, index: Int) -> TemplateAttribute:
+    def get_attr(self, index: Int) -> TemplateAttribute:
         """Return a copy of the attribute at the given index."""
         return self.attrs[index].copy()
 
     # ── Node queries (convenience) ───────────────────────────────────
 
-    fn node_kind(self, index: Int) -> UInt8:
+    def node_kind(self, index: Int) -> UInt8:
         """Return the kind tag of the node at `index`."""
         return self.nodes[index].kind
 
-    fn node_html_tag(self, index: Int) -> UInt8:
+    def node_html_tag(self, index: Int) -> UInt8:
         """Return the HTML tag of the Element node at `index`."""
         return self.nodes[index].html_tag
 
-    fn node_child_count(self, index: Int) -> Int:
+    def node_child_count(self, index: Int) -> Int:
         """Return the number of children of the node at `index`."""
         return self.nodes[index].child_count()
 
-    fn node_child_at(self, node_index: Int, child_pos: Int) -> UInt32:
+    def node_child_at(self, node_index: Int, child_pos: Int) -> UInt32:
         """Return the node index of the child at position `child_pos`
         within the node at `node_index`."""
         return self.nodes[node_index].child_at(child_pos)
 
-    fn node_dynamic_index(self, index: Int) -> UInt32:
+    def node_dynamic_index(self, index: Int) -> UInt32:
         """Return the dynamic slot index of the node at `index`."""
         return self.nodes[index].dynamic_index
 
-    fn node_attr_count(self, index: Int) -> Int:
+    def node_attr_count(self, index: Int) -> Int:
         """Return the number of attributes on the node at `index`."""
         return self.nodes[index].attr_count()
 
-    fn node_first_attr(self, index: Int) -> UInt32:
+    def node_first_attr(self, index: Int) -> UInt32:
         """Return the first attribute index of the node at `index`."""
         return self.nodes[index].first_attr
 
     # ── Mutation (used by builder) ───────────────────────────────────
 
-    fn push_node(mut self, node: TemplateNode) -> UInt32:
+    def push_node(mut self, node: TemplateNode) -> UInt32:
         """Append a node to the template and return its index."""
         var idx = UInt32(len(self.nodes))
         self.nodes.append(node^)
         return idx
 
-    fn push_attr(mut self, attr: TemplateAttribute) -> UInt32:
+    def push_attr(mut self, attr: TemplateAttribute) -> UInt32:
         """Append an attribute to the template and return its index."""
         var idx = UInt32(len(self.attrs))
         self.attrs.append(attr^)
         return idx
 
-    fn push_root(mut self, node_index: UInt32):
+    def push_root(mut self, node_index: UInt32):
         """Mark a node as a root-level node."""
         self.root_indices.append(node_index)
 
-    fn add_child_to_node(mut self, parent_index: UInt32, child_index: UInt32):
+    def add_child_to_node(mut self, parent_index: UInt32, child_index: UInt32):
         """Add a child index to the parent node's children list."""
         self.nodes[Int(parent_index)].add_child(child_index)
 
-    fn set_node_attr_range(
+    def set_node_attr_range(
         mut self, node_index: UInt32, first_attr: UInt32, count: UInt32
     ):
         """Set the attribute range for the node at `node_index`."""
@@ -441,7 +441,7 @@ struct Template(Copyable):
 
     # ── Dynamic slot counting ────────────────────────────────────────
 
-    fn dynamic_node_count(self) -> Int:
+    def dynamic_node_count(self) -> Int:
         """Count the number of Dynamic node slots in this template."""
         var count = 0
         for i in range(len(self.nodes)):
@@ -449,7 +449,7 @@ struct Template(Copyable):
                 count += 1
         return count
 
-    fn dynamic_text_count(self) -> Int:
+    def dynamic_text_count(self) -> Int:
         """Count the number of DynamicText node slots in this template."""
         var count = 0
         for i in range(len(self.nodes)):
@@ -457,7 +457,7 @@ struct Template(Copyable):
                 count += 1
         return count
 
-    fn dynamic_attr_count(self) -> Int:
+    def dynamic_attr_count(self) -> Int:
         """Count the number of dynamic attribute slots in this template."""
         var count = 0
         for i in range(len(self.attrs)):
@@ -465,7 +465,7 @@ struct Template(Copyable):
                 count += 1
         return count
 
-    fn static_attr_count(self) -> Int:
+    def static_attr_count(self) -> Int:
         """Count the number of static attributes in this template."""
         var count = 0
         for i in range(len(self.attrs)):

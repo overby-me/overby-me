@@ -51,7 +51,7 @@ struct MemoFormApp(Movable):
     var status: MemoString
     var input_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.input = self.ctx.use_signal_string(String(""))
         self.is_valid = self.ctx.use_memo_bool(False)
@@ -75,14 +75,14 @@ struct MemoFormApp(Movable):
         # view_event_handler_id(0) returns the first event handler.
         self.input_handler = self.ctx.view_event_handler_id(0)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.input = take.input^
-        self.is_valid = take.is_valid.copy()
-        self.status = take.status.copy()
-        self.input_handler = take.input_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.input = move.input^
+        self.is_valid = move.is_valid.copy()
+        self.status = move.status.copy()
+        self.input_handler = move.input_handler
 
-    fn run_memos(mut self):
+    def run_memos(mut self):
         """Recompute both memos if dirty.
 
         Order matters: is_valid must be recomputed before status,
@@ -95,7 +95,7 @@ struct MemoFormApp(Movable):
         if self.is_valid.is_dirty():
             self.is_valid.begin_compute()
             var txt = self.input.read()  # subscribes memo to input
-            self.is_valid.end_compute(len(txt) > 0)
+            self.is_valid.end_compute((txt).byte_length() > 0)
 
         # Step 2: Recompute status (depends on input + is_valid)
         if self.status.is_dirty():
@@ -107,7 +107,7 @@ struct MemoFormApp(Movable):
             else:
                 self.status.end_compute(String("✗ Empty"))
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build a fresh VNode with 2 dyn_text slots."""
         var vb = self.ctx.render_builder()
         if self.is_valid.peek():
@@ -121,23 +121,23 @@ struct MemoFormApp(Movable):
 # ── MemoFormApp lifecycle functions ──────────────────────────────────────────
 
 
-fn _mf_init() -> UnsafePointer[MemoFormApp, MutExternalOrigin]:
+def _mf_init() -> UnsafePointer[MemoFormApp, MutUntrackedOrigin]:
     var app_ptr = alloc[MemoFormApp](1)
-    app_ptr.init_pointee_move(MemoFormApp())
+    app_ptr.unsafe_write(MemoFormApp())
     return app_ptr
 
 
-fn _mf_destroy(
-    app_ptr: UnsafePointer[MemoFormApp, MutExternalOrigin],
+def _mf_destroy(
+    app_ptr: UnsafePointer[MemoFormApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _mf_rebuild(
+def _mf_rebuild(
     mut app: MemoFormApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the memo-form app.
 
@@ -153,7 +153,7 @@ fn _mf_rebuild(
     return result
 
 
-fn _mf_handle_event(
+def _mf_handle_event(
     mut app: MemoFormApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -161,7 +161,7 @@ fn _mf_handle_event(
     return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _mf_handle_event_string(
+def _mf_handle_event_string(
     mut app: MemoFormApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -170,9 +170,9 @@ fn _mf_handle_event_string(
     return app.ctx.dispatch_event_with_string(handler_id, event_type, value)
 
 
-fn _mf_flush(
+def _mf_flush(
     mut app: MemoFormApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with memo recomputation.
 

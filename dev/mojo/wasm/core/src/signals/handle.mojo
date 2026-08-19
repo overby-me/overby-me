@@ -68,14 +68,14 @@ struct SignalI32(Copyable, Writable):
     """
 
     var key: UInt32
-    var runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
+    def __init__(
         out self,
         key: UInt32,
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a signal handle from a raw key and runtime pointer.
 
@@ -86,17 +86,17 @@ struct SignalI32(Copyable, Writable):
         self.key = key
         self.runtime = runtime
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.key = copy.key
         self.runtime = copy.runtime
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.key = take.key
-        self.runtime = take.runtime
+    def __init__(out self, *, deinit move: Self):
+        self.key = move.key
+        self.runtime = move.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 
-    fn peek(self) -> Int32:
+    def peek(self) -> Int32:
         """Read the signal value WITHOUT subscribing the current context.
 
         Use this for one-off reads (e.g. in event handlers) where you
@@ -108,7 +108,7 @@ struct SignalI32(Copyable, Writable):
         """
         return self.runtime[0].peek_signal[Int32](self.key)
 
-    fn read(self) -> Int32:
+    def read(self) -> Int32:
         """Read the signal value AND subscribe the current reactive context.
 
         If a scope, memo, or effect is currently rendering/computing/running,
@@ -122,7 +122,7 @@ struct SignalI32(Copyable, Writable):
 
     # ── Write ────────────────────────────────────────────────────────
 
-    fn set(self, value: Int32):
+    def set(self, value: Int32):
         """Write a new value to the signal.
 
         All subscribers (scopes, memos, effects) will be marked dirty.
@@ -134,29 +134,29 @@ struct SignalI32(Copyable, Writable):
 
     # ── Operator overloading — read-modify-write ─────────────────────
 
-    fn __iadd__(mut self, rhs: Int32):
+    def __iadd__(mut self, rhs: Int32):
         """Add `rhs` to the signal value.  `count += 1`"""
         self.set(self.peek() + rhs)
 
-    fn __isub__(mut self, rhs: Int32):
+    def __isub__(mut self, rhs: Int32):
         """Subtract `rhs` from the signal value.  `count -= 1`"""
         self.set(self.peek() - rhs)
 
-    fn __imul__(mut self, rhs: Int32):
+    def __imul__(mut self, rhs: Int32):
         """Multiply the signal value by `rhs`.  `count *= 2`"""
         self.set(self.peek() * rhs)
 
-    fn __ifloordiv__(mut self, rhs: Int32):
+    def __ifloordiv__(mut self, rhs: Int32):
         """Floor-divide the signal value by `rhs`.  `count //= 2`"""
         self.set(self.peek() // rhs)
 
-    fn __imod__(mut self, rhs: Int32):
+    def __imod__(mut self, rhs: Int32):
         """Modulo the signal value by `rhs`.  `count %= 3`"""
         self.set(self.peek() % rhs)
 
     # ── Toggle (Bool-as-Int32) ───────────────────────────────────────
 
-    fn toggle(self):
+    def toggle(self):
         """Toggle a boolean signal stored as Int32 (0 ↔ 1).
 
         Reads the current value and writes 1 if it was 0, or 0 otherwise.
@@ -170,7 +170,7 @@ struct SignalI32(Copyable, Writable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn version(self) -> UInt32:
+    def version(self) -> UInt32:
         """Return the signal's write version (monotonically increasing).
 
         Useful for staleness checks — if the version hasn't changed,
@@ -180,7 +180,7 @@ struct SignalI32(Copyable, Writable):
 
     # ── Writable ─────────────────────────────────────────────────────
 
-    fn write_to[W: Writer](self, mut w: W):
+    def write_to(self, mut w: Some[Writer]):
         """Write the value through a Writer, as Writable requires.
 
         Delegates to __str__ so String(self) keeps producing the value
@@ -188,7 +188,7 @@ struct SignalI32(Copyable, Writable):
         """
         w.write(self.__str__())
 
-    fn __str__(self) -> String:
+    def __str__(self) -> String:
         """Return the signal value as a String for display/interpolation.
 
         Uses peek() so it does NOT subscribe the calling context.
@@ -226,12 +226,14 @@ struct MemoI32(Copyable, Writable):
     """
 
     var id: UInt32
-    var runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
-        out self, id: UInt32, runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    def __init__(
+        out self,
+        id: UInt32,
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a memo handle from a raw ID and runtime pointer.
 
@@ -242,17 +244,17 @@ struct MemoI32(Copyable, Writable):
         self.id = id
         self.runtime = runtime
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.id = copy.id
         self.runtime = copy.runtime
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.id = take.id
-        self.runtime = take.runtime
+    def __init__(out self, *, deinit move: Self):
+        self.id = move.id
+        self.runtime = move.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 
-    fn read(self) -> Int32:
+    def read(self) -> Int32:
         """Read the memo's cached value (with context tracking).
 
         If a scope or effect is currently active, it will be subscribed
@@ -264,7 +266,7 @@ struct MemoI32(Copyable, Writable):
         """
         return self.runtime[0].memo_read_i32(self.id)
 
-    fn peek(self) -> Int32:
+    def peek(self) -> Int32:
         """Read the memo's cached value WITHOUT subscribing.
 
         Returns:
@@ -279,7 +281,7 @@ struct MemoI32(Copyable, Writable):
 
     # ── Dirty / Recompute lifecycle ──────────────────────────────────
 
-    fn is_dirty(self) -> Bool:
+    def is_dirty(self) -> Bool:
         """Check whether the memo needs recomputation.
 
         A memo becomes dirty when any of its input signals are written.
@@ -289,7 +291,7 @@ struct MemoI32(Copyable, Writable):
         """
         return self.runtime[0].memo_is_dirty(self.id)
 
-    fn begin_compute(self):
+    def begin_compute(self):
         """Begin memo recomputation.
 
         Sets the memo's reactive context as current, so any signals
@@ -298,7 +300,7 @@ struct MemoI32(Copyable, Writable):
         """
         self.runtime[0].memo_begin_compute(self.id)
 
-    fn end_compute(self, value: Int32):
+    def end_compute(self, value: Int32):
         """End memo recomputation and cache the result.
 
         Writes the computed value to the memo's output signal and
@@ -309,7 +311,7 @@ struct MemoI32(Copyable, Writable):
         """
         self.runtime[0].memo_end_compute_i32(self.id, value)
 
-    fn recompute_from(self, value: Int32):
+    def recompute_from(self, value: Int32):
         """Convenience: begin_compute + end_compute in one call.
 
         Use this when the computation doesn't need to read any signals
@@ -328,7 +330,7 @@ struct MemoI32(Copyable, Writable):
 
     # ── Writable ─────────────────────────────────────────────────────
 
-    fn write_to[W: Writer](self, mut w: W):
+    def write_to(self, mut w: Some[Writer]):
         """Write the value through a Writer, as Writable requires.
 
         Delegates to __str__ so String(self) keeps producing the value
@@ -336,7 +338,7 @@ struct MemoI32(Copyable, Writable):
         """
         w.write(self.__str__())
 
-    fn __str__(self) -> String:
+    def __str__(self) -> String:
         """Return the memo's cached value as a String.
 
         Uses peek() so it does NOT subscribe the calling context.
@@ -371,12 +373,14 @@ struct EffectHandle(Copyable):
     """
 
     var id: UInt32
-    var runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
-        out self, id: UInt32, runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    def __init__(
+        out self,
+        id: UInt32,
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ):
         """Create an effect handle from a raw ID and runtime pointer.
 
@@ -387,17 +391,17 @@ struct EffectHandle(Copyable):
         self.id = id
         self.runtime = runtime
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.id = copy.id
         self.runtime = copy.runtime
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.id = take.id
-        self.runtime = take.runtime
+    def __init__(out self, *, deinit move: Self):
+        self.id = move.id
+        self.runtime = move.runtime
 
     # ── Lifecycle ────────────────────────────────────────────────────
 
-    fn is_pending(self) -> Bool:
+    def is_pending(self) -> Bool:
         """Check whether this effect needs to run.
 
         An effect becomes pending when any of its subscribed signals
@@ -408,7 +412,7 @@ struct EffectHandle(Copyable):
         """
         return self.runtime[0].effect_is_pending(self.id)
 
-    fn begin_run(self):
+    def begin_run(self):
         """Begin effect execution.
 
         Sets the effect's reactive context as current, so any signals
@@ -417,7 +421,7 @@ struct EffectHandle(Copyable):
         """
         self.runtime[0].effect_begin_run(self.id)
 
-    fn end_run(self):
+    def end_run(self):
         """End effect execution.
 
         Clears the pending flag and restores the previous reactive
@@ -450,14 +454,14 @@ struct SignalBool(Copyable, Writable):
     """
 
     var key: UInt32
-    var runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
+    def __init__(
         out self,
         key: UInt32,
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a bool signal handle from a raw key and runtime pointer.
 
@@ -468,17 +472,17 @@ struct SignalBool(Copyable, Writable):
         self.key = key
         self.runtime = runtime
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.key = copy.key
         self.runtime = copy.runtime
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.key = take.key
-        self.runtime = take.runtime
+    def __init__(out self, *, deinit move: Self):
+        self.key = move.key
+        self.runtime = move.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 
-    fn get(self) -> Bool:
+    def get(self) -> Bool:
         """Read the signal value as Bool WITHOUT subscribing.
 
         Equivalent to `peek()` on SignalI32 but returns Bool.
@@ -489,7 +493,7 @@ struct SignalBool(Copyable, Writable):
         """
         return self.runtime[0].peek_signal[Int32](self.key) != 0
 
-    fn read(self) -> Bool:
+    def read(self) -> Bool:
         """Read the signal value as Bool AND subscribe the current context.
 
         If a scope, memo, or effect is currently rendering/computing,
@@ -500,7 +504,7 @@ struct SignalBool(Copyable, Writable):
         """
         return self.runtime[0].read_signal[Int32](self.key) != 0
 
-    fn peek_i32(self) -> Int32:
+    def peek_i32(self) -> Int32:
         """Read the raw Int32 value (0 or 1) without subscribing.
 
         Useful when you need the Int32 representation directly.
@@ -512,7 +516,7 @@ struct SignalBool(Copyable, Writable):
 
     # ── Write ────────────────────────────────────────────────────────
 
-    fn set(self, value: Bool):
+    def set(self, value: Bool):
         """Write a boolean value to the signal.
 
         All subscribers (scopes, memos, effects) will be marked dirty.
@@ -525,7 +529,7 @@ struct SignalBool(Copyable, Writable):
         else:
             self.runtime[0].write_signal[Int32](self.key, 0)
 
-    fn toggle(self):
+    def toggle(self):
         """Flip the boolean value (True ↔ False).
 
         Reads the current value and writes its logical inverse.
@@ -538,7 +542,7 @@ struct SignalBool(Copyable, Writable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn version(self) -> UInt32:
+    def version(self) -> UInt32:
         """Return the signal's write version (monotonically increasing).
 
         Returns:
@@ -548,7 +552,7 @@ struct SignalBool(Copyable, Writable):
 
     # ── Writable ─────────────────────────────────────────────────────
 
-    fn write_to[W: Writer](self, mut w: W):
+    def write_to(self, mut w: Some[Writer]):
         """Write the value through a Writer, as Writable requires.
 
         Delegates to __str__ so String(self) keeps producing the value
@@ -556,7 +560,7 @@ struct SignalBool(Copyable, Writable):
         """
         w.write(self.__str__())
 
-    fn __str__(self) -> String:
+    def __str__(self) -> String:
         """Return "true" or "false" for display/interpolation.
 
         Uses get() (peek) so it does NOT subscribe the calling context.
@@ -592,15 +596,15 @@ struct SignalString(Copyable, Writable):
 
     var string_key: UInt32
     var version_key: UInt32
-    var runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
+    def __init__(
         out self,
         string_key: UInt32,
         version_key: UInt32,
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a string signal handle from raw keys and runtime pointer.
 
@@ -613,19 +617,19 @@ struct SignalString(Copyable, Writable):
         self.version_key = version_key
         self.runtime = runtime
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.string_key = copy.string_key
         self.version_key = copy.version_key
         self.runtime = copy.runtime
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.string_key = take.string_key
-        self.version_key = take.version_key
-        self.runtime = take.runtime
+    def __init__(out self, *, deinit move: Self):
+        self.string_key = move.string_key
+        self.version_key = move.version_key
+        self.runtime = move.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 
-    fn get(self) -> String:
+    def get(self) -> String:
         """Read the string value WITHOUT subscribing the current context.
 
         Use this for one-off reads (e.g. in event handlers) where you
@@ -637,7 +641,7 @@ struct SignalString(Copyable, Writable):
         """
         return self.runtime[0].peek_signal_string(self.string_key)
 
-    fn peek(self) -> String:
+    def peek(self) -> String:
         """Alias for get() — read without subscribing.
 
         Returns:
@@ -645,7 +649,7 @@ struct SignalString(Copyable, Writable):
         """
         return self.get()
 
-    fn read(self) -> String:
+    def read(self) -> String:
         """Read the string value AND subscribe the current reactive context.
 
         If a scope, memo, or effect is currently rendering/computing/running,
@@ -661,7 +665,7 @@ struct SignalString(Copyable, Writable):
 
     # ── Write ────────────────────────────────────────────────────────
 
-    fn set(self, value: String):
+    def set(self, value: String):
         """Write a new string value to the signal.
 
         Updates the StringStore entry and bumps the version signal,
@@ -676,7 +680,7 @@ struct SignalString(Copyable, Writable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn version(self) -> UInt32:
+    def version(self) -> UInt32:
         """Return the signal's write version (monotonically increasing).
 
         Useful for staleness checks — if the version hasn't changed,
@@ -684,7 +688,7 @@ struct SignalString(Copyable, Writable):
         """
         return self.runtime[0].signals.version(self.version_key)
 
-    fn is_empty(self) -> Bool:
+    def is_empty(self) -> Bool:
         """Check whether the string value is empty.
 
         Uses get() (peek) so it does NOT subscribe the calling context.
@@ -692,11 +696,11 @@ struct SignalString(Copyable, Writable):
         Returns:
             True if the string is empty, False otherwise.
         """
-        return len(self.get()) == 0
+        return self.get().byte_length() == 0
 
     # ── Writable ─────────────────────────────────────────────────────
 
-    fn write_to[W: Writer](self, mut w: W):
+    def write_to(self, mut w: Some[Writer]):
         """Write the value through a Writer, as Writable requires.
 
         Delegates to __str__ so String(self) keeps producing the value
@@ -704,7 +708,7 @@ struct SignalString(Copyable, Writable):
         """
         w.write(self.__str__())
 
-    fn __str__(self) -> String:
+    def __str__(self) -> String:
         """Return the string value for display/interpolation.
 
         Uses get() (peek) so it does NOT subscribe the calling context.
@@ -741,12 +745,14 @@ struct MemoBool(Copyable, Writable):
     """
 
     var id: UInt32
-    var runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
-        out self, id: UInt32, runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    def __init__(
+        out self,
+        id: UInt32,
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a memo handle from a raw ID and runtime pointer.
 
@@ -757,17 +763,17 @@ struct MemoBool(Copyable, Writable):
         self.id = id
         self.runtime = runtime
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.id = copy.id
         self.runtime = copy.runtime
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.id = take.id
-        self.runtime = take.runtime
+    def __init__(out self, *, deinit move: Self):
+        self.id = move.id
+        self.runtime = move.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 
-    fn read(self) -> Bool:
+    def read(self) -> Bool:
         """Read the memo's cached value (with context tracking).
 
         If a scope or effect is currently active, it will be subscribed
@@ -779,7 +785,7 @@ struct MemoBool(Copyable, Writable):
         """
         return self.runtime[0].memo_read_bool(self.id)
 
-    fn peek(self) -> Bool:
+    def peek(self) -> Bool:
         """Read the memo's cached value WITHOUT subscribing.
 
         Returns:
@@ -794,7 +800,7 @@ struct MemoBool(Copyable, Writable):
 
     # ── Dirty / Recompute lifecycle ──────────────────────────────────
 
-    fn is_dirty(self) -> Bool:
+    def is_dirty(self) -> Bool:
         """Check whether the memo needs recomputation.
 
         A memo becomes dirty when any of its input signals are written.
@@ -804,7 +810,7 @@ struct MemoBool(Copyable, Writable):
         """
         return self.runtime[0].memo_is_dirty(self.id)
 
-    fn begin_compute(self):
+    def begin_compute(self):
         """Begin memo recomputation.
 
         Sets the memo's reactive context as current, so any signals
@@ -813,7 +819,7 @@ struct MemoBool(Copyable, Writable):
         """
         self.runtime[0].memo_begin_compute(self.id)
 
-    fn end_compute(self, value: Bool):
+    def end_compute(self, value: Bool):
         """End memo recomputation and cache the result.
 
         Writes the computed value to the memo's output signal and
@@ -824,7 +830,7 @@ struct MemoBool(Copyable, Writable):
         """
         self.runtime[0].memo_end_compute_bool(self.id, value)
 
-    fn recompute_from(self, value: Bool):
+    def recompute_from(self, value: Bool):
         """Convenience: begin_compute + end_compute in one call.
 
         Use this when the computation doesn't need to read any signals
@@ -843,7 +849,7 @@ struct MemoBool(Copyable, Writable):
 
     # ── Writable ─────────────────────────────────────────────────────
 
-    fn write_to[W: Writer](self, mut w: W):
+    def write_to(self, mut w: Some[Writer]):
         """Write the value through a Writer, as Writable requires.
 
         Delegates to __str__ so String(self) keeps producing the value
@@ -851,7 +857,7 @@ struct MemoBool(Copyable, Writable):
         """
         w.write(self.__str__())
 
-    fn __str__(self) -> String:
+    def __str__(self) -> String:
         """Return the memo's cached value as a String.
 
         Uses peek() so it does NOT subscribe the calling context.
@@ -893,12 +899,14 @@ struct MemoString(Copyable, Writable):
     """
 
     var id: UInt32
-    var runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(
-        out self, id: UInt32, runtime: UnsafePointer[Runtime, MutExternalOrigin]
+    def __init__(
+        out self,
+        id: UInt32,
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a memo handle from a raw ID and runtime pointer.
 
@@ -909,17 +917,17 @@ struct MemoString(Copyable, Writable):
         self.id = id
         self.runtime = runtime
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.id = copy.id
         self.runtime = copy.runtime
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.id = take.id
-        self.runtime = take.runtime
+    def __init__(out self, *, deinit move: Self):
+        self.id = move.id
+        self.runtime = move.runtime
 
     # ── Read ─────────────────────────────────────────────────────────
 
-    fn read(self) -> String:
+    def read(self) -> String:
         """Read the memo's cached value (with context tracking).
 
         Subscribes the current reactive context via the version signal,
@@ -930,7 +938,7 @@ struct MemoString(Copyable, Writable):
         """
         return self.runtime[0].memo_read_string(self.id)
 
-    fn peek(self) -> String:
+    def peek(self) -> String:
         """Read the memo's cached value WITHOUT subscribing.
 
         Returns:
@@ -938,7 +946,7 @@ struct MemoString(Copyable, Writable):
         """
         return self.runtime[0].memo_peek_string(self.id)
 
-    fn get(self) -> String:
+    def get(self) -> String:
         """Alias for read() — read with context tracking.
 
         Matches the SignalString API for consistency.
@@ -950,7 +958,7 @@ struct MemoString(Copyable, Writable):
 
     # ── Dirty / Recompute lifecycle ──────────────────────────────────
 
-    fn is_dirty(self) -> Bool:
+    def is_dirty(self) -> Bool:
         """Check whether the memo needs recomputation.
 
         A memo becomes dirty when any of its input signals are written.
@@ -960,7 +968,7 @@ struct MemoString(Copyable, Writable):
         """
         return self.runtime[0].memo_is_dirty(self.id)
 
-    fn begin_compute(self):
+    def begin_compute(self):
         """Begin memo recomputation.
 
         Sets the memo's reactive context as current, so any signals
@@ -969,7 +977,7 @@ struct MemoString(Copyable, Writable):
         """
         self.runtime[0].memo_begin_compute(self.id)
 
-    fn end_compute(self, value: String):
+    def end_compute(self, value: String):
         """End memo recomputation and cache the result.
 
         Writes the computed string to the StringStore, bumps the
@@ -980,7 +988,7 @@ struct MemoString(Copyable, Writable):
         """
         self.runtime[0].memo_end_compute_string(self.id, value)
 
-    fn recompute_from(self, value: String):
+    def recompute_from(self, value: String):
         """Convenience: begin_compute + end_compute in one call.
 
         Use this when the computation doesn't need to read any signals
@@ -999,7 +1007,7 @@ struct MemoString(Copyable, Writable):
 
     # ── Queries ──────────────────────────────────────────────────────
 
-    fn is_empty(self) -> Bool:
+    def is_empty(self) -> Bool:
         """Check whether the cached string value is empty.
 
         Uses peek() so it does NOT subscribe the calling context.
@@ -1011,7 +1019,7 @@ struct MemoString(Copyable, Writable):
 
     # ── Writable ─────────────────────────────────────────────────────
 
-    fn write_to[W: Writer](self, mut w: W):
+    def write_to(self, mut w: Some[Writer]):
         """Write the value through a Writer, as Writable requires.
 
         Delegates to __str__ so String(self) keeps producing the value
@@ -1019,7 +1027,7 @@ struct MemoString(Copyable, Writable):
         """
         w.write(self.__str__())
 
-    fn __str__(self) -> String:
+    def __str__(self) -> String:
         """Return the memo's cached value as a String.
 
         Uses peek() so it does NOT subscribe the calling context.

@@ -70,7 +70,7 @@ struct TemplateBuilder(Movable):
 
     # ── Construction ─────────────────────────────────────────────────
 
-    fn __init__(out self, name: String):
+    def __init__(out self, name: String):
         """Create a builder for a template with the given name."""
         self._name = name
         self._nodes = List[TemplateNode]()
@@ -79,17 +79,17 @@ struct TemplateBuilder(Movable):
         self._node_attr_start = List[Int]()
         self._node_attr_count = List[Int]()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self._name = take._name^
-        self._nodes = take._nodes^
-        self._attrs = take._attrs^
-        self._root_indices = take._root_indices^
-        self._node_attr_start = take._node_attr_start^
-        self._node_attr_count = take._node_attr_count^
+    def __init__(out self, *, deinit move: Self):
+        self._name = move._name^
+        self._nodes = move._nodes^
+        self._attrs = move._attrs^
+        self._root_indices = move._root_indices^
+        self._node_attr_start = move._node_attr_start^
+        self._node_attr_count = move._node_attr_count^
 
     # ── Node insertion ───────────────────────────────────────────────
 
-    fn push_element(mut self, html_tag: UInt8, parent: Int) -> Int:
+    def push_element(mut self, html_tag: UInt8, parent: Int) -> Int:
         """Add an Element node.
 
         Args:
@@ -111,7 +111,7 @@ struct TemplateBuilder(Movable):
             self._nodes[parent].add_child(UInt32(idx))
         return idx
 
-    fn push_text(mut self, text: String, parent: Int) -> Int:
+    def push_text(mut self, text: String, parent: Int) -> Int:
         """Add a static Text node.
 
         Args:
@@ -133,7 +133,7 @@ struct TemplateBuilder(Movable):
             self._nodes[parent].add_child(UInt32(idx))
         return idx
 
-    fn push_dynamic(mut self, dynamic_index: UInt32, parent: Int) -> Int:
+    def push_dynamic(mut self, dynamic_index: UInt32, parent: Int) -> Int:
         """Add a Dynamic node placeholder.
 
         A Dynamic node is a slot for a full dynamic node (component,
@@ -159,7 +159,7 @@ struct TemplateBuilder(Movable):
             self._nodes[parent].add_child(UInt32(idx))
         return idx
 
-    fn push_dynamic_text(mut self, dynamic_index: UInt32, parent: Int) -> Int:
+    def push_dynamic_text(mut self, dynamic_index: UInt32, parent: Int) -> Int:
         """Add a DynamicText node placeholder.
 
         A DynamicText node is a slot for dynamic text content that will
@@ -186,7 +186,9 @@ struct TemplateBuilder(Movable):
 
     # ── Attribute insertion ──────────────────────────────────────────
 
-    fn push_static_attr(mut self, node_index: Int, name: String, value: String):
+    def push_static_attr(
+        mut self, node_index: Int, name: String, value: String
+    ):
         """Add a static attribute to the node at `node_index`.
 
         Args:
@@ -202,7 +204,7 @@ struct TemplateBuilder(Movable):
             self._node_attr_start[node_index] = attr_idx
         self._node_attr_count[node_index] += 1
 
-    fn push_dynamic_attr(mut self, node_index: Int, dynamic_index: UInt32):
+    def push_dynamic_attr(mut self, node_index: Int, dynamic_index: UInt32):
         """Add a dynamic attribute placeholder to the node at `node_index`.
 
         Args:
@@ -218,41 +220,41 @@ struct TemplateBuilder(Movable):
 
     # ── Queries (pre-build introspection) ────────────────────────────
 
-    fn node_count(self) -> Int:
+    def node_count(self) -> Int:
         """Return the number of nodes added so far."""
         return len(self._nodes)
 
-    fn root_count(self) -> Int:
+    def root_count(self) -> Int:
         """Return the number of root nodes added so far."""
         return len(self._root_indices)
 
-    fn attr_count(self) -> Int:
+    def attr_count(self) -> Int:
         """Return the total number of attributes added so far."""
         return len(self._attrs)
 
-    fn node_kind(self, index: Int) -> UInt8:
+    def node_kind(self, index: Int) -> UInt8:
         """Return the kind of the node at `index`."""
         return self._nodes[index].kind
 
-    fn node_html_tag(self, index: Int) -> UInt8:
+    def node_html_tag(self, index: Int) -> UInt8:
         """Return the HTML tag of the node at `index`."""
         return self._nodes[index].html_tag
 
-    fn node_child_count(self, index: Int) -> Int:
+    def node_child_count(self, index: Int) -> Int:
         """Return the number of children of the node at `index`."""
         return self._nodes[index].child_count()
 
-    fn node_attr_count_at(self, index: Int) -> Int:
+    def node_attr_count_at(self, index: Int) -> Int:
         """Return the number of attributes on the node at `index`."""
         return self._node_attr_count[index]
 
-    fn node_dynamic_index(self, index: Int) -> UInt32:
+    def node_dynamic_index(self, index: Int) -> UInt32:
         """Return the dynamic index of the node at `index`."""
         return self._nodes[index].dynamic_index
 
     # ── Build ────────────────────────────────────────────────────────
 
-    fn build(mut self) -> Template:
+    def build(mut self) -> Template:
         """Finalise the builder and produce a Template.
 
         Transfers all nodes, attributes, and root indices into the new
@@ -299,16 +301,16 @@ struct TemplateBuilder(Movable):
 # pointer handles.  These helpers manage the lifecycle.
 
 
-fn create_builder(
+def create_builder(
     name: String,
-) -> UnsafePointer[TemplateBuilder, MutExternalOrigin]:
+) -> UnsafePointer[TemplateBuilder, MutUntrackedOrigin]:
     """Allocate a TemplateBuilder on the heap and return a pointer."""
     var ptr = alloc[TemplateBuilder](1)
-    ptr.init_pointee_move(TemplateBuilder(name))
+    ptr.unsafe_write(TemplateBuilder(name))
     return ptr
 
 
-fn destroy_builder(ptr: UnsafePointer[TemplateBuilder, MutExternalOrigin]):
+def destroy_builder(ptr: UnsafePointer[TemplateBuilder, MutUntrackedOrigin]):
     """Destroy and free a heap-allocated TemplateBuilder."""
-    ptr.destroy_pointee()
+    ptr.unsafe_deinit_pointee()
     ptr.free()

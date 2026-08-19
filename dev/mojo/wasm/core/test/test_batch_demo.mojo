@@ -46,15 +46,15 @@ from wasm_harness import (
 )
 
 
-fn _load() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_bd(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_bd(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a BatchDemoApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("bd_init", no_args()))
@@ -63,8 +63,8 @@ fn _create_bd(
     return Tuple(app, buf)
 
 
-fn _create_bd_no_rebuild(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _create_bd_no_rebuild(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a BatchDemoApp without mounting.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("bd_init", no_args()))
@@ -72,8 +72,8 @@ fn _create_bd_no_rebuild(
     return Tuple(app, buf)
 
 
-fn _destroy_bd(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _destroy_bd(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -82,8 +82,8 @@ fn _destroy_bd(
     w[].call_void("bd_destroy", args_ptr(app))
 
 
-fn _flush(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _flush(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -91,8 +91,8 @@ fn _flush(
     return w[].call_i32("bd_flush", args_ptr_ptr_i32(app, buf, 8192))
 
 
-fn _handle_event(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _handle_event(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -100,8 +100,8 @@ fn _handle_event(
     return w[].call_i32("bd_handle_event", args_ptr_i32_i32(app, handler_id, 0))
 
 
-fn _set_names(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _set_names(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     first: String,
     last: String,
@@ -112,16 +112,16 @@ fn _set_names(
     w[].call_void("bd_set_names", args_ptr_ptr_ptr(app, first_ptr, last_ptr))
 
 
-fn _reset(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _reset(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises:
     """Call bd_reset(app) via WASM."""
     w[].call_void("bd_reset", args_ptr(app))
 
 
-fn _full_name_text(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _full_name_text(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
@@ -129,8 +129,8 @@ fn _full_name_text(
     return w[].read_string_struct(out_ptr)
 
 
-fn _first_name_text(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _first_name_text(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
@@ -138,8 +138,8 @@ fn _first_name_text(
     return w[].read_string_struct(out_ptr)
 
 
-fn _last_name_text(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _last_name_text(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
@@ -147,64 +147,64 @@ fn _last_name_text(
     return w[].read_string_struct(out_ptr)
 
 
-fn _write_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _write_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("bd_write_count", args_ptr(app))
 
 
-fn _full_name_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _full_name_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("bd_full_name_dirty", args_ptr(app)) != 0
 
 
-fn _full_name_changed(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _full_name_changed(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("bd_full_name_changed", args_ptr(app)) != 0
 
 
-fn _has_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _has_dirty(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("bd_has_dirty", args_ptr(app)) != 0
 
 
-fn _is_batching(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _is_batching(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("bd_is_batching", args_ptr(app)) != 0
 
 
-fn _scope_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _scope_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("bd_scope_count", args_ptr(app))
 
 
-fn _memo_count(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _memo_count(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("bd_memo_count", args_ptr(app))
 
 
-fn _set_handler(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _set_handler(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("bd_set_handler", args_ptr(app))
 
 
-fn _reset_handler(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def _reset_handler(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("bd_reset_handler", args_ptr(app))
@@ -541,7 +541,7 @@ def test_bd_has_dirty_after_set() raises:
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
-fn main() raises:
+def main() raises:
     var passed = 0
     var failed = 0
     var total = 19

@@ -51,7 +51,7 @@ struct EffectDemoApp(Movable):
     var count_effect: EffectHandle
     var incr_handler: UInt32
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.count = self.ctx.use_signal(0)
         self.doubled = self.ctx.use_signal(0)
@@ -72,15 +72,15 @@ struct EffectDemoApp(Movable):
         )
         self.incr_handler = self.ctx.view_event_handler_id(0)
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.count = take.count.copy()
-        self.doubled = take.doubled.copy()
-        self.parity = take.parity^
-        self.count_effect = take.count_effect.copy()
-        self.incr_handler = take.incr_handler
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.count = move.count.copy()
+        self.doubled = move.doubled.copy()
+        self.parity = move.parity^
+        self.count_effect = move.count_effect.copy()
+        self.incr_handler = move.incr_handler
 
-    fn run_effects(mut self):
+    def run_effects(mut self):
         """Drain and execute pending effects.
 
         The count_effect reads count (re-subscribing), then writes
@@ -97,7 +97,7 @@ struct EffectDemoApp(Movable):
                 self.parity.set(String("odd"))
             self.count_effect.end_run()
 
-    fn render(mut self) -> UInt32:
+    def render(mut self) -> UInt32:
         """Build a fresh VNode with 3 dyn_text slots."""
         var vb = self.ctx.render_builder()
         vb.add_dyn_text(String("Count: ") + String(self.count.peek()))
@@ -109,23 +109,23 @@ struct EffectDemoApp(Movable):
 # ── EffectDemoApp lifecycle functions ────────────────────────────────────────
 
 
-fn _ed_init() -> UnsafePointer[EffectDemoApp, MutExternalOrigin]:
+def _ed_init() -> UnsafePointer[EffectDemoApp, MutUntrackedOrigin]:
     var app_ptr = alloc[EffectDemoApp](1)
-    app_ptr.init_pointee_move(EffectDemoApp())
+    app_ptr.unsafe_write(EffectDemoApp())
     return app_ptr
 
 
-fn _ed_destroy(
-    app_ptr: UnsafePointer[EffectDemoApp, MutExternalOrigin],
+def _ed_destroy(
+    app_ptr: UnsafePointer[EffectDemoApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()
 
 
-fn _ed_rebuild(
+def _ed_rebuild(
     mut app: EffectDemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the effect-demo app.
 
@@ -143,7 +143,7 @@ fn _ed_rebuild(
     return result
 
 
-fn _ed_handle_event(
+def _ed_handle_event(
     mut app: EffectDemoApp,
     handler_id: UInt32,
     event_type: UInt8,
@@ -151,9 +151,9 @@ fn _ed_handle_event(
     return app.ctx.dispatch_event(handler_id, event_type)
 
 
-fn _ed_flush(
+def _ed_flush(
     mut app: EffectDemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutExternalOrigin],
+    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with effect drain-and-run pattern.
 

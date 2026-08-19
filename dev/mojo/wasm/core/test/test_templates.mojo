@@ -29,27 +29,27 @@ from wasm_harness import (
 )
 
 
-fn _get_wasm() raises -> UnsafePointer[WasmInstance, MutExternalOrigin]:
+def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-fn _create_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def _create_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises -> Int:
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
-fn _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], rt: Int
+def _destroy_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_destroy", args_ptr(rt))
 
 
-fn _create_builder(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], name: String
+def _create_builder(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], name: String
 ) raises -> Int:
     return Int(
         w[].call_i64(
@@ -58,20 +58,20 @@ fn _create_builder(
     )
 
 
-fn _destroy_builder(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], b: Int
+def _destroy_builder(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], b: Int
 ) raises:
     w[].call_void("tmpl_builder_destroy", args_ptr(b))
 
 
-fn _create_vnode_store(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def _create_vnode_store(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises -> Int:
     return Int(w[].call_i64("vnode_store_create", no_args()))
 
 
-fn _destroy_vnode_store(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin], s: Int
+def _destroy_vnode_store(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], s: Int
 ) raises:
     w[].call_void("vnode_store_destroy", args_ptr(s))
 
@@ -129,8 +129,8 @@ comptime TAG_TH = 20
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_builder_basic_lifecycle(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_builder_basic_lifecycle(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
     var b = _create_builder(w, "test-basic")
@@ -192,8 +192,8 @@ fn test_builder_basic_lifecycle(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_registry_register_and_query(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_registry_register_and_query(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -292,8 +292,8 @@ fn test_registry_register_and_query(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_template_structure_node_queries(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_template_structure_node_queries(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -454,8 +454,8 @@ fn test_template_structure_node_queries(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_template_dynamic_slots(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_template_dynamic_slots(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -578,8 +578,8 @@ fn test_template_dynamic_slots(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_template_attributes(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_template_attributes(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -701,8 +701,8 @@ fn test_template_attributes(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_template_deduplication(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_template_deduplication(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -759,8 +759,8 @@ fn test_template_deduplication(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_vnode_creation_basic_kinds(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_vnode_creation_basic_kinds(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var store = _create_vnode_store(w)
 
@@ -856,8 +856,8 @@ fn test_vnode_creation_basic_kinds(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_vnode_dynamic_content(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_vnode_dynamic_content(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var store = _create_vnode_store(w)
 
@@ -961,8 +961,8 @@ fn test_vnode_dynamic_content(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_vnode_fragments(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_vnode_fragments(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var store = _create_vnode_store(w)
 
@@ -1057,7 +1057,7 @@ fn test_vnode_fragments(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_vnode_keys(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
+def test_vnode_keys(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     var store = _create_vnode_store(w)
 
     # Unkeyed
@@ -1103,8 +1103,8 @@ fn test_vnode_keys(w: UnsafePointer[WasmInstance, MutExternalOrigin]) raises:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_vnode_mixed_attributes(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_vnode_mixed_attributes(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var store = _create_vnode_store(w)
     var vn = Int(
@@ -1262,8 +1262,8 @@ fn test_vnode_mixed_attributes(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_vnode_store_lifecycle(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_vnode_store_lifecycle(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var store = _create_vnode_store(w)
 
@@ -1313,8 +1313,8 @@ fn test_vnode_store_lifecycle(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_builder_pre_build_queries(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_builder_pre_build_queries(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var b = _create_builder(w, "query-test")
 
@@ -1409,8 +1409,8 @@ fn test_builder_pre_build_queries(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_complex_template_counter(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_complex_template_counter(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -1673,8 +1673,8 @@ fn test_complex_template_counter(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_multiple_templates_in_one_runtime(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+def test_multiple_templates_in_one_runtime(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -1831,8 +1831,8 @@ fn test_multiple_templates_in_one_runtime(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-fn test_builder_reset_after_build(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+def test_builder_reset_after_build(
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -1903,7 +1903,7 @@ fn test_builder_reset_after_build(
     _destroy_runtime(w, rt)
 
 
-fn main() raises:
+def main() raises:
     from wasm_harness import get_instance
 
     var w = get_instance()

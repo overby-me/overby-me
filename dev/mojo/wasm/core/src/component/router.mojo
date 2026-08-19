@@ -50,17 +50,17 @@ struct RouteEntry(Copyable, Movable):
     var path: String
     var branch: UInt8
 
-    fn __init__(out self, path: String, branch: UInt8):
+    def __init__(out self, path: String, branch: UInt8):
         self.path = path
         self.branch = branch
 
-    fn __copyinit__(out self, copy: Self):
+    def __init__(out self, *, copy: Self):
         self.path = copy.path
         self.branch = copy.branch
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.path = take.path^
-        self.branch = take.branch
+    def __init__(out self, *, deinit move: Self):
+        self.path = move.path^
+        self.branch = move.branch
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -92,7 +92,7 @@ struct Router(Movable):
     var slot: ConditionalSlot
     var dirty: Bool
 
-    fn __init__(out self):
+    def __init__(out self):
         """Create an empty router with no routes and no active branch."""
         self.routes = List[RouteEntry]()
         self.current = 255  # sentinel: no route matched
@@ -100,14 +100,14 @@ struct Router(Movable):
         self.slot = ConditionalSlot()
         self.dirty = False
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.routes = take.routes^
-        self.current = take.current
-        self.current_path = take.current_path^
-        self.slot = take.slot.copy()
-        self.dirty = take.dirty
+    def __init__(out self, *, deinit move: Self):
+        self.routes = move.routes^
+        self.current = move.current
+        self.current_path = move.current_path^
+        self.slot = move.slot.copy()
+        self.dirty = move.dirty
 
-    fn add_route(mut self, path: String, branch: UInt8):
+    def add_route(mut self, path: String, branch: UInt8):
         """Register a route mapping from a URL path to a branch tag.
 
         Routes are matched in registration order — first match wins.
@@ -121,7 +121,7 @@ struct Router(Movable):
         """
         self.routes.append(RouteEntry(path, branch))
 
-    fn navigate(mut self, path: String) -> Bool:
+    def navigate(mut self, path: String) -> Bool:
         """Navigate to the given URL path.
 
         Looks up the path in the route table (exact match, first wins).
@@ -151,7 +151,7 @@ struct Router(Movable):
                 return True
         return False
 
-    fn consume_dirty(mut self) -> Bool:
+    def consume_dirty(mut self) -> Bool:
         """Check and clear the dirty flag.
 
         Returns True if navigate() changed the branch since the last
@@ -166,11 +166,11 @@ struct Router(Movable):
             return True
         return False
 
-    fn route_count(self) -> Int:
+    def route_count(self) -> Int:
         """Return the number of registered routes."""
         return len(self.routes)
 
-    fn has_route(self, path: String) -> Bool:
+    def has_route(self, path: String) -> Bool:
         """Check whether a path has a registered route.
 
         Args:
@@ -184,7 +184,7 @@ struct Router(Movable):
                 return True
         return False
 
-    fn branch_for(self, path: String) -> Int:
+    def branch_for(self, path: String) -> Int:
         """Return the branch tag for a path, or -1 if not found.
 
         Args:
@@ -198,7 +198,7 @@ struct Router(Movable):
                 return Int(self.routes[i].branch)
         return -1
 
-    fn init_slot(mut self, anchor_id: UInt32):
+    def init_slot(mut self, anchor_id: UInt32):
         """Initialize the ConditionalSlot with the anchor element ID.
 
         Called after the parent template is mounted.  The anchor_id is

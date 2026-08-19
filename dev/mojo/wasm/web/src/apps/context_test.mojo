@@ -20,30 +20,30 @@ struct ContextTestApp(Movable):
     var child_scope_id: UInt32
     var count: _SignalI32
 
-    fn __init__(out self):
+    def __init__(out self):
         self.ctx = ComponentContext.create()
         self.count = self.ctx.use_signal(0)
         self.ctx.end_setup()
         # Create a child scope under the root
         self.child_scope_id = self.ctx.create_child_scope()
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.ctx = take.ctx^
-        self.child_scope_id = take.child_scope_id
-        self.count = take.count^
+    def __init__(out self, *, deinit move: Self):
+        self.ctx = move.ctx^
+        self.child_scope_id = move.child_scope_id
+        self.count = move.count^
 
 
-fn _cta_init() -> UnsafePointer[ContextTestApp, MutExternalOrigin]:
+def _cta_init() -> UnsafePointer[ContextTestApp, MutUntrackedOrigin]:
     var app_ptr = alloc[ContextTestApp](1)
-    app_ptr.init_pointee_move(ContextTestApp())
+    app_ptr.unsafe_write(ContextTestApp())
     return app_ptr
 
 
-fn _cta_destroy(app_ptr: UnsafePointer[ContextTestApp, MutExternalOrigin]):
+def _cta_destroy(app_ptr: UnsafePointer[ContextTestApp, MutUntrackedOrigin]):
     # Destroy child scope
     var scope_ids = List[UInt32]()
     scope_ids.append(app_ptr[0].child_scope_id)
     app_ptr[0].ctx.destroy_child_scopes(scope_ids)
     app_ptr[0].ctx.destroy()
-    app_ptr.destroy_pointee()
+    app_ptr.unsafe_deinit_pointee()
     app_ptr.free()

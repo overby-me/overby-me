@@ -24,7 +24,7 @@ from wasm_harness import (
 )
 
 
-fn _load() raises -> WasmInstance:
+def _load() raises -> WasmInstance:
     return WasmInstance("build/out.wasm")
 
 
@@ -32,7 +32,7 @@ fn _load() raises -> WasmInstance:
 
 
 def test_scheduler_create_destroy(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var sched = Int(w[].call_i64("scheduler_create", no_args()))
     assert_true(sched != 0, "scheduler pointer should be non-zero")
@@ -40,7 +40,7 @@ def test_scheduler_create_destroy(
 
 
 def test_scheduler_initially_empty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var sched = Int(w[].call_i64("scheduler_create", no_args()))
     assert_equal(w[].call_i32("scheduler_is_empty", args_ptr(sched)), 1)
@@ -52,7 +52,7 @@ def test_scheduler_initially_empty(
 
 
 def test_scheduler_collect_one_and_next(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = Int(w[].call_i64("runtime_create", no_args()))
     var sched = Int(w[].call_i64("scheduler_create", no_args()))
@@ -81,7 +81,7 @@ def test_scheduler_collect_one_and_next(
 
 
 def test_scheduler_height_ordering(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Scopes are yielded shallowest (lowest height) first."""
     var rt = Int(w[].call_i64("runtime_create", no_args()))
@@ -123,7 +123,7 @@ def test_scheduler_height_ordering(
 
 
 def test_scheduler_same_height_preserves_order(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Scopes at the same height are yielded in insertion order (stable sort).
     """
@@ -152,7 +152,7 @@ def test_scheduler_same_height_preserves_order(
 
 
 def test_scheduler_deduplicates(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Adding the same scope twice does not create duplicates."""
     var rt = Int(w[].call_i64("runtime_create", no_args()))
@@ -182,7 +182,7 @@ def test_scheduler_deduplicates(
 
 
 def test_scheduler_collect_from_dirty_queue(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """collect() drains the runtime's dirty scopes into the scheduler."""
     var rt = Int(w[].call_i64("runtime_create", no_args()))
@@ -219,7 +219,7 @@ def test_scheduler_collect_from_dirty_queue(
 
 
 def test_scheduler_collect_multiple_dirty(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """collect() handles multiple dirty scopes and orders by height."""
     var rt = Int(w[].call_i64("runtime_create", no_args()))
@@ -261,7 +261,7 @@ def test_scheduler_collect_multiple_dirty(
 
 
 def test_scheduler_clear(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = Int(w[].call_i64("runtime_create", no_args()))
     var sched = Int(w[].call_i64("scheduler_create", no_args()))
@@ -285,7 +285,7 @@ def test_scheduler_clear(
 
 
 def test_scheduler_has_scope(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = Int(w[].call_i64("runtime_create", no_args()))
     var sched = Int(w[].call_i64("scheduler_create", no_args()))
@@ -314,7 +314,7 @@ def test_scheduler_has_scope(
 
 
 def test_scheduler_multiple_collect_cycles(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Scheduler can be reused across multiple collect/drain cycles."""
     var rt = Int(w[].call_i64("runtime_create", no_args()))
@@ -342,7 +342,7 @@ def test_scheduler_multiple_collect_cycles(
 
 
 def test_scheduler_deep_hierarchy(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin]
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Height ordering works with deeper scope trees."""
     var rt = Int(w[].call_i64("runtime_create", no_args()))
@@ -389,7 +389,7 @@ def test_scheduler_deep_hierarchy(
 
 
 def test_scheduler_collect_deduplicates_against_existing(
-    w: UnsafePointer[WasmInstance, MutExternalOrigin],
+    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """collect() does not add scopes already in the queue."""
     var rt = Int(w[].call_i64("runtime_create", no_args()))
@@ -418,7 +418,7 @@ def test_scheduler_collect_deduplicates_against_existing(
     w[].call_void("runtime_destroy", args_ptr(rt))
 
 
-fn main() raises:
+def main() raises:
     from wasm_harness import get_instance
 
     var w = get_instance()

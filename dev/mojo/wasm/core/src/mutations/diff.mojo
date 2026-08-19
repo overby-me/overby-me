@@ -60,7 +60,7 @@ from .create import CreateEngine
 # ── Attribute value comparison helpers ────────────────────────────────────────
 
 
-fn _attr_values_equal(a: AttributeValue, b: AttributeValue) -> Bool:
+def _attr_values_equal(a: AttributeValue, b: AttributeValue) -> Bool:
     """Check whether two AttributeValues are semantically equal.
 
     Now delegates to the auto-derived `Equatable` conformance on
@@ -69,7 +69,7 @@ fn _attr_values_equal(a: AttributeValue, b: AttributeValue) -> Bool:
     return a == b
 
 
-fn _attr_value_to_string(value: AttributeValue) -> String:
+def _attr_value_to_string(value: AttributeValue) -> String:
     """Convert an AttributeValue to its string representation."""
     if value.kind == AVAL_TEXT:
         return value.text_value
@@ -106,24 +106,24 @@ struct DiffEngine:
         # The new VNode now has mount state from the old VNode (transferred/updated)
     """
 
-    var writer: UnsafePointer[MutationWriter, MutExternalOrigin]
-    var eid_alloc: UnsafePointer[ElementIdAllocator, MutExternalOrigin]
-    var runtime: UnsafePointer[Runtime, MutExternalOrigin]
-    var store: UnsafePointer[VNodeStore, MutExternalOrigin]
+    var writer: UnsafePointer[MutationWriter, MutUntrackedOrigin]
+    var eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin]
+    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var store: UnsafePointer[VNodeStore, MutUntrackedOrigin]
 
-    fn __init__(
+    def __init__(
         out self,
-        writer: UnsafePointer[MutationWriter, MutExternalOrigin],
-        eid_alloc: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
-        store: UnsafePointer[VNodeStore, MutExternalOrigin],
+        writer: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     ):
         self.writer = writer
         self.eid_alloc = eid_alloc
         self.runtime = runtime
         self.store = store
 
-    fn diff_node(mut self, old_index: UInt32, new_index: UInt32):
+    def diff_node(mut self, old_index: UInt32, new_index: UInt32):
         """Diff two VNodes and emit mutations to transform old → new.
 
         The old VNode must have mount state populated (from a previous
@@ -160,7 +160,7 @@ struct DiffEngine:
         # Different kinds → full replacement
         self._replace_node(old_index, new_index)
 
-    fn _diff_template_ref(mut self, old_index: UInt32, new_index: UInt32):
+    def _diff_template_ref(mut self, old_index: UInt32, new_index: UInt32):
         """Diff two TemplateRef VNodes with the same template_id.
 
         Only dynamic nodes and dynamic attributes are compared.
@@ -180,7 +180,7 @@ struct DiffEngine:
         # Diff dynamic nodes
         self._diff_dynamic_nodes(old_index, new_index)
 
-    fn _diff_dynamic_attrs(mut self, old_index: UInt32, new_index: UInt32):
+    def _diff_dynamic_attrs(mut self, old_index: UInt32, new_index: UInt32):
         """Diff dynamic attributes between old and new TemplateRef VNodes.
 
         For each dynamic attribute that changed, emit SetAttribute or
@@ -261,7 +261,7 @@ struct DiffEngine:
                         elem_id, ns_byte, new_attr.name, val_str
                     )
 
-    fn _diff_dynamic_nodes(mut self, old_index: UInt32, new_index: UInt32):
+    def _diff_dynamic_nodes(mut self, old_index: UInt32, new_index: UInt32):
         """Diff dynamic nodes between old and new TemplateRef VNodes.
 
         For each dynamic node that changed, emit SetText, ReplaceWith, etc.
@@ -328,7 +328,7 @@ struct DiffEngine:
                             i
                         ] = new_eid.as_u32()
 
-    fn _diff_text(mut self, old_index: UInt32, new_index: UInt32):
+    def _diff_text(mut self, old_index: UInt32, new_index: UInt32):
         """Diff two Text VNodes.  Emits SetText if content changed."""
         var old_ptr = self.store[0].get_ptr(old_index)
         var new_ptr = self.store[0].get_ptr(new_index)
@@ -340,7 +340,7 @@ struct DiffEngine:
         if old_ptr[0].text != new_ptr[0].text:
             self.writer[0].set_text(old_ptr[0].element_id, new_ptr[0].text)
 
-    fn _diff_placeholder(mut self, old_index: UInt32, new_index: UInt32):
+    def _diff_placeholder(mut self, old_index: UInt32, new_index: UInt32):
         """Diff two Placeholder VNodes.  No mutations needed."""
         var old_ptr = self.store[0].get_ptr(old_index)
         var new_ptr = self.store[0].get_ptr(new_index)
@@ -349,7 +349,7 @@ struct DiffEngine:
         new_ptr[0].element_id = old_ptr[0].element_id
         new_ptr[0].root_ids = old_ptr[0].root_ids.copy()
 
-    fn _diff_fragment(mut self, old_index: UInt32, new_index: UInt32):
+    def _diff_fragment(mut self, old_index: UInt32, new_index: UInt32):
         """Diff two Fragment VNodes.  Dispatches to keyed or unkeyed."""
         var old_ptr = self.store[0].get_ptr(old_index)
         var new_ptr = self.store[0].get_ptr(new_index)
@@ -381,7 +381,7 @@ struct DiffEngine:
         else:
             self._diff_fragment_unkeyed(old_index, new_index)
 
-    fn _diff_fragment_unkeyed(mut self, old_index: UInt32, new_index: UInt32):
+    def _diff_fragment_unkeyed(mut self, old_index: UInt32, new_index: UInt32):
         """Diff two Fragment VNodes with unkeyed children (pairwise)."""
         var old_ptr = self.store[0].get_ptr(old_index)
         var new_ptr = self.store[0].get_ptr(new_index)
@@ -445,7 +445,7 @@ struct DiffEngine:
                 )
                 self._remove_node(old_child)
 
-    fn _diff_fragment_keyed(mut self, old_index: UInt32, new_index: UInt32):
+    def _diff_fragment_keyed(mut self, old_index: UInt32, new_index: UInt32):
         """Diff two Fragment VNodes using key-based reconciliation.
 
         Algorithm (simplified LIS-based, following Dioxus/Ivi):
@@ -685,7 +685,7 @@ struct DiffEngine:
             elif placed_ptr[0].element_id != 0:
                 next_ref_id = placed_ptr[0].element_id
 
-    fn _keyed_create_all(mut self, old_index: UInt32, new_index: UInt32):
+    def _keyed_create_all(mut self, old_index: UInt32, new_index: UInt32):
         """Create all children of a new fragment (old was empty).
 
         Finds a reference point from the parent context and inserts
@@ -706,7 +706,7 @@ struct DiffEngine:
         # The created nodes are on the stack; the caller is responsible
         # for appending them (usually via AppendChildren or InsertAfter).
 
-    fn _keyed_create_range(
+    def _keyed_create_range(
         mut self,
         old_index: UInt32,
         new_index: UInt32,
@@ -784,7 +784,7 @@ struct DiffEngine:
         if ref_id != 0 and total > 0:
             self.writer[0].insert_before(ref_id, total)
 
-    fn _replace_node(mut self, old_index: UInt32, new_index: UInt32):
+    def _replace_node(mut self, old_index: UInt32, new_index: UInt32):
         """Replace the old VNode entirely with the new one.
 
         Removes old DOM nodes and creates new ones in their place.
@@ -824,7 +824,7 @@ struct DiffEngine:
         # Free old ElementIds
         self._free_mount_ids(old_index)
 
-    fn _remove_node(mut self, vnode_index: UInt32):
+    def _remove_node(mut self, vnode_index: UInt32):
         """Remove a VNode's DOM nodes entirely."""
         var node_ptr = self.store[0].get_ptr(vnode_index)
 
@@ -851,7 +851,7 @@ struct DiffEngine:
         # Free the ElementIds
         self._free_mount_ids(vnode_index)
 
-    fn _get_first_root_id(self, vnode_index: UInt32) -> UInt32:
+    def _get_first_root_id(self, vnode_index: UInt32) -> UInt32:
         """Get the first root ElementId of a VNode, or 0 if none."""
         var node_ptr = self.store[0].get_ptr(vnode_index)
         if node_ptr[0].root_id_count() > 0:
@@ -860,7 +860,7 @@ struct DiffEngine:
             return node_ptr[0].element_id
         return 0
 
-    fn _get_last_root_id(self, vnode_index: UInt32) -> UInt32:
+    def _get_last_root_id(self, vnode_index: UInt32) -> UInt32:
         """Get the last root ElementId of a VNode, or 0 if none."""
         var node_ptr = self.store[0].get_ptr(vnode_index)
         var rc = node_ptr[0].root_id_count()
@@ -870,7 +870,7 @@ struct DiffEngine:
             return node_ptr[0].element_id
         return 0
 
-    fn _free_mount_ids(mut self, vnode_index: UInt32):
+    def _free_mount_ids(mut self, vnode_index: UInt32):
         """Free all ElementIds associated with a VNode's mount state."""
         var node_ptr = self.store[0].get_ptr(vnode_index)
 
@@ -906,7 +906,7 @@ struct DiffEngine:
 # Algorithm: patience-sort / binary-search based O(n log n).
 
 
-fn _compute_lis(seq: List[Int]) -> List[Int]:
+def _compute_lis(seq: List[Int]) -> List[Int]:
     """Compute indices of the longest increasing subsequence.
 
     Args:

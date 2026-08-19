@@ -53,28 +53,28 @@ struct MutationWriter(Movable):
     written before `finalize()` is called.
     """
 
-    var buf: UnsafePointer[UInt8, MutExternalOrigin]
+    var buf: UnsafePointer[UInt8, MutUntrackedOrigin]
     var offset: Int
     var capacity: Int
 
-    fn __moveinit__(out self, deinit take: Self):
-        self.buf = take.buf
-        self.offset = take.offset
-        self.capacity = take.capacity
+    def __init__(out self, *, deinit move: Self):
+        self.buf = move.buf
+        self.offset = move.offset
+        self.capacity = move.capacity
 
     # ── Construction ─────────────────────────────────────────────────────
 
-    fn __init__(
-        out self, buf: UnsafePointer[UInt8, MutExternalOrigin], capacity: Int
+    def __init__(
+        out self, buf: UnsafePointer[UInt8, MutUntrackedOrigin], capacity: Int
     ):
         """Create a writer that starts at the beginning of `buf`."""
         self.buf = buf
         self.offset = 0
         self.capacity = capacity
 
-    fn __init__(
+    def __init__(
         out self,
-        buf: UnsafePointer[UInt8, MutExternalOrigin],
+        buf: UnsafePointer[UInt8, MutUntrackedOrigin],
         offset: Int,
         capacity: Int,
     ):
@@ -86,44 +86,44 @@ struct MutationWriter(Movable):
     # ── Primitive encoders ───────────────────────────────────────────────
 
     @always_inline
-    fn _write_u8(mut self, val: UInt8):
+    def _write_u8(mut self, val: UInt8):
         self.buf[self.offset] = val
         self.offset += 1
 
     @always_inline
-    fn _write_u16_le(mut self, val: UInt16):
+    def _write_u16_le(mut self, val: UInt16):
         self.buf[self.offset] = UInt8(val & 0xFF)
         self.buf[self.offset + 1] = UInt8((val >> 8) & 0xFF)
         self.offset += 2
 
     @always_inline
-    fn _write_u32_le(mut self, val: UInt32):
+    def _write_u32_le(mut self, val: UInt32):
         self.buf[self.offset] = UInt8(val & 0xFF)
         self.buf[self.offset + 1] = UInt8((val >> 8) & 0xFF)
         self.buf[self.offset + 2] = UInt8((val >> 16) & 0xFF)
         self.buf[self.offset + 3] = UInt8((val >> 24) & 0xFF)
         self.offset += 4
 
-    fn _write_str(mut self, text: String):
+    def _write_str(mut self, text: String):
         """Write a u32-length-prefixed UTF-8 string."""
-        var text_len = len(text)
+        var text_len = text.byte_length()
         self._write_u32_le(UInt32(text_len))
         var ptr = text.unsafe_ptr()
         for i in range(text_len):
             self.buf[self.offset + i] = ptr[i]
         self.offset += text_len
 
-    fn _write_short_str(mut self, text: String):
+    def _write_short_str(mut self, text: String):
         """Write a u16-length-prefixed UTF-8 string (for names ≤ 65535 bytes).
         """
-        var text_len = len(text)
+        var text_len = text.byte_length()
         self._write_u16_le(UInt16(text_len))
         var ptr = text.unsafe_ptr()
         for i in range(text_len):
             self.buf[self.offset + i] = ptr[i]
         self.offset += text_len
 
-    fn _write_path[
+    def _write_path[
         origin: Origin
     ](mut self, path_ptr: UnsafePointer[UInt8, origin], path_len: Int):
         """Write a u8-length-prefixed byte path (template traversal indices)."""
@@ -134,16 +134,16 @@ struct MutationWriter(Movable):
 
     # ── Mutation operations ──────────────────────────────────────────────
 
-    fn end(mut self):
+    def end(mut self):
         """Write the End sentinel (0x00). Must be called after all mutations."""
         self._write_u8(OP_END)
 
-    fn finalize(mut self):
+    def finalize(mut self):
         """Alias for `end()` — write the End sentinel to terminate the buffer.
         """
         self.end()
 
-    fn append_children(mut self, id: UInt32, m: UInt32):
+    def append_children(mut self, id: UInt32, m: UInt32):
         """Pop `m` nodes from the stack and append them as children of `id`.
 
         | op (u8) | id (u32) | m (u32) |
@@ -152,7 +152,7 @@ struct MutationWriter(Movable):
         self._write_u32_le(id)
         self._write_u32_le(m)
 
-    fn assign_id[
+    def assign_id[
         origin: Origin
     ](
         mut self,
@@ -168,7 +168,7 @@ struct MutationWriter(Movable):
         self._write_path(path_ptr, path_len)
         self._write_u32_le(id)
 
-    fn create_placeholder(mut self, id: UInt32):
+    def create_placeholder(mut self, id: UInt32):
         """Create an empty placeholder node (for conditional/suspended content).
 
         | op (u8) | id (u32) |
@@ -176,7 +176,7 @@ struct MutationWriter(Movable):
         self._write_u8(OP_CREATE_PLACEHOLDER)
         self._write_u32_le(id)
 
-    fn create_text_node(mut self, id: UInt32, text: String):
+    def create_text_node(mut self, id: UInt32, text: String):
         """Create a text node with the given content and id.
 
         | op (u8) | id (u32) | len (u32) | text ([u8]) |
@@ -185,7 +185,7 @@ struct MutationWriter(Movable):
         self._write_u32_le(id)
         self._write_str(text)
 
-    fn load_template(mut self, tmpl_id: UInt32, index: UInt32, id: UInt32):
+    def load_template(mut self, tmpl_id: UInt32, index: UInt32, id: UInt32):
         """Clone a pre-compiled template and assign it an ElementId.
 
         | op (u8) | tmpl_id (u32) | index (u32) | id (u32) |
@@ -195,7 +195,7 @@ struct MutationWriter(Movable):
         self._write_u32_le(index)
         self._write_u32_le(id)
 
-    fn replace_with(mut self, id: UInt32, m: UInt32):
+    def replace_with(mut self, id: UInt32, m: UInt32):
         """Replace node `id` with `m` nodes popped from the stack.
 
         | op (u8) | id (u32) | m (u32) |
@@ -204,7 +204,7 @@ struct MutationWriter(Movable):
         self._write_u32_le(id)
         self._write_u32_le(m)
 
-    fn replace_placeholder[
+    def replace_placeholder[
         origin: Origin
     ](
         mut self,
@@ -220,7 +220,7 @@ struct MutationWriter(Movable):
         self._write_path(path_ptr, path_len)
         self._write_u32_le(m)
 
-    fn insert_after(mut self, id: UInt32, m: UInt32):
+    def insert_after(mut self, id: UInt32, m: UInt32):
         """Insert `m` stack nodes after node `id`.
 
         | op (u8) | id (u32) | m (u32) |
@@ -229,7 +229,7 @@ struct MutationWriter(Movable):
         self._write_u32_le(id)
         self._write_u32_le(m)
 
-    fn insert_before(mut self, id: UInt32, m: UInt32):
+    def insert_before(mut self, id: UInt32, m: UInt32):
         """Insert `m` stack nodes before node `id`.
 
         | op (u8) | id (u32) | m (u32) |
@@ -238,7 +238,7 @@ struct MutationWriter(Movable):
         self._write_u32_le(id)
         self._write_u32_le(m)
 
-    fn set_attribute(
+    def set_attribute(
         mut self, id: UInt32, ns: UInt8, name: String, value: String
     ):
         """Set an attribute on the element with the given id.
@@ -253,7 +253,7 @@ struct MutationWriter(Movable):
         self._write_short_str(name)
         self._write_str(value)
 
-    fn remove_attribute(mut self, id: UInt32, ns: UInt8, name: String):
+    def remove_attribute(mut self, id: UInt32, ns: UInt8, name: String):
         """Remove an attribute from the element with the given id.
 
         Used for boolean attributes (disabled, checked, hidden, etc.)
@@ -269,7 +269,7 @@ struct MutationWriter(Movable):
         self._write_u8(ns)
         self._write_short_str(name)
 
-    fn set_text(mut self, id: UInt32, text: String):
+    def set_text(mut self, id: UInt32, text: String):
         """Update the text content of node `id`.
 
         | op (u8) | id (u32) | len (u32) | text ([u8]) |
@@ -278,7 +278,7 @@ struct MutationWriter(Movable):
         self._write_u32_le(id)
         self._write_str(text)
 
-    fn new_event_listener(
+    def new_event_listener(
         mut self, id: UInt32, handler_id: UInt32, name: String
     ):
         """Attach an event listener to element `id`.
@@ -293,7 +293,7 @@ struct MutationWriter(Movable):
         self._write_u32_le(handler_id)
         self._write_short_str(name)
 
-    fn remove_event_listener(mut self, id: UInt32, name: String):
+    def remove_event_listener(mut self, id: UInt32, name: String):
         """Remove an event listener from element `id`.
 
         | op (u8) | id (u32) | name_len (u16) | name ([u8]) |
@@ -302,7 +302,7 @@ struct MutationWriter(Movable):
         self._write_u32_le(id)
         self._write_short_str(name)
 
-    fn remove(mut self, id: UInt32):
+    def remove(mut self, id: UInt32):
         """Remove node `id` from the DOM.
 
         | op (u8) | id (u32) |
@@ -310,7 +310,7 @@ struct MutationWriter(Movable):
         self._write_u8(OP_REMOVE)
         self._write_u32_le(id)
 
-    fn push_root(mut self, id: UInt32):
+    def push_root(mut self, id: UInt32):
         """Push node `id` onto the stack.
 
         | op (u8) | id (u32) |
@@ -320,7 +320,7 @@ struct MutationWriter(Movable):
 
     # ── Template registration ────────────────────────────────────────────
 
-    fn register_template(mut self, tmpl: Template):
+    def register_template(mut self, tmpl: Template):
         """Serialize a Template's full static structure into the buffer.
 
         The JS interpreter uses this to build cloneable DOM template roots

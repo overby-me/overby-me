@@ -79,8 +79,8 @@ from vdom import (
 # up to the root and reversing.
 
 
-fn _build_parent_map(
-    tmpl_ptr: UnsafePointer[Template, MutExternalOrigin]
+def _build_parent_map(
+    tmpl_ptr: UnsafePointer[Template, MutUntrackedOrigin]
 ) -> List[Int]:
     """Build parent[i] = parent node index of node i, or -1 for roots."""
     var n = tmpl_ptr[0].node_count()
@@ -95,8 +95,8 @@ fn _build_parent_map(
     return parents^
 
 
-fn _path_from_root(
-    tmpl_ptr: UnsafePointer[Template, MutExternalOrigin],
+def _path_from_root(
+    tmpl_ptr: UnsafePointer[Template, MutUntrackedOrigin],
     parents: List[Int],
     target: Int,
 ) -> List[UInt8]:
@@ -122,7 +122,7 @@ fn _path_from_root(
     return path^
 
 
-fn _find_root_for_node(parents: List[Int], node_index: Int) -> Int:
+def _find_root_for_node(parents: List[Int], node_index: Int) -> Int:
     """Find the root node index that `node_index` is a descendant of."""
     var current = node_index
     while parents[current] != -1:
@@ -133,7 +133,7 @@ fn _find_root_for_node(parents: List[Int], node_index: Int) -> Int:
 # ── Attribute value to string conversion ─────────────────────────────────────
 
 
-fn _attr_value_to_string(value: AttributeValue) -> String:
+def _attr_value_to_string(value: AttributeValue) -> String:
     """Convert an AttributeValue to its string representation for SetAttribute.
     """
     if value.kind == AVAL_TEXT:
@@ -175,24 +175,24 @@ struct CreateEngine:
         # The writer contains the mutations to create the DOM
     """
 
-    var writer: UnsafePointer[MutationWriter, MutExternalOrigin]
-    var eid_alloc: UnsafePointer[ElementIdAllocator, MutExternalOrigin]
-    var runtime: UnsafePointer[Runtime, MutExternalOrigin]
-    var store: UnsafePointer[VNodeStore, MutExternalOrigin]
+    var writer: UnsafePointer[MutationWriter, MutUntrackedOrigin]
+    var eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin]
+    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var store: UnsafePointer[VNodeStore, MutUntrackedOrigin]
 
-    fn __init__(
+    def __init__(
         out self,
-        writer: UnsafePointer[MutationWriter, MutExternalOrigin],
-        eid_alloc: UnsafePointer[ElementIdAllocator, MutExternalOrigin],
-        runtime: UnsafePointer[Runtime, MutExternalOrigin],
-        store: UnsafePointer[VNodeStore, MutExternalOrigin],
+        writer: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
     ):
         self.writer = writer
         self.eid_alloc = eid_alloc
         self.runtime = runtime
         self.store = store
 
-    fn create_node(mut self, vnode_index: UInt32) -> UInt32:
+    def create_node(mut self, vnode_index: UInt32) -> UInt32:
         """Create mutations for the VNode at `vnode_index`.
 
         Emits the mutations and populates the VNode's mount state.
@@ -212,7 +212,7 @@ struct CreateEngine:
         else:
             return 0
 
-    fn _create_template_ref(mut self, vnode_index: UInt32) -> UInt32:
+    def _create_template_ref(mut self, vnode_index: UInt32) -> UInt32:
         """Create a TemplateRef VNode.  Returns number of roots (on stack)."""
         var node_ptr = self.store[0].get_ptr(vnode_index)
         var tmpl_id = node_ptr[0].template_id
@@ -358,7 +358,7 @@ struct CreateEngine:
 
         return UInt32(root_count)
 
-    fn _create_text(mut self, vnode_index: UInt32) -> UInt32:
+    def _create_text(mut self, vnode_index: UInt32) -> UInt32:
         """Create a Text VNode.  Returns 1 (one root on stack)."""
         var node_ptr = self.store[0].get_ptr(vnode_index)
         var eid = self.eid_alloc[0].alloc()
@@ -368,7 +368,7 @@ struct CreateEngine:
         node_ptr[0].push_root_id(eid.as_u32())
         return 1
 
-    fn _create_placeholder(mut self, vnode_index: UInt32) -> UInt32:
+    def _create_placeholder(mut self, vnode_index: UInt32) -> UInt32:
         """Create a Placeholder VNode.  Returns 1 (one root on stack)."""
         var node_ptr = self.store[0].get_ptr(vnode_index)
         var eid: ElementId
@@ -382,7 +382,7 @@ struct CreateEngine:
         node_ptr[0].push_root_id(eid.as_u32())
         return 1
 
-    fn _create_fragment(mut self, vnode_index: UInt32) -> UInt32:
+    def _create_fragment(mut self, vnode_index: UInt32) -> UInt32:
         """Create a Fragment VNode.  Returns total roots from all children."""
         var node_ptr = self.store[0].get_ptr(vnode_index)
         var child_count = node_ptr[0].fragment_child_count()
