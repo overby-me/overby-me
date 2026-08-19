@@ -157,6 +157,13 @@
   "case"
 ] @keyword
 
+; Mojo 1.0 keywords the pinned grammar predates (comptime replaced alias,
+; mut/out/deinit are argument conventions). The grammar tokenizes them as
+; identifiers, so match by text; adding them to the anonymous-token list
+; above would fail query compilation against this grammar.
+((identifier) @keyword
+ (#match? @keyword "^(comptime|mut|out|deinit)$"))
+
 (mlir_type "!" @punctuation.special (#set! "priority" 110))
 (mlir_type ">" @punctuation.special (#set! "priority" 110))
 (mlir_type "<" @punctuation.special (#set! "priority" 110))
