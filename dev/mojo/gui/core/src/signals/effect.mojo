@@ -29,7 +29,7 @@
 # SignalStore, HandlerRegistry, and ScopeArena, so effect IDs are stable
 # and reusable.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 
 # ── EffectEntry ──────────────────────────────────────────────────────────────
@@ -195,13 +195,13 @@ struct EffectStore(Movable):
 
     def get_ptr(
         mut self, id: UInt32
-    ) -> UnsafePointer[EffectEntry, MutUntrackedOrigin]:
+    ) -> Pointer[EffectEntry, MutUntrackedOrigin]:
         """Return a pointer to the effect entry at `id`.
 
         The pointer is valid until the next mutation of the store.
         Precondition: `contains(id)` is True.
         """
-        return UnsafePointer(to=self._entries[Int(id)])
+        return Pointer(to=self._entries[Int(id)])
 
     # ── Pending tracking ─────────────────────────────────────────────
 

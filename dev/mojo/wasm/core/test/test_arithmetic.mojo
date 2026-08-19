@@ -7,7 +7,7 @@
 # Run with:
 #   mojo test test/test_arithmetic.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal, assert_true
 
 from wasm_harness import (
@@ -24,14 +24,14 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Add ──────────────────────────────────────────────────────────────────────
 
 
-def test_add_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_add_int32(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("add_int32", args_i32_i32(2, 3))),
         5,
@@ -39,7 +39,7 @@ def test_add_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_add_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_add_int64(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i64("add_int64", args_i64_i64(2, 3))),
         5,
@@ -47,14 +47,14 @@ def test_add_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_add_float32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_add_float32(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var result = Float64(w[].call_f32("add_float32", args_f32_f32(2.2, 3.3)))
     # Float32 precision: compute expected in f32
     var expected = Float64(Float32(2.2) + Float32(3.3))
     assert_equal(result, expected, "add_float32(2.2, 3.3)")
 
 
-def test_add_float64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_add_float64(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         w[].call_f64("add_float64", args_f64_f64(2.2, 3.3)),
         2.2 + 3.3,
@@ -63,7 +63,7 @@ def test_add_float64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_add_int32_edge_cases(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("add_int32", args_i32_i32(0, 0))),
@@ -88,7 +88,7 @@ def test_add_int32_edge_cases(
 
 
 def test_add_int64_edge_cases(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("add_int64", args_i64_i64(0, 0))),
@@ -108,7 +108,7 @@ def test_add_int64_edge_cases(
 
 
 def test_add_float64_edge_cases(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("add_float64", args_f64_f64(0.0, 0.0)),
@@ -125,7 +125,7 @@ def test_add_float64_edge_cases(
 # ── Subtract ─────────────────────────────────────────────────────────────────
 
 
-def test_sub_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_sub_int32(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("sub_int32", args_i32_i32(10, 3))),
         7,
@@ -133,7 +133,7 @@ def test_sub_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_sub_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_sub_int64(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i64("sub_int64", args_i64_i64(10, 3))),
         7,
@@ -141,13 +141,13 @@ def test_sub_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_sub_float32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_sub_float32(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var result = Float64(w[].call_f32("sub_float32", args_f32_f32(5.5, 2.2)))
     var expected = Float64(Float32(5.5) - Float32(2.2))
     assert_equal(result, expected, "sub_float32(5.5, 2.2)")
 
 
-def test_sub_float64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_sub_float64(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         w[].call_f64("sub_float64", args_f64_f64(5.5, 2.2)),
         5.5 - 2.2,
@@ -156,7 +156,7 @@ def test_sub_float64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_sub_int32_edge_cases(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("sub_int32", args_i32_i32(0, 0))),
@@ -181,7 +181,7 @@ def test_sub_int32_edge_cases(
 
 
 def test_sub_int64_edge_cases(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("sub_int64", args_i64_i64(0, 0))),
@@ -198,7 +198,7 @@ def test_sub_int64_edge_cases(
 # ── Multiply ─────────────────────────────────────────────────────────────────
 
 
-def test_mul_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_mul_int32(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("mul_int32", args_i32_i32(4, 5))),
         20,
@@ -206,7 +206,7 @@ def test_mul_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_mul_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_mul_int64(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i64("mul_int64", args_i64_i64(4, 5))),
         20,
@@ -214,13 +214,13 @@ def test_mul_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_mul_float32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_mul_float32(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var result = Float64(w[].call_f32("mul_float32", args_f32_f32(2.0, 3.0)))
     var expected = Float64(Float32(2.0) * Float32(3.0))
     assert_equal(result, expected, "mul_float32(2.0, 3.0)")
 
 
-def test_mul_float64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_mul_float64(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         w[].call_f64("mul_float64", args_f64_f64(2.5, 4.0)),
         10.0,
@@ -229,7 +229,7 @@ def test_mul_float64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_mul_int32_edge_cases(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("mul_int32", args_i32_i32(0, 100))),
@@ -254,7 +254,7 @@ def test_mul_int32_edge_cases(
 
 
 def test_mul_int64_edge_cases(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("mul_int64", args_i64_i64(0, 999))),
@@ -269,7 +269,7 @@ def test_mul_int64_edge_cases(
 
 
 def test_mul_float64_edge_cases(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("mul_float64", args_f64_f64(0.0, 123.456)),
@@ -281,7 +281,7 @@ def test_mul_float64_edge_cases(
 # ── Division ─────────────────────────────────────────────────────────────────
 
 
-def test_div_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_div_int32(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("div_int32", args_i32_i32(20, 4))),
         5,
@@ -289,7 +289,7 @@ def test_div_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_div_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_div_int64(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i64("div_int64", args_i64_i64(20, 4))),
         5,
@@ -297,13 +297,13 @@ def test_div_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_div_float32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_div_float32(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var result = Float64(w[].call_f32("div_float32", args_f32_f32(10.0, 4.0)))
     var expected = Float64(Float32(10.0) / Float32(4.0))
     assert_equal(result, expected, "div_float32(10.0, 4.0) === 2.5")
 
 
-def test_div_float64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_div_float64(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         w[].call_f64("div_float64", args_f64_f64(10.0, 4.0)),
         2.5,
@@ -312,7 +312,7 @@ def test_div_float64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_div_int32_edge_cases(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("div_int32", args_i32_i32(7, 2))),
@@ -339,7 +339,7 @@ def test_div_int32_edge_cases(
 
 
 def test_div_int64_edge_cases(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("div_int64", args_i64_i64(7, 2))),
@@ -349,7 +349,7 @@ def test_div_int64_edge_cases(
 
 
 def test_div_float64_edge_cases(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("div_float64", args_f64_f64(1.0, 3.0)),
@@ -366,7 +366,7 @@ def test_div_float64_edge_cases(
 # ── Modulo ───────────────────────────────────────────────────────────────────
 
 
-def test_mod_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_mod_int32(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("mod_int32", args_i32_i32(10, 3))),
         1,
@@ -389,7 +389,7 @@ def test_mod_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_mod_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_mod_int64(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i64("mod_int64", args_i64_i64(10, 3))),
         1,
@@ -405,7 +405,7 @@ def test_mod_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 # ── Power ────────────────────────────────────────────────────────────────────
 
 
-def test_pow_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_pow_int32(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("pow_int32", args_i32(3))),
         27,
@@ -423,7 +423,7 @@ def test_pow_int32(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_pow_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_pow_int64(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i64("pow_int64", args_i64(3))),
         27,
@@ -441,7 +441,7 @@ def test_pow_int64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_pow_float64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_pow_float64(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     # pow_float64(3.3) = 3.3^3.3 ≈ 51.41572944937184
     var result = w[].call_f64("pow_float64", args_f64(3.3))
     assert_true(
@@ -463,7 +463,7 @@ def test_pow_float64(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_pow_float32_stable(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     # Verify pow_float32 is at least stable (same input → same output)
     var a = Float64(w[].call_f32("pow_float32", args_f32(3.3)))

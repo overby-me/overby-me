@@ -16,7 +16,7 @@
 # Child template ("child-display"):
 #   p > dynamic_text[0]          ← "Count: N"
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponent
 from mutations import CreateEngine as _CreateEngine
@@ -103,13 +103,13 @@ struct ChildCounterApp(Movable):
         return cvb.build()
 
 
-def _cc_init() -> UnsafePointer[ChildCounterApp, MutUntrackedOrigin]:
+def _cc_init() -> Pointer[ChildCounterApp, MutUntrackedOrigin]:
     var app_ptr = alloc[ChildCounterApp](1)
     app_ptr.unsafe_write(ChildCounterApp())
     return app_ptr
 
 
-def _cc_destroy(app_ptr: UnsafePointer[ChildCounterApp, MutUntrackedOrigin]):
+def _cc_destroy(app_ptr: Pointer[ChildCounterApp, MutUntrackedOrigin]):
     app_ptr[0].ctx.destroy_child_component(app_ptr[0].child)
     app_ptr[0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
@@ -118,7 +118,7 @@ def _cc_destroy(app_ptr: UnsafePointer[ChildCounterApp, MutUntrackedOrigin]):
 
 def _cc_rebuild(
     mut app: ChildCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the child-counter app.
 
@@ -185,7 +185,7 @@ def _cc_handle_event(
 
 def _cc_flush(
     mut app: ChildCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates.
 

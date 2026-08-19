@@ -7,7 +7,7 @@
 #   - Count signal shared from parent to child via context (props)
 #   - Child's show_hex signal owned by child scope
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -138,14 +138,14 @@ struct PropsCounterApp(Movable):
         return pvb.build()
 
 
-def _pc_init() -> UnsafePointer[PropsCounterApp, MutUntrackedOrigin]:
+def _pc_init() -> Pointer[PropsCounterApp, MutUntrackedOrigin]:
     var app_ptr = alloc[PropsCounterApp](1)
     app_ptr.unsafe_write(PropsCounterApp())
     return app_ptr
 
 
 def _pc_destroy(
-    app_ptr: UnsafePointer[PropsCounterApp, MutUntrackedOrigin],
+    app_ptr: Pointer[PropsCounterApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].display.child_ctx)
     app_ptr[0].ctx.destroy()
@@ -155,7 +155,7 @@ def _pc_destroy(
 
 def _pc_rebuild(
     mut app: PropsCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the props-counter app."""
     # 1. Render parent with placeholder
@@ -203,7 +203,7 @@ def _pc_handle_event(
 
 def _pc_flush(
     mut app: PropsCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates."""
     var parent_dirty = app.ctx.consume_dirty()

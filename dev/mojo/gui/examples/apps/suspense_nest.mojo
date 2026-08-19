@@ -26,7 +26,7 @@
 #   SNInnerSkeletonChild:    p > dyn_text("Inner loading...")
 #   SNOuterSkeletonChild:    p > dyn_text("Outer loading...")
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -245,14 +245,14 @@ struct SuspenseNestApp(Movable):
 # ── SuspenseNestApp lifecycle functions ──────────────────────────────────────
 
 
-def _sn_init() -> UnsafePointer[SuspenseNestApp, MutUntrackedOrigin]:
+def _sn_init() -> Pointer[SuspenseNestApp, MutUntrackedOrigin]:
     var app_ptr = alloc[SuspenseNestApp](1)
     app_ptr.unsafe_write(SuspenseNestApp())
     return app_ptr
 
 
 def _sn_destroy(
-    app_ptr: UnsafePointer[SuspenseNestApp, MutUntrackedOrigin],
+    app_ptr: Pointer[SuspenseNestApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(
         app_ptr[0].outer_content.inner_content.child_ctx
@@ -269,7 +269,7 @@ def _sn_destroy(
 
 def _sn_rebuild(
     mut app: SuspenseNestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the suspense-nest app."""
     # 1. Render parent with placeholders
@@ -372,7 +372,7 @@ def _sn_inner_resolve(
 
 def _sn_flush(
     mut app: SuspenseNestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with nested suspense boundary logic.
 

@@ -28,7 +28,7 @@ Run with:
   mojo test test/test_equality_demo.mojo
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
@@ -44,7 +44,7 @@ from wasm_harness import (
 )
 
 
-def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _load() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -52,7 +52,7 @@ def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
 
 
 def _create_eq(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create an EqualityDemoApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("eq_init", no_args()))
@@ -62,7 +62,7 @@ def _create_eq(
 
 
 def _create_eq_no_rebuild(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create an EqualityDemoApp without mounting.  Returns (app_ptr, buf_ptr).
     """
@@ -72,7 +72,7 @@ def _create_eq_no_rebuild(
 
 
 def _destroy_eq(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -82,7 +82,7 @@ def _destroy_eq(
 
 
 def _flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -91,7 +91,7 @@ def _flush(
 
 
 def _handle_event(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -100,7 +100,7 @@ def _handle_event(
 
 
 def _incr(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises:
     """Increment input via the button handler."""
@@ -109,7 +109,7 @@ def _incr(
 
 
 def _decr(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises:
     """Decrement input via the button handler."""
@@ -118,21 +118,21 @@ def _decr(
 
 
 def _input(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("eq_input_value", args_ptr(app))
 
 
 def _clamped(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("eq_clamped_value", args_ptr(app))
 
 
 def _label_text(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
@@ -141,49 +141,49 @@ def _label_text(
 
 
 def _clamped_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("eq_clamped_dirty", args_ptr(app)) != 0
 
 
 def _label_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("eq_label_dirty", args_ptr(app)) != 0
 
 
 def _clamped_changed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("eq_clamped_changed", args_ptr(app)) != 0
 
 
 def _label_changed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("eq_label_changed", args_ptr(app)) != 0
 
 
 def _has_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("eq_has_dirty", args_ptr(app)) != 0
 
 
 def _scope_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("eq_scope_count", args_ptr(app))
 
 
 def _memo_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("eq_memo_count", args_ptr(app))
@@ -193,7 +193,7 @@ def _memo_count(
 
 
 def _incr_and_flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
     n: Int,
@@ -205,7 +205,7 @@ def _incr_and_flush(
 
 
 def _decr_and_flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
     n: Int,

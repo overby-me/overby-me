@@ -11,7 +11,7 @@
 # Run with:
 #   mojo test test/test_signals.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal, assert_true, assert_false
 
 from wasm_harness import (
@@ -24,22 +24,20 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _create_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises -> Int:
+def _create_runtime(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises -> Int:
     """Create a heap-allocated Runtime via WASM."""
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
 def _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     """Destroy a heap-allocated Runtime via WASM."""
     w[].call_void("runtime_destroy", args_ptr(rt))
@@ -49,7 +47,7 @@ def _destroy_runtime(
 
 
 def test_runtime_create_returns_non_null(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -67,7 +65,7 @@ def test_runtime_create_returns_non_null(
 
 
 def test_signal_create_and_read(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -94,7 +92,7 @@ def test_signal_create_and_read(
 
 
 def test_signal_write_and_read_back(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -125,7 +123,7 @@ def test_signal_write_and_read_back(
 # ── Signal peek (no subscription) ────────────────────────────────────────────
 
 
-def test_signal_peek(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_signal_peek(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var rt = _create_runtime(w)
 
     var key = Int(w[].call_i32("signal_create_i32", args_ptr_i32(rt, 77)))
@@ -149,7 +147,7 @@ def test_signal_peek(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_signal_version_tracking(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -190,7 +188,7 @@ def test_signal_version_tracking(
 
 
 def test_multiple_independent_signals(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -245,9 +243,7 @@ def test_multiple_independent_signals(
 # ── Signal destroy ───────────────────────────────────────────────────────────
 
 
-def test_signal_destroy(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_signal_destroy(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var rt = _create_runtime(w)
 
     var k1 = Int(w[].call_i32("signal_create_i32", args_ptr_i32(rt, 10)))
@@ -282,7 +278,7 @@ def test_signal_destroy(
 
 
 def test_signal_slot_reuse_after_destroy(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -303,7 +299,7 @@ def test_signal_slot_reuse_after_destroy(
 # ── Signal iadd (+=) via WASM export ─────────────────────────────────────────
 
 
-def test_signal_iadd(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_signal_iadd(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var rt = _create_runtime(w)
 
     var key = Int(w[].call_i32("signal_create_i32", args_ptr_i32(rt, 10)))
@@ -334,7 +330,7 @@ def test_signal_iadd(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 # ── Signal isub (-=) via WASM export ─────────────────────────────────────────
 
 
-def test_signal_isub(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_signal_isub(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var rt = _create_runtime(w)
 
     var key = Int(w[].call_i32("signal_create_i32", args_ptr_i32(rt, 100)))
@@ -359,7 +355,7 @@ def test_signal_isub(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_no_context_by_default(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -376,7 +372,7 @@ def test_no_context_by_default(
 
 
 def test_context_set_and_clear(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -401,7 +397,7 @@ def test_context_set_and_clear(
 
 
 def test_read_with_context_subscribes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -445,7 +441,7 @@ def test_read_with_context_subscribes(
 
 
 def test_peek_does_not_subscribe(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -467,7 +463,7 @@ def test_peek_does_not_subscribe(
 
 
 def test_multiple_contexts_subscribe(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -496,7 +492,7 @@ def test_multiple_contexts_subscribe(
 
 
 def test_write_marks_subscribers_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -537,7 +533,7 @@ def test_write_marks_subscribers_dirty(
 
 
 def test_write_without_subscribers_is_clean(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -562,7 +558,7 @@ def test_write_without_subscribers_is_clean(
 
 
 def test_iadd_marks_subscribers_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -592,7 +588,7 @@ def test_iadd_marks_subscribers_dirty(
 
 
 def test_multiple_writes_deduplicate_dirty_scopes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -620,7 +616,7 @@ def test_multiple_writes_deduplicate_dirty_scopes(
 
 
 def test_read_after_write_returns_new_value(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -647,7 +643,7 @@ def test_read_after_write_returns_new_value(
 
 
 def test_stress_100_independent_signals(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -691,7 +687,7 @@ def test_stress_100_independent_signals(
 
 
 def test_stress_create_destroy_reuse_cycle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -746,7 +742,7 @@ def test_stress_create_destroy_reuse_cycle(
 
 
 def test_signal_negative_values(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -775,7 +771,7 @@ def test_signal_negative_values(
 
 
 def test_signal_zero_initial_value(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 

@@ -43,7 +43,7 @@
 #
 # Thread safety: WASM is single-threaded, so no synchronisation needed.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from .runtime import Runtime
 
 
@@ -68,14 +68,14 @@ struct SignalI32(Copyable, Writable):
     """
 
     var key: UInt32
-    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var runtime: Pointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
     def __init__(
         out self,
         key: UInt32,
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a signal handle from a raw key and runtime pointer.
 
@@ -226,14 +226,14 @@ struct MemoI32(Copyable, Writable):
     """
 
     var id: UInt32
-    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var runtime: Pointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
     def __init__(
         out self,
         id: UInt32,
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a memo handle from a raw ID and runtime pointer.
 
@@ -373,14 +373,14 @@ struct EffectHandle(Copyable):
     """
 
     var id: UInt32
-    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var runtime: Pointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
     def __init__(
         out self,
         id: UInt32,
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ):
         """Create an effect handle from a raw ID and runtime pointer.
 
@@ -454,14 +454,14 @@ struct SignalBool(Copyable, Writable):
     """
 
     var key: UInt32
-    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var runtime: Pointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
     def __init__(
         out self,
         key: UInt32,
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a bool signal handle from a raw key and runtime pointer.
 
@@ -596,7 +596,7 @@ struct SignalString(Copyable, Writable):
 
     var string_key: UInt32
     var version_key: UInt32
-    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var runtime: Pointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
@@ -604,7 +604,7 @@ struct SignalString(Copyable, Writable):
         out self,
         string_key: UInt32,
         version_key: UInt32,
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a string signal handle from raw keys and runtime pointer.
 
@@ -745,14 +745,14 @@ struct MemoBool(Copyable, Writable):
     """
 
     var id: UInt32
-    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var runtime: Pointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
     def __init__(
         out self,
         id: UInt32,
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a memo handle from a raw ID and runtime pointer.
 
@@ -899,14 +899,14 @@ struct MemoString(Copyable, Writable):
     """
 
     var id: UInt32
-    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var runtime: Pointer[Runtime, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
     def __init__(
         out self,
         id: UInt32,
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ):
         """Create a memo handle from a raw ID and runtime pointer.
 

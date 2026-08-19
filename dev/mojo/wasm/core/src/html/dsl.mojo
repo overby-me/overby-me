@@ -42,7 +42,7 @@
 #
 # Both forms produce identical Template and VNode structures.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from vdom.builder import TemplateBuilder
 from vdom.template import Template
 from vdom.vnode import (
@@ -3341,7 +3341,7 @@ struct VNodeBuilder(Movable):
         var idx = vb.index()
     """
 
-    var _store: UnsafePointer[VNodeStore, MutUntrackedOrigin]
+    var _store: Pointer[VNodeStore, MutUntrackedOrigin]
     var _vnode_idx: UInt32
 
     # ── Construction ─────────────────────────────────────────────────
@@ -3349,7 +3349,7 @@ struct VNodeBuilder(Movable):
     def __init__(
         out self,
         template_id: UInt32,
-        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+        store: Pointer[VNodeStore, MutUntrackedOrigin],
     ):
         """Create a new TemplateRef VNode in the store.
 
@@ -3364,7 +3364,7 @@ struct VNodeBuilder(Movable):
         out self,
         template_id: UInt32,
         key: String,
-        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+        store: Pointer[VNodeStore, MutUntrackedOrigin],
     ):
         """Create a new keyed TemplateRef VNode in the store.
 
@@ -3534,7 +3534,7 @@ struct VNodeBuilder(Movable):
         """Return the VNode's index in the VNodeStore."""
         return self._vnode_idx
 
-    def store(self) -> UnsafePointer[VNodeStore, MutUntrackedOrigin]:
+    def store(self) -> Pointer[VNodeStore, MutUntrackedOrigin]:
         """Return the VNodeStore pointer."""
         return self._store
 

@@ -21,7 +21,7 @@ the 8-byte-aligned addresses cause SIGSEGV on SIMD-aligned loads/stores.
 Using UInt64 fields gives correct 8-byte alignment matching C.
 """
 
-from std.memory import UnsafePointer, unsafe_memset_zero, unsafe_memcpy
+from std.memory import Pointer, unsafe_memset_zero, unsafe_memcpy
 
 # ---------------------------------------------------------------------------
 # Wasmtime val kind constants (wasmtime_valkind_t)
@@ -75,18 +75,18 @@ comptime WASM_BYTE_VEC_SIZE = 16
 # Opaque pointer aliases — these wrap C types we never inspect directly
 # ---------------------------------------------------------------------------
 
-comptime EnginePtr = UnsafePointer[NoneType, MutUntrackedOrigin]
-comptime StorePtr = UnsafePointer[NoneType, MutUntrackedOrigin]
-comptime ContextPtr = UnsafePointer[NoneType, MutUntrackedOrigin]
-comptime ModulePtr = UnsafePointer[NoneType, MutUntrackedOrigin]
-comptime LinkerPtr = UnsafePointer[NoneType, MutUntrackedOrigin]
-comptime ErrorPtr = Optional[UnsafePointer[NoneType, MutUntrackedOrigin]]
-comptime TrapPtr = Optional[UnsafePointer[NoneType, MutUntrackedOrigin]]
-comptime FuncTypePtr = UnsafePointer[NoneType, MutUntrackedOrigin]
-comptime ValTypePtr = UnsafePointer[NoneType, MutUntrackedOrigin]
-comptime CallerPtr = UnsafePointer[NoneType, MutUntrackedOrigin]
-comptime GlobalTypePtr = UnsafePointer[NoneType, MutUntrackedOrigin]
-comptime ExternTypePtr = UnsafePointer[NoneType, MutUntrackedOrigin]
+comptime EnginePtr = Pointer[NoneType, MutUntrackedOrigin]
+comptime StorePtr = Pointer[NoneType, MutUntrackedOrigin]
+comptime ContextPtr = Pointer[NoneType, MutUntrackedOrigin]
+comptime ModulePtr = Pointer[NoneType, MutUntrackedOrigin]
+comptime LinkerPtr = Pointer[NoneType, MutUntrackedOrigin]
+comptime ErrorPtr = Optional[Pointer[NoneType, MutUntrackedOrigin]]
+comptime TrapPtr = Optional[Pointer[NoneType, MutUntrackedOrigin]]
+comptime FuncTypePtr = Pointer[NoneType, MutUntrackedOrigin]
+comptime ValTypePtr = Pointer[NoneType, MutUntrackedOrigin]
+comptime CallerPtr = Pointer[NoneType, MutUntrackedOrigin]
+comptime GlobalTypePtr = Pointer[NoneType, MutUntrackedOrigin]
+comptime ExternTypePtr = Pointer[NoneType, MutUntrackedOrigin]
 
 
 # ---------------------------------------------------------------------------
@@ -156,11 +156,11 @@ struct WasmtimeVal(TrivialRegisterPassable):
     @always_inline
     def get_f32(self) -> Float32:
         var bits = Int32(Int(self._w1) & 0xFFFFFFFF)
-        return UnsafePointer(to=bits).bitcast[Float32]()[]
+        return Pointer(to=bits).bitcast[Float32]()[]
 
     @always_inline
     def set_f32(mut self, value: Float32):
-        var bits = UnsafePointer(to=value).bitcast[Int32]()[]
+        var bits = Pointer(to=value).bitcast[Int32]()[]
         self._w1 = UInt64(Int64(bits) & 0xFFFFFFFF)
 
     # -- f64 accessor (offset 8, stored in _w1) --
@@ -168,11 +168,11 @@ struct WasmtimeVal(TrivialRegisterPassable):
     @always_inline
     def get_f64(self) -> Float64:
         var w = self._w1
-        return UnsafePointer(to=w).bitcast[Float64]()[]
+        return Pointer(to=w).bitcast[Float64]()[]
 
     @always_inline
     def set_f64(mut self, value: Float64):
-        self._w1 = UnsafePointer(to=value).bitcast[UInt64]()[]
+        self._w1 = Pointer(to=value).bitcast[UInt64]()[]
 
     # -- Convenience constructors --
 
@@ -395,12 +395,12 @@ struct WasmByteVec(TrivialRegisterPassable):
     """Mirrors wasm_byte_vec_t (16 bytes)."""
 
     var size: Int
-    var data: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var data: Pointer[UInt8, MutUntrackedOrigin]
 
     @always_inline
     def __init__(out self):
         self.size = 0
-        self.data = UnsafePointer[UInt8, MutUntrackedOrigin].unsafe_dangling()
+        self.data = Pointer[UInt8, MutUntrackedOrigin].unsafe_dangling()
 
 
 # ---------------------------------------------------------------------------
@@ -418,14 +418,12 @@ struct WasmValtypeVec(TrivialRegisterPassable):
     """Mirrors wasm_valtype_vec_t (16 bytes)."""
 
     var size: Int
-    var data: UnsafePointer[ValTypePtr, MutUntrackedOrigin]
+    var data: Pointer[ValTypePtr, MutUntrackedOrigin]
 
     @always_inline
     def __init__(out self):
         self.size = 0
-        self.data = UnsafePointer[
-            ValTypePtr, MutUntrackedOrigin
-        ].unsafe_dangling()
+        self.data = Pointer[ValTypePtr, MutUntrackedOrigin].unsafe_dangling()
 
 
 # ---------------------------------------------------------------------------
@@ -446,15 +444,15 @@ struct WasmValtypeVec(TrivialRegisterPassable):
 # ---------------------------------------------------------------------------
 
 comptime WasmtimeCallback = def(
-    UnsafePointer[NoneType, MutUntrackedOrigin],  # env
-    UnsafePointer[NoneType, MutUntrackedOrigin],  # caller
-    UnsafePointer[WasmtimeVal, MutUntrackedOrigin],  # args
+    Pointer[NoneType, MutUntrackedOrigin],  # env
+    Pointer[NoneType, MutUntrackedOrigin],  # caller
+    Pointer[WasmtimeVal, MutUntrackedOrigin],  # args
     Int,  # nargs
-    UnsafePointer[WasmtimeVal, MutUntrackedOrigin],  # results
+    Pointer[WasmtimeVal, MutUntrackedOrigin],  # results
     Int,  # nresults
 ) thin abi("C") -> TrapPtr
 
 # Finalizer callback: void (*)(void*)
 comptime FinalizerCallback = def(
-    UnsafePointer[NoneType, MutUntrackedOrigin]
+    Pointer[NoneType, MutUntrackedOrigin]
 ) thin abi("C") -> None

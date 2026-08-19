@@ -19,7 +19,7 @@ Validates ChildComponent via the child-counter app (cc_*) WASM exports:
   - destroy with dirty (unflushed) state does not crash
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
@@ -43,7 +43,7 @@ def _load() raises -> WasmInstance:
 
 
 def _create_cc(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a child-counter app and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("cc_init", no_args()))
@@ -53,7 +53,7 @@ def _create_cc(
 
 
 def _destroy_cc(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -66,7 +66,7 @@ def _destroy_cc(
 
 
 def test_cc_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """cc_init returns a non-zero app pointer."""
     var app = Int(w[].call_i64("cc_init", no_args()))
@@ -75,7 +75,7 @@ def test_cc_init_creates_app(
 
 
 def test_cc_init_count_starts_at_zero(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Initial count value should be 0."""
     var app = Int(w[].call_i64("cc_init", no_args()))
@@ -85,7 +85,7 @@ def test_cc_init_count_starts_at_zero(
 
 
 def test_cc_parent_child_scope_differ(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child scope ID should differ from parent scope ID."""
     var app = Int(w[].call_i64("cc_init", no_args()))
@@ -98,7 +98,7 @@ def test_cc_parent_child_scope_differ(
 
 
 def test_cc_parent_child_tmpl_differ(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child template ID should differ from parent template ID."""
     var app = Int(w[].call_i64("cc_init", no_args()))
@@ -111,7 +111,7 @@ def test_cc_parent_child_tmpl_differ(
 
 
 def test_cc_child_no_events(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child component has no event bindings (display only)."""
     var app = Int(w[].call_i64("cc_init", no_args()))
@@ -121,7 +121,7 @@ def test_cc_child_no_events(
 
 
 def test_cc_handler_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """At least 2 handlers registered (increment + decrement)."""
     var app = Int(w[].call_i64("cc_init", no_args()))
@@ -131,7 +131,7 @@ def test_cc_handler_count(
 
 
 def test_cc_incr_decr_handlers_valid(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Increment and decrement handlers are valid and distinct."""
     var app = Int(w[].call_i64("cc_init", no_args()))
@@ -147,7 +147,7 @@ def test_cc_incr_decr_handlers_valid(
 
 
 def test_cc_rebuild_produces_mutations(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """cc_rebuild produces a non-zero mutation buffer."""
     var app = Int(w[].call_i64("cc_init", no_args()))
@@ -159,7 +159,7 @@ def test_cc_rebuild_produces_mutations(
 
 
 def test_cc_child_mounted_after_rebuild(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child should be mounted in the DOM after rebuild."""
     var tup = _create_cc(w)
@@ -171,7 +171,7 @@ def test_cc_child_mounted_after_rebuild(
 
 
 def test_cc_child_has_rendered_after_rebuild(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child should have rendered at least once after rebuild."""
     var tup = _create_cc(w)
@@ -186,7 +186,7 @@ def test_cc_child_has_rendered_after_rebuild(
 
 
 def test_cc_increment(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Handle event increment updates count signal."""
     var tup = _create_cc(w)
@@ -205,7 +205,7 @@ def test_cc_increment(
 
 
 def test_cc_decrement(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Handle event decrement updates count signal."""
     var tup = _create_cc(w)
@@ -220,7 +220,7 @@ def test_cc_decrement(
 
 
 def test_cc_mixed_incr_decr(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Mixed increment/decrement produces correct count."""
     var tup = _create_cc(w)
@@ -245,7 +245,7 @@ def test_cc_mixed_incr_decr(
 
 
 def test_cc_flush_after_increment(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """cc_flush produces mutations after increment."""
     var tup = _create_cc(w)
@@ -262,7 +262,7 @@ def test_cc_flush_after_increment(
 
 
 def test_cc_flush_returns_zero_when_clean(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """cc_flush returns 0 when nothing is dirty."""
     var tup = _create_cc(w)
@@ -276,7 +276,7 @@ def test_cc_flush_returns_zero_when_clean(
 
 
 def test_cc_multiple_flush_cycles(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Multiple flush cycles produce mutations each time."""
     var tup = _create_cc(w)
@@ -301,7 +301,7 @@ def test_cc_multiple_flush_cycles(
 
 
 def test_cc_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy after use does not crash."""
     var tup = _create_cc(w)
@@ -317,7 +317,7 @@ def test_cc_destroy_does_not_crash(
 
 
 def test_cc_destroy_with_dirty_state(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy with unflushed dirty state does not crash."""
     var tup = _create_cc(w)
@@ -332,7 +332,7 @@ def test_cc_destroy_with_dirty_state(
 
 
 def test_cc_destroy_recreate_cycle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy → recreate cycle works correctly (clean state)."""
     # First instance: create, increment, destroy
@@ -368,7 +368,7 @@ def test_cc_destroy_recreate_cycle(
 
 
 def test_cc_ten_create_destroy_cycles(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """10 create/destroy cycles with state verification."""
     for cycle in range(10):
@@ -395,7 +395,7 @@ def test_cc_ten_create_destroy_cycles(
 
 
 def test_cc_rapid_increments(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Rapid 50 increments produce correct final count."""
     var tup = _create_cc(w)
@@ -415,7 +415,7 @@ def test_cc_rapid_increments(
 
 
 def test_cc_child_scope_survives_flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child scope and template IDs remain valid across multiple flushes."""
     var tup = _create_cc(w)

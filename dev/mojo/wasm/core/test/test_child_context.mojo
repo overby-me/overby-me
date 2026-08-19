@@ -24,7 +24,7 @@ Validates ChildComponentContext via the ChildContextTestApp (cct_*) WASM exports
   - rapid 20 increments produce correct count
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
@@ -47,7 +47,7 @@ def _load() raises -> WasmInstance:
 
 
 def _create_cct(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a child-context test app and mount it.  Returns (app_ptr, buf_ptr).
     """
@@ -58,7 +58,7 @@ def _create_cct(
 
 
 def _destroy_cct(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -68,7 +68,7 @@ def _destroy_cct(
 
 
 def _flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -80,7 +80,7 @@ def _flush(
 
 
 def test_cct_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero app pointer."""
     var app = Int(w[].call_i64("cct_init", no_args()))
@@ -92,7 +92,7 @@ def test_cct_init_creates_app(
 
 
 def test_cct_scopes_distinct(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child scope ID differs from parent scope ID."""
     var app = Int(w[].call_i64("cct_init", no_args()))
@@ -108,7 +108,7 @@ def test_cct_scopes_distinct(
 
 
 def test_cct_templates_distinct(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child template ID differs from parent template ID."""
     var app = Int(w[].call_i64("cct_init", no_args()))
@@ -124,7 +124,7 @@ def test_cct_templates_distinct(
 
 
 def test_cct_scope_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """App has exactly 2 live scopes (parent + child)."""
     var app = Int(w[].call_i64("cct_init", no_args()))
@@ -137,7 +137,7 @@ def test_cct_scope_count(
 
 
 def test_cct_child_signal_independent(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child's show_hex signal is independent from parent's count signal."""
     var app = Int(w[].call_i64("cct_init", no_args()))
@@ -152,7 +152,7 @@ def test_cct_child_signal_independent(
 
 
 def test_cct_child_signal_marks_child_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Toggling show_hex marks child dirty but not parent."""
     var result = _create_cct(w)
@@ -175,7 +175,7 @@ def test_cct_child_signal_marks_child_dirty(
 
 
 def test_cct_parent_signal_marks_parent_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Setting count marks parent dirty."""
     var result = _create_cct(w)
@@ -193,7 +193,7 @@ def test_cct_parent_signal_marks_parent_dirty(
 
 
 def test_cct_consumed_signal_key_matches_parent(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child's consumed count signal key should match parent's count signal key.
     """
@@ -208,7 +208,7 @@ def test_cct_consumed_signal_key_matches_parent(
 
 
 def test_cct_rebuild_produces_mutations(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Rebuild produces a non-zero mutation buffer."""
     var app = Int(w[].call_i64("cct_init", no_args()))
@@ -223,7 +223,7 @@ def test_cct_rebuild_produces_mutations(
 
 
 def test_cct_child_mounted_after_rebuild(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child should be mounted after rebuild."""
     var result = _create_cct(w)
@@ -237,7 +237,7 @@ def test_cct_child_mounted_after_rebuild(
 
 
 def test_cct_child_has_rendered_after_rebuild(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Child should have rendered after rebuild."""
     var result = _create_cct(w)
@@ -251,7 +251,7 @@ def test_cct_child_has_rendered_after_rebuild(
 
 
 def test_cct_flush_after_increment(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush after increment produces non-zero mutations."""
     var result = _create_cct(w)
@@ -271,7 +271,7 @@ def test_cct_flush_after_increment(
 
 
 def test_cct_flush_returns_zero_when_clean(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush returns 0 when nothing is dirty."""
     var result = _create_cct(w)
@@ -286,7 +286,7 @@ def test_cct_flush_returns_zero_when_clean(
 
 
 def test_cct_toggle_hex(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Toggle hex changes show_hex state."""
     var result = _create_cct(w)
@@ -307,7 +307,7 @@ def test_cct_toggle_hex(
 
 
 def test_cct_mixed_increment_toggle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Mixed increment + toggle both apply correctly."""
     var result = _create_cct(w)
@@ -334,7 +334,7 @@ def test_cct_mixed_increment_toggle(
 
 
 def test_cct_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Creating and destroying the app does not crash."""
     var result = _create_cct(w)
@@ -347,7 +347,7 @@ def test_cct_destroy_does_not_crash(
 
 
 def test_cct_destroy_recreate_cycle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy then recreate produces a fresh app with correct initial state."""
     var result1 = _create_cct(w)
@@ -371,7 +371,7 @@ def test_cct_destroy_recreate_cycle(
 
 
 def test_cct_ten_create_destroy_cycles(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Ten create/destroy cycles work without leaks or crashes."""
     for i in range(10):
@@ -387,7 +387,7 @@ def test_cct_ten_create_destroy_cycles(
 
 
 def test_cct_rapid_increments(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Twenty rapid increments + flushes produce correct final count."""
     var result = _create_cct(w)
@@ -405,7 +405,7 @@ def test_cct_rapid_increments(
 
 
 def test_cct_initial_count_zero(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Initial count value should be 0."""
     var app = Int(w[].call_i64("cct_init", no_args()))
@@ -417,7 +417,7 @@ def test_cct_initial_count_zero(
 
 
 def test_cct_handler_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """At least 1 handler registered (increment)."""
     var app = Int(w[].call_i64("cct_init", no_args()))
@@ -430,7 +430,7 @@ def test_cct_handler_count(
 
 
 def test_cct_destroy_with_dirty_state(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroying app with unflushed dirty state does not crash."""
     var result = _create_cct(w)

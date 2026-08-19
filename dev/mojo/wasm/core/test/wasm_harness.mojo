@@ -29,7 +29,7 @@ Import signatures are derived from `wasm-objdump -j Import -x build/out.wasm`:
 """
 
 from std.collections import Dict
-from std.memory import UnsafePointer, unsafe_memcpy, unsafe_memset_zero, alloc
+from std.memory import Pointer, unsafe_memcpy, unsafe_memset_zero, alloc
 from std.pathlib import Path
 from std.ffi import OwnedDLHandle
 
@@ -236,8 +236,8 @@ struct SharedState(Movable):
 # Helper to get the SharedState from the env pointer.
 @always_inline
 def _state(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-) -> UnsafePointer[SharedState, MutUntrackedOrigin]:
+    env: Pointer[NoneType, MutUntrackedOrigin],
+) -> Pointer[SharedState, MutUntrackedOrigin]:
     return env.bitcast[SharedState]()
 
 
@@ -245,11 +245,11 @@ def _state(
 
 
 def _cb_aligned_alloc(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     var state = _state(env)
@@ -264,11 +264,11 @@ def _cb_aligned_alloc(
 
 
 def _cb_aligned_free(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     var state = _state(env)
@@ -281,11 +281,11 @@ def _cb_aligned_free(
 
 
 def _cb_fmaf(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     var x = args[0].get_f32()
@@ -301,11 +301,11 @@ def _cb_fmaf(
 
 
 def _cb_fminf(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     var x = args[0].get_f32()
@@ -319,11 +319,11 @@ def _cb_fminf(
 
 
 def _cb_fmaxf(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     var x = args[0].get_f32()
@@ -337,11 +337,11 @@ def _cb_fmaxf(
 
 
 def _cb_fma(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     var x = args[0].get_f64()
@@ -356,11 +356,11 @@ def _cb_fma(
 
 
 def _cb_fmin(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     var x = args[0].get_f64()
@@ -374,11 +374,11 @@ def _cb_fmin(
 
 
 def _cb_fmax(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     var x = args[0].get_f64()
@@ -396,11 +396,11 @@ def _cb_fmax(
 
 
 def _cb_dup(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     results[0] = WasmtimeVal.from_i32(1)
@@ -411,11 +411,11 @@ def _cb_dup(
 
 
 def _cb_fdopen(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     results[0] = WasmtimeVal.from_i64(1)
@@ -426,11 +426,11 @@ def _cb_fdopen(
 
 
 def _cb_fflush(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     results[0] = WasmtimeVal.from_i32(1)
@@ -441,11 +441,11 @@ def _cb_fflush(
 
 
 def _cb_fclose(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     results[0] = WasmtimeVal.from_i32(1)
@@ -456,11 +456,11 @@ def _cb_fclose(
 
 
 def _cb_fprintf(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     results[0] = WasmtimeVal.from_i32(0)
@@ -471,11 +471,11 @@ def _cb_fprintf(
 
 
 def _cb_write(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     var state = _state(env)
@@ -521,11 +521,11 @@ def _cb_write(
 
 
 def _cb_performance_now(
-    env: UnsafePointer[NoneType, MutUntrackedOrigin],
-    caller: UnsafePointer[NoneType, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
 ) abi("C") -> TrapPtr:
     var state = _state(env)
@@ -556,7 +556,7 @@ struct WasmInstance(Movable):
     var _linker: Linker
     var _instance: WasmtimeInstance
     var _memory: WasmtimeMemory
-    var _state_ptr: UnsafePointer[SharedState, MutUntrackedOrigin]
+    var _state_ptr: Pointer[SharedState, MutUntrackedOrigin]
 
     def __init__(out self, wasm_path: String) raises:
         """Create a WasmInstance by loading and instantiating the WASM binary.
@@ -1436,11 +1436,11 @@ def no_args() -> List[WasmtimeVal]:
 # ---------------------------------------------------------------------------
 
 
-def get_instance() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def get_instance() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     """Create a new WasmInstance and return a heap pointer to it.
 
     Returns:
-        UnsafePointer to a freshly allocated WasmInstance.
+        Pointer to a freshly allocated WasmInstance.
 
     Raises:
         Error: If the WASM binary cannot be loaded or instantiated.

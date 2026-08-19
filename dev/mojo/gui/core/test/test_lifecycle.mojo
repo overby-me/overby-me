@@ -9,7 +9,7 @@ Validates the full create→use→destroy→recreate loop at the WASM level:
   - double destroy safety (second destroy should not trap)
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
@@ -33,7 +33,7 @@ def _load() raises -> WasmInstance:
 
 
 def test_counter_create_use_destroy(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Counter init → increment → flush → destroy completes without error."""
     var app = Int(w[].call_i64("counter_init", no_args()))
@@ -67,7 +67,7 @@ def test_counter_create_use_destroy(
 
 
 def test_counter_destroy_recreate_cycle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Counter create→use→destroy→create→use cycle produces correct state."""
     # --- First instance ---
@@ -112,7 +112,7 @@ def test_counter_destroy_recreate_cycle(
 
 
 def test_counter_multiple_cycles_heap_bounded(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """10 counter create/destroy cycles — heap pointer stays bounded."""
     var stats_before = w[].heap_stats()
@@ -156,7 +156,7 @@ def test_counter_multiple_cycles_heap_bounded(
 
 
 def test_counter_destroy_with_dirty_state(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy counter with dirty (unflushed) state doesn't crash."""
     var app = Int(w[].call_i64("counter_init", no_args()))
@@ -177,7 +177,7 @@ def test_counter_destroy_with_dirty_state(
 
 
 def test_todo_create_destroy_cycle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Todo create→add items→destroy→create cycle produces clean slate."""
     # --- First instance ---
@@ -231,7 +231,7 @@ def test_todo_create_destroy_cycle(
 
 
 def test_todo_multiple_cycles_heap_bounded(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """5 todo create/add/destroy cycles — heap stays bounded."""
     var stats_before = w[].heap_stats()
@@ -271,7 +271,7 @@ def test_todo_multiple_cycles_heap_bounded(
 
 
 def test_bench_create_destroy_cycle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Bench create→rows→destroy→create→rows cycle produces correct counts."""
     var buf_cap = 8 * 1024 * 1024
@@ -306,7 +306,7 @@ def test_bench_create_destroy_cycle(
 
 
 def test_bench_warmup_pattern(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Bench warmup: create→1k→destroy→create→1k — heap stays bounded."""
     var buf_cap = 8 * 1024 * 1024
@@ -356,7 +356,7 @@ def test_bench_warmup_pattern(
 
 
 def test_free_list_integrity_across_destroys(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Verify aligned_free calls during destroy don't corrupt the free list.
 
@@ -404,7 +404,7 @@ def test_free_list_integrity_across_destroys(
 
 
 def test_interleaved_counter_todo(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Counter → destroy → todo → destroy → counter — all on same WASM instance.
     """

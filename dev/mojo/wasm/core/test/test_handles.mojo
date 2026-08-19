@@ -14,7 +14,7 @@
 #     on_input_set, vnode_builder, render_builder, mount, dispatch_event, flush,
 #     has_dirty, consume_dirty, diff, finalize, destroy
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from std.testing import assert_equal, assert_true, assert_false
 from signals import (
     Runtime,
@@ -51,22 +51,22 @@ from bridge import MutationWriter
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _create_runtime() -> UnsafePointer[Runtime, MutUntrackedOrigin]:
+def _create_runtime() -> Pointer[Runtime, MutUntrackedOrigin]:
     return create_runtime()
 
 
-def _destroy_runtime(rt: UnsafePointer[Runtime, MutUntrackedOrigin]):
+def _destroy_runtime(rt: Pointer[Runtime, MutUntrackedOrigin]):
     destroy_runtime(rt)
 
 
-def _alloc_writer() -> UnsafePointer[MutationWriter, MutUntrackedOrigin]:
+def _alloc_writer() -> Pointer[MutationWriter, MutUntrackedOrigin]:
     var buf_ptr = alloc[UInt8](8192)
     var writer_ptr = alloc[MutationWriter](1)
     writer_ptr.unsafe_write(MutationWriter(buf_ptr, 8192))
     return writer_ptr
 
 
-def _free_writer(writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin]):
+def _free_writer(writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin]):
     writer_ptr[0].buf.free()
     writer_ptr.unsafe_deinit_pointee()
     writer_ptr.free()

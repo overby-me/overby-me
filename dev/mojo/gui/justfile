@@ -9,8 +9,10 @@
 #
 # Shared examples (examples/) compile identically for both targets:
 #
-#   # Web (WASM):
-#   mojo build examples/counter/main.mojo --target wasm64-wasi -I core/src -I web/src -I examples
+#   # Web (WASM): the mojo driver has no WebAssembly TargetBackend, so the
+#   # web pipeline emits LLVM IR and retargets it with the SDK's own
+#   # version-matched llc + wasm-ld (see web/justfile).
+#   mojo build --emit llvm ... && llc --mtriple=wasm64-wasi ... && wasm-ld ...
 #
 #   # Desktop (native, Wayland-only):
 #   mojo build examples/counter/main.mojo -I core/src -I desktop/src -I examples

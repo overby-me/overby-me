@@ -49,7 +49,7 @@
 #           _ = blitz.step(blocking=True)
 #   blitz.destroy()
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from std.os import getenv
 from std.ffi import _DLHandle
 
@@ -210,12 +210,12 @@ struct Blitz(Movable):
     """
 
     var _lib: _DLHandle
-    var _ctx: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]]
+    var _ctx: Optional[Pointer[NoneType, MutUntrackedOrigin]]
 
     def __init__(
         out self,
         lib: _DLHandle,
-        ctx: UnsafePointer[NoneType, MutUntrackedOrigin],
+        ctx: Pointer[NoneType, MutUntrackedOrigin],
     ):
         """Private initializer. Use Blitz.create() instead."""
         self._lib = lib
@@ -256,7 +256,7 @@ struct Blitz(Movable):
         var debug_flag = Int32(1) if debug else Int32(0)
 
         var ctx = lib.call[
-            "mblitz_create", UnsafePointer[NoneType, MutUntrackedOrigin]
+            "mblitz_create", Pointer[NoneType, MutUntrackedOrigin]
         ](
             title_ptr,
             title_len,
@@ -402,7 +402,7 @@ struct Blitz(Movable):
     def append_children(
         self,
         parent_id: UInt32,
-        child_ids: UnsafePointer[UInt32, _],
+        child_ids: Pointer[UInt32, _],
         child_count: UInt32,
     ):
         """Append children to a parent element.
@@ -419,7 +419,7 @@ struct Blitz(Movable):
     def insert_before(
         self,
         anchor_id: UInt32,
-        new_ids: UnsafePointer[UInt32, _],
+        new_ids: Pointer[UInt32, _],
         new_count: UInt32,
     ):
         """Insert nodes before an anchor node.
@@ -436,7 +436,7 @@ struct Blitz(Movable):
     def insert_after(
         self,
         anchor_id: UInt32,
-        new_ids: UnsafePointer[UInt32, _],
+        new_ids: Pointer[UInt32, _],
         new_count: UInt32,
     ):
         """Insert nodes after an anchor node.
@@ -453,7 +453,7 @@ struct Blitz(Movable):
     def replace_with(
         self,
         old_id: UInt32,
-        new_ids: UnsafePointer[UInt32, _],
+        new_ids: Pointer[UInt32, _],
         new_count: UInt32,
     ):
         """Replace a node with new nodes.
@@ -530,7 +530,7 @@ struct Blitz(Movable):
     def node_at_path(
         self,
         start_id: UInt32,
-        path: UnsafePointer[UInt8, _],
+        path: Pointer[UInt8, _],
         path_len: UInt32,
     ) -> UInt32:
         """Navigate to a child at the given path from a starting node.
@@ -624,7 +624,7 @@ struct Blitz(Movable):
         """
         # Allocate output slots for each event field.
         # For the value pointer we use alloc[Int] (pointer-sized) because
-        # alloc[UnsafePointer[UInt8, _]] fails to infer the origin parameter
+        # alloc[Pointer[UInt8, _]] fails to infer the origin parameter
         # in Mojo 26.1. This follows the pattern from launcher.mojo.
         var out_handler_id = alloc[UInt32](1)
         var out_event_type = alloc[UInt8](1)
@@ -670,9 +670,7 @@ struct Blitz(Movable):
         if v_len > 0 and v_ptr_int != 0:
             var slot = alloc[Int](1)
             slot[0] = v_ptr_int
-            var v_ptr = slot.bitcast[
-                UnsafePointer[UInt8, MutUntrackedOrigin]
-            ]()[0]
+            var v_ptr = slot.bitcast[Pointer[UInt8, MutUntrackedOrigin]]()[0]
             slot.free()
             for i in range(v_len):
                 value += chr(Int(v_ptr[i]))

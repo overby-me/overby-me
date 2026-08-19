@@ -8,7 +8,7 @@
 # This is the Tier 1 (runtime) registry.  In Tier 2, compile-time
 # templates will be pre-registered as constants.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from .template import Template
 
 
@@ -85,16 +85,14 @@ struct TemplateRegistry(Movable):
 
     # ── Lookup ───────────────────────────────────────────────────────
 
-    def get_ptr(
-        self, id: UInt32
-    ) -> UnsafePointer[Template, MutUntrackedOrigin]:
+    def get_ptr(self, id: UInt32) -> Pointer[Template, MutUntrackedOrigin]:
         """Return a pointer to the template at `id`.
 
         The pointer is valid until the next mutation of the registry.
         Precondition: `id` < `count()`.
         """
         var ptr = self._templates.unsafe_ptr() + Int(id)
-        return UnsafePointer[Template, MutUntrackedOrigin](
+        return Pointer[Template, MutUntrackedOrigin](
             unsafe_from_address=Int(ptr)
         )
 

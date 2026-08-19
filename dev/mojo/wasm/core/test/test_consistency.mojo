@@ -10,7 +10,7 @@
 # Run with:
 #   mojo test test/test_consistency.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_true, assert_equal
 
 from wasm_harness import (
@@ -26,7 +26,7 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -52,9 +52,7 @@ def _gcd(var a: Int, var b: Int) -> Int:
 # ---------------------------------------------------------------------------
 
 
-def test_add_sub_inverse(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_add_sub_inverse(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     """sub(add(x, y), y) === x (add/sub inverse)."""
     var x = 17
     var y = 9
@@ -66,9 +64,7 @@ def test_add_sub_inverse(
     )
 
 
-def test_mul_div_inverse(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_mul_div_inverse(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     """div(mul(x, y), y) === x (mul/div inverse for exact division)."""
     var x = 6
     var y = 3
@@ -80,9 +76,7 @@ def test_mul_div_inverse(
     )
 
 
-def test_neg_neg_identity(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_neg_neg_identity(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     """neg(neg(x)) === x."""
     var inner = Int(w[].call_i32("neg_int32", args_i32(42)))
     assert_equal(
@@ -92,9 +86,7 @@ def test_neg_neg_identity(
     )
 
 
-def test_abs_neg_eq_abs(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_abs_neg_eq_abs(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     """abs(neg(x)) === abs(x) for positive x."""
     var neg7 = Int(w[].call_i32("neg_int32", args_i32(7)))
     var abs_neg = Int(w[].call_i32("abs_int32", args_i32(neg7)))
@@ -102,7 +94,7 @@ def test_abs_neg_eq_abs(
     assert_equal(abs_neg, abs_pos, "abs(neg(7)) === abs(7)")
 
 
-def test_min_le_max(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_min_le_max(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     """min(x, y) <= max(x, y)."""
     var a = 3
     var b = 7
@@ -116,7 +108,7 @@ def test_min_le_max(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_bitwise_identity_and_or_xor(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """(x & y) | (x ^ y) === x | y."""
     var x = 0b1100
@@ -128,9 +120,7 @@ def test_bitwise_identity_and_or_xor(
     assert_equal(lhs, rhs, "(x & y) | (x ^ y) === x | y")
 
 
-def test_shl_shr_roundtrip(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_shl_shr_roundtrip(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     """shr(shl(x, 4), 4) === x."""
     var x = 5
     var shifted = Int(w[].call_i32("shl_int32", args_i32_i32(x, 4)))
@@ -141,7 +131,7 @@ def test_shl_shr_roundtrip(
     )
 
 
-def test_de_morgan(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_de_morgan(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     """De Morgan: not(and(a,b)) === or(not(a), not(b))."""
     var a = 1
     var b = 0
@@ -153,7 +143,7 @@ def test_de_morgan(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(lhs, rhs, "De Morgan: not(and(a,b)) === or(not(a), not(b))")
 
 
-def test_gcd_scaling(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_gcd_scaling(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     """gcd(a*k, b*k) === k * gcd(a, b)."""
     var a = 6
     var b = 4
@@ -167,7 +157,7 @@ def test_gcd_scaling(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_fibonacci_recurrence(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """fib(n) === fib(n-1) + fib(n-2) for several values of n."""
     var ns: List[Int] = [5, 8, 12, 15]
@@ -184,7 +174,7 @@ def test_fibonacci_recurrence(
 
 
 def test_factorial_recurrence(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """factorial(n) === n * factorial(n-1) for n = 2..7."""
     var ns: List[Int] = [2, 3, 4, 5, 6, 7]
@@ -200,7 +190,7 @@ def test_factorial_recurrence(
 
 
 def test_string_concat_length(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """len(concat(a, b)) === len(a) + len(b)."""
     var a_ptr = w[].write_string_struct("foo")
@@ -216,7 +206,7 @@ def test_string_concat_length(
 
 
 def test_clamp_eq_max_lo_min_hi_x(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """clamp(x, lo, hi) === max(lo, min(hi, x)) for several values of x."""
     var lo = 0

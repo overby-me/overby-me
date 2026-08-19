@@ -50,7 +50,7 @@
 # and FragmentSlot (manages keyed lists), but for reusable sub-components
 # with their own template and scope.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from bridge import MutationWriter
 from arena import ElementIdAllocator
 from signals import Runtime
@@ -254,13 +254,13 @@ struct ChildRenderBuilder(Movable):
     var _vb: VNodeBuilder
     var _auto_bindings: List[ChildAutoBinding]
     var _events: List[ChildEventBinding]
-    var _runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var _runtime: Pointer[Runtime, MutUntrackedOrigin]
 
     def __init__(
         out self,
         var vb: VNodeBuilder,
         var auto_bindings: List[ChildAutoBinding],
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ):
         """Construct with auto-bindings (events + value bindings)."""
         self._vb = vb^
@@ -277,9 +277,7 @@ struct ChildRenderBuilder(Movable):
         self._vb = vb^
         self._auto_bindings = List[ChildAutoBinding]()
         self._events = events^
-        self._runtime = UnsafePointer[
-            Runtime, MutUntrackedOrigin
-        ].unsafe_dangling()
+        self._runtime = Pointer[Runtime, MutUntrackedOrigin].unsafe_dangling()
 
     def __init__(out self, *, deinit move: Self):
         self._vb = move._vb^
@@ -473,8 +471,8 @@ struct ChildComponent(Copyable, Movable):
 
     def render_builder(
         self,
-        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        store: Pointer[VNodeStore, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ) -> ChildRenderBuilder:
         """Create a ChildRenderBuilder for this component's template.
 
@@ -496,7 +494,7 @@ struct ChildComponent(Copyable, Movable):
 
     def vnode_builder(
         self,
-        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+        store: Pointer[VNodeStore, MutUntrackedOrigin],
     ) -> VNodeBuilder:
         """Create a raw VNodeBuilder for this component's template.
 
@@ -516,10 +514,10 @@ struct ChildComponent(Copyable, Movable):
 
     def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-        eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-        rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
-        store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+        eid_ptr: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+        rt_ptr: Pointer[Runtime, MutUntrackedOrigin],
+        store_ptr: Pointer[VNodeStore, MutUntrackedOrigin],
         new_vnode_idx: UInt32,
     ):
         """Flush the child: create or diff its VNode in the DOM.
@@ -547,10 +545,10 @@ struct ChildComponent(Copyable, Movable):
 
     def flush_via_context(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-        eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
-        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+        eid_alloc: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
+        store: Pointer[VNodeStore, MutUntrackedOrigin],
         new_vnode_idx: UInt32,
     ):
         """Flush the child using context pointers (convenience alias).
@@ -569,10 +567,10 @@ struct ChildComponent(Copyable, Movable):
 
     def flush_empty(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-        eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-        rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
-        store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+        eid_ptr: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+        rt_ptr: Pointer[Runtime, MutUntrackedOrigin],
+        store_ptr: Pointer[VNodeStore, MutUntrackedOrigin],
     ):
         """Hide the child: remove its DOM content, restore placeholder.
 
@@ -607,7 +605,7 @@ struct ChildComponent(Copyable, Movable):
 
     def is_dirty(
         self,
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ) -> Bool:
         """Check if the child's scope is dirty.
 
@@ -647,7 +645,7 @@ struct ChildComponent(Copyable, Movable):
 
     def destroy(
         self,
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ):
         """Destroy the child scope and clean up its handlers.
 

@@ -119,7 +119,7 @@
 #                 return True
 #             return False
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from mutations import CreateEngine
 from events import HandlerEntry
@@ -474,7 +474,7 @@ struct TodoApp(Movable):
         return vb.index()
 
 
-def todo_app_init() -> UnsafePointer[TodoApp, MutUntrackedOrigin]:
+def todo_app_init() -> Pointer[TodoApp, MutUntrackedOrigin]:
     """Initialize the todo app.  Returns a pointer to the app state.
 
     All setup happens in TodoApp.__init__() — this function just
@@ -485,7 +485,7 @@ def todo_app_init() -> UnsafePointer[TodoApp, MutUntrackedOrigin]:
     return app_ptr
 
 
-def todo_app_destroy(app_ptr: UnsafePointer[TodoApp, MutUntrackedOrigin]):
+def todo_app_destroy(app_ptr: Pointer[TodoApp, MutUntrackedOrigin]):
     """Destroy the todo app and free all resources."""
     app_ptr[0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
@@ -494,7 +494,7 @@ def todo_app_destroy(app_ptr: UnsafePointer[TodoApp, MutUntrackedOrigin]):
 
 def todo_app_rebuild(
     mut app: TodoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the todo app.
 
@@ -556,7 +556,7 @@ def todo_app_rebuild(
 
 def todo_app_flush(
     mut app: TodoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates after a list mutation or input clear.
 

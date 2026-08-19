@@ -9,7 +9,7 @@
 # The arena does not impose any hierarchy — parent/child relationships
 # are tracked by ScopeState.parent_id and ScopeState.height.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from .scope import ScopeState
 
 
@@ -128,9 +128,7 @@ struct ScopeArena(Movable):
 
     # ── Access ───────────────────────────────────────────────────────
 
-    def get_ptr(
-        self, id: UInt32
-    ) -> UnsafePointer[ScopeState, MutUntrackedOrigin]:
+    def get_ptr(self, id: UInt32) -> Pointer[ScopeState, MutUntrackedOrigin]:
         """Return a pointer to the ScopeState at `id`.
 
         The caller must ensure `id` refers to a live scope.

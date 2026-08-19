@@ -194,7 +194,7 @@
 #                 # select / remove
 #             return False
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.ffi import external_call
 from bridge import MutationWriter
 from mutations import CreateEngine
@@ -889,7 +889,7 @@ struct BenchmarkApp(GuiApp):
 
     def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Initial render (mount) of the benchmark app (GuiApp trait method).
 
@@ -951,7 +951,7 @@ struct BenchmarkApp(GuiApp):
 
     def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Re-render dirty scopes and write update mutations (GuiApp trait method).
 

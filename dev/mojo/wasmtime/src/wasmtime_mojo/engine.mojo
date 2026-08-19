@@ -12,7 +12,7 @@ Usage:
     var cached_engine = Engine(cache=True)
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from ._types import EnginePtr
 from ._lib import (

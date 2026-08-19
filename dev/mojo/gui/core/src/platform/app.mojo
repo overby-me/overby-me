@@ -33,7 +33,7 @@
 # Usage by renderer implementors:
 #
 #     struct MyRenderer(PlatformApp):
-#         fn flush_mutations(mut self, buf: UnsafePointer[UInt8, _], length: Int):
+#         fn flush_mutations(mut self, buf: Pointer[UInt8, _], length: Int):
 #             # Send the mutation buffer to the rendering backend
 #             ...
 #
@@ -53,7 +53,7 @@
 #             # Return True if the application should exit
 #             ...
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -103,9 +103,7 @@ trait PlatformApp(Movable):
         """
         ...
 
-    def flush_mutations(
-        mut self, buf: UnsafePointer[UInt8, _], length: Int
-    ) raises:
+    def flush_mutations(mut self, buf: Pointer[UInt8, _], length: Int) raises:
         """Deliver a completed mutation buffer to the renderer.
 
         Args:

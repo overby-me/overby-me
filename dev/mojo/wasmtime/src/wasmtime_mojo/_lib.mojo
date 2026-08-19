@@ -8,7 +8,7 @@ The OwnedDLHandle is loaded lazily on first use via `get_lib()`.
 
 from std.os import getenv
 from std.ffi import OwnedDLHandle
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 
 from ._types import (
     EnginePtr,
@@ -41,9 +41,9 @@ from ._types import (
 @always_inline
 def _as_ext[
     T: AnyType, origin: Origin
-](ptr: UnsafePointer[T, origin]) -> UnsafePointer[T, MutUntrackedOrigin]:
-    """Cast any UnsafePointer to MutUntrackedOrigin for FFI calls."""
-    return UnsafePointer[T, MutUntrackedOrigin](unsafe_from_address=Int(ptr))
+](ptr: Pointer[T, origin]) -> Pointer[T, MutUntrackedOrigin]:
+    """Cast any Pointer to MutUntrackedOrigin for FFI calls."""
+    return Pointer[T, MutUntrackedOrigin](unsafe_from_address=Int(ptr))
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +131,7 @@ def wasm_engine_delete(engine: EnginePtr) raises:
 # Config (for cache support)
 # ═══════════════════════════════════════════════════════════════════════════
 
-comptime ConfigPtr = UnsafePointer[NoneType, MutUntrackedOrigin]
+comptime ConfigPtr = Pointer[NoneType, MutUntrackedOrigin]
 
 
 def wasm_config_new() raises -> ConfigPtr:
@@ -150,7 +150,7 @@ def wasm_config_delete(config: ConfigPtr) raises:
 
 def wasmtime_config_cache_config_load(
     config: ConfigPtr,
-    path: Optional[UnsafePointer[UInt8, MutUntrackedOrigin]],
+    path: Optional[Pointer[UInt8, MutUntrackedOrigin]],
 ) raises -> ErrorPtr:
     """Load cache configuration.
 
@@ -180,8 +180,8 @@ def wasm_engine_new_with_config(config: ConfigPtr) raises -> EnginePtr:
 
 def wasmtime_store_new(
     engine: EnginePtr,
-    data: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]],
-    finalizer: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]],
+    data: Optional[Pointer[NoneType, MutUntrackedOrigin]],
+    finalizer: Optional[Pointer[NoneType, MutUntrackedOrigin]],
 ) raises -> StorePtr:
     """Create a new wasmtime store."""
     var lib = get_lib()
@@ -210,9 +210,9 @@ def wasmtime_store_context(store: StorePtr) raises -> ContextPtr:
 
 def wasmtime_module_new(
     engine: EnginePtr,
-    wasm: UnsafePointer[UInt8, MutUntrackedOrigin],
+    wasm: Pointer[UInt8, MutUntrackedOrigin],
     wasm_len: Int,
-    ret: UnsafePointer[ModulePtr, MutUntrackedOrigin],
+    ret: Pointer[ModulePtr, MutUntrackedOrigin],
 ) raises -> ErrorPtr:
     """Compile a WASM binary into a module."""
     var lib = get_lib()
@@ -229,7 +229,7 @@ def wasmtime_module_delete(module: ModulePtr) raises:
 
 def wasmtime_module_serialize(
     module: ModulePtr,
-    ret: UnsafePointer[WasmByteVec, MutUntrackedOrigin],
+    ret: Pointer[WasmByteVec, MutUntrackedOrigin],
 ) raises -> ErrorPtr:
     """Serialize a compiled module to bytes.
 
@@ -242,8 +242,8 @@ def wasmtime_module_serialize(
 
 def wasmtime_module_deserialize_file(
     engine: EnginePtr,
-    path: UnsafePointer[UInt8, MutUntrackedOrigin],
-    ret: UnsafePointer[ModulePtr, MutUntrackedOrigin],
+    path: Pointer[UInt8, MutUntrackedOrigin],
+    ret: Pointer[ModulePtr, MutUntrackedOrigin],
 ) raises -> ErrorPtr:
     """Deserialize a pre-compiled module directly from a file.
 
@@ -276,14 +276,14 @@ def wasmtime_linker_delete(linker: LinkerPtr) raises:
 
 def wasmtime_linker_define_func(
     linker: LinkerPtr,
-    module_name: UnsafePointer[UInt8, MutUntrackedOrigin],
+    module_name: Pointer[UInt8, MutUntrackedOrigin],
     module_name_len: Int,
-    func_name: UnsafePointer[UInt8, MutUntrackedOrigin],
+    func_name: Pointer[UInt8, MutUntrackedOrigin],
     func_name_len: Int,
     func_type: FuncTypePtr,
     callback: WasmtimeCallback,
-    env: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]],
-    finalizer: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]],
+    env: Optional[Pointer[NoneType, MutUntrackedOrigin]],
+    finalizer: Optional[Pointer[NoneType, MutUntrackedOrigin]],
 ) raises -> ErrorPtr:
     """Define a host function in the linker."""
     var lib = get_lib()
@@ -305,8 +305,8 @@ def wasmtime_linker_instantiate(
     linker: LinkerPtr,
     context: ContextPtr,
     module: ModulePtr,
-    instance: UnsafePointer[WasmtimeInstance, MutUntrackedOrigin],
-    trap: UnsafePointer[TrapPtr, MutUntrackedOrigin],
+    instance: Pointer[WasmtimeInstance, MutUntrackedOrigin],
+    trap: Pointer[TrapPtr, MutUntrackedOrigin],
 ) raises -> ErrorPtr:
     """Instantiate a module using the linker definitions."""
     var lib = get_lib()
@@ -321,10 +321,10 @@ def wasmtime_linker_instantiate(
 
 def wasmtime_instance_export_get(
     context: ContextPtr,
-    instance: UnsafePointer[WasmtimeInstance, MutUntrackedOrigin],
-    name: UnsafePointer[UInt8, MutUntrackedOrigin],
+    instance: Pointer[WasmtimeInstance, MutUntrackedOrigin],
+    name: Pointer[UInt8, MutUntrackedOrigin],
     name_len: Int,
-    item: UnsafePointer[WasmtimeExtern, MutUntrackedOrigin],
+    item: Pointer[WasmtimeExtern, MutUntrackedOrigin],
 ) raises -> Bool:
     """Look up an export from an instance by name."""
     var lib = get_lib()
@@ -339,12 +339,12 @@ def wasmtime_instance_export_get(
 
 def wasmtime_func_call(
     context: ContextPtr,
-    func: UnsafePointer[WasmtimeFunc, MutUntrackedOrigin],
-    args: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    func: Pointer[WasmtimeFunc, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nargs: Int,
-    results: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
     nresults: Int,
-    trap: UnsafePointer[TrapPtr, MutUntrackedOrigin],
+    trap: Pointer[TrapPtr, MutUntrackedOrigin],
 ) raises -> ErrorPtr:
     """Call a WASM function."""
     var lib = get_lib()
@@ -359,8 +359,8 @@ def wasmtime_func_call(
 
 def wasmtime_global_get(
     context: ContextPtr,
-    global_: UnsafePointer[WasmtimeGlobal, MutUntrackedOrigin],
-    result: UnsafePointer[WasmtimeVal, MutUntrackedOrigin],
+    global_: Pointer[WasmtimeGlobal, MutUntrackedOrigin],
+    result: Pointer[WasmtimeVal, MutUntrackedOrigin],
 ) raises:
     """Read the value of a WASM global."""
     var lib = get_lib()
@@ -375,11 +375,11 @@ def wasmtime_global_get(
 
 def wasmtime_memory_data(
     context: ContextPtr,
-    memory: UnsafePointer[WasmtimeMemory, MutUntrackedOrigin],
-) raises -> UnsafePointer[UInt8, MutUntrackedOrigin]:
+    memory: Pointer[WasmtimeMemory, MutUntrackedOrigin],
+) raises -> Pointer[UInt8, MutUntrackedOrigin]:
     """Get a pointer to WASM linear memory data."""
     var lib = get_lib()
-    var f = lib.get_function[UnsafePointer[UInt8, MutUntrackedOrigin]](
+    var f = lib.get_function[Pointer[UInt8, MutUntrackedOrigin]](
         "wasmtime_memory_data"
     )
     return f(context, memory)
@@ -387,7 +387,7 @@ def wasmtime_memory_data(
 
 def wasmtime_memory_data_size(
     context: ContextPtr,
-    memory: UnsafePointer[WasmtimeMemory, MutUntrackedOrigin],
+    memory: Pointer[WasmtimeMemory, MutUntrackedOrigin],
 ) raises -> Int:
     """Get the current size of WASM linear memory in bytes."""
     var lib = get_lib()
@@ -415,8 +415,8 @@ def wasm_valtype_delete(vt: ValTypePtr) raises:
 
 
 def wasm_functype_new(
-    params: UnsafePointer[WasmValtypeVec, MutUntrackedOrigin],
-    results: UnsafePointer[WasmValtypeVec, MutUntrackedOrigin],
+    params: Pointer[WasmValtypeVec, MutUntrackedOrigin],
+    results: Pointer[WasmValtypeVec, MutUntrackedOrigin],
 ) raises -> FuncTypePtr:
     """Create a function type from param and result type vecs.
 
@@ -436,9 +436,9 @@ def wasm_functype_delete(ft: FuncTypePtr) raises:
 
 
 def wasm_valtype_vec_new(
-    result: UnsafePointer[WasmValtypeVec, MutUntrackedOrigin],
+    result: Pointer[WasmValtypeVec, MutUntrackedOrigin],
     size: Int,
-    data: UnsafePointer[ValTypePtr, MutUntrackedOrigin],
+    data: Pointer[ValTypePtr, MutUntrackedOrigin],
 ) raises:
     """Create a new valtype vec from an array of valtype pointers."""
     var lib = get_lib()
@@ -447,7 +447,7 @@ def wasm_valtype_vec_new(
 
 
 def wasm_valtype_vec_new_empty(
-    result: UnsafePointer[WasmValtypeVec, MutUntrackedOrigin]
+    result: Pointer[WasmValtypeVec, MutUntrackedOrigin]
 ) raises:
     """Create a new empty valtype vec."""
     var lib = get_lib()
@@ -456,7 +456,7 @@ def wasm_valtype_vec_new_empty(
 
 
 def wasm_valtype_vec_delete(
-    vec: UnsafePointer[WasmValtypeVec, MutUntrackedOrigin]
+    vec: Pointer[WasmValtypeVec, MutUntrackedOrigin]
 ) raises:
     """Delete a valtype vec."""
     var lib = get_lib()
@@ -471,7 +471,7 @@ def wasm_valtype_vec_delete(
 
 def wasmtime_error_message(
     error: ErrorPtr,
-    message: UnsafePointer[WasmByteVec, MutUntrackedOrigin],
+    message: Pointer[WasmByteVec, MutUntrackedOrigin],
 ) raises:
     """Extract the error message from a wasmtime error."""
     var lib = get_lib()
@@ -486,9 +486,7 @@ def wasmtime_error_delete(error: ErrorPtr) raises:
     f(error)
 
 
-def wasm_byte_vec_delete(
-    vec: UnsafePointer[WasmByteVec, MutUntrackedOrigin]
-) raises:
+def wasm_byte_vec_delete(vec: Pointer[WasmByteVec, MutUntrackedOrigin]) raises:
     """Delete a byte vec."""
     var lib = get_lib()
     var f = lib.get_function[NoneType]("wasm_byte_vec_delete")
@@ -502,7 +500,7 @@ def wasm_byte_vec_delete(
 
 def wasm_trap_message(
     trap: TrapPtr,
-    message: UnsafePointer[WasmByteVec, MutUntrackedOrigin],
+    message: Pointer[WasmByteVec, MutUntrackedOrigin],
 ) raises:
     """Extract the message from a trap."""
     var lib = get_lib()
@@ -533,7 +531,7 @@ def make_functype(
     """
     # Build params vec
     var params = WasmValtypeVec()
-    var params_ptr = _as_ext(UnsafePointer(to=params))
+    var params_ptr = _as_ext(Pointer(to=params))
     if len(param_kinds) == 0:
         wasm_valtype_vec_new_empty(params_ptr)
     else:
@@ -547,7 +545,7 @@ def make_functype(
 
     # Build results vec
     var results = WasmValtypeVec()
-    var results_ptr = _as_ext(UnsafePointer(to=results))
+    var results_ptr = _as_ext(Pointer(to=results))
     if len(result_kinds) == 0:
         wasm_valtype_vec_new_empty(results_ptr)
     else:
@@ -629,7 +627,7 @@ def trap_message(trap: TrapPtr) raises -> String:
 
 
 def check_error(
-    error: ErrorPtr, trap: UnsafePointer[TrapPtr, MutUntrackedOrigin]
+    error: ErrorPtr, trap: Pointer[TrapPtr, MutUntrackedOrigin]
 ) raises:
     """Check the error and trap pointers returned from a wasmtime API call.
     If either is non-null, raises with the appropriate message."""

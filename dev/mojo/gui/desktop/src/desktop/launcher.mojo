@@ -52,7 +52,7 @@
 # loop). On native, launch() calls desktop_launch() which blocks until
 # the window is closed.
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from platform.gui_app import GuiApp
 from platform.launch import AppConfig
@@ -75,7 +75,7 @@ comptime _DEFAULT_BUF_CAPACITY: Int = 65536
 
 def _alloc_mutation_buffer(
     capacity: Int,
-) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
+) -> Pointer[UInt8, MutUntrackedOrigin]:
     """Allocate a heap buffer for mutation data.
 
     Returns a pointer to a zeroed buffer of `capacity` bytes.
@@ -87,8 +87,8 @@ def _alloc_mutation_buffer(
 
 
 def _alloc_writer(
-    buf_ptr: UnsafePointer[UInt8, MutUntrackedOrigin], capacity: Int
-) -> UnsafePointer[MutationWriter, MutUntrackedOrigin]:
+    buf_ptr: Pointer[UInt8, MutUntrackedOrigin], capacity: Int
+) -> Pointer[MutationWriter, MutUntrackedOrigin]:
     """Allocate a MutationWriter on the heap backed by the given buffer.
 
     The writer is initialized at offset 0 with the given buffer and capacity.
@@ -104,7 +104,7 @@ def _alloc_writer(
     # This is safe because the buffer is heap-allocated and we control its lifetime.
     var slot = alloc[Int](1)
     slot[0] = Int(buf_ptr)
-    var ext_ptr = slot.bitcast[UnsafePointer[UInt8, MutUntrackedOrigin]]()[0]
+    var ext_ptr = slot.bitcast[Pointer[UInt8, MutUntrackedOrigin]]()[0]
     slot.free()
 
     var ptr = alloc[MutationWriter](1)
@@ -113,8 +113,8 @@ def _alloc_writer(
 
 
 def _reset_writer(
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-    buf_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+    buf_ptr: Pointer[UInt8, MutUntrackedOrigin],
     capacity: Int,
 ):
     """Reset a MutationWriter to offset 0, reusing the same buffer.
@@ -129,7 +129,7 @@ def _reset_writer(
     """
     var slot = alloc[Int](1)
     slot[0] = Int(buf_ptr)
-    var ext_ptr = slot.bitcast[UnsafePointer[UInt8, MutUntrackedOrigin]]()[0]
+    var ext_ptr = slot.bitcast[Pointer[UInt8, MutUntrackedOrigin]]()[0]
     slot.free()
 
     writer_ptr.unsafe_deinit_pointee()
@@ -137,7 +137,7 @@ def _reset_writer(
 
 
 def _free_writer(
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ):
     """Destroy and free a heap-allocated MutationWriter.
 

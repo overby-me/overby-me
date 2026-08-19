@@ -51,7 +51,7 @@
 # destroying it.  The reactive handles (SignalI32, MemoI32, EffectHandle)
 # hold non-owning pointers back to the Runtime inside the shell.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from signals import Runtime
 from signals.handle import (
     SignalI32,
@@ -264,7 +264,7 @@ struct RenderBuilder(Movable):
     var _vb: VNodeBuilder
     var _events: List[EventBinding]
     var _auto_bindings: List[AutoBinding]
-    var _runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
+    var _runtime: Pointer[Runtime, MutUntrackedOrigin]
 
     def __init__(
         out self,
@@ -275,15 +275,13 @@ struct RenderBuilder(Movable):
         self._vb = vb^
         self._events = events^
         self._auto_bindings = List[AutoBinding]()
-        self._runtime = UnsafePointer[
-            Runtime, MutUntrackedOrigin
-        ].unsafe_dangling()
+        self._runtime = Pointer[Runtime, MutUntrackedOrigin].unsafe_dangling()
 
     def __init__(
         out self,
         var vb: VNodeBuilder,
         var auto_bindings: List[AutoBinding],
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
     ):
         """Construct with auto-bindings (events + value bindings)."""
         self._vb = vb^
@@ -980,7 +978,7 @@ struct ComponentContext(Movable):
 
     def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         new_vnode_idx: UInt32,
     ) -> Int32:
         """Diff old → new VNode, write End sentinel, return byte length.
@@ -1262,7 +1260,7 @@ struct ComponentContext(Movable):
 
     def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         vnode_idx: UInt32,
     ) -> Int32:
         """Initial mount: emit templates + create VNode + append to root.
@@ -1357,7 +1355,7 @@ struct ComponentContext(Movable):
 
     def diff(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         new_vnode_idx: UInt32,
     ):
         """Diff the current VNode against a new one.
@@ -1373,7 +1371,7 @@ struct ComponentContext(Movable):
         self.current_vnode = Int(new_vnode_idx)
 
     def finalize(
-        self, writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin]
+        self, writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin]
     ) -> Int32:
         """Write the End sentinel and return byte length.
 
@@ -1945,7 +1943,7 @@ struct ComponentContext(Movable):
 
     def flush_fragment(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         slot: FragmentSlot,
         new_frag_idx: UInt32,
     ) -> FragmentSlot:
@@ -1998,7 +1996,7 @@ struct ComponentContext(Movable):
 
     def flush_conditional_slot(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         slot: ConditionalSlot,
         new_vnode_idx: UInt32,
     ) -> ConditionalSlot:
@@ -2033,7 +2031,7 @@ struct ComponentContext(Movable):
 
     def flush_conditional_slot_empty(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         slot: ConditionalSlot,
     ) -> ConditionalSlot:
         """Flush a conditional slot: hide the current branch (back to placeholder).
@@ -2084,11 +2082,11 @@ struct ComponentContext(Movable):
 
     # ── Accessors for WASM exports ───────────────────────────────────
 
-    def runtime_ptr(self) -> UnsafePointer[Runtime, MutUntrackedOrigin]:
+    def runtime_ptr(self) -> Pointer[Runtime, MutUntrackedOrigin]:
         """Return the runtime pointer (for WASM export helpers)."""
         return self.shell.runtime
 
-    def store_ptr(self) -> UnsafePointer[VNodeStore, MutUntrackedOrigin]:
+    def store_ptr(self) -> Pointer[VNodeStore, MutUntrackedOrigin]:
         """Return the VNode store pointer."""
         return self.shell.store
 

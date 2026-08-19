@@ -26,7 +26,7 @@ the error boundary pattern with crash/retry lifecycle:
   - destroy with active error
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
@@ -41,7 +41,7 @@ from wasm_harness import (
 )
 
 
-def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _load() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -49,7 +49,7 @@ def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
 
 
 def _create_sc(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a SafeCounterApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("sc_init", no_args()))
@@ -59,7 +59,7 @@ def _create_sc(
 
 
 def _destroy_sc(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -69,7 +69,7 @@ def _destroy_sc(
 
 
 def _flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -78,7 +78,7 @@ def _flush(
 
 
 def _handle_event(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -90,7 +90,7 @@ def _handle_event(
 
 
 def test_sc_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero pointer."""
     var app = Int(w[].call_i64("sc_init", no_args()))
@@ -102,7 +102,7 @@ def test_sc_init_creates_app(
 
 
 def test_sc_count_starts_at_0(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Initial count value is 0."""
     var t = _create_sc(w)
@@ -117,7 +117,7 @@ def test_sc_count_starts_at_0(
 
 
 def test_sc_has_error_initially_false(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Boundary has no error after init."""
     var t = _create_sc(w)
@@ -132,7 +132,7 @@ def test_sc_has_error_initially_false(
 
 
 def test_sc_normal_mounted_after_rebuild(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Normal child is mounted after rebuild."""
     var t = _create_sc(w)
@@ -147,7 +147,7 @@ def test_sc_normal_mounted_after_rebuild(
 
 
 def test_sc_fallback_not_mounted_initially(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Fallback child is NOT mounted after initial rebuild."""
     var t = _create_sc(w)
@@ -162,7 +162,7 @@ def test_sc_fallback_not_mounted_initially(
 
 
 def test_sc_increment_updates_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Incrementing via the incr handler updates the count signal."""
     var t = _create_sc(w)
@@ -179,7 +179,7 @@ def test_sc_increment_updates_count(
 
 
 def test_sc_crash_sets_error(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Dispatching the crash handler sets has_error to true."""
     var t = _create_sc(w)
@@ -196,7 +196,7 @@ def test_sc_crash_sets_error(
 
 
 def test_sc_flush_after_crash_hides_normal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After crash + flush, normal child is no longer mounted."""
     var t = _create_sc(w)
@@ -214,7 +214,7 @@ def test_sc_flush_after_crash_hides_normal(
 
 
 def test_sc_flush_after_crash_shows_fallback(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After crash + flush, fallback child is mounted."""
     var t = _create_sc(w)
@@ -232,7 +232,7 @@ def test_sc_flush_after_crash_shows_fallback(
 
 
 def test_sc_retry_clears_error(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Retry handler clears the error state."""
     var t = _create_sc(w)
@@ -254,7 +254,7 @@ def test_sc_retry_clears_error(
 
 
 def test_sc_flush_after_retry_shows_normal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After crash + flush + retry + flush, normal child is re-mounted."""
     var t = _create_sc(w)
@@ -277,7 +277,7 @@ def test_sc_flush_after_retry_shows_normal(
 
 
 def test_sc_flush_after_retry_hides_fallback(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After crash + flush + retry + flush, fallback child is hidden."""
     var t = _create_sc(w)
@@ -300,7 +300,7 @@ def test_sc_flush_after_retry_hides_fallback(
 
 
 def test_sc_count_preserved_after_crash_recovery(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Count signal persists across crash/recovery cycles."""
     var t = _create_sc(w)
@@ -331,7 +331,7 @@ def test_sc_count_preserved_after_crash_recovery(
 
 
 def test_sc_multiple_crash_retry_cycles(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Five crash/retry cycles all succeed without errors."""
     var t = _create_sc(w)
@@ -359,7 +359,7 @@ def test_sc_multiple_crash_retry_cycles(
 
 
 def test_sc_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy after normal lifecycle does not crash."""
     var t = _create_sc(w)
@@ -372,7 +372,7 @@ def test_sc_destroy_does_not_crash(
 
 
 def test_sc_rapid_increments_after_recovery(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Twenty increments after crash/recovery produce correct count."""
     var t = _create_sc(w)
@@ -403,7 +403,7 @@ def test_sc_rapid_increments_after_recovery(
 
 
 def test_sc_scope_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Three scopes: parent + normal child + fallback child."""
     var t = _create_sc(w)
@@ -418,7 +418,7 @@ def test_sc_scope_count(
 
 
 def test_sc_scope_ids_distinct(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Parent, normal child, and fallback child have distinct scope IDs."""
     var t = _create_sc(w)
@@ -437,7 +437,7 @@ def test_sc_scope_ids_distinct(
 
 
 def test_sc_handler_ids_valid(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Crash, retry, and increment handler IDs are all distinct and non-negative.
     """
@@ -460,7 +460,7 @@ def test_sc_handler_ids_valid(
 
 
 def test_sc_flush_returns_0_when_clean(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush without any state change returns 0."""
     var t = _create_sc(w)
@@ -475,7 +475,7 @@ def test_sc_flush_returns_0_when_clean(
 
 
 def test_sc_destroy_with_active_error(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy while error is active does not crash."""
     var t = _create_sc(w)
@@ -492,7 +492,7 @@ def test_sc_destroy_with_active_error(
 
 
 def test_sc_increment_after_crash_no_flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Increment after crash (before flush) still updates count."""
     var t = _create_sc(w)

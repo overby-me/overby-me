@@ -8,7 +8,7 @@
 # Run with:
 #   mojo test test/test_effect.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal, assert_true, assert_false
 
 from wasm_harness import (
@@ -22,29 +22,27 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _create_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises -> Int:
+def _create_runtime(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises -> Int:
     """Create a heap-allocated Runtime via WASM."""
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
 def _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     """Destroy a heap-allocated Runtime via WASM."""
     w[].call_void("runtime_destroy", args_ptr(rt))
 
 
 def _scope_create(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     height: Int32,
     parent: Int32,
@@ -56,14 +54,14 @@ def _scope_create(
 
 
 def _scope_destroy(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, id: Int
 ) raises:
     """Destroy a scope."""
     w[].call_void("scope_destroy", args_ptr_i32(rt, Int32(id)))
 
 
 def _begin_render(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, scope_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, scope_id: Int
 ) raises -> Int:
     """Begin rendering a scope. Returns previous scope ID."""
     return Int(
@@ -72,28 +70,28 @@ def _begin_render(
 
 
 def _end_render(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, prev: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, prev: Int
 ) raises:
     """End rendering a scope."""
     w[].call_void("scope_end_render", args_ptr_i32(rt, Int32(prev)))
 
 
 def _signal_create(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
 ) raises -> Int:
     """Create an Int32 signal and return its key as Int."""
     return Int(w[].call_i32("signal_create_i32", args_ptr_i32(rt, initial)))
 
 
 def _signal_read(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     """Read an Int32 signal (with context tracking)."""
     return Int(w[].call_i32("signal_read_i32", args_ptr_i32(rt, Int32(key))))
 
 
 def _signal_write(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     key: Int,
     value: Int32,
@@ -103,7 +101,7 @@ def _signal_write(
 
 
 def _signal_subscriber_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     """Return subscriber count for a signal."""
     return Int(
@@ -112,35 +110,35 @@ def _signal_subscriber_count(
 
 
 def _signal_contains(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Bool:
     """Check whether a signal key is live."""
     return w[].call_i32("signal_contains", args_ptr_i32(rt, Int32(key))) != 0
 
 
 def _effect_create(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, scope_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, scope_id: Int
 ) raises -> Int:
     """Create an effect and return its ID as Int."""
     return Int(w[].call_i32("effect_create", args_ptr_i32(rt, Int32(scope_id))))
 
 
 def _effect_begin_run(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises:
     """Begin effect execution."""
     w[].call_void("effect_begin_run", args_ptr_i32(rt, Int32(effect_id)))
 
 
 def _effect_end_run(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises:
     """End effect execution."""
     w[].call_void("effect_end_run", args_ptr_i32(rt, Int32(effect_id)))
 
 
 def _effect_is_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises -> Bool:
     """Check whether the effect is pending."""
     return (
@@ -150,21 +148,21 @@ def _effect_is_pending(
 
 
 def _effect_destroy(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises:
     """Destroy an effect."""
     w[].call_void("effect_destroy", args_ptr_i32(rt, Int32(effect_id)))
 
 
 def _effect_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Int:
     """Return the number of live effects."""
     return Int(w[].call_i32("effect_count", args_ptr(rt)))
 
 
 def _effect_context_id(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, effect_id: Int
 ) raises -> Int:
     """Return the reactive context ID of the effect."""
     return Int(
@@ -173,14 +171,14 @@ def _effect_context_id(
 
 
 def _effect_drain_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Int:
     """Return the number of currently pending effects."""
     return Int(w[].call_i32("effect_drain_pending", args_ptr(rt)))
 
 
 def _effect_pending_at(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, index: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, index: Int
 ) raises -> Int:
     """Return the effect ID at the given index in the pending list."""
     return Int(
@@ -189,28 +187,28 @@ def _effect_pending_at(
 
 
 def _dirty_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Int:
     """Return number of dirty scopes."""
     return Int(w[].call_i32("runtime_dirty_count", args_ptr(rt)))
 
 
 def _hook_use_effect(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Int:
     """Hook: create or retrieve an effect for the current scope."""
     return Int(w[].call_i32("hook_use_effect", args_ptr(rt)))
 
 
 def _hook_use_signal_i32(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
 ) raises -> Int:
     """Hook: create or retrieve an Int32 signal for the current scope."""
     return Int(w[].call_i32("hook_use_signal_i32", args_ptr_i32(rt, initial)))
 
 
 def _hook_use_memo_i32(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
 ) raises -> Int:
     """Hook: create or retrieve an Int32 memo for the current scope."""
     return Int(w[].call_i32("hook_use_memo_i32", args_ptr_i32(rt, initial)))
@@ -218,7 +216,7 @@ def _hook_use_memo_i32(
 
 # Memo helpers for testing effect→memo chain
 def _memo_create(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: Int32,
@@ -233,13 +231,13 @@ def _memo_create(
 
 
 def _memo_begin_compute(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
 def _memo_end_compute_i32(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Int32,
@@ -251,13 +249,13 @@ def _memo_end_compute_i32(
 
 
 def _memo_read_i32(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     return Int(w[].call_i32("memo_read_i32", args_ptr_i32(rt, Int32(memo_id))))
 
 
 def _memo_output_key(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     return Int(
         w[].call_i32("memo_output_key", args_ptr_i32(rt, Int32(memo_id)))
@@ -270,7 +268,7 @@ def _memo_output_key(
 
 
 def test_effect_create_returns_valid_id(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Creating an effect returns ID 0 and count becomes 1."""
     var rt = _create_runtime(w)
@@ -285,7 +283,7 @@ def test_effect_create_returns_valid_id(
 
 
 def test_effect_starts_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """A newly created effect starts pending (needs first run)."""
     var rt = _create_runtime(w)
@@ -299,7 +297,7 @@ def test_effect_starts_pending(
 
 
 def test_effect_has_context_id(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """An effect has a valid reactive context ID (a signal key)."""
     var rt = _create_runtime(w)
@@ -315,7 +313,7 @@ def test_effect_has_context_id(
 
 
 def test_effect_two_effects_distinct_ids(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Creating two effects returns distinct IDs."""
     var rt = _create_runtime(w)
@@ -331,7 +329,7 @@ def test_effect_two_effects_distinct_ids(
 
 
 def test_effect_destroy_reduces_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Destroying an effect reduces the count."""
     var rt = _create_runtime(w)
@@ -354,7 +352,7 @@ def test_effect_destroy_reduces_count(
 
 
 def test_effect_id_reuse_after_destroy(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Destroyed effect IDs are reused by the next create."""
     var rt = _create_runtime(w)
@@ -371,7 +369,7 @@ def test_effect_id_reuse_after_destroy(
 
 
 def test_effect_destroy_cleans_up_context_signal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroying an effect also destroys its context signal."""
     var rt = _create_runtime(w)
@@ -400,7 +398,7 @@ def test_effect_destroy_cleans_up_context_signal(
 
 
 def test_effect_begin_end_run_clears_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Running an effect (begin + end) clears the pending flag."""
     var rt = _create_runtime(w)
@@ -421,7 +419,7 @@ def test_effect_begin_end_run_clears_pending(
 
 
 def test_effect_signal_read_during_run_subscribes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Reading a signal during an effect run subscribes the effect's context."""
     var rt = _create_runtime(w)
@@ -456,7 +454,7 @@ def test_effect_signal_read_during_run_subscribes(
 
 
 def test_effect_signal_write_marks_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Writing to a signal that the effect depends on marks it pending."""
     var rt = _create_runtime(w)
@@ -485,7 +483,7 @@ def test_effect_signal_write_marks_pending(
 
 
 def test_effect_signal_write_does_not_dirty_scope(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Writing to a signal that ONLY an effect subscribes to does NOT dirty any scope.
     """
@@ -520,7 +518,7 @@ def test_effect_signal_write_does_not_dirty_scope(
 
 
 def test_effect_two_effects_same_signal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Two effects reading the same signal both become pending on write."""
     var rt = _create_runtime(w)
@@ -557,7 +555,7 @@ def test_effect_two_effects_same_signal(
 
 
 def test_effect_scope_and_effect_both_react(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """A signal with both a scope subscriber and an effect subscriber:
     writing marks the scope dirty AND the effect pending."""
@@ -587,7 +585,7 @@ def test_effect_scope_and_effect_both_react(
 
 
 def test_effect_unsubscribed_signal_no_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Writing to a signal that the effect does NOT read does not trigger pending.
     """
@@ -628,7 +626,7 @@ def test_effect_unsubscribed_signal_no_pending(
 
 
 def test_effect_dependency_retracking(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Effect dependencies are re-tracked on each run.
 
@@ -681,7 +679,7 @@ def test_effect_dependency_retracking(
 
 
 def test_effect_drain_pending_returns_pending_effects(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Drain_pending returns the correct count and IDs of pending effects."""
     var rt = _create_runtime(w)
@@ -726,7 +724,7 @@ def test_effect_drain_pending_returns_pending_effects(
 
 
 def test_effect_drain_pending_after_partial_run(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """After running one of two pending effects, drain returns only the remaining one.
     """
@@ -773,7 +771,7 @@ def test_effect_drain_pending_after_partial_run(
 
 
 def test_effect_reads_memo_output(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """An effect that reads a memo's output becomes pending when the memo changes.
 
@@ -821,7 +819,7 @@ def test_effect_reads_memo_output(
 
 
 def test_effect_destroy_while_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Destroying a pending effect is safe and cleans up properly."""
     var rt = _create_runtime(w)
@@ -849,7 +847,7 @@ def test_effect_destroy_while_pending(
 
 
 def test_effect_destroy_nonexistent(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Destroying a non-existent effect is a no-op."""
     var rt = _create_runtime(w)
@@ -868,7 +866,7 @@ def test_effect_destroy_nonexistent(
 
 
 def test_hook_use_effect_creates_on_first_render(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Use_effect on first render creates an effect and returns its ID."""
     var rt = _create_runtime(w)
@@ -887,7 +885,7 @@ def test_hook_use_effect_creates_on_first_render(
 
 
 def test_hook_use_effect_returns_same_id_on_rerender(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Use_effect on re-render returns the same effect ID."""
     var rt = _create_runtime(w)
@@ -911,7 +909,7 @@ def test_hook_use_effect_returns_same_id_on_rerender(
 
 
 def test_hook_use_effect_multiple_distinct_ids(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Multiple use_effect calls in one render create distinct effects."""
     var rt = _create_runtime(w)
@@ -939,7 +937,7 @@ def test_hook_use_effect_multiple_distinct_ids(
 
 
 def test_hook_use_effect_interleaved_with_signal_and_memo(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Hooks use_effect interleaved with use_signal and use_memo all remain stable.
     """
@@ -977,7 +975,7 @@ def test_hook_use_effect_interleaved_with_signal_and_memo(
 
 
 def test_effect_multiple_writes_single_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Multiple writes to the same signal only produce one pending state (idempotent).
     """
@@ -1003,7 +1001,7 @@ def test_effect_multiple_writes_single_pending(
 
 
 def test_effect_run_resubscribe_cycle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Running an effect multiple times correctly re-subscribes each time."""
     var rt = _create_runtime(w)
@@ -1046,7 +1044,7 @@ def test_effect_run_resubscribe_cycle(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def test_all(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_all(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     # Store basics
     test_effect_create_returns_valid_id(w)
     test_effect_starts_pending(w)

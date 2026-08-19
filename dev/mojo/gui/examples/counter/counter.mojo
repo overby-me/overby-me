@@ -83,7 +83,7 @@
 #     p > dynamic_text[0]   ← "Count is even" / "Count is odd"
 #     p > dynamic_text[1]   ← "Doubled: N"
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from bridge import MutationWriter
 from component import ComponentContext, ConditionalSlot
 from signals import SignalI32, SignalBool
@@ -246,7 +246,7 @@ struct CounterApp(GuiApp):
 
     def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Initial render (mount) of the counter app.
 
@@ -281,7 +281,7 @@ struct CounterApp(GuiApp):
 
     def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Flush pending updates after event dispatch.
 

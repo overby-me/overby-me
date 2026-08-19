@@ -21,7 +21,7 @@ the signal → memo → effect → signal reactive chain:
   - rapid 20 increments
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
@@ -37,7 +37,7 @@ from wasm_harness import (
 )
 
 
-def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _load() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -45,7 +45,7 @@ def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
 
 
 def _create_em(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create an EffectMemoApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("em_init", no_args()))
@@ -55,7 +55,7 @@ def _create_em(
 
 
 def _destroy_em(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -65,7 +65,7 @@ def _destroy_em(
 
 
 def _flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -74,7 +74,7 @@ def _flush(
 
 
 def _handle_event(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -83,7 +83,7 @@ def _handle_event(
 
 
 def _incr(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises:
     """Increment input via the button handler."""
@@ -92,7 +92,7 @@ def _incr(
 
 
 def _label_text(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     """Read the label text from the app."""
@@ -105,7 +105,7 @@ def _label_text(
 
 
 def test_em_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero pointer."""
     var app = Int(w[].call_i64("em_init", no_args()))
@@ -117,7 +117,7 @@ def test_em_init_creates_app(
 
 
 def test_em_input_starts_at_0(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Input signal is 0 after init + rebuild."""
     var t = _create_em(w)
@@ -131,7 +131,7 @@ def test_em_input_starts_at_0(
 
 
 def test_em_tripled_starts_at_0(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Tripled memo is 0 after init + rebuild (memo recomputed on mount)."""
     var t = _create_em(w)
@@ -145,7 +145,7 @@ def test_em_tripled_starts_at_0(
 
 
 def test_em_label_starts_at_small(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Label text is 'small' after init + rebuild (0 < 10)."""
     var t = _create_em(w)
@@ -160,7 +160,7 @@ def test_em_label_starts_at_small(
 
 
 def test_em_increment_updates_input(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment, input = 1."""
     var t = _create_em(w)
@@ -175,7 +175,7 @@ def test_em_increment_updates_input(
 
 
 def test_em_flush_updates_tripled(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment + flush, tripled = 3."""
     var t = _create_em(w)
@@ -191,7 +191,7 @@ def test_em_flush_updates_tripled(
 
 
 def test_em_flush_updates_label(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment + flush, label = 'small' (3 < 10)."""
     var t = _create_em(w)
@@ -208,7 +208,7 @@ def test_em_flush_updates_label(
 
 
 def test_em_3_increments_tripled_9(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 3 increments, input=3, tripled=9, label='small'."""
     var t = _create_em(w)
@@ -228,7 +228,7 @@ def test_em_3_increments_tripled_9(
 
 
 def test_em_4_increments_tripled_12(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 4 increments, input=4, tripled=12, label='big'."""
     var t = _create_em(w)
@@ -248,7 +248,7 @@ def test_em_4_increments_tripled_12(
 
 
 def test_em_threshold_boundary(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Threshold: input=3→tripled=9→'small', input=4→tripled=12→'big'."""
     var t = _create_em(w)
@@ -274,7 +274,7 @@ def test_em_threshold_boundary(
 
 
 def test_em_memo_and_effect_both_run(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After flush, both memo and effect have executed (tripled updated, label updated).
     """
@@ -297,7 +297,7 @@ def test_em_memo_and_effect_both_run(
 
 
 def test_em_effect_reads_memo_not_input(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Effect depends on tripled (memo output), not input directly.
 
@@ -325,7 +325,7 @@ def test_em_effect_reads_memo_not_input(
 
 
 def test_em_10_increments(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 10 increments, input=10, tripled=30, label='big'."""
     var t = _create_em(w)
@@ -345,7 +345,7 @@ def test_em_10_increments(
 
 
 def test_em_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy after normal use does not crash."""
     var t = _create_em(w)
@@ -360,7 +360,7 @@ def test_em_destroy_does_not_crash(
 
 
 def test_em_flush_returns_0_when_clean(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush returns 0 when no state changes have occurred."""
     var t = _create_em(w)
@@ -375,7 +375,7 @@ def test_em_flush_returns_0_when_clean(
 
 
 def test_em_rapid_20_increments(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """20 increments with flush after each — all derived state correct."""
     var t = _create_em(w)

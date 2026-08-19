@@ -37,7 +37,7 @@
 #   When the pending scope resolves, the boundary re-renders with the
 #   actual content.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 
 # ── Hook type tags ───────────────────────────────────────────────────────────

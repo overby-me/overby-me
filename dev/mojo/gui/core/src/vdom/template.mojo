@@ -22,7 +22,7 @@
 #   - Static:  A name/value pair known at template definition time.
 #   - Dynamic: A placeholder (index into VNode's dynamic_attrs array).
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 # TAG_UNKNOWN sentinel — defined locally to avoid circular import with html.tags
 # (tags.mojo was moved from vdom/ to html/ during the mojo-gui separation).
@@ -365,13 +365,13 @@ struct Template(Copyable):
 
     def get_node_ptr(
         self, index: Int
-    ) -> UnsafePointer[TemplateNode, MutUntrackedOrigin]:
+    ) -> Pointer[TemplateNode, MutUntrackedOrigin]:
         """Return a pointer to the node at `index`.
 
         The pointer is valid until the next mutation of the template.
         """
         var ptr = self.nodes.unsafe_ptr() + index
-        return UnsafePointer[TemplateNode, MutUntrackedOrigin](
+        return Pointer[TemplateNode, MutUntrackedOrigin](
             unsafe_from_address=Int(ptr)
         )
 

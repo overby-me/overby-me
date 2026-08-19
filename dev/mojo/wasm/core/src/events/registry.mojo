@@ -29,7 +29,7 @@
 #   - `dispatch_event` executes the action, which writes to a signal,
 #     which in turn marks subscribing scopes dirty.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 
 # ── Event type tags ──────────────────────────────────────────────────────────
@@ -347,14 +347,12 @@ struct HandlerRegistry(Movable):
         """
         return self._entries[Int(id)].copy()
 
-    def get_ptr(
-        self, id: UInt32
-    ) -> UnsafePointer[HandlerEntry, MutUntrackedOrigin]:
+    def get_ptr(self, id: UInt32) -> Pointer[HandlerEntry, MutUntrackedOrigin]:
         """Return a pointer to the handler entry at `id`.
 
         Precondition: `contains(id)` is True.
         """
-        return UnsafePointer(to=self._entries[Int(id)])
+        return Pointer(to=self._entries[Int(id)])
 
     def scope_id(self, id: UInt32) -> UInt32:
         """Return the scope_id of the handler at `id`."""

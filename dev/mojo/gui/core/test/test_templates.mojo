@@ -8,7 +8,7 @@
 # Run with:
 #   mojo test test/test_templates.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal, assert_true, assert_false
 
 from wasm_harness import (
@@ -29,27 +29,25 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _create_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises -> Int:
+def _create_runtime(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises -> Int:
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
 def _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_destroy", args_ptr(rt))
 
 
 def _create_builder(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], name: String
+    w: Pointer[WasmInstance, MutUntrackedOrigin], name: String
 ) raises -> Int:
     return Int(
         w[].call_i64(
@@ -59,19 +57,19 @@ def _create_builder(
 
 
 def _destroy_builder(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], b: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], b: Int
 ) raises:
     w[].call_void("tmpl_builder_destroy", args_ptr(b))
 
 
 def _create_vnode_store(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises -> Int:
     return Int(w[].call_i64("vnode_store_create", no_args()))
 
 
 def _destroy_vnode_store(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], s: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], s: Int
 ) raises:
     w[].call_void("vnode_store_destroy", args_ptr(s))
 
@@ -130,7 +128,7 @@ comptime TAG_TH = 20
 
 
 def test_builder_basic_lifecycle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
     var b = _create_builder(w, "test-basic")
@@ -193,7 +191,7 @@ def test_builder_basic_lifecycle(
 
 
 def test_registry_register_and_query(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -293,7 +291,7 @@ def test_registry_register_and_query(
 
 
 def test_template_structure_node_queries(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -455,7 +453,7 @@ def test_template_structure_node_queries(
 
 
 def test_template_dynamic_slots(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -579,7 +577,7 @@ def test_template_dynamic_slots(
 
 
 def test_template_attributes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -702,7 +700,7 @@ def test_template_attributes(
 
 
 def test_template_deduplication(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -760,7 +758,7 @@ def test_template_deduplication(
 
 
 def test_vnode_creation_basic_kinds(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var store = _create_vnode_store(w)
 
@@ -857,7 +855,7 @@ def test_vnode_creation_basic_kinds(
 
 
 def test_vnode_dynamic_content(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var store = _create_vnode_store(w)
 
@@ -961,9 +959,7 @@ def test_vnode_dynamic_content(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_vnode_fragments(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_vnode_fragments(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var store = _create_vnode_store(w)
 
     # Create child vnodes
@@ -1057,7 +1053,7 @@ def test_vnode_fragments(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_vnode_keys(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_vnode_keys(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var store = _create_vnode_store(w)
 
     # Unkeyed
@@ -1104,7 +1100,7 @@ def test_vnode_keys(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_vnode_mixed_attributes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var store = _create_vnode_store(w)
     var vn = Int(
@@ -1263,7 +1259,7 @@ def test_vnode_mixed_attributes(
 
 
 def test_vnode_store_lifecycle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var store = _create_vnode_store(w)
 
@@ -1314,7 +1310,7 @@ def test_vnode_store_lifecycle(
 
 
 def test_builder_pre_build_queries(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var b = _create_builder(w, "query-test")
 
@@ -1410,7 +1406,7 @@ def test_builder_pre_build_queries(
 
 
 def test_complex_template_counter(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -1674,7 +1670,7 @@ def test_complex_template_counter(
 
 
 def test_multiple_templates_in_one_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -1832,7 +1828,7 @@ def test_multiple_templates_in_one_runtime(
 
 
 def test_builder_reset_after_build(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 

@@ -57,7 +57,7 @@
 #         Todo {},
 #     }
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from bridge import MutationWriter
 from component import (
     ComponentContext,
@@ -358,7 +358,7 @@ struct MultiViewApp(GuiApp):
 
     def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Initial render (mount) of the multi-view app (GuiApp trait method).
 
@@ -419,7 +419,7 @@ struct MultiViewApp(GuiApp):
 
     def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Re-render dirty scopes and write update mutations (GuiApp trait method).
 

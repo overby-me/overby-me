@@ -56,7 +56,7 @@
 #       blitz.end_mutations()
 #       blitz.request_redraw()
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from .blitz import Blitz
 from html.tags import tag_name
 
@@ -115,12 +115,12 @@ struct BufReader:
       - path: u8 length prefix + byte array
     """
 
-    var buf: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var buf: Pointer[UInt8, MutUntrackedOrigin]
     var offset: Int
     var length: Int
 
     def __init__(
-        out self, buf: UnsafePointer[UInt8, MutUntrackedOrigin], length: Int
+        out self, buf: Pointer[UInt8, MutUntrackedOrigin], length: Int
     ):
         self.buf = buf
         self.offset = 0
@@ -187,7 +187,7 @@ struct BufReader:
 
     def read_path_bytes(
         mut self, path_len: Int
-    ) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
+    ) -> Pointer[UInt8, MutUntrackedOrigin]:
         """Read path_len bytes and return a pointer to the start.
 
         The pointer points directly into the buffer. The caller must not
@@ -225,7 +225,7 @@ struct MutationInterpreter(Movable):
     outlive the Blitz context.
     """
 
-    var _blitz: UnsafePointer[Blitz, MutUntrackedOrigin]
+    var _blitz: Pointer[Blitz, MutUntrackedOrigin]
     var _stack: List[UInt32]
 
     def __init__(out self, mut blitz: Blitz):
@@ -237,9 +237,7 @@ struct MutationInterpreter(Movable):
         """
         # Store a pointer to the Blitz instance. This is an unsafe borrow —
         # the caller guarantees the Blitz instance outlives the interpreter.
-        self._blitz = UnsafePointer(to=blitz).unsafe_origin_cast[
-            MutUntrackedOrigin
-        ]()
+        self._blitz = Pointer(to=blitz).unsafe_origin_cast[MutUntrackedOrigin]()
         self._stack = List[UInt32](capacity=64)
 
     def __init__(out self, *, deinit move: Self):
@@ -248,9 +246,7 @@ struct MutationInterpreter(Movable):
 
     # ── Public API ───────────────────────────────────────────────────────
 
-    def apply(
-        mut self, buf: UnsafePointer[UInt8, MutUntrackedOrigin], length: Int
-    ):
+    def apply(mut self, buf: Pointer[UInt8, MutUntrackedOrigin], length: Int):
         """Apply all mutations in the given buffer to the Blitz DOM.
 
         Reads opcodes sequentially from the buffer until OP_END is

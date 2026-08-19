@@ -52,7 +52,7 @@
 #         Todo {},
 #     }
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import (
     ComponentContext,
@@ -327,7 +327,7 @@ struct MultiViewApp(Movable):
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def multi_view_app_init() -> UnsafePointer[MultiViewApp, MutUntrackedOrigin]:
+def multi_view_app_init() -> Pointer[MultiViewApp, MutUntrackedOrigin]:
     """Initialize the multi-view app.  Returns a pointer to the app state."""
     var app_ptr = alloc[MultiViewApp](1)
     app_ptr.unsafe_write(MultiViewApp())
@@ -335,7 +335,7 @@ def multi_view_app_init() -> UnsafePointer[MultiViewApp, MutUntrackedOrigin]:
 
 
 def multi_view_app_destroy(
-    app_ptr: UnsafePointer[MultiViewApp, MutUntrackedOrigin],
+    app_ptr: Pointer[MultiViewApp, MutUntrackedOrigin],
 ):
     """Destroy the multi-view app and free all resources."""
     app_ptr[0].ctx.destroy()
@@ -345,7 +345,7 @@ def multi_view_app_destroy(
 
 def multi_view_app_rebuild(
     mut app: MultiViewApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the multi-view app.
 
@@ -421,7 +421,7 @@ def multi_view_app_handle_event(
 
 def multi_view_app_flush(
     mut app: MultiViewApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates after event dispatch.
 

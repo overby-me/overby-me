@@ -15,7 +15,7 @@
 # Run with:
 #   mojo test test/test_stress.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_true, assert_equal
 
 from wasm_harness import (
@@ -30,7 +30,7 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -72,7 +72,7 @@ def _repeat_char(ch: String, n: Int) -> String:
 
 
 def test_200_sequential_string_allocations(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Write 200 distinct strings and verify they all read back correctly."""
     var ptrs = List[Int]()
@@ -98,7 +98,7 @@ def test_200_sequential_string_allocations(
 
 
 def test_100_return_input_string_roundtrips(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     for i in range(100):
         var s = "roundtrip-" + String(i)
@@ -119,7 +119,7 @@ def test_100_return_input_string_roundtrips(
 
 
 def test_50_sequential_concats(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Build a string by concatenating 'ab' 50 times through WASM."""
     var current_ptr = w[].write_string_struct("")
@@ -151,7 +151,7 @@ def test_50_sequential_concats(
 
 
 def test_50_interleaved_numeric_string_ops(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     for i in range(50):
         # Do some numeric work
@@ -188,7 +188,7 @@ def test_50_interleaved_numeric_string_ops(
 
 
 def test_300_alloc_string_struct_non_overlapping(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Verify no two struct pointers overlap (each struct is 24 bytes)."""
     var ptrs = List[Int]()
@@ -215,7 +215,7 @@ def test_300_alloc_string_struct_non_overlapping(
 
 
 def test_mixed_size_strings_report_correct_length(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var sizes: List[Int] = [0, 1, 5, 22, 23, 24, 25, 50, 100, 255, 1, 0, 23, 24]
     var ptrs = List[Int]()
@@ -241,7 +241,7 @@ def test_mixed_size_strings_report_correct_length(
 
 
 def test_fib_recurrence_2_to_40(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Verify fib(n) = fib(n-1) + fib(n-2) for n = 2..40."""
     for n in range(2, 41):
@@ -269,7 +269,7 @@ def test_fib_recurrence_2_to_40(
 
 
 def test_string_eq_reflexive(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var test_strings: List[String] = [
         "",

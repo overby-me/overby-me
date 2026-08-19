@@ -20,7 +20,7 @@
 # Run with:
 #   mojo test test/test_memo_equality.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal, assert_true, assert_false
 
 from wasm_harness import (
@@ -35,7 +35,7 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -43,19 +43,19 @@ def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
 
 
 def _create_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Int:
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
 def _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_destroy", args_ptr(rt))
 
 
 def _scope_create(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     height: Int32,
     parent: Int32,
@@ -66,7 +66,7 @@ def _scope_create(
 
 
 def _scope_begin_render(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, scope_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, scope_id: Int
 ) raises -> Int:
     return Int(
         w[].call_i32("scope_begin_render", args_ptr_i32(rt, Int32(scope_id)))
@@ -74,25 +74,25 @@ def _scope_begin_render(
 
 
 def _scope_end_render(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, prev: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, prev: Int
 ) raises:
     w[].call_void("scope_end_render", args_ptr_i32(rt, Int32(prev)))
 
 
 def _signal_create(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, initial: Int32
 ) raises -> Int:
     return Int(w[].call_i32("signal_create_i32", args_ptr_i32(rt, initial)))
 
 
 def _signal_read(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     return Int(w[].call_i32("signal_read_i32", args_ptr_i32(rt, Int32(key))))
 
 
 def _signal_write(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     key: Int,
     value: Int32,
@@ -101,19 +101,19 @@ def _signal_write(
 
 
 def _signal_peek(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     return Int(w[].call_i32("signal_peek_i32", args_ptr_i32(rt, Int32(key))))
 
 
 def _signal_version(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Int:
     return Int(w[].call_i32("signal_version", args_ptr_i32(rt, Int32(key))))
 
 
 def _memo_create(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: Int32,
@@ -127,13 +127,13 @@ def _memo_create(
 
 
 def _memo_begin_compute(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
 def _memo_end_compute(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Int32,
@@ -145,19 +145,19 @@ def _memo_end_compute(
 
 
 def _memo_read(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     return Int(w[].call_i32("memo_read_i32", args_ptr_i32(rt, Int32(memo_id))))
 
 
 def _memo_is_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return w[].call_i32("memo_is_dirty", args_ptr_i32(rt, Int32(memo_id))) != 0
 
 
 def _memo_output_key(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Int:
     return Int(
         w[].call_i32("memo_output_key", args_ptr_i32(rt, Int32(memo_id)))
@@ -165,7 +165,7 @@ def _memo_output_key(
 
 
 def _memo_did_value_change(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return (
         w[].call_i32("memo_did_value_change", args_ptr_i32(rt, Int32(memo_id)))
@@ -174,7 +174,7 @@ def _memo_did_value_change(
 
 
 def _memo_bool_create(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: Bool,
@@ -193,13 +193,13 @@ def _memo_bool_create(
 
 
 def _memo_bool_begin_compute(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_bool_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
 def _memo_bool_end_compute(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Bool,
@@ -216,13 +216,13 @@ def _memo_bool_end_compute(
 
 
 def _memo_bool_read(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return w[].call_i32("memo_bool_read", args_ptr_i32(rt, Int32(memo_id))) != 0
 
 
 def _memo_string_create(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     scope_id: Int,
     initial: String,
@@ -237,13 +237,13 @@ def _memo_string_create(
 
 
 def _memo_string_begin_compute(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_string_begin_compute", args_ptr_i32(rt, Int32(memo_id)))
 
 
 def _memo_string_end_compute(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: String,
@@ -256,7 +256,7 @@ def _memo_string_end_compute(
 
 
 def _memo_string_peek(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
     w[].call_void(
@@ -266,7 +266,7 @@ def _memo_string_peek(
 
 
 def _memo_string_is_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises -> Bool:
     return (
         w[].call_i32("memo_string_is_dirty", args_ptr_i32(rt, Int32(memo_id)))
@@ -275,7 +275,7 @@ def _memo_string_is_dirty(
 
 
 def _runtime_signal_changed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, key: Int
 ) raises -> Bool:
     return (
         w[].call_i32("runtime_signal_changed", args_ptr_i32(rt, Int32(key)))
@@ -284,25 +284,25 @@ def _runtime_signal_changed(
 
 
 def _runtime_clear_changed_signals(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_clear_changed_signals", args_ptr(rt))
 
 
 def _drain_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Int:
     return Int(w[].call_i32("runtime_drain_dirty", args_ptr(rt)))
 
 
 def _has_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises -> Bool:
     return w[].call_i32("runtime_has_dirty", args_ptr(rt)) != 0
 
 
 def _memo_destroy(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int, memo_id: Int
 ) raises:
     w[].call_void("memo_destroy", args_ptr_i32(rt, Int32(memo_id)))
 
@@ -314,7 +314,7 @@ def _memo_destroy(
 
 
 def _recompute_i32(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Int32,
@@ -325,7 +325,7 @@ def _recompute_i32(
 
 
 def _recompute_bool(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: Bool,
@@ -336,7 +336,7 @@ def _recompute_bool(
 
 
 def _recompute_string(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     rt: Int,
     memo_id: Int,
     value: String,

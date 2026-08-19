@@ -23,13 +23,13 @@
 #   - When a signal is written, all subscribers are marked dirty.
 #
 # Memory layout per signal slot:
-#   - value_ptr    : UnsafePointer[UInt8, MutUntrackedOrigin]  — type-erased value storage
+#   - value_ptr    : Pointer[UInt8, MutUntrackedOrigin]  — type-erased value storage
 #   - value_size   : Int                   — byte size of the stored value
 #   - subscribers  : List[UInt32]          — context IDs subscribed to this signal
 #   - version      : UInt32               — monotonic write counter (for staleness checks)
 
 from std.sys import size_of
-from std.memory import UnsafePointer, unsafe_memcpy, alloc
+from std.memory import Pointer, unsafe_memcpy, alloc
 from scope import ScopeArena, ScopeState, HOOK_SIGNAL, HOOK_MEMO, HOOK_EFFECT
 from vdom import TemplateRegistry, VNodeStore
 from .memo import MemoStore, MemoEntry, MEMO_NO_STRING
@@ -64,7 +64,7 @@ from events import (
 struct SignalEntry(Copyable):
     """Type-erased storage for a single signal's value + subscribers."""
 
-    var value_ptr: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var value_ptr: Pointer[UInt8, MutUntrackedOrigin]
     var value_size: Int
     var subscribers: List[UInt32]
     var version: UInt32
@@ -73,16 +73,12 @@ struct SignalEntry(Copyable):
 
     def __init__(out self):
         """Create an empty (uninitialised) entry."""
-        self.value_ptr = UnsafePointer[
-            UInt8, MutUntrackedOrigin
-        ].unsafe_dangling()
+        self.value_ptr = Pointer[UInt8, MutUntrackedOrigin].unsafe_dangling()
         self.value_size = 0
         self.subscribers = List[UInt32]()
         self.version = 0
 
-    def __init__(
-        out self, ptr: UnsafePointer[UInt8, MutUntrackedOrigin], size: Int
-    ):
+    def __init__(out self, ptr: Pointer[UInt8, MutUntrackedOrigin], size: Int):
         """Create an entry that owns `size` bytes at `ptr`."""
         self.value_ptr = ptr
         self.value_size = size
@@ -99,7 +95,7 @@ struct SignalEntry(Copyable):
                 dest=self.value_ptr, src=copy.value_ptr, count=copy.value_size
             )
         else:
-            self.value_ptr = UnsafePointer[
+            self.value_ptr = Pointer[
                 UInt8, MutUntrackedOrigin
             ].unsafe_dangling()
 
@@ -1927,14 +1923,14 @@ struct Runtime(Movable):
 # These helpers create and access the heap-allocated instance.
 
 
-def create_runtime() -> UnsafePointer[Runtime, MutUntrackedOrigin]:
+def create_runtime() -> Pointer[Runtime, MutUntrackedOrigin]:
     """Allocate a Runtime on the heap and return a pointer to it."""
     var ptr = alloc[Runtime](1)
     ptr.unsafe_write(Runtime())
     return ptr
 
 
-def destroy_runtime(ptr: UnsafePointer[Runtime, MutUntrackedOrigin]):
+def destroy_runtime(ptr: Pointer[Runtime, MutUntrackedOrigin]):
     """Destroy and free a heap-allocated Runtime."""
     ptr.unsafe_deinit_pointee()
     ptr.free()

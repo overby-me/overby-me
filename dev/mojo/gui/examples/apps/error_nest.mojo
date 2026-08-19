@@ -25,7 +25,7 @@
 #   InnerFallbackChild:   p > dyn_text("Inner error: ...") + button("Inner Retry")
 #   OuterFallbackChild:   p > dyn_text("Outer error: ...") + button("Outer Retry")
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -256,14 +256,14 @@ struct ErrorNestApp(Movable):
 # ── ErrorNestApp lifecycle functions ─────────────────────────────────────────
 
 
-def _en_init() -> UnsafePointer[ErrorNestApp, MutUntrackedOrigin]:
+def _en_init() -> Pointer[ErrorNestApp, MutUntrackedOrigin]:
     var app_ptr = alloc[ErrorNestApp](1)
     app_ptr.unsafe_write(ErrorNestApp())
     return app_ptr
 
 
 def _en_destroy(
-    app_ptr: UnsafePointer[ErrorNestApp, MutUntrackedOrigin],
+    app_ptr: Pointer[ErrorNestApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(
         app_ptr[0].outer_normal.inner_normal.child_ctx
@@ -280,7 +280,7 @@ def _en_destroy(
 
 def _en_rebuild(
     mut app: ErrorNestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the error-nest app."""
     # 1. Render parent with placeholder
@@ -372,7 +372,7 @@ def _en_handle_event(
 
 def _en_flush(
     mut app: ErrorNestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with nested error boundary logic.
 

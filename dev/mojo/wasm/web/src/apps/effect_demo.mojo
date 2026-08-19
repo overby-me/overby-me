@@ -21,7 +21,7 @@
 # and parity.  The drain-and-run pattern ensures all derived state is
 # settled before render().
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import SignalI32 as _SignalI32, SignalString, EffectHandle
@@ -109,14 +109,14 @@ struct EffectDemoApp(Movable):
 # ── EffectDemoApp lifecycle functions ────────────────────────────────────────
 
 
-def _ed_init() -> UnsafePointer[EffectDemoApp, MutUntrackedOrigin]:
+def _ed_init() -> Pointer[EffectDemoApp, MutUntrackedOrigin]:
     var app_ptr = alloc[EffectDemoApp](1)
     app_ptr.unsafe_write(EffectDemoApp())
     return app_ptr
 
 
 def _ed_destroy(
-    app_ptr: UnsafePointer[EffectDemoApp, MutUntrackedOrigin],
+    app_ptr: Pointer[EffectDemoApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
@@ -125,7 +125,7 @@ def _ed_destroy(
 
 def _ed_rebuild(
     mut app: EffectDemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the effect-demo app.
 
@@ -153,7 +153,7 @@ def _ed_handle_event(
 
 def _ed_flush(
     mut app: EffectDemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with effect drain-and-run pattern.
 

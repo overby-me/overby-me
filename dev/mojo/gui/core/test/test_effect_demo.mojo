@@ -23,7 +23,7 @@ effects in the flush cycle with derived state (doubled, parity):
   - rapid 20 increments
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
@@ -39,7 +39,7 @@ from wasm_harness import (
 )
 
 
-def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _load() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -47,7 +47,7 @@ def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
 
 
 def _create_ed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create an EffectDemoApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("ed_init", no_args()))
@@ -57,7 +57,7 @@ def _create_ed(
 
 
 def _destroy_ed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -67,7 +67,7 @@ def _destroy_ed(
 
 
 def _flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -76,7 +76,7 @@ def _flush(
 
 
 def _handle_event(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -85,7 +85,7 @@ def _handle_event(
 
 
 def _incr(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises:
     """Increment count via the button handler."""
@@ -94,7 +94,7 @@ def _incr(
 
 
 def _parity_text(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     """Read the parity text from the app."""
@@ -107,7 +107,7 @@ def _parity_text(
 
 
 def test_ed_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero pointer."""
     var app = Int(w[].call_i64("ed_init", no_args()))
@@ -119,7 +119,7 @@ def test_ed_init_creates_app(
 
 
 def test_ed_count_starts_at_0(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Count signal is 0 after init + rebuild."""
     var t = _create_ed(w)
@@ -133,7 +133,7 @@ def test_ed_count_starts_at_0(
 
 
 def test_ed_doubled_starts_at_0(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Doubled signal is 0 after init + rebuild (effect ran on mount)."""
     var t = _create_ed(w)
@@ -147,7 +147,7 @@ def test_ed_doubled_starts_at_0(
 
 
 def test_ed_parity_starts_at_even(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Parity text is 'even' after init + rebuild (effect ran on mount)."""
     var t = _create_ed(w)
@@ -162,7 +162,7 @@ def test_ed_parity_starts_at_even(
 
 
 def test_ed_effect_starts_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Effect is pending after init (before rebuild runs it)."""
     var app = Int(w[].call_i64("ed_init", no_args()))
@@ -175,7 +175,7 @@ def test_ed_effect_starts_pending(
 
 
 def test_ed_rebuild_runs_effect(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After rebuild, effect has been run (not pending), doubled=0, parity='even'.
     """
@@ -193,7 +193,7 @@ def test_ed_rebuild_runs_effect(
 
 
 def test_ed_increment_updates_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment, count = 1."""
     var t = _create_ed(w)
@@ -208,7 +208,7 @@ def test_ed_increment_updates_count(
 
 
 def test_ed_increment_marks_effect_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment (before flush), effect is pending."""
     var t = _create_ed(w)
@@ -223,7 +223,7 @@ def test_ed_increment_marks_effect_pending(
 
 
 def test_ed_flush_after_increment_doubled(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment + flush, doubled = 2."""
     var t = _create_ed(w)
@@ -239,7 +239,7 @@ def test_ed_flush_after_increment_doubled(
 
 
 def test_ed_flush_after_increment_parity(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment + flush, parity = 'odd'."""
     var t = _create_ed(w)
@@ -256,7 +256,7 @@ def test_ed_flush_after_increment_parity(
 
 
 def test_ed_effect_not_pending_after_flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After increment + flush, effect is no longer pending."""
     var t = _create_ed(w)
@@ -272,7 +272,7 @@ def test_ed_effect_not_pending_after_flush(
 
 
 def test_ed_two_increments_doubled_4(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 2 increments + flush, doubled = 4."""
     var t = _create_ed(w)
@@ -291,7 +291,7 @@ def test_ed_two_increments_doubled_4(
 
 
 def test_ed_two_increments_parity_even(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 2 increments + flush, parity = 'even'."""
     var t = _create_ed(w)
@@ -310,7 +310,7 @@ def test_ed_two_increments_parity_even(
 
 
 def test_ed_10_increments(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After 10 increments, count=10, doubled=20, parity='even'."""
     var t = _create_ed(w)
@@ -330,7 +330,7 @@ def test_ed_10_increments(
 
 
 def test_ed_effect_resubscribes_each_run(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Effect dependency tracking works across multiple runs.
 
@@ -359,7 +359,7 @@ def test_ed_effect_resubscribes_each_run(
 
 
 def test_ed_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy after normal use does not crash."""
     var t = _create_ed(w)
@@ -374,7 +374,7 @@ def test_ed_destroy_does_not_crash(
 
 
 def test_ed_flush_returns_0_when_clean(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush returns 0 when no state changes have occurred."""
     var t = _create_ed(w)
@@ -389,7 +389,7 @@ def test_ed_flush_returns_0_when_clean(
 
 
 def test_ed_rapid_20_increments(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """20 increments with flush after each — all derived state correct."""
     var t = _create_ed(w)

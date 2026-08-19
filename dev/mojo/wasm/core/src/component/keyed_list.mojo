@@ -58,7 +58,7 @@
 # The Phase 16 methods (create_scope, item_builder, push_child) remain
 # available for apps that prefer the manual pattern.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from bridge import MutationWriter
 from events import HandlerEntry
 from .lifecycle import FragmentSlot
@@ -190,19 +190,15 @@ struct ItemBuilder(Movable):
 
     var vb: VNodeBuilder
     var scope_id: UInt32
-    var _runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
-    var _handler_map_ptr: UnsafePointer[
-        List[_HandlerMapping], MutUntrackedOrigin
-    ]
+    var _runtime: Pointer[Runtime, MutUntrackedOrigin]
+    var _handler_map_ptr: Pointer[List[_HandlerMapping], MutUntrackedOrigin]
 
     def __init__(
         out self,
         var vb: VNodeBuilder,
         scope_id: UInt32,
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
-        handler_map_ptr: UnsafePointer[
-            List[_HandlerMapping], MutUntrackedOrigin
-        ],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
+        handler_map_ptr: Pointer[List[_HandlerMapping], MutUntrackedOrigin],
     ):
         """Create an ItemBuilder (called internally by KeyedList.begin_item).
 
@@ -539,12 +535,12 @@ struct KeyedList(Movable):
         var scope_id = ctx.create_child_scope()
         self.scope_ids.append(scope_id)
         var vb = VNodeBuilder(self.template_id, key, ctx.store_ptr())
-        var handler_map_ptr = UnsafePointer(to=self.handler_map)
+        var handler_map_ptr = Pointer(to=self.handler_map)
         return ItemBuilder(
             vb^,
             scope_id,
             ctx.runtime_ptr(),
-            UnsafePointer[List[_HandlerMapping], MutUntrackedOrigin](
+            Pointer[List[_HandlerMapping], MutUntrackedOrigin](
                 unsafe_from_address=Int(handler_map_ptr)
             ),
         )
@@ -631,7 +627,7 @@ struct KeyedList(Movable):
     def flush(
         mut self,
         mut ctx: ComponentContext,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         new_frag_idx: UInt32,
     ):
         """Flush the keyed list: diff old vs new fragment, emit mutations.

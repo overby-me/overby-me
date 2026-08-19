@@ -57,7 +57,7 @@
 #     panel.set_position(0.0, 1.4, -1.0)
 #     panel.set_rotation_euler(0.0, 0.0, 0.0)
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 
 # ══════════════════════════════════════════════════════════════════════════════

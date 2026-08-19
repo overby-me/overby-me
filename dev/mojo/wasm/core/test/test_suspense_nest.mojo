@@ -27,7 +27,7 @@ nested suspense boundaries with independent load/resolve lifecycles:
   - scope IDs all distinct
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
@@ -43,7 +43,7 @@ from wasm_harness import (
 )
 
 
-def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _load() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -51,7 +51,7 @@ def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
 
 
 def _create_sn(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a SuspenseNestApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("sn_init", no_args()))
@@ -61,7 +61,7 @@ def _create_sn(
 
 
 def _destroy_sn(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -71,7 +71,7 @@ def _destroy_sn(
 
 
 def _flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -80,7 +80,7 @@ def _flush(
 
 
 def _handle_event(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -89,7 +89,7 @@ def _handle_event(
 
 
 def _outer_resolve(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     data: String,
 ) raises:
@@ -99,7 +99,7 @@ def _outer_resolve(
 
 
 def _inner_resolve(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     data: String,
 ) raises:
@@ -109,7 +109,7 @@ def _inner_resolve(
 
 
 def _outer_load(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -120,7 +120,7 @@ def _outer_load(
 
 
 def _inner_load(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -134,7 +134,7 @@ def _inner_load(
 
 
 def test_sn_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero pointer."""
     var app = Int(w[].call_i64("sn_init", no_args()))
@@ -146,7 +146,7 @@ def test_sn_init_creates_app(
 
 
 def test_sn_no_pending_initially(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Both boundaries are not pending after init + rebuild."""
     var t = _create_sn(w)
@@ -161,7 +161,7 @@ def test_sn_no_pending_initially(
 
 
 def test_sn_all_content_mounted_after_rebuild(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Outer + inner content are mounted after initial rebuild."""
     var t = _create_sn(w)
@@ -176,7 +176,7 @@ def test_sn_all_content_mounted_after_rebuild(
 
 
 def test_sn_no_skeletons_initially(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Both skeletons are hidden after initial rebuild."""
     var t = _create_sn(w)
@@ -191,7 +191,7 @@ def test_sn_no_skeletons_initially(
 
 
 def test_sn_inner_load_sets_inner_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Inner load button sets inner pending to true."""
     var t = _create_sn(w)
@@ -207,7 +207,7 @@ def test_sn_inner_load_sets_inner_pending(
 
 
 def test_sn_inner_load_preserves_outer(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Inner load does not affect outer pending state."""
     var t = _create_sn(w)
@@ -223,7 +223,7 @@ def test_sn_inner_load_preserves_outer(
 
 
 def test_sn_flush_after_inner_load(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After inner load + flush: inner skeleton shown, inner content hidden,
     outer content still mounted."""
@@ -241,7 +241,7 @@ def test_sn_flush_after_inner_load(
 
 
 def test_sn_inner_resolve_clears_inner_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Inner resolve clears inner pending state."""
     var t = _create_sn(w)
@@ -257,7 +257,7 @@ def test_sn_inner_resolve_clears_inner_pending(
 
 
 def test_sn_flush_after_inner_resolve(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After inner load + flush + inner resolve + flush: inner content restored.
     """
@@ -280,7 +280,7 @@ def test_sn_flush_after_inner_resolve(
 
 
 def test_sn_outer_load_sets_outer_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Outer load button sets outer pending to true."""
     var t = _create_sn(w)
@@ -296,7 +296,7 @@ def test_sn_outer_load_sets_outer_pending(
 
 
 def test_sn_flush_after_outer_load(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After outer load + flush: outer skeleton shown, outer content hidden,
     inner boundary + children also hidden."""
@@ -315,7 +315,7 @@ def test_sn_flush_after_outer_load(
 
 
 def test_sn_outer_resolve_restores_outer_content(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After outer load + resolve + flush: outer content + inner boundary visible again.
     """
@@ -339,7 +339,7 @@ def test_sn_outer_resolve_restores_outer_content(
 
 
 def test_sn_inner_load_then_outer_load(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Inner load then outer load — outer skeleton takes visual precedence."""
     var t = _create_sn(w)
@@ -361,7 +361,7 @@ def test_sn_inner_load_then_outer_load(
 
 
 def test_sn_outer_resolve_reveals_inner_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After inner load + outer load + outer resolve: inner still pending,
     inner skeleton shown."""
@@ -388,7 +388,7 @@ def test_sn_outer_resolve_reveals_inner_pending(
 
 
 def test_sn_inner_resolve_after_outer_resolve(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Full resolution: inner load → outer load → outer resolve → inner resolve.
     """
@@ -415,7 +415,7 @@ def test_sn_inner_resolve_after_outer_resolve(
 
 
 def test_sn_multiple_inner_load_resolve_cycles(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Five inner load/resolve cycles all succeed."""
     var t = _create_sn(w)
@@ -444,7 +444,7 @@ def test_sn_multiple_inner_load_resolve_cycles(
 
 
 def test_sn_multiple_outer_load_resolve_cycles(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Five outer load/resolve cycles all succeed."""
     var t = _create_sn(w)
@@ -474,7 +474,7 @@ def test_sn_multiple_outer_load_resolve_cycles(
 
 
 def test_sn_mixed_load_resolve_sequence(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """inner→outer→outer_resolve→inner_resolve sequence."""
     var t = _create_sn(w)
@@ -513,7 +513,7 @@ def test_sn_mixed_load_resolve_sequence(
 
 
 def test_sn_resolve_with_different_data(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Each resolve shows new data text."""
     var t = _create_sn(w)
@@ -559,7 +559,7 @@ def test_sn_resolve_with_different_data(
 
 
 def test_sn_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy after normal lifecycle does not crash."""
     var t = _create_sn(w)
@@ -572,7 +572,7 @@ def test_sn_destroy_does_not_crash(
 
 
 def test_sn_destroy_while_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy while both boundaries are pending does not crash."""
     var t = _create_sn(w)
@@ -589,7 +589,7 @@ def test_sn_destroy_while_pending(
 
 
 def test_sn_scope_ids_all_distinct(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """All five scope IDs (outer, inner boundary, inner content, inner skeleton,
     outer skeleton) are distinct."""
@@ -625,7 +625,7 @@ def test_sn_scope_ids_all_distinct(
 
 
 def test_sn_flush_returns_0_when_clean(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush without any state change returns 0."""
     var t = _create_sn(w)

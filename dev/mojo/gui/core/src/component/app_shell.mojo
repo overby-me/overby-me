@@ -24,7 +24,7 @@
 #             self.my_signal = self.shell.create_signal_i32(42)
 #             ...
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from arena import ElementIdAllocator
 from signals import Runtime, create_runtime, destroy_runtime
@@ -43,21 +43,17 @@ struct AppShell(Movable):
     manually wire CreateEngine, DiffEngine, etc.
     """
 
-    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
-    var store: UnsafePointer[VNodeStore, MutUntrackedOrigin]
-    var eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin]
+    var runtime: Pointer[Runtime, MutUntrackedOrigin]
+    var store: Pointer[VNodeStore, MutUntrackedOrigin]
+    var eid_alloc: Pointer[ElementIdAllocator, MutUntrackedOrigin]
     var scheduler: Scheduler
     var _alive: Bool
 
     def __init__(out self):
         """Create an uninitialized shell.  Call `setup()` to allocate."""
-        self.runtime = UnsafePointer[
-            Runtime, MutUntrackedOrigin
-        ].unsafe_dangling()
-        self.store = UnsafePointer[
-            VNodeStore, MutUntrackedOrigin
-        ].unsafe_dangling()
-        self.eid_alloc = UnsafePointer[
+        self.runtime = Pointer[Runtime, MutUntrackedOrigin].unsafe_dangling()
+        self.store = Pointer[VNodeStore, MutUntrackedOrigin].unsafe_dangling()
+        self.eid_alloc = Pointer[
             ElementIdAllocator, MutUntrackedOrigin
         ].unsafe_dangling()
         self.scheduler = Scheduler()
@@ -93,20 +89,16 @@ struct AppShell(Movable):
 
         self.store.unsafe_deinit_pointee()
         self.store.free()
-        self.store = UnsafePointer[
-            VNodeStore, MutUntrackedOrigin
-        ].unsafe_dangling()
+        self.store = Pointer[VNodeStore, MutUntrackedOrigin].unsafe_dangling()
 
         self.eid_alloc.unsafe_deinit_pointee()
         self.eid_alloc.free()
-        self.eid_alloc = UnsafePointer[
+        self.eid_alloc = Pointer[
             ElementIdAllocator, MutUntrackedOrigin
         ].unsafe_dangling()
 
         destroy_runtime(self.runtime)
-        self.runtime = UnsafePointer[
-            Runtime, MutUntrackedOrigin
-        ].unsafe_dangling()
+        self.runtime = Pointer[Runtime, MutUntrackedOrigin].unsafe_dangling()
 
     def is_alive(self) -> Bool:
         """Check whether the shell has been set up and not yet destroyed."""
@@ -283,7 +275,7 @@ struct AppShell(Movable):
 
     def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         vnode_idx: UInt32,
     ) -> Int32:
         """Initial render: create mutations for a VNode, append to root (id 0),
@@ -310,7 +302,7 @@ struct AppShell(Movable):
 
     def mount_with_templates(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         vnode_idx: UInt32,
     ) -> Int32:
         """Initial render with template emission prepended.
@@ -347,7 +339,7 @@ struct AppShell(Movable):
 
     def diff(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         old_idx: UInt32,
         new_idx: UInt32,
     ):
@@ -364,7 +356,7 @@ struct AppShell(Movable):
         engine.diff_node(old_idx, new_idx)
 
     def finalize(
-        self, writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin]
+        self, writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin]
     ) -> Int32:
         """Write the End sentinel and return the byte length."""
         writer_ptr[0].finalize()
@@ -443,7 +435,7 @@ struct AppShell(Movable):
 
     def flush_fragment(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         slot: FragmentSlot,
         new_frag_idx: UInt32,
     ) -> FragmentSlot:
@@ -482,7 +474,7 @@ struct AppShell(Movable):
     # ── Template emission ────────────────────────────────────────────
 
     def emit_templates(
-        self, writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin]
+        self, writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin]
     ):
         """Serialize all registered templates into the mutation buffer.
 

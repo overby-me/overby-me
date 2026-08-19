@@ -7,7 +7,7 @@
 # Run with:
 #   mojo test test/test_scopes.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal, assert_true, assert_false
 
 from wasm_harness import (
@@ -20,22 +20,20 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _create_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises -> Int:
+def _create_runtime(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises -> Int:
     """Create a heap-allocated Runtime via WASM."""
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
 def _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     """Destroy a heap-allocated Runtime via WASM."""
     w[].call_void("runtime_destroy", args_ptr(rt))
@@ -45,7 +43,7 @@ def _destroy_runtime(
 
 
 def test_scope_create_and_destroy(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -83,7 +81,7 @@ def test_scope_create_and_destroy(
 
 
 def test_scope_sequential_ids(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -104,7 +102,7 @@ def test_scope_sequential_ids(
 
 
 def test_scope_slot_reuse_after_destroy(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -124,7 +122,7 @@ def test_scope_slot_reuse_after_destroy(
 
 
 def test_scope_double_destroy_is_noop(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -144,7 +142,7 @@ def test_scope_double_destroy_is_noop(
 
 
 def test_scope_height_and_parent_tracking(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -190,7 +188,7 @@ def test_scope_height_and_parent_tracking(
 
 
 def test_scope_create_child_auto_computes_height(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -227,9 +225,7 @@ def test_scope_create_child_auto_computes_height(
 # ── Dirty flag ───────────────────────────────────────────────────────────────
 
 
-def test_scope_dirty_flag(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_scope_dirty_flag(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var rt = _create_runtime(w)
 
     var s = Int(w[].call_i32("scope_create", args_ptr_i32_i32(rt, 0, -1)))
@@ -260,7 +256,7 @@ def test_scope_dirty_flag(
 
 
 def test_scope_render_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -294,7 +290,7 @@ def test_scope_render_count(
 
 
 def test_scope_begin_render_clears_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -321,7 +317,7 @@ def test_scope_begin_render_clears_dirty(
 
 
 def test_scope_begin_end_render_manages_current(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -369,7 +365,7 @@ def test_scope_begin_end_render_manages_current(
 
 
 def test_scope_begin_render_sets_reactive_context(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -401,7 +397,7 @@ def test_scope_begin_render_sets_reactive_context(
 
 
 def test_scope_nested_rendering(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -448,7 +444,7 @@ def test_scope_nested_rendering(
 
 
 def test_scope_is_first_render(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -482,7 +478,7 @@ def test_scope_is_first_render(
 
 
 def test_scope_hooks_start_empty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -500,7 +496,7 @@ def test_scope_hooks_start_empty(
 
 
 def test_hook_use_signal_creates_on_first_render(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -538,7 +534,7 @@ def test_hook_use_signal_creates_on_first_render(
 
 
 def test_hook_use_signal_same_on_rerender(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -580,7 +576,7 @@ def test_hook_use_signal_same_on_rerender(
 
 
 def test_hook_multiple_signals_same_scope(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -638,7 +634,7 @@ def test_hook_multiple_signals_same_scope(
 
 
 def test_hook_signals_in_different_scopes_independent(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -687,7 +683,7 @@ def test_hook_signals_in_different_scopes_independent(
 
 
 def test_hook_signal_read_subscribes_scope(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -727,7 +723,7 @@ def test_hook_signal_read_subscribes_scope(
 
 
 def test_hook_peek_does_not_subscribe(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -753,7 +749,7 @@ def test_hook_peek_does_not_subscribe(
 
 
 def test_hook_nested_rendering_subscribes_correct_scope(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -821,7 +817,7 @@ def test_hook_nested_rendering_subscribes_correct_scope(
 
 
 def test_scope_stress_100_scopes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -872,7 +868,7 @@ def test_scope_stress_100_scopes(
 
 
 def test_hook_signal_stable_across_many_rerenders(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
 
@@ -915,7 +911,7 @@ def test_hook_signal_stable_across_many_rerenders(
 
 
 def test_hook_simulated_counter_component(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
     var s = Int(w[].call_i32("scope_create", args_ptr_i32_i32(rt, 0, -1)))
@@ -979,7 +975,7 @@ def test_hook_simulated_counter_component(
 
 
 def test_hook_simulated_multi_state_component(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var rt = _create_runtime(w)
     var s = Int(w[].call_i32("scope_create", args_ptr_i32_i32(rt, 0, -1)))
@@ -1038,7 +1034,7 @@ def test_hook_simulated_multi_state_component(
 
 
 def test_hook_simulated_parent_child_tree(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 
@@ -1135,7 +1131,7 @@ def test_hook_simulated_parent_child_tree(
 
 
 def test_scope_render_with_no_hooks(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var rt = _create_runtime(w)
 

@@ -84,14 +84,14 @@
 #
 #         fn mount(
 #             mut self,
-#             writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+#             writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 #         ) -> Int32:
 #             var vnode_idx = self.render()
 #             return self.ctx.mount(writer_ptr, vnode_idx)
 #
 #         fn flush(
 #             mut self,
-#             writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+#             writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 #         ) -> Int32:
 #             if not self.ctx.consume_dirty():
 #                 return 0
@@ -117,7 +117,7 @@
 # (native). The GuiApp trait ensures the renderer can drive the app
 # uniformly regardless of platform.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from bridge import MutationWriter
 
 
@@ -232,7 +232,7 @@ trait GuiApp(Deinitable, Movable):
 
     def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Perform the initial render and write mount mutations.
 
@@ -266,7 +266,7 @@ trait GuiApp(Deinitable, Movable):
 
     def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Re-render dirty scopes and write update mutations.
 

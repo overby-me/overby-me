@@ -7,7 +7,7 @@
 # Run with:
 #   mojo test test/test_comparison.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal
 
 from wasm_harness import (
@@ -18,16 +18,14 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Comparison — eq / ne ─────────────────────────────────────────────────────
 
 
-def test_eq_int32_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_eq_int32_equal(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("eq_int32", args_i32_i32(5, 5))),
         1,
@@ -36,7 +34,7 @@ def test_eq_int32_equal(
 
 
 def test_eq_int32_not_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("eq_int32", args_i32_i32(5, 6))),
@@ -45,9 +43,7 @@ def test_eq_int32_not_equal(
     )
 
 
-def test_eq_int32_zero(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_eq_int32_zero(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("eq_int32", args_i32_i32(0, 0))),
         1,
@@ -56,7 +52,7 @@ def test_eq_int32_zero(
 
 
 def test_ne_int32_not_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("ne_int32", args_i32_i32(5, 6))),
@@ -65,9 +61,7 @@ def test_ne_int32_not_equal(
     )
 
 
-def test_ne_int32_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_ne_int32_equal(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("ne_int32", args_i32_i32(5, 5))),
         0,
@@ -78,9 +72,7 @@ def test_ne_int32_equal(
 # ── Comparison — lt / le / gt / ge ───────────────────────────────────────────
 
 
-def test_lt_int32_less(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_lt_int32_less(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("lt_int32", args_i32_i32(3, 5))),
         1,
@@ -88,9 +80,7 @@ def test_lt_int32_less(
     )
 
 
-def test_lt_int32_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_lt_int32_equal(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("lt_int32", args_i32_i32(5, 5))),
         0,
@@ -98,9 +88,7 @@ def test_lt_int32_equal(
     )
 
 
-def test_lt_int32_greater(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_lt_int32_greater(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("lt_int32", args_i32_i32(7, 5))),
         0,
@@ -108,9 +96,7 @@ def test_lt_int32_greater(
     )
 
 
-def test_le_int32_less(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_le_int32_less(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("le_int32", args_i32_i32(3, 5))),
         1,
@@ -118,9 +104,7 @@ def test_le_int32_less(
     )
 
 
-def test_le_int32_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_le_int32_equal(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("le_int32", args_i32_i32(5, 5))),
         1,
@@ -128,9 +112,7 @@ def test_le_int32_equal(
     )
 
 
-def test_le_int32_greater(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_le_int32_greater(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("le_int32", args_i32_i32(7, 5))),
         0,
@@ -138,9 +120,7 @@ def test_le_int32_greater(
     )
 
 
-def test_gt_int32_greater(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_gt_int32_greater(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("gt_int32", args_i32_i32(7, 5))),
         1,
@@ -148,9 +128,7 @@ def test_gt_int32_greater(
     )
 
 
-def test_gt_int32_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_gt_int32_equal(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("gt_int32", args_i32_i32(5, 5))),
         0,
@@ -158,9 +136,7 @@ def test_gt_int32_equal(
     )
 
 
-def test_gt_int32_less(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_gt_int32_less(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("gt_int32", args_i32_i32(3, 5))),
         0,
@@ -168,9 +144,7 @@ def test_gt_int32_less(
     )
 
 
-def test_ge_int32_greater(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_ge_int32_greater(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("ge_int32", args_i32_i32(7, 5))),
         1,
@@ -178,9 +152,7 @@ def test_ge_int32_greater(
     )
 
 
-def test_ge_int32_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_ge_int32_equal(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("ge_int32", args_i32_i32(5, 5))),
         1,
@@ -188,9 +160,7 @@ def test_ge_int32_equal(
     )
 
 
-def test_ge_int32_less(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_ge_int32_less(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("ge_int32", args_i32_i32(3, 5))),
         0,
@@ -202,7 +172,7 @@ def test_ge_int32_less(
 
 
 def test_lt_negative_vs_zero(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("lt_int32", args_i32_i32(-5, 0))),
@@ -212,7 +182,7 @@ def test_lt_negative_vs_zero(
 
 
 def test_gt_zero_vs_negative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("gt_int32", args_i32_i32(0, -5))),
@@ -221,9 +191,7 @@ def test_gt_zero_vs_negative(
     )
 
 
-def test_le_negative_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_le_negative_equal(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("le_int32", args_i32_i32(-5, -5))),
         1,
@@ -231,9 +199,7 @@ def test_le_negative_equal(
     )
 
 
-def test_ge_negative_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_ge_negative_equal(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("ge_int32", args_i32_i32(-5, -5))),
         1,
@@ -241,9 +207,7 @@ def test_ge_negative_equal(
     )
 
 
-def test_lt_more_negative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_lt_more_negative(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("lt_int32", args_i32_i32(-10, -5))),
         1,
@@ -251,9 +215,7 @@ def test_lt_more_negative(
     )
 
 
-def test_gt_less_negative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_gt_less_negative(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("gt_int32", args_i32_i32(-5, -10))),
         1,
@@ -265,7 +227,7 @@ def test_gt_less_negative(
 
 
 def test_bool_and_true_true(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bool_and", args_i32_i32(1, 1))),
@@ -275,7 +237,7 @@ def test_bool_and_true_true(
 
 
 def test_bool_and_true_false(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bool_and", args_i32_i32(1, 0))),
@@ -285,7 +247,7 @@ def test_bool_and_true_false(
 
 
 def test_bool_and_false_true(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bool_and", args_i32_i32(0, 1))),
@@ -295,7 +257,7 @@ def test_bool_and_false_true(
 
 
 def test_bool_and_false_false(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bool_and", args_i32_i32(0, 0))),
@@ -307,9 +269,7 @@ def test_bool_and_false_false(
 # ── Boolean logic — or ──────────────────────────────────────────────────────
 
 
-def test_bool_or_true_true(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bool_or_true_true(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("bool_or", args_i32_i32(1, 1))),
         1,
@@ -318,7 +278,7 @@ def test_bool_or_true_true(
 
 
 def test_bool_or_true_false(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bool_or", args_i32_i32(1, 0))),
@@ -328,7 +288,7 @@ def test_bool_or_true_false(
 
 
 def test_bool_or_false_true(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bool_or", args_i32_i32(0, 1))),
@@ -338,7 +298,7 @@ def test_bool_or_false_true(
 
 
 def test_bool_or_false_false(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bool_or", args_i32_i32(0, 0))),
@@ -350,9 +310,7 @@ def test_bool_or_false_false(
 # ── Boolean logic — not ─────────────────────────────────────────────────────
 
 
-def test_bool_not_true(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bool_not_true(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("bool_not", args_i32(1))),
         0,
@@ -360,9 +318,7 @@ def test_bool_not_true(
     )
 
 
-def test_bool_not_false(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bool_not_false(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("bool_not", args_i32(0))),
         1,

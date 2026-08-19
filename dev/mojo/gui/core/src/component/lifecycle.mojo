@@ -65,7 +65,7 @@
 #     # Flush — hide (back to placeholder):
 #     self.cond = flush_conditional_empty(writer, eid, rt, store, self.cond)
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from bridge import MutationWriter
 from arena import ElementIdAllocator
 from signals import Runtime
@@ -198,10 +198,10 @@ struct ConditionalSlot(Copyable, Equatable, Writable):
 
 
 def flush_conditional(
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: Pointer[Runtime, MutUntrackedOrigin],
+    store_ptr: Pointer[VNodeStore, MutUntrackedOrigin],
     slot: ConditionalSlot,
     new_vnode_idx: UInt32,
 ) -> ConditionalSlot:
@@ -255,10 +255,10 @@ def flush_conditional(
 
 
 def flush_conditional_empty(
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: Pointer[Runtime, MutUntrackedOrigin],
+    store_ptr: Pointer[VNodeStore, MutUntrackedOrigin],
     slot: ConditionalSlot,
 ) -> ConditionalSlot:
     """Flush a conditional slot: hide the current branch (back to placeholder).
@@ -322,10 +322,10 @@ def flush_conditional_empty(
 
 
 def flush_fragment(
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: Pointer[Runtime, MutUntrackedOrigin],
+    store_ptr: Pointer[VNodeStore, MutUntrackedOrigin],
     mut slot: FragmentSlot,
     new_frag_idx: UInt32,
 ) -> FragmentSlot:
@@ -426,10 +426,10 @@ def flush_fragment(
 
 
 def mount_vnode(
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: Pointer[Runtime, MutUntrackedOrigin],
+    store_ptr: Pointer[VNodeStore, MutUntrackedOrigin],
     vnode_idx: UInt32,
 ) -> Int32:
     """Initial render: create mutations for a VNode and append to root.
@@ -460,10 +460,10 @@ def mount_vnode(
 
 
 def mount_vnode_to(
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: Pointer[Runtime, MutUntrackedOrigin],
+    store_ptr: Pointer[VNodeStore, MutUntrackedOrigin],
     vnode_idx: UInt32,
     parent_id: UInt32,
 ) -> Int32:
@@ -493,10 +493,10 @@ def mount_vnode_to(
 
 
 def diff_and_finalize(
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: Pointer[Runtime, MutUntrackedOrigin],
+    store_ptr: Pointer[VNodeStore, MutUntrackedOrigin],
     old_idx: UInt32,
     new_idx: UInt32,
 ) -> Int32:
@@ -524,10 +524,10 @@ def diff_and_finalize(
 
 
 def diff_no_finalize(
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: Pointer[Runtime, MutUntrackedOrigin],
+    store_ptr: Pointer[VNodeStore, MutUntrackedOrigin],
     old_idx: UInt32,
     new_idx: UInt32,
 ):
@@ -550,10 +550,10 @@ def diff_no_finalize(
 
 
 def create_no_finalize(
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-    eid_ptr: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-    rt_ptr: UnsafePointer[Runtime, MutUntrackedOrigin],
-    store_ptr: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
+    eid_ptr: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+    rt_ptr: Pointer[Runtime, MutUntrackedOrigin],
+    store_ptr: Pointer[VNodeStore, MutUntrackedOrigin],
     vnode_idx: UInt32,
 ) -> UInt32:
     """Create mutations for a VNode WITHOUT finalizing or appending.

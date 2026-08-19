@@ -32,7 +32,7 @@
 # The store uses a slab allocator (free-list) identical to SignalStore,
 # HandlerRegistry, and ScopeArena, so memo IDs are stable and reusable.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 comptime MEMO_NO_STRING: UInt32 = UInt32(0xFFFFFFFF)
 """Sentinel: this memo has no StringStore entry."""
@@ -288,15 +288,13 @@ struct MemoStore(Movable):
         """
         return self._entries[Int(id)].copy()
 
-    def get_ptr(
-        mut self, id: UInt32
-    ) -> UnsafePointer[MemoEntry, MutUntrackedOrigin]:
+    def get_ptr(mut self, id: UInt32) -> Pointer[MemoEntry, MutUntrackedOrigin]:
         """Return a pointer to the memo entry at `id`.
 
         The pointer is valid until the next mutation of the store.
         Precondition: `contains(id)` is True.
         """
-        return UnsafePointer(to=self._entries[Int(id)])
+        return Pointer(to=self._entries[Int(id)])
 
     # ── Dirty tracking ───────────────────────────────────────────────
 

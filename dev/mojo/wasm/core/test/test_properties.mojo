@@ -6,7 +6,7 @@
 # Run with:
 #   mojo test test/test_properties.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_true, assert_equal
 
 from wasm_harness import (
@@ -21,7 +21,7 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -31,7 +31,7 @@ def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
 
 
 def test_add_int32_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0, 1, -7, 100, 2147483647, 12345]
     var bs: List[Int] = [0, 2, 13, -100, -2147483648, 67890]
@@ -46,7 +46,7 @@ def test_add_int32_commutes(
 
 
 def test_add_int64_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0, 1, -999, 9223372036854775807]
     var bs: List[Int] = [0, 2, 999, -1]
@@ -61,7 +61,7 @@ def test_add_int64_commutes(
 
 
 def test_add_float64_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Float64] = [0.0, 1.5, -3.14, 1e10]
     var bs: List[Float64] = [0.0, 2.5, 3.14, 1e-10]
@@ -85,7 +85,7 @@ def test_add_float64_commutes(
 
 
 def test_mul_int32_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0, 3, -5, -4, 2147483647, 1000]
     var bs: List[Int] = [1, 7, 11, -6, 2, 1000]
@@ -100,7 +100,7 @@ def test_mul_int32_commutes(
 
 
 def test_mul_int64_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0, 3, -100]
     var bs: List[Int] = [1, 7, 200]
@@ -115,7 +115,7 @@ def test_mul_int64_commutes(
 
 
 def test_mul_float64_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Float64] = [2.5, -1.5, 0.0]
     var bs: List[Float64] = [4.0, 3.0, 999.0]
@@ -139,7 +139,7 @@ def test_mul_float64_commutes(
 
 
 def test_min_int32_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [3, -5, 0, 2147483647]
     var bs: List[Int] = [7, 5, 0, -2147483648]
@@ -154,7 +154,7 @@ def test_min_int32_commutes(
 
 
 def test_max_int32_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [3, -5, 0, 2147483647]
     var bs: List[Int] = [7, 5, 0, -2147483648]
@@ -174,7 +174,7 @@ def test_max_int32_commutes(
 
 
 def test_gcd_int32_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [12, 7, 100, 0, 1071]
     var bs: List[Int] = [8, 13, 75, 5, 462]
@@ -194,7 +194,7 @@ def test_gcd_int32_commutes(
 
 
 def test_bitand_int32_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0b1100, 0xFF, 0, 2147483647]
     var bs: List[Int] = [0b1010, 0x0F, -1, -2147483648]
@@ -213,7 +213,7 @@ def test_bitand_int32_commutes(
 
 
 def test_bitor_int32_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0b1100, 0xFF, 0, 2147483647]
     var bs: List[Int] = [0b1010, 0x0F, -1, -2147483648]
@@ -232,7 +232,7 @@ def test_bitor_int32_commutes(
 
 
 def test_bitxor_int32_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0b1100, 0xFF, 0, 2147483647]
     var bs: List[Int] = [0b1010, 0x0F, -1, -2147483648]
@@ -255,9 +255,7 @@ def test_bitxor_int32_commutes(
 # ---------------------------------------------------------------------------
 
 
-def test_bool_and_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bool_and_commutes(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     for a in range(2):
         for b in range(2):
             assert_equal(
@@ -271,9 +269,7 @@ def test_bool_and_commutes(
             )
 
 
-def test_bool_or_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bool_or_commutes(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     for a in range(2):
         for b in range(2):
             assert_equal(
@@ -292,9 +288,7 @@ def test_bool_or_commutes(
 # ---------------------------------------------------------------------------
 
 
-def test_eq_int32_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_eq_int32_commutes(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var as_: List[Int] = [0, 5, -1, 2147483647]
     var bs: List[Int] = [0, 6, 1, -2147483648]
     for i in range(len(as_)):
@@ -307,9 +301,7 @@ def test_eq_int32_commutes(
         )
 
 
-def test_ne_int32_commutes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_ne_int32_commutes(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var as_: List[Int] = [0, 5, -1, 2147483647]
     var bs: List[Int] = [0, 6, 1, -2147483648]
     for i in range(len(as_)):
@@ -328,7 +320,7 @@ def test_ne_int32_commutes(
 
 
 def test_add_int32_associative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [1, -5, 100, 0, 2147483647]
     var bs: List[Int] = [2, 10, 200, 0, 1]
@@ -366,7 +358,7 @@ def test_add_int32_associative(
 
 
 def test_add_float64_associative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Float64] = [1.0, -1.0, 100.0]
     var bs: List[Float64] = [2.0, 1.0, 200.0]
@@ -403,7 +395,7 @@ def test_add_float64_associative(
 
 
 def test_mul_int32_associative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [2, -1, 1, 0, 10]
     var bs: List[Int] = [3, 5, 1, 999, 10]
@@ -446,7 +438,7 @@ def test_mul_int32_associative(
 
 
 def test_bitand_int32_associative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0b1100, 0xFF, 0]
     var bs: List[Int] = [0b1010, 0x0F, -1]
@@ -484,7 +476,7 @@ def test_bitand_int32_associative(
 
 
 def test_bitor_int32_associative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0b1100, 0xFF, 0]
     var bs: List[Int] = [0b1010, 0x0F, -1]
@@ -522,7 +514,7 @@ def test_bitor_int32_associative(
 
 
 def test_bitxor_int32_associative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0b1100, 0xFF, 0]
     var bs: List[Int] = [0b1010, 0x0F, -1]
@@ -565,7 +557,7 @@ def test_bitxor_int32_associative(
 
 
 def test_mul_distributes_over_add(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [2, -3, 0, 1, 10, 7]
     var bs: List[Int] = [3, 5, 100, -1, 10, 0]
@@ -610,7 +602,7 @@ def test_mul_distributes_over_add(
 
 
 def test_bitand_distributes_over_bitor(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0b1100, 0xFF, -1, 0]
     var bs: List[Int] = [0b1010, 0x0F, 42, 0xFFFF]
@@ -655,7 +647,7 @@ def test_bitand_distributes_over_bitor(
 
 
 def test_bitor_distributes_over_bitand(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var as_: List[Int] = [0b1100, 0xFF, 0]
     var bs: List[Int] = [0b1010, 0x0F, 42]
@@ -699,9 +691,7 @@ def test_bitor_distributes_over_bitand(
 # ---------------------------------------------------------------------------
 
 
-def test_add_identity(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_add_identity(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var xs: List[Int] = [-42, 0, 1, 2147483647, -2147483648]
     for i in range(len(xs)):
         var x = xs[i]
@@ -712,9 +702,7 @@ def test_add_identity(
         )
 
 
-def test_mul_identity(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_mul_identity(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var xs: List[Int] = [-42, 0, 1, 2147483647, -2147483648]
     for i in range(len(xs)):
         var x = xs[i]
@@ -725,9 +713,7 @@ def test_mul_identity(
         )
 
 
-def test_bitand_identity(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bitand_identity(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var xs: List[Int] = [-42, 0, 1, 2147483647, -2147483648]
     for i in range(len(xs)):
         var x = xs[i]
@@ -738,9 +724,7 @@ def test_bitand_identity(
         )
 
 
-def test_bitor_identity(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bitor_identity(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var xs: List[Int] = [-42, 0, 1, 2147483647, -2147483648]
     for i in range(len(xs)):
         var x = xs[i]
@@ -751,9 +735,7 @@ def test_bitor_identity(
         )
 
 
-def test_bitxor_identity(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bitxor_identity(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var xs: List[Int] = [-42, 0, 1, 2147483647, -2147483648]
     for i in range(len(xs)):
         var x = xs[i]
@@ -769,7 +751,7 @@ def test_bitxor_identity(
 # ---------------------------------------------------------------------------
 
 
-def test_mul_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_mul_zero(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var xs: List[Int] = [-42, 0, 1, 2147483647, -2147483648]
     for i in range(len(xs)):
         var x = xs[i]
@@ -780,7 +762,7 @@ def test_mul_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
         )
 
 
-def test_bitand_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_bitand_zero(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var xs: List[Int] = [-42, 0, 1, 2147483647, -2147483648]
     for i in range(len(xs)):
         var x = xs[i]
@@ -791,9 +773,7 @@ def test_bitand_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
         )
 
 
-def test_bitor_all_ones(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bitor_all_ones(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var xs: List[Int] = [-42, 0, 1, 2147483647, -2147483648]
     for i in range(len(xs)):
         var x = xs[i]
@@ -809,7 +789,7 @@ def test_bitor_all_ones(
 # ---------------------------------------------------------------------------
 
 
-def test_neg_neg(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_neg_neg(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var xs: List[Int] = [-42, 0, 1, 99, 2147483647, -2147483648]
     for i in range(len(xs)):
         var x = xs[i]
@@ -825,9 +805,7 @@ def test_neg_neg(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
         )
 
 
-def test_bitnot_bitnot(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bitnot_bitnot(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var xs: List[Int] = [-42, 0, 1, 99, 2147483647, -2147483648]
     for i in range(len(xs)):
         var x = xs[i]
@@ -846,9 +824,7 @@ def test_bitnot_bitnot(
         )
 
 
-def test_bool_not_not(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bool_not_not(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     for x in range(2):
         assert_equal(
             Int(
@@ -863,7 +839,7 @@ def test_bool_not_not(
 
 
 def test_bitxor_self_inverse(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var xs: List[Int] = [42, 0, 2147483647]
     var ys: List[Int] = [99, -1, -2147483648]
@@ -898,7 +874,7 @@ def test_bitxor_self_inverse(
 
 
 def test_de_morgan_not_and_eq_or_not(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """not(a and b) === not(a) or not(b)."""
     for a in range(2):
@@ -934,7 +910,7 @@ def test_de_morgan_not_and_eq_or_not(
 
 
 def test_de_morgan_not_or_eq_and_not(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """not(a or b) === not(a) and not(b)."""
     for a in range(2):
@@ -975,7 +951,7 @@ def test_de_morgan_not_or_eq_and_not(
 
 
 def test_bitnot_and_eq_or_bitnot(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """~(a & b) === ~a | ~b."""
     var as_: List[Int] = [0b1100, 0xFF, 0, 2147483647]
@@ -1013,7 +989,7 @@ def test_bitnot_and_eq_or_bitnot(
 
 
 def test_bitnot_or_eq_and_bitnot(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """~(a | b) === ~a & ~b."""
     var as_: List[Int] = [0b1100, 0xFF, 0, 2147483647]
@@ -1055,9 +1031,7 @@ def test_bitnot_or_eq_and_bitnot(
 # ---------------------------------------------------------------------------
 
 
-def test_lt_eq_not_ge(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_lt_eq_not_ge(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var as_: List[Int] = [3, 5, 7, -1, 0, 2147483647]
     var bs: List[Int] = [5, 5, 5, 0, -1, -2147483648]
     for i in range(len(as_)):
@@ -1083,9 +1057,7 @@ def test_lt_eq_not_ge(
         )
 
 
-def test_le_eq_not_gt(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_le_eq_not_gt(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var as_: List[Int] = [3, 5, 7, -1, 0, 2147483647]
     var bs: List[Int] = [5, 5, 5, 0, -1, -2147483648]
     for i in range(len(as_)):
@@ -1111,9 +1083,7 @@ def test_le_eq_not_gt(
         )
 
 
-def test_eq_iff_le_and_ge(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_eq_iff_le_and_ge(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var as_: List[Int] = [3, 5, 7, -1, 0, 2147483647]
     var bs: List[Int] = [5, 5, 5, 0, -1, -2147483648]
     for i in range(len(as_)):

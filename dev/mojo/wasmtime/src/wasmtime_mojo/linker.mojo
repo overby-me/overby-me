@@ -5,7 +5,7 @@ NOTE on FFI output parameters:
     instance handle from wasmtime_linker_instantiate).  For Mojo types
     that are TrivialRegisterPassable, the compiler may keep local
     variables in registers.  If we take the address of such a local with
-    UnsafePointer(to=var) and pass it to FFI, the write goes to a stack
+    Pointer(to=var) and pass it to FFI, the write goes to a stack
     spill slot — but the compiler may never reload the register from that
     slot, so the local still has its old (zero) value.
 
@@ -36,7 +36,7 @@ Usage:
     var instance = linker.instantiate(store.context(), module.ptr())
 """
 
-from std.memory import UnsafePointer, unsafe_memcpy, alloc
+from std.memory import Pointer, unsafe_memcpy, alloc
 
 from ._types import (
     EnginePtr,
@@ -118,8 +118,8 @@ struct Linker(Movable):
         param_kinds: List[UInt8],
         result_kinds: List[UInt8],
         callback: WasmtimeCallback,
-        env: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]] = None,
-        finalizer: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]] = None,
+        env: Optional[Pointer[NoneType, MutUntrackedOrigin]] = None,
+        finalizer: Optional[Pointer[NoneType, MutUntrackedOrigin]] = None,
     ) raises:
         """Define a host function to satisfy a WASM import.
 

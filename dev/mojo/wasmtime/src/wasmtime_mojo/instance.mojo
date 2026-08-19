@@ -16,7 +16,7 @@ Usage:
     var glob = instance_get_global(store.context(), inst, "__heap_base")
 """
 
-from std.memory import UnsafePointer, alloc, unsafe_memcpy
+from std.memory import Pointer, alloc, unsafe_memcpy
 
 from ._types import (
     ContextPtr,
@@ -412,7 +412,7 @@ def func_call_f64(
 
 def memory_data_ptr(
     context: ContextPtr, memory: WasmtimeMemory
-) raises -> UnsafePointer[UInt8, MutUntrackedOrigin]:
+) raises -> Pointer[UInt8, MutUntrackedOrigin]:
     """Return a raw pointer to the start of WASM linear memory.
 
     The pointer is only valid until the next memory-growing operation.

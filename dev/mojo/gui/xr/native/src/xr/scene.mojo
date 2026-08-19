@@ -63,7 +63,7 @@
 #         var controls = scene.create_panel(PanelConfig(width_m=0.4, height_m=0.3))
 #         scene.set_panel_position(controls, 0.5, 1.2, -0.8)
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.collections import List, Optional
 from std.math import sin, cos
 

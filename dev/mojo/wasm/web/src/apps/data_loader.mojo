@@ -26,7 +26,7 @@
 #      shows content with loaded data
 #   4. Re-load: repeat cycle with new data
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -145,14 +145,14 @@ struct DataLoaderApp(Movable):
 # ── DataLoaderApp lifecycle functions ────────────────────────────────────────
 
 
-def _dl_init() -> UnsafePointer[DataLoaderApp, MutUntrackedOrigin]:
+def _dl_init() -> Pointer[DataLoaderApp, MutUntrackedOrigin]:
     var app_ptr = alloc[DataLoaderApp](1)
     app_ptr.unsafe_write(DataLoaderApp())
     return app_ptr
 
 
 def _dl_destroy(
-    app_ptr: UnsafePointer[DataLoaderApp, MutUntrackedOrigin],
+    app_ptr: Pointer[DataLoaderApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].content.child_ctx)
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].skeleton.child_ctx)
@@ -163,7 +163,7 @@ def _dl_destroy(
 
 def _dl_rebuild(
     mut app: DataLoaderApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the data-loader app."""
     # 1. Render parent with placeholders
@@ -229,7 +229,7 @@ def _dl_resolve(
 
 def _dl_flush(
     mut app: DataLoaderApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with suspense logic.
 

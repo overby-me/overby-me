@@ -20,7 +20,7 @@
 #   - DynamicAttr:  A dynamic attribute within a TemplateRef.
 #   - AttributeValue: The value of a dynamic attribute (tagged union).
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 
 # ── VNode kind tags ──────────────────────────────────────────────────────────
@@ -708,17 +708,13 @@ struct VNodeStore(Movable):
 
     # ── Access ───────────────────────────────────────────────────────
 
-    def get_ptr(
-        self, index: UInt32
-    ) -> UnsafePointer[VNode, MutUntrackedOrigin]:
+    def get_ptr(self, index: UInt32) -> Pointer[VNode, MutUntrackedOrigin]:
         """Return a pointer to the VNode at `index`.
 
         Valid until the store is mutated.
         """
         var ptr = self._nodes.unsafe_ptr() + Int(index)
-        return UnsafePointer[VNode, MutUntrackedOrigin](
-            unsafe_from_address=Int(ptr)
-        )
+        return Pointer[VNode, MutUntrackedOrigin](unsafe_from_address=Int(ptr))
 
     def kind(self, index: UInt32) -> UInt8:
         """Return the kind tag of the VNode at `index`."""

@@ -56,7 +56,7 @@
 #           # dispatch event to panel's GuiApp.handle_event()
 #   xr.destroy()
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from std.os import getenv
 from std.ffi import _DLHandle
 
@@ -419,12 +419,12 @@ struct XRBlitz(Movable):
     """
 
     var _lib: _DLHandle
-    var _session: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]]
+    var _session: Optional[Pointer[NoneType, MutUntrackedOrigin]]
 
     def __init__(
         out self,
         lib: _DLHandle,
-        session: UnsafePointer[NoneType, MutUntrackedOrigin],
+        session: Pointer[NoneType, MutUntrackedOrigin],
     ):
         """Private initializer. Use XRBlitz.create_session() or
         XRBlitz.create_headless() instead."""
@@ -462,7 +462,7 @@ struct XRBlitz(Movable):
 
         var session = lib.call[
             "mxr_create_session",
-            Optional[UnsafePointer[NoneType, MutUntrackedOrigin]],
+            Optional[Pointer[NoneType, MutUntrackedOrigin]],
         ](name_ptr, name_len)
 
         if not session:
@@ -491,7 +491,7 @@ struct XRBlitz(Movable):
         var lib = _DLHandle(lib_path)
 
         var session = lib.call[
-            "mxr_create_headless", UnsafePointer[NoneType, MutUntrackedOrigin]
+            "mxr_create_headless", Pointer[NoneType, MutUntrackedOrigin]
         ]()
 
         return Self(lib, session)
@@ -692,7 +692,7 @@ struct XRBlitz(Movable):
     def panel_apply_mutations(
         self,
         panel_id: UInt32,
-        buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+        buf: Pointer[UInt8, MutUntrackedOrigin],
         length: UInt32,
     ):
         """Apply a binary mutation buffer to a panel's DOM.
@@ -768,7 +768,7 @@ struct XRBlitz(Movable):
     def panel_register_template(
         self,
         panel_id: UInt32,
-        buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+        buf: Pointer[UInt8, MutUntrackedOrigin],
         length: UInt32,
     ):
         """Register a template definition in a panel.
@@ -809,7 +809,7 @@ struct XRBlitz(Movable):
         self,
         panel_id: UInt32,
         parent_id: UInt32,
-        child_ids: UnsafePointer[UInt32, _],
+        child_ids: Pointer[UInt32, _],
         child_count: UInt32,
     ):
         """Append children to a parent element in a panel.
@@ -828,7 +828,7 @@ struct XRBlitz(Movable):
         self,
         panel_id: UInt32,
         anchor_id: UInt32,
-        new_ids: UnsafePointer[UInt32, _],
+        new_ids: Pointer[UInt32, _],
         new_count: UInt32,
     ):
         """Insert nodes before an anchor node in a panel.
@@ -847,7 +847,7 @@ struct XRBlitz(Movable):
         self,
         panel_id: UInt32,
         anchor_id: UInt32,
-        new_ids: UnsafePointer[UInt32, _],
+        new_ids: Pointer[UInt32, _],
         new_count: UInt32,
     ):
         """Insert nodes after an anchor node in a panel.
@@ -866,7 +866,7 @@ struct XRBlitz(Movable):
         self,
         panel_id: UInt32,
         old_id: UInt32,
-        new_ids: UnsafePointer[UInt32, _],
+        new_ids: Pointer[UInt32, _],
         new_count: UInt32,
     ):
         """Replace a node with new nodes in a panel.
@@ -969,7 +969,7 @@ struct XRBlitz(Movable):
         self,
         panel_id: UInt32,
         root_id: UInt32,
-        path: UnsafePointer[UInt32, _],
+        path: Pointer[UInt32, _],
         path_len: UInt32,
     ) -> UInt32:
         """Navigate to a child at the given path from a starting node.
@@ -1188,9 +1188,7 @@ struct XRBlitz(Movable):
         if v_len > 0 and v_ptr_int != 0:
             var slot = alloc[Int](1)
             slot[0] = v_ptr_int
-            var v_ptr = slot.bitcast[
-                UnsafePointer[UInt8, MutUntrackedOrigin]
-            ]()[0]
+            var v_ptr = slot.bitcast[Pointer[UInt8, MutUntrackedOrigin]]()[0]
             slot.free()
             for i in range(v_len):
                 value += chr(Int(v_ptr[i]))
@@ -1385,7 +1383,7 @@ struct XRBlitz(Movable):
     def read_pixels(
         self,
         panel_id: UInt32,
-        buf: UnsafePointer[UInt8, _],
+        buf: Pointer[UInt8, _],
         buf_len: UInt32,
     ) -> UInt32:
         """Copy a panel's most-recently-rendered texture to a CPU buffer.
@@ -1731,7 +1729,7 @@ struct XRBlitz(Movable):
         var needed = self._lib.call["mxr_panel_serialize_subtree", UInt32](
             self._session,
             panel_id,
-            Optional[UnsafePointer[UInt8, MutUntrackedOrigin]](None),
+            Optional[Pointer[UInt8, MutUntrackedOrigin]](None),
             UInt32(0),
         )
 

@@ -10,7 +10,7 @@
 # Run with:
 #   mojo test test/test_sso.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_true, assert_equal
 
 from wasm_harness import (
@@ -24,7 +24,7 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -46,7 +46,7 @@ def _repeat_char(ch: String, n: Int) -> String:
 
 
 def test_roundtrip_22_bytes_sso(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """22 bytes: comfortably within SSO."""
     var s = _repeat_char("a", 22)
@@ -61,7 +61,7 @@ def test_roundtrip_22_bytes_sso(
 
 
 def test_roundtrip_23_bytes_sso_max(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """23 bytes: max SSO capacity."""
     var s = _repeat_char("b", 23)
@@ -76,7 +76,7 @@ def test_roundtrip_23_bytes_sso_max(
 
 
 def test_roundtrip_24_bytes_heap(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """24 bytes: first heap-allocated size."""
     var s = _repeat_char("c", 24)
@@ -91,7 +91,7 @@ def test_roundtrip_24_bytes_heap(
 
 
 def test_roundtrip_25_bytes_heap(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """25 bytes: safely past the boundary."""
     var s = _repeat_char("d", 25)
@@ -110,9 +110,7 @@ def test_roundtrip_25_bytes_heap(
 # ---------------------------------------------------------------------------
 
 
-def test_length_22_sso(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_length_22_sso(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var ptr = w[].write_string_struct(_repeat_char("x", 22))
     assert_equal(
         Int(w[].call_i64("string_length", args_ptr(ptr))),
@@ -121,9 +119,7 @@ def test_length_22_sso(
     )
 
 
-def test_length_23_sso_max(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_length_23_sso_max(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var ptr = w[].write_string_struct(_repeat_char("x", 23))
     assert_equal(
         Int(w[].call_i64("string_length", args_ptr(ptr))),
@@ -132,9 +128,7 @@ def test_length_23_sso_max(
     )
 
 
-def test_length_24_heap(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_length_24_heap(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var ptr = w[].write_string_struct(_repeat_char("x", 24))
     assert_equal(
         Int(w[].call_i64("string_length", args_ptr(ptr))),
@@ -149,7 +143,7 @@ def test_length_24_heap(
 
 
 def test_eq_23_identical_sso(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Both SSO."""
     var s = _repeat_char("y", 23)
@@ -163,7 +157,7 @@ def test_eq_23_identical_sso(
 
 
 def test_eq_23_vs_24_different_length(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """SSO vs heap: different lengths should not match."""
     var a_ptr = w[].write_string_struct(_repeat_char("z", 23))
@@ -176,7 +170,7 @@ def test_eq_23_vs_24_different_length(
 
 
 def test_eq_24_identical_heap(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Both heap."""
     var s = _repeat_char("w", 24)
@@ -190,7 +184,7 @@ def test_eq_24_identical_heap(
 
 
 def test_eq_23_differ_last_byte_sso(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Same length at boundary, different content."""
     var a_ptr = w[].write_string_struct(_repeat_char("a", 23))
@@ -208,7 +202,7 @@ def test_eq_23_differ_last_byte_sso(
 
 
 def test_concat_11_plus_12_eq_23_sso(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Two small strings that concat to exactly 23 bytes (SSO)."""
     var a_ptr = w[].write_string_struct(_repeat_char("a", 11))
@@ -229,7 +223,7 @@ def test_concat_11_plus_12_eq_23_sso(
 
 
 def test_concat_12_plus_12_eq_24_heap(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Two small strings that concat to exactly 24 bytes (crosses to heap)."""
     var a_ptr = w[].write_string_struct(_repeat_char("a", 12))
@@ -255,7 +249,7 @@ def test_concat_12_plus_12_eq_24_heap(
 
 
 def test_repeat_8x3_eq_24_heap(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """8 * 3 = 24 bytes -> heap."""
     var ptr = w[].write_string_struct(_repeat_char("a", 8))
@@ -270,7 +264,7 @@ def test_repeat_8x3_eq_24_heap(
 
 
 def test_repeat_23x1_stays_sso(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """23 * 1 = 23 bytes -> stays SSO."""
     var ptr = w[].write_string_struct(_repeat_char("q", 23))
@@ -290,7 +284,7 @@ def test_repeat_23x1_stays_sso(
 
 
 def test_roundtrip_150_bytes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var s = _repeat_char("abc", 50)  # 150 bytes
     var in_ptr = w[].write_string_struct(s)
@@ -303,9 +297,7 @@ def test_roundtrip_150_bytes(
     )
 
 
-def test_length_256_bytes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_length_256_bytes(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var s = _repeat_char("x", 256)
     var ptr = w[].write_string_struct(s)
     assert_equal(

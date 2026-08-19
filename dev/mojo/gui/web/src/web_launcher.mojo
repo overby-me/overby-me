@@ -82,7 +82,7 @@
 #   platform abstraction matures, main.mojo can be simplified to delegate
 #   to WebApp methods.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from platform import (
     PlatformApp,
     AppConfig,
@@ -182,9 +182,7 @@ struct WebApp(PlatformApp):
 
         self._initialized = True
 
-    def flush_mutations(
-        mut self, buf: UnsafePointer[UInt8, _], length: Int
-    ) raises:
+    def flush_mutations(mut self, buf: Pointer[UInt8, _], length: Int) raises:
         """No-op on WASM — the JS runtime reads the mutation buffer directly.
 
         On the web target, the mutation buffer lives in WASM linear memory.

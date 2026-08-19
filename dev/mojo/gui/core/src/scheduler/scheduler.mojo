@@ -17,7 +17,7 @@
 # The scheduler does NOT own the Runtime — it borrows a pointer to it
 # for querying scope heights and draining the dirty queue.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from signals import Runtime
 
 
@@ -63,7 +63,7 @@ struct Scheduler(Movable):
         self._queue = move._queue^
         self._sorted = move._sorted
 
-    def collect(mut self, rt: UnsafePointer[Runtime, MutUntrackedOrigin]):
+    def collect(mut self, rt: Pointer[Runtime, MutUntrackedOrigin]):
         """Drain the runtime's dirty queue into the scheduler.
 
         Deduplicates against any entries already in the queue.
@@ -81,7 +81,7 @@ struct Scheduler(Movable):
 
     def collect_one(
         mut self,
-        rt: UnsafePointer[Runtime, MutUntrackedOrigin],
+        rt: Pointer[Runtime, MutUntrackedOrigin],
         scope_id: UInt32,
     ):
         """Add a single scope to the queue (if not already present).

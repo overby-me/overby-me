@@ -23,7 +23,7 @@ MemoBool + MemoString in a form-validation scenario:
   - scope count is 1
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
@@ -39,7 +39,7 @@ from wasm_harness import (
 )
 
 
-def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _load() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -47,7 +47,7 @@ def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
 
 
 def _create_mf(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a MemoFormApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("mf_init", no_args()))
@@ -57,7 +57,7 @@ def _create_mf(
 
 
 def _create_mf_no_rebuild(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a MemoFormApp without mounting.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("mf_init", no_args()))
@@ -66,7 +66,7 @@ def _create_mf_no_rebuild(
 
 
 def _destroy_mf(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -76,7 +76,7 @@ def _destroy_mf(
 
 
 def _flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -85,7 +85,7 @@ def _flush(
 
 
 def _set_input(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     value: String,
 ) raises:
@@ -95,7 +95,7 @@ def _set_input(
 
 
 def _input_text(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     """Read the input signal text."""
@@ -105,7 +105,7 @@ def _input_text(
 
 
 def _status_text(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     """Read the status memo text."""
@@ -115,7 +115,7 @@ def _status_text(
 
 
 def _is_valid(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     """Read the is_valid memo value."""
@@ -123,7 +123,7 @@ def _is_valid(
 
 
 def _is_valid_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     """Check if is_valid memo is dirty."""
@@ -131,7 +131,7 @@ def _is_valid_dirty(
 
 
 def _status_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     """Check if status memo is dirty."""
@@ -142,7 +142,7 @@ def _status_dirty(
 
 
 def test_mf_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero pointer."""
     var app = Int(w[].call_i64("mf_init", no_args()))
@@ -154,7 +154,7 @@ def test_mf_init_creates_app(
 
 
 def test_mf_input_starts_empty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Input signal is empty after init + rebuild."""
     var t = _create_mf(w)
@@ -169,7 +169,7 @@ def test_mf_input_starts_empty(
 
 
 def test_mf_is_valid_starts_false(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Validate is_valid memo is False after init + rebuild."""
     var t = _create_mf(w)
@@ -183,7 +183,7 @@ def test_mf_is_valid_starts_false(
 
 
 def test_mf_status_starts_empty_marker(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Status memo is '✗ Empty' after init + rebuild."""
     var t = _create_mf(w)
@@ -198,7 +198,7 @@ def test_mf_status_starts_empty_marker(
 
 
 def test_mf_memos_start_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Both memos are dirty before first rebuild."""
     var t = _create_mf_no_rebuild(w)
@@ -213,7 +213,7 @@ def test_mf_memos_start_dirty(
 
 
 def test_mf_rebuild_settles_memos(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After rebuild, both memos are clean."""
     var t = _create_mf(w)
@@ -232,7 +232,7 @@ def test_mf_rebuild_settles_memos(
 
 
 def test_mf_rebuild_is_valid_false(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Validate is_valid = False after rebuild (empty input)."""
     var t = _create_mf(w)
@@ -246,7 +246,7 @@ def test_mf_rebuild_is_valid_false(
 
 
 def test_mf_rebuild_status_empty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Status memo = '✗ Empty' after rebuild (empty input)."""
     var t = _create_mf(w)
@@ -261,7 +261,7 @@ def test_mf_rebuild_status_empty(
 
 
 def test_mf_set_input_marks_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Setting input dirties both memos."""
     var t = _create_mf(w)
@@ -281,7 +281,7 @@ def test_mf_set_input_marks_dirty(
 
 
 def test_mf_flush_after_set_input_valid(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After set_input("hello") + flush, is_valid = True."""
     var t = _create_mf(w)
@@ -297,7 +297,7 @@ def test_mf_flush_after_set_input_valid(
 
 
 def test_mf_flush_after_set_input_status(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After set_input("hello") + flush, status = '✓ Valid: hello'."""
     var t = _create_mf(w)
@@ -314,7 +314,7 @@ def test_mf_flush_after_set_input_status(
 
 
 def test_mf_clear_input_reverts(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Setting input to '' reverts is_valid=False, status='✗ Empty'."""
     var t = _create_mf(w)
@@ -337,7 +337,7 @@ def test_mf_clear_input_reverts(
 
 
 def test_mf_memo_recomputation_order(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Validate is_valid recomputed before status — status sees updated is_valid.
 
@@ -361,7 +361,7 @@ def test_mf_memo_recomputation_order(
 
 
 def test_mf_multiple_inputs_correct(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """'a' → 'ab' → 'abc' all produce correct derived state."""
     var t = _create_mf(w)
@@ -393,7 +393,7 @@ def test_mf_multiple_inputs_correct(
 
 
 def test_mf_flush_returns_0_when_clean(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush returns 0 when no state changes have occurred."""
     var t = _create_mf(w)
@@ -408,7 +408,7 @@ def test_mf_flush_returns_0_when_clean(
 
 
 def test_mf_memo_count_is_2(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Two live memos (is_valid + status)."""
     var t = _create_mf(w)
@@ -423,7 +423,7 @@ def test_mf_memo_count_is_2(
 
 
 def test_mf_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy after normal use does not crash."""
     var t = _create_mf(w)
@@ -438,7 +438,7 @@ def test_mf_destroy_does_not_crash(
 
 
 def test_mf_scope_count_is_1(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Single root scope."""
     var t = _create_mf(w)

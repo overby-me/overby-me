@@ -53,7 +53,7 @@ struct MutationWriter(Movable):
     written before `finalize()` is called.
     """
 
-    var buf: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var buf: Pointer[UInt8, MutUntrackedOrigin]
     var offset: Int
     var capacity: Int
 
@@ -65,7 +65,7 @@ struct MutationWriter(Movable):
     # ── Construction ─────────────────────────────────────────────────────
 
     def __init__(
-        out self, buf: UnsafePointer[UInt8, MutUntrackedOrigin], capacity: Int
+        out self, buf: Pointer[UInt8, MutUntrackedOrigin], capacity: Int
     ):
         """Create a writer that starts at the beginning of `buf`."""
         self.buf = buf
@@ -74,7 +74,7 @@ struct MutationWriter(Movable):
 
     def __init__(
         out self,
-        buf: UnsafePointer[UInt8, MutUntrackedOrigin],
+        buf: Pointer[UInt8, MutUntrackedOrigin],
         offset: Int,
         capacity: Int,
     ):
@@ -125,7 +125,7 @@ struct MutationWriter(Movable):
 
     def _write_path[
         origin: Origin
-    ](mut self, path_ptr: UnsafePointer[UInt8, origin], path_len: Int):
+    ](mut self, path_ptr: Pointer[UInt8, origin], path_len: Int):
         """Write a u8-length-prefixed byte path (template traversal indices)."""
         self._write_u8(UInt8(path_len))
         for i in range(path_len):
@@ -154,12 +154,7 @@ struct MutationWriter(Movable):
 
     def assign_id[
         origin: Origin
-    ](
-        mut self,
-        path_ptr: UnsafePointer[UInt8, origin],
-        path_len: Int,
-        id: UInt32,
-    ):
+    ](mut self, path_ptr: Pointer[UInt8, origin], path_len: Int, id: UInt32,):
         """Assign an ElementId to the node at `path` inside the current template.
 
         | op (u8) | path_len (u8) | path ([u8]) | id (u32) |
@@ -206,12 +201,7 @@ struct MutationWriter(Movable):
 
     def replace_placeholder[
         origin: Origin
-    ](
-        mut self,
-        path_ptr: UnsafePointer[UInt8, origin],
-        path_len: Int,
-        m: UInt32,
-    ):
+    ](mut self, path_ptr: Pointer[UInt8, origin], path_len: Int, m: UInt32,):
         """Replace the placeholder at `path` with `m` nodes from the stack.
 
         | op (u8) | path_len (u8) | path ([u8]) | m (u32) |

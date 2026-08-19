@@ -9,7 +9,7 @@
 # Run with:
 #   mojo test test/test_mutations.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal, assert_true, assert_false
 
 from wasm_harness import (
@@ -33,7 +33,7 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -71,13 +71,13 @@ comptime BUF_CAP = 8192
 
 
 def _read_u8(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
 ) raises -> Int:
     return Int(w[].call_i32("debug_read_byte", args_ptr_i32(buf, offset)))
 
 
 def _read_u32_le(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
 ) raises -> Int:
     var b0 = _read_u8(w, buf, offset)
     var b1 = _read_u8(w, buf, offset + 1)
@@ -87,7 +87,7 @@ def _read_u32_le(
 
 
 def _read_u16_le(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
 ) raises -> Int:
     var lo = _read_u8(w, buf, offset)
     var hi = _read_u8(w, buf, offset + 1)
@@ -140,7 +140,7 @@ struct MutationInfo(Copyable):
 
 
 def _read_mutations(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], buf: Int, length: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], buf: Int, length: Int
 ) raises -> List[MutationInfo]:
     """Decode all mutations from the WASM buffer up to the End sentinel."""
     var result = List[MutationInfo]()
@@ -277,16 +277,14 @@ def _find_first(mutations: List[MutationInfo], op: Int) -> Int:
 struct WasmTestContext(Movable):
     """Manages WASM resources for a create/diff engine test."""
 
-    var w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    var w: Pointer[WasmInstance, MutUntrackedOrigin]
     var rt: Int
     var eid: Int
     var store: Int
     var buf: Int
     var writer: Int
 
-    def __init__(
-        out self, w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-    ) raises:
+    def __init__(out self, w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
         self.w = w
         self.rt = Int(w[].call_i64("runtime_create", no_args()))
         self.eid = Int(w[].call_i64("eid_alloc_create", no_args()))
@@ -505,9 +503,7 @@ def _register_complex_template(
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def test_create_text_vnode(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_create_text_vnode(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var ctx = WasmTestContext(w)
 
     var vn_idx = Int(
@@ -564,7 +560,7 @@ def test_create_text_vnode(
 
 
 def test_create_placeholder_vnode(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var ctx = WasmTestContext(w)
 
@@ -608,7 +604,7 @@ def test_create_placeholder_vnode(
 
 
 def test_create_simple_template_ref(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var ctx = WasmTestContext(w)
 
@@ -662,7 +658,7 @@ def test_create_simple_template_ref(
 
 
 def test_create_template_ref_with_dyn_text(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var ctx = WasmTestContext(w)
 
@@ -719,7 +715,7 @@ def test_create_template_ref_with_dyn_text(
 
 
 def test_create_template_ref_with_dyn_attr(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var ctx = WasmTestContext(w)
 
@@ -775,7 +771,7 @@ def test_create_template_ref_with_dyn_attr(
 
 
 def test_create_template_ref_with_event(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var ctx = WasmTestContext(w)
 
@@ -813,7 +809,7 @@ def test_create_template_ref_with_event(
 
 
 def test_create_template_ref_with_dyn_text_node(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Create a template ref with a Dynamic (full) node slot filled with text.
     """
@@ -863,7 +859,7 @@ def test_create_template_ref_with_dyn_text_node(
 
 
 def test_create_template_ref_with_dyn_placeholder(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Create a template ref with a Dynamic node slot filled with placeholder.
     """
@@ -907,7 +903,7 @@ def test_create_template_ref_with_dyn_placeholder(
 
 
 def test_create_fragment_vnode(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var ctx = WasmTestContext(w)
 
@@ -963,7 +959,7 @@ def test_create_fragment_vnode(
 
 
 def test_create_element_id_uniqueness(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Multiple create calls produce unique ElementIds."""
     var ctx = WasmTestContext(w)
@@ -1017,7 +1013,7 @@ def test_create_element_id_uniqueness(
 
 
 def test_create_empty_fragment(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Empty fragment creates 0 roots."""
     var ctx = WasmTestContext(w)
@@ -1041,7 +1037,7 @@ def test_create_empty_fragment(
 
 
 def test_create_complex_template_multi_slots(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Create a complex template with multiple dynamic slots."""
     var ctx = WasmTestContext(w)
@@ -1112,7 +1108,7 @@ def test_create_complex_template_multi_slots(
 
 
 def test_diff_same_text_zero_mutations(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Diffing two Text VNodes with the same text -> 0 mutations."""
     var ctx = WasmTestContext(w)
@@ -1156,7 +1152,7 @@ def test_diff_same_text_zero_mutations(
 
 
 def test_diff_text_changed_produces_set_text(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Diffing two Text VNodes with different text -> SetText."""
     var ctx = WasmTestContext(w)
@@ -1219,7 +1215,7 @@ def test_diff_text_changed_produces_set_text(
 
 
 def test_diff_text_empty_to_content(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Diffing '' -> 'hello' produces SetText."""
     var ctx = WasmTestContext(w)
@@ -1260,7 +1256,7 @@ def test_diff_text_empty_to_content(
 
 
 def test_diff_placeholder_to_placeholder_zero_mutations(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Diffing two Placeholders -> 0 mutations."""
     var ctx = WasmTestContext(w)
@@ -1295,7 +1291,7 @@ def test_diff_placeholder_to_placeholder_zero_mutations(
 
 
 def test_diff_same_template_same_dyn_values_zero_mutations(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Same template, same dynamic text -> 0 mutations."""
     var ctx = WasmTestContext(w)
@@ -1354,7 +1350,7 @@ def test_diff_same_template_same_dyn_values_zero_mutations(
 
 
 def test_diff_same_template_dyn_text_changed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Same template, dynamic text changed -> SetText."""
     var ctx = WasmTestContext(w)
@@ -1428,7 +1424,7 @@ def test_diff_same_template_dyn_text_changed(
 
 
 def test_diff_same_template_attr_changed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Same template, dynamic attribute changed -> SetAttribute."""
     var ctx = WasmTestContext(w)
@@ -1493,7 +1489,7 @@ def test_diff_same_template_attr_changed(
 
 
 def test_diff_same_template_attr_unchanged_zero_mutations(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Same template, same attribute value -> 0 mutations."""
     var ctx = WasmTestContext(w)
@@ -1556,7 +1552,7 @@ def test_diff_same_template_attr_unchanged_zero_mutations(
 
 
 def test_diff_bool_attr_changed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Bool attribute changed -> SetAttribute."""
     var ctx = WasmTestContext(w)
@@ -1611,7 +1607,7 @@ def test_diff_bool_attr_changed(
 
 
 def test_diff_text_to_placeholder_replacement(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Text -> Placeholder (different kind) -> replacement."""
     var ctx = WasmTestContext(w)
@@ -1655,7 +1651,7 @@ def test_diff_text_to_placeholder_replacement(
 
 
 def test_diff_different_templates_replacement(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Different templates -> full replacement."""
     var ctx = WasmTestContext(w)
@@ -1697,7 +1693,7 @@ def test_diff_different_templates_replacement(
 
 
 def test_diff_fragment_children_text_changed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Fragment diff: child text changed."""
     var ctx = WasmTestContext(w)
@@ -1777,7 +1773,7 @@ def test_diff_fragment_children_text_changed(
 
 
 def test_diff_fragment_children_removed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Fragment diff: children removed."""
     var ctx = WasmTestContext(w)
@@ -1857,7 +1853,7 @@ def test_diff_fragment_children_removed(
 
 
 def test_diff_fragment_children_added(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Fragment diff: children added."""
     var ctx = WasmTestContext(w)
@@ -1940,7 +1936,7 @@ def test_diff_fragment_children_added(
 
 
 def test_diff_event_listener_changed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Event listener handler changed -> RemoveEventListener + NewEventListener.
     """
@@ -1998,7 +1994,7 @@ def test_diff_event_listener_changed(
 
 
 def test_diff_same_event_listener_zero_mutations(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Same event listener -> 0 mutations."""
     var ctx = WasmTestContext(w)
@@ -2051,7 +2047,7 @@ def test_diff_same_event_listener_zero_mutations(
 
 
 def test_diff_attr_type_changed_text_to_bool(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Attribute type changed (text -> bool) -> SetAttribute."""
     var ctx = WasmTestContext(w)
@@ -2110,7 +2106,7 @@ def test_diff_attr_type_changed_text_to_bool(
 
 
 def test_diff_attr_removed_text_to_none(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Attribute removed (text -> none) -> RemoveAttribute."""
     var ctx = WasmTestContext(w)
@@ -2169,7 +2165,7 @@ def test_diff_attr_removed_text_to_none(
 
 
 def test_diff_attr_none_to_text(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Attribute appearing (none -> text) -> SetAttribute."""
     var ctx = WasmTestContext(w)
@@ -2232,7 +2228,7 @@ def test_diff_attr_none_to_text(
 
 
 def test_diff_bool_attr_true_to_false_remove(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Boolean HTML attr pattern: AVAL_TEXT('') -> AVAL_NONE -> RemoveAttribute.
     """
@@ -2301,7 +2297,7 @@ def test_diff_bool_attr_true_to_false_remove(
 
 
 def test_diff_int_attr_changed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Integer attribute value changed -> SetAttribute."""
     var ctx = WasmTestContext(w)
@@ -2356,7 +2352,7 @@ def test_diff_int_attr_changed(
 
 
 def test_diff_mount_state_transfer_preserves_ids(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Diff transfers mount state: ElementIds on new VNode match old."""
     var ctx = WasmTestContext(w)
@@ -2433,7 +2429,7 @@ def test_diff_mount_state_transfer_preserves_ids(
 
 
 def test_diff_sequential_diffs_state_chain(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Sequential diffs (state chain): v0 -> v1 -> v2 -> v3."""
     var ctx = WasmTestContext(w)
@@ -2532,7 +2528,7 @@ def test_diff_sequential_diffs_state_chain(
 
 
 def test_diff_dyn_node_text_to_placeholder(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Dynamic node: text -> placeholder -> replacement."""
     var ctx = WasmTestContext(w)

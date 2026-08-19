@@ -10,7 +10,7 @@
 # Run with:
 #   mojo test test/test_protocol.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal, assert_true
 
 from wasm_harness import (
@@ -34,7 +34,7 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -65,29 +65,25 @@ comptime BUF_CAP = 4096
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _alloc_buf(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises -> Int:
+def _alloc_buf(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises -> Int:
     """Allocate a mutation buffer in WASM linear memory."""
     return Int(w[].call_i64("mutation_buf_alloc", args_i32(BUF_CAP)))
 
 
-def _free_buf(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], buf: Int
-) raises:
+def _free_buf(w: Pointer[WasmInstance, MutUntrackedOrigin], buf: Int) raises:
     """Free a mutation buffer."""
     w[].call_void("mutation_buf_free", args_ptr(buf))
 
 
 def _read_u8(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
 ) raises -> Int:
     """Read a single byte from WASM memory."""
     return Int(w[].call_i32("debug_read_byte", args_ptr_i32(buf, offset)))
 
 
 def _read_u16_le(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
 ) raises -> Int:
     """Read a little-endian u16 from WASM memory."""
     var lo = _read_u8(w, buf, offset)
@@ -96,7 +92,7 @@ def _read_u16_le(
 
 
 def _read_u32_le(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
 ) raises -> Int:
     """Read a little-endian u32 from WASM memory."""
     var b0 = _read_u8(w, buf, offset)
@@ -109,9 +105,7 @@ def _read_u32_le(
 # ── End sentinel ─────────────────────────────────────────────────────────────
 
 
-def test_end_sentinel(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_end_sentinel(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var off = Int(w[].call_i32("write_op_end", args_ptr_i32(buf, 0)))
@@ -123,7 +117,7 @@ def test_end_sentinel(
 
 
 def test_empty_buffer_starts_at_zero(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -135,7 +129,7 @@ def test_empty_buffer_starts_at_zero(
 
 
 def test_writer_with_initial_offset(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -149,9 +143,7 @@ def test_writer_with_initial_offset(
 # ── AppendChildren ───────────────────────────────────────────────────────────
 
 
-def test_append_children(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_append_children(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var off = Int(
@@ -173,7 +165,7 @@ def test_append_children(
 
 
 def test_append_children_zero(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -193,7 +185,7 @@ def test_append_children_zero(
 
 
 def test_create_placeholder(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -219,9 +211,7 @@ def test_create_placeholder(
 # ── CreateTextNode ───────────────────────────────────────────────────────────
 
 
-def test_create_text_node(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_create_text_node(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var text_ptr = w[].write_string_struct("hello")
@@ -251,7 +241,7 @@ def test_create_text_node(
 
 
 def test_create_text_node_empty_string(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -273,7 +263,7 @@ def test_create_text_node_empty_string(
 
 
 def test_create_text_node_unicode(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -300,9 +290,7 @@ def test_create_text_node_unicode(
 # ── LoadTemplate ─────────────────────────────────────────────────────────────
 
 
-def test_load_template(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_load_template(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var off = Int(
@@ -328,9 +316,7 @@ def test_load_template(
 # ── ReplaceWith ──────────────────────────────────────────────────────────────
 
 
-def test_replace_with(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_replace_with(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var off = Int(
@@ -351,9 +337,7 @@ def test_replace_with(
 # ── InsertAfter ──────────────────────────────────────────────────────────────
 
 
-def test_insert_after(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_insert_after(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var off = Int(
@@ -374,9 +358,7 @@ def test_insert_after(
 # ── InsertBefore ─────────────────────────────────────────────────────────────
 
 
-def test_insert_before(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_insert_before(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var off = Int(
@@ -399,7 +381,7 @@ def test_insert_before(
 # ── Remove ───────────────────────────────────────────────────────────────────
 
 
-def test_remove(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_remove(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var off = Int(w[].call_i32("write_op_remove", args_ptr_i32_i32(buf, 0, 15)))
@@ -416,7 +398,7 @@ def test_remove(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 # ── PushRoot ─────────────────────────────────────────────────────────────────
 
 
-def test_push_root(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_push_root(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var off = Int(
@@ -434,7 +416,7 @@ def test_push_root(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 # ── SetText ──────────────────────────────────────────────────────────────────
 
 
-def test_set_text(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_set_text(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var text_ptr = w[].write_string_struct("world")
@@ -461,9 +443,7 @@ def test_set_text(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 # ── SetAttribute ─────────────────────────────────────────────────────────────
 
 
-def test_set_attribute(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_set_attribute(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var name_ptr = w[].write_string_struct("class")
@@ -515,7 +495,7 @@ def test_set_attribute(
 
 
 def test_set_attribute_with_namespace(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -534,7 +514,7 @@ def test_set_attribute_with_namespace(
 
 
 def test_set_attribute_empty_value(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -565,9 +545,7 @@ def test_set_attribute_empty_value(
 # ── RemoveAttribute ──────────────────────────────────────────────────────────
 
 
-def test_remove_attribute(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_remove_attribute(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var name_ptr = w[].write_string_struct("disabled")
@@ -616,7 +594,7 @@ def test_remove_attribute(
 
 
 def test_remove_attribute_with_namespace(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -637,7 +615,7 @@ def test_remove_attribute_with_namespace(
 
 
 def test_new_event_listener(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -683,7 +661,7 @@ def test_new_event_listener(
 
 
 def test_remove_event_listener(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -718,7 +696,7 @@ def test_remove_event_listener(
 # ── AssignId ─────────────────────────────────────────────────────────────────
 
 
-def test_assign_id(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_assign_id(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     # Build a path in WASM memory: [0, 1, 2]
@@ -760,7 +738,7 @@ def test_assign_id(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_assign_id_empty_path(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -783,7 +761,7 @@ def test_assign_id_empty_path(
 
 
 def test_assign_id_single_element_path(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -812,7 +790,7 @@ def test_assign_id_single_element_path(
 
 
 def test_replace_placeholder(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -856,7 +834,7 @@ def test_replace_placeholder(
 
 
 def test_multiple_mutations_in_sequence(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -904,7 +882,7 @@ def test_multiple_mutations_in_sequence(
 
 
 def test_mixed_mutations_with_strings(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -976,9 +954,7 @@ def test_mixed_mutations_with_strings(
 # ── Max u32 values ───────────────────────────────────────────────────────────
 
 
-def test_max_u32_values(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_max_u32_values(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     """Ensure the writer correctly encodes the maximum u32 value."""
     var buf = _alloc_buf(w)
 
@@ -996,7 +972,7 @@ def test_max_u32_values(
     _free_buf(w, buf)
 
 
-def test_zero_ids(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_zero_ids(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     var buf = _alloc_buf(w)
 
     var off = Int(
@@ -1014,7 +990,7 @@ def test_zero_ids(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_long_string_payload(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Test encoding a 1KB string in a text node."""
     var buf = Int(w[].call_i64("mutation_buf_alloc", args_i32(8192)))
@@ -1056,7 +1032,7 @@ def test_long_string_payload(
 
 
 def test_write_test_sequence(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Test the write_test_sequence composite helper that writes 5 mutations."""
     var buf = _alloc_buf(w)
@@ -1121,7 +1097,7 @@ def test_write_test_sequence(
 
 
 def test_debug_ptr_roundtrip(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Verify that debug_ptr_roundtrip correctly round-trips a pointer."""
     var buf = _alloc_buf(w)
@@ -1136,7 +1112,7 @@ def test_debug_ptr_roundtrip(
 
 
 def test_debug_read_write_byte(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var buf = _alloc_buf(w)
 
@@ -1156,7 +1132,7 @@ def test_debug_read_write_byte(
 
 
 def test_all_opcodes_in_one_buffer(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Write one of each opcode into a single buffer and verify opcodes appear
     in the correct order."""
@@ -1351,20 +1327,18 @@ comptime TAG_BUTTON = 19
 # ── Template registration helpers ────────────────────────────────────────────
 
 
-def _create_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises -> Int:
+def _create_runtime(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises -> Int:
     return Int(w[].call_i64("runtime_create", no_args()))
 
 
 def _destroy_runtime(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], rt: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], rt: Int
 ) raises:
     w[].call_void("runtime_destroy", args_ptr(rt))
 
 
 def _create_builder(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], name: String
+    w: Pointer[WasmInstance, MutUntrackedOrigin], name: String
 ) raises -> Int:
     return Int(
         w[].call_i64(
@@ -1374,13 +1348,13 @@ def _create_builder(
 
 
 def _destroy_builder(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], b: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], b: Int
 ) raises:
     w[].call_void("tmpl_builder_destroy", args_ptr(b))
 
 
 def _read_short_str_bytes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
 ) raises -> Tuple[Int, Int]:
     """Read a u16-length-prefixed string's length and return (length, new_offset).
 
@@ -1391,7 +1365,7 @@ def _read_short_str_bytes(
 
 
 def _read_str_bytes(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], buf: Int, offset: Int
 ) raises -> Tuple[Int, Int]:
     """Read a u32-length-prefixed string's length and return (length, new_offset).
 
@@ -1405,7 +1379,7 @@ def _read_str_bytes(
 
 
 def test_register_template_minimal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """Serialize a minimal template: div > dyn_text[0].
 
@@ -1519,7 +1493,7 @@ def test_register_template_minimal(
 
 
 def test_register_template_with_text_and_attrs(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Serialize a template with static text, static attrs, and dynamic attrs.
 
@@ -1707,7 +1681,7 @@ def test_register_template_with_text_and_attrs(
 
 
 def test_register_template_with_dynamic_node(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Serialize a template with a Dynamic node slot (not DynamicText).
 

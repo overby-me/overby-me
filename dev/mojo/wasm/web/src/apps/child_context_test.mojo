@@ -5,7 +5,7 @@
 # The parent provides a count signal via context; the child consumes it
 # and also owns a local bool signal (show_hex toggle).
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -86,14 +86,14 @@ struct ChildContextTestApp(Movable):
         return cvb.build()
 
 
-def _cct_init() -> UnsafePointer[ChildContextTestApp, MutUntrackedOrigin]:
+def _cct_init() -> Pointer[ChildContextTestApp, MutUntrackedOrigin]:
     var app_ptr = alloc[ChildContextTestApp](1)
     app_ptr.unsafe_write(ChildContextTestApp())
     return app_ptr
 
 
 def _cct_destroy(
-    app_ptr: UnsafePointer[ChildContextTestApp, MutUntrackedOrigin],
+    app_ptr: Pointer[ChildContextTestApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].child_ctx)
     app_ptr[0].ctx.destroy()
@@ -103,7 +103,7 @@ def _cct_destroy(
 
 def _cct_rebuild(
     mut app: ChildContextTestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the child-context test app."""
     # 1. Render parent with placeholder
@@ -151,7 +151,7 @@ def _cct_handle_event(
 
 def _cct_flush(
     mut app: ChildContextTestApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates."""
     var parent_dirty = app.ctx.consume_dirty()

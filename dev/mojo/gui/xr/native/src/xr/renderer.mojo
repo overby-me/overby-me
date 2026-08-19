@@ -59,7 +59,7 @@
 #       interpreter.apply(buf_ptr, Int(mount_len))
 #       xr_blitz.panel_end_mutations(panel_id)
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from .xr_blitz import XRBlitz, _event_type_from_name
 from html.tags import tag_name
 
@@ -118,12 +118,12 @@ struct BufReader:
       - path: u8 length prefix + byte array
     """
 
-    var buf: UnsafePointer[UInt8, MutUntrackedOrigin]
+    var buf: Pointer[UInt8, MutUntrackedOrigin]
     var offset: Int
     var length: Int
 
     def __init__(
-        out self, buf: UnsafePointer[UInt8, MutUntrackedOrigin], length: Int
+        out self, buf: Pointer[UInt8, MutUntrackedOrigin], length: Int
     ):
         self.buf = buf
         self.offset = 0
@@ -189,7 +189,7 @@ struct BufReader:
 
     def read_path_bytes(
         mut self, path_len: Int
-    ) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
+    ) -> Pointer[UInt8, MutUntrackedOrigin]:
         """Read path_len bytes and return a pointer to the start.
 
         The pointer points directly into the buffer. The caller must not
@@ -229,7 +229,7 @@ struct XRMutationInterpreter(Movable):
     outlive the XRBlitz session.
     """
 
-    var _xr: UnsafePointer[XRBlitz, MutUntrackedOrigin]
+    var _xr: Pointer[XRBlitz, MutUntrackedOrigin]
     var _panel_id: UInt32
     var _stack: List[UInt32]
 
@@ -241,7 +241,7 @@ struct XRMutationInterpreter(Movable):
                 borrows this; the caller must keep it alive.
             panel_id: Panel ID targeting all DOM operations.
         """
-        self._xr = UnsafePointer(to=xr).unsafe_origin_cast[MutUntrackedOrigin]()
+        self._xr = Pointer(to=xr).unsafe_origin_cast[MutUntrackedOrigin]()
         self._panel_id = panel_id
         self._stack = List[UInt32](capacity=64)
 
@@ -252,9 +252,7 @@ struct XRMutationInterpreter(Movable):
 
     # ── Public API ───────────────────────────────────────────────────────
 
-    def apply(
-        mut self, buf: UnsafePointer[UInt8, MutUntrackedOrigin], length: Int
-    ):
+    def apply(mut self, buf: Pointer[UInt8, MutUntrackedOrigin], length: Int):
         """Apply all mutations in the given buffer to the panel's Blitz DOM.
 
         Reads opcodes sequentially from the buffer until OP_END is

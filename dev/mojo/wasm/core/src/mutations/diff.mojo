@@ -22,7 +22,7 @@
 # from the old VNode to know which DOM elements to target, and writes
 # updated mount state onto the new VNode.
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from bridge import MutationWriter
 from arena import ElementId, ElementIdAllocator
 from signals import Runtime
@@ -106,17 +106,17 @@ struct DiffEngine:
         # The new VNode now has mount state from the old VNode (transferred/updated)
     """
 
-    var writer: UnsafePointer[MutationWriter, MutUntrackedOrigin]
-    var eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin]
-    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
-    var store: UnsafePointer[VNodeStore, MutUntrackedOrigin]
+    var writer: Pointer[MutationWriter, MutUntrackedOrigin]
+    var eid_alloc: Pointer[ElementIdAllocator, MutUntrackedOrigin]
+    var runtime: Pointer[Runtime, MutUntrackedOrigin]
+    var store: Pointer[VNodeStore, MutUntrackedOrigin]
 
     def __init__(
         out self,
-        writer: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-        eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
-        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+        writer: Pointer[MutationWriter, MutUntrackedOrigin],
+        eid_alloc: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
+        store: Pointer[VNodeStore, MutUntrackedOrigin],
     ):
         self.writer = writer
         self.eid_alloc = eid_alloc

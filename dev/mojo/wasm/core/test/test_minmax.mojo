@@ -7,7 +7,7 @@
 # Run with:
 #   mojo test test/test_minmax.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal
 
 from wasm_harness import (
@@ -21,7 +21,7 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -29,7 +29,7 @@ def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
 
 
 def test_min_int32_first_smaller(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("min_int32", args_i32_i32(3, 7))),
@@ -39,7 +39,7 @@ def test_min_int32_first_smaller(
 
 
 def test_min_int32_second_smaller(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("min_int32", args_i32_i32(7, 3))),
@@ -48,9 +48,7 @@ def test_min_int32_second_smaller(
     )
 
 
-def test_min_int32_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_min_int32_equal(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("min_int32", args_i32_i32(5, 5))),
         5,
@@ -59,7 +57,7 @@ def test_min_int32_equal(
 
 
 def test_min_int32_negative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("min_int32", args_i32_i32(-3, 3))),
@@ -69,7 +67,7 @@ def test_min_int32_negative(
 
 
 def test_max_int32_second_larger(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("max_int32", args_i32_i32(3, 7))),
@@ -79,7 +77,7 @@ def test_max_int32_second_larger(
 
 
 def test_max_int32_first_larger(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("max_int32", args_i32_i32(7, 3))),
@@ -88,9 +86,7 @@ def test_max_int32_first_larger(
     )
 
 
-def test_max_int32_equal(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_max_int32_equal(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("max_int32", args_i32_i32(5, 5))),
         5,
@@ -99,7 +95,7 @@ def test_max_int32_equal(
 
 
 def test_max_int32_negative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("max_int32", args_i32_i32(-3, 3))),
@@ -112,7 +108,7 @@ def test_max_int32_negative(
 
 
 def test_min_int64_first_smaller(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("min_int64", args_i64_i64(3, 7))),
@@ -122,7 +118,7 @@ def test_min_int64_first_smaller(
 
 
 def test_min_int64_second_smaller(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("min_int64", args_i64_i64(7, 3))),
@@ -132,7 +128,7 @@ def test_min_int64_second_smaller(
 
 
 def test_min_int64_negative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("min_int64", args_i64_i64(-10, 10))),
@@ -142,7 +138,7 @@ def test_min_int64_negative(
 
 
 def test_max_int64_second_larger(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("max_int64", args_i64_i64(3, 7))),
@@ -152,7 +148,7 @@ def test_max_int64_second_larger(
 
 
 def test_max_int64_first_larger(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("max_int64", args_i64_i64(7, 3))),
@@ -162,7 +158,7 @@ def test_max_int64_first_larger(
 
 
 def test_max_int64_negative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i64("max_int64", args_i64_i64(-10, 10))),
@@ -175,7 +171,7 @@ def test_max_int64_negative(
 
 
 def test_min_float64_first_smaller(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("min_float64", args_f64_f64(1.1, 2.2)),
@@ -185,7 +181,7 @@ def test_min_float64_first_smaller(
 
 
 def test_min_float64_second_smaller(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("min_float64", args_f64_f64(2.2, 1.1)),
@@ -195,7 +191,7 @@ def test_min_float64_second_smaller(
 
 
 def test_min_float64_negative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("min_float64", args_f64_f64(-0.5, 0.5)),
@@ -205,7 +201,7 @@ def test_min_float64_negative(
 
 
 def test_max_float64_second_larger(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("max_float64", args_f64_f64(1.1, 2.2)),
@@ -215,7 +211,7 @@ def test_max_float64_second_larger(
 
 
 def test_max_float64_first_larger(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("max_float64", args_f64_f64(2.2, 1.1)),
@@ -225,7 +221,7 @@ def test_max_float64_first_larger(
 
 
 def test_max_float64_negative(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("max_float64", args_f64_f64(-0.5, 0.5)),
@@ -238,7 +234,7 @@ def test_max_float64_negative(
 
 
 def test_clamp_int32_within_range(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("clamp_int32", args_i32_i32_i32(5, 0, 10))),
@@ -247,9 +243,7 @@ def test_clamp_int32_within_range(
     )
 
 
-def test_clamp_int32_below(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_clamp_int32_below(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("clamp_int32", args_i32_i32_i32(-5, 0, 10))),
         0,
@@ -257,9 +251,7 @@ def test_clamp_int32_below(
     )
 
 
-def test_clamp_int32_above(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_clamp_int32_above(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("clamp_int32", args_i32_i32_i32(15, 0, 10))),
         10,
@@ -268,7 +260,7 @@ def test_clamp_int32_above(
 
 
 def test_clamp_int32_at_low_bound(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("clamp_int32", args_i32_i32_i32(0, 0, 10))),
@@ -278,7 +270,7 @@ def test_clamp_int32_at_low_bound(
 
 
 def test_clamp_int32_at_high_bound(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("clamp_int32", args_i32_i32_i32(10, 0, 10))),
@@ -291,7 +283,7 @@ def test_clamp_int32_at_high_bound(
 
 
 def test_clamp_float64_within_range(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("clamp_float64", args_f64_f64_f64(5.5, 0.0, 10.0)),
@@ -301,7 +293,7 @@ def test_clamp_float64_within_range(
 
 
 def test_clamp_float64_below(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("clamp_float64", args_f64_f64_f64(-1.0, 0.0, 10.0)),
@@ -311,7 +303,7 @@ def test_clamp_float64_below(
 
 
 def test_clamp_float64_above(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         w[].call_f64("clamp_float64", args_f64_f64_f64(11.0, 0.0, 10.0)),

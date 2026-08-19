@@ -124,7 +124,7 @@
 #                 return True
 #             return False
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from bridge import MutationWriter
 from mutations import CreateEngine
 from events import HandlerEntry
@@ -475,7 +475,7 @@ struct TodoApp(GuiApp):
 
     def mount(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Initial render (mount) of the todo app (GuiApp trait method).
 
@@ -542,7 +542,7 @@ struct TodoApp(GuiApp):
 
     def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
     ) -> Int32:
         """Re-render dirty scopes and write update mutations (GuiApp trait method).
 

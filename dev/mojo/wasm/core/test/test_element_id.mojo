@@ -11,7 +11,7 @@
 # Run with:
 #   mojo test test/test_element_id.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal, assert_true, assert_false
 
 from wasm_harness import (
@@ -23,22 +23,20 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _create_alloc(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises -> Int:
+def _create_alloc(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises -> Int:
     """Create a heap-allocated ElementIdAllocator via WASM."""
     return Int(w[].call_i64("eid_alloc_create", no_args()))
 
 
 def _destroy_alloc(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin], alloc_ptr: Int
+    w: Pointer[WasmInstance, MutUntrackedOrigin], alloc_ptr: Int
 ) raises:
     """Destroy a heap-allocated ElementIdAllocator via WASM."""
     w[].call_void("eid_alloc_destroy", args_ptr(alloc_ptr))
@@ -48,7 +46,7 @@ def _destroy_alloc(
 
 
 def test_allocator_initial_state(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var a = _create_alloc(w)
 
@@ -71,7 +69,7 @@ def test_allocator_initial_state(
 
 
 def test_allocator_first_alloc_returns_1(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var a = _create_alloc(w)
 
@@ -87,7 +85,7 @@ def test_allocator_first_alloc_returns_1(
 
 
 def test_allocator_sequential_alloc(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var a = _create_alloc(w)
 
@@ -108,7 +106,7 @@ def test_allocator_sequential_alloc(
 
 
 def test_allocator_is_alive(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var a = _create_alloc(w)
 
@@ -143,7 +141,7 @@ def test_allocator_is_alive(
 
 
 def test_allocator_free_decrements_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var a = _create_alloc(w)
 
@@ -171,7 +169,7 @@ def test_allocator_free_decrements_count(
 
 
 def test_allocator_free_root_is_noop(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var a = _create_alloc(w)
 
@@ -197,7 +195,7 @@ def test_allocator_free_root_is_noop(
 
 
 def test_allocator_double_free_is_noop(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var a = _create_alloc(w)
 
@@ -219,7 +217,7 @@ def test_allocator_double_free_is_noop(
 
 
 def test_allocator_reuse_freed_slot(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var a = _create_alloc(w)
 
@@ -248,7 +246,7 @@ def test_allocator_reuse_freed_slot(
 
 
 def test_allocator_reuse_multiple_freed_slots(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var a = _create_alloc(w)
 
@@ -290,7 +288,7 @@ def test_allocator_reuse_multiple_freed_slots(
 
 
 def test_allocator_stress_100(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     var a = _create_alloc(w)
 
@@ -316,7 +314,7 @@ def test_allocator_stress_100(
 
 
 def test_allocator_stress_free_even_realloc(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     var a = _create_alloc(w)
 
@@ -370,7 +368,7 @@ def test_allocator_stress_free_even_realloc(
 
 
 def test_allocator_stress_alloc_free_cycle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Allocate and free in a tight loop to exercise slot reuse."""
     var a = _create_alloc(w)
@@ -399,7 +397,7 @@ def test_allocator_stress_alloc_free_cycle(
 
 
 def test_debug_eid_alloc_capacity(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     """debug_eid_alloc_capacity returns the total number of slots."""
     var a = _create_alloc(w)

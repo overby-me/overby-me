@@ -54,7 +54,7 @@
 #   - The WASM ABI uses Int64 for pointers (wasm64) and Int32 for return
 #     values. Bool is returned as Int32 (1 or 0) via _b2i().
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from platform import GuiApp
 
@@ -68,26 +68,24 @@ from platform import GuiApp
 
 
 @always_inline
-def _as_ptr[T: AnyType](addr: Int) -> UnsafePointer[T, MutUntrackedOrigin]:
-    """Reinterpret an integer address as an UnsafePointer[T, MutUntrackedOrigin].
-    """
+def _as_ptr[T: AnyType](addr: Int) -> Pointer[T, MutUntrackedOrigin]:
+    """Reinterpret an integer address as an Pointer[T, MutUntrackedOrigin]."""
     var slot = alloc[Int](1)
     slot[0] = addr
-    var result = slot.bitcast[UnsafePointer[T, MutUntrackedOrigin]]()[0]
+    var result = slot.bitcast[Pointer[T, MutUntrackedOrigin]]()[0]
     slot.free()
     return result
 
 
 @always_inline
-def _to_i64[T: AnyType](ptr: UnsafePointer[T, MutUntrackedOrigin]) -> Int64:
+def _to_i64[T: AnyType](ptr: Pointer[T, MutUntrackedOrigin]) -> Int64:
     """Return the raw address of a typed pointer as Int64."""
     return Int64(Int(ptr))
 
 
 @always_inline
-def _get[T: AnyType](ptr: Int64) -> UnsafePointer[T, MutUntrackedOrigin]:
-    """Reinterpret an Int64 WASM handle as an UnsafePointer[T, MutUntrackedOrigin].
-    """
+def _get[T: AnyType](ptr: Int64) -> Pointer[T, MutUntrackedOrigin]:
+    """Reinterpret an Int64 WASM handle as an Pointer[T, MutUntrackedOrigin]."""
     return _as_ptr[T](Int(ptr))
 
 
@@ -102,7 +100,7 @@ def _b2i(val: Bool) -> Int32:
 @always_inline
 def _alloc_writer(
     buf_ptr: Int64, capacity: Int32
-) -> UnsafePointer[MutationWriter, MutUntrackedOrigin]:
+) -> Pointer[MutationWriter, MutUntrackedOrigin]:
     """Allocate a MutationWriter on the heap with the given buffer and capacity.
     """
     var ptr = alloc[MutationWriter](1)
@@ -111,7 +109,7 @@ def _alloc_writer(
 
 
 @always_inline
-def _free_writer(ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin]):
+def _free_writer(ptr: Pointer[MutationWriter, MutUntrackedOrigin]):
     """Destroy and free a heap-allocated MutationWriter."""
     ptr.unsafe_deinit_pointee()
     ptr.free()

@@ -77,7 +77,7 @@
 #     p > dynamic_text[0]   ← "Count is even" / "Count is odd"
 #     p > dynamic_text[1]   ← "Doubled: N"
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ConditionalSlot
 from signals import SignalI32, SignalBool
@@ -214,7 +214,7 @@ struct CounterApp(Movable):
         return vb.index()
 
 
-def counter_app_init() -> UnsafePointer[CounterApp, MutUntrackedOrigin]:
+def counter_app_init() -> Pointer[CounterApp, MutUntrackedOrigin]:
     """Initialize the counter app.  Returns a pointer to the app state.
 
     All setup happens in CounterApp.__init__() — this function just
@@ -225,7 +225,7 @@ def counter_app_init() -> UnsafePointer[CounterApp, MutUntrackedOrigin]:
     return app_ptr
 
 
-def counter_app_destroy(app_ptr: UnsafePointer[CounterApp, MutUntrackedOrigin]):
+def counter_app_destroy(app_ptr: Pointer[CounterApp, MutUntrackedOrigin]):
     """Destroy the counter app and free all resources."""
     app_ptr[0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
@@ -234,7 +234,7 @@ def counter_app_destroy(app_ptr: UnsafePointer[CounterApp, MutUntrackedOrigin]):
 
 def counter_app_rebuild(
     mut app: CounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the counter app.
 
@@ -276,7 +276,7 @@ def counter_app_handle_event(
 
 def counter_app_flush(
     mut app: CounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates after event dispatch.
 

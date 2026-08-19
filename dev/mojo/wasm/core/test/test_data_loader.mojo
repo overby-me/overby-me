@@ -25,7 +25,7 @@ suspense with load/resolve lifecycle:
   - scope IDs distinct
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
@@ -41,7 +41,7 @@ from wasm_harness import (
 )
 
 
-def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _load() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -49,7 +49,7 @@ def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
 
 
 def _create_dl(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a DataLoaderApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("dl_init", no_args()))
@@ -59,7 +59,7 @@ def _create_dl(
 
 
 def _destroy_dl(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -69,7 +69,7 @@ def _destroy_dl(
 
 
 def _flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -78,7 +78,7 @@ def _flush(
 
 
 def _handle_event(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -87,7 +87,7 @@ def _handle_event(
 
 
 def _resolve(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     data: String,
 ) raises:
@@ -100,7 +100,7 @@ def _resolve(
 
 
 def test_dl_init_creates_app(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Init returns a non-zero pointer."""
     var app = Int(w[].call_i64("dl_init", no_args()))
@@ -112,7 +112,7 @@ def test_dl_init_creates_app(
 
 
 def test_dl_not_pending_initially(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """App is not in pending state after init + rebuild."""
     var t = _create_dl(w)
@@ -126,7 +126,7 @@ def test_dl_not_pending_initially(
 
 
 def test_dl_data_text_initially_none(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Data text is '(none)' after init."""
     var t = _create_dl(w)
@@ -143,7 +143,7 @@ def test_dl_data_text_initially_none(
 
 
 def test_dl_content_mounted_after_rebuild(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Content child is mounted after initial rebuild."""
     var t = _create_dl(w)
@@ -157,7 +157,7 @@ def test_dl_content_mounted_after_rebuild(
 
 
 def test_dl_skeleton_not_mounted_initially(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Skeleton child is hidden after initial rebuild."""
     var t = _create_dl(w)
@@ -171,7 +171,7 @@ def test_dl_skeleton_not_mounted_initially(
 
 
 def test_dl_load_sets_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Load button handler sets pending to true."""
     var t = _create_dl(w)
@@ -187,7 +187,7 @@ def test_dl_load_sets_pending(
 
 
 def test_dl_flush_after_load_hides_content(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After load + flush: content is hidden."""
     var t = _create_dl(w)
@@ -204,7 +204,7 @@ def test_dl_flush_after_load_hides_content(
 
 
 def test_dl_flush_after_load_shows_skeleton(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After load + flush: skeleton is shown."""
     var t = _create_dl(w)
@@ -221,7 +221,7 @@ def test_dl_flush_after_load_shows_skeleton(
 
 
 def test_dl_resolve_clears_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Resolve clears the pending state."""
     var t = _create_dl(w)
@@ -239,7 +239,7 @@ def test_dl_resolve_clears_pending(
 
 
 def test_dl_resolve_stores_data(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Resolve stores the data string."""
     var t = _create_dl(w)
@@ -260,7 +260,7 @@ def test_dl_resolve_stores_data(
 
 
 def test_dl_flush_after_resolve_shows_content(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After load + flush + resolve + flush: content is remounted."""
     var t = _create_dl(w)
@@ -279,7 +279,7 @@ def test_dl_flush_after_resolve_shows_content(
 
 
 def test_dl_flush_after_resolve_hides_skeleton(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """After load + flush + resolve + flush: skeleton is hidden."""
     var t = _create_dl(w)
@@ -298,7 +298,7 @@ def test_dl_flush_after_resolve_hides_skeleton(
 
 
 def test_dl_reload_cycle(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Load → resolve → load → resolve works correctly."""
     var t = _create_dl(w)
@@ -333,7 +333,7 @@ def test_dl_reload_cycle(
 
 
 def test_dl_multiple_load_resolve_cycles(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Five load/resolve cycles all succeed."""
     var t = _create_dl(w)
@@ -360,7 +360,7 @@ def test_dl_multiple_load_resolve_cycles(
 
 
 def test_dl_resolve_with_different_data(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Each resolve shows the new data string."""
     var t = _create_dl(w)
@@ -393,7 +393,7 @@ def test_dl_resolve_with_different_data(
 
 
 def test_dl_flush_returns_0_when_clean(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Flush without any state change returns 0."""
     var t = _create_dl(w)
@@ -408,7 +408,7 @@ def test_dl_flush_returns_0_when_clean(
 
 
 def test_dl_destroy_does_not_crash(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy after normal lifecycle does not crash."""
     var t = _create_dl(w)
@@ -421,7 +421,7 @@ def test_dl_destroy_does_not_crash(
 
 
 def test_dl_destroy_while_pending(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Destroy while in pending state does not crash."""
     var t = _create_dl(w)
@@ -438,7 +438,7 @@ def test_dl_destroy_while_pending(
 
 
 def test_dl_scope_ids_distinct(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """All three scope IDs (parent, content, skeleton) are distinct."""
     var t = _create_dl(w)
@@ -457,7 +457,7 @@ def test_dl_scope_ids_distinct(
 
 
 def test_dl_scope_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises:
     """Three scopes: root + content + skeleton."""
     var t = _create_dl(w)

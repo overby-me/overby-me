@@ -33,7 +33,7 @@
 #     1. Recursively create each child
 #     Result: all children's roots on the stack
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from bridge import MutationWriter
 from arena import ElementId, ElementIdAllocator
 from signals import Runtime
@@ -80,7 +80,7 @@ from vdom import (
 
 
 def _build_parent_map(
-    tmpl_ptr: UnsafePointer[Template, MutUntrackedOrigin]
+    tmpl_ptr: Pointer[Template, MutUntrackedOrigin]
 ) -> List[Int]:
     """Build parent[i] = parent node index of node i, or -1 for roots."""
     var n = tmpl_ptr[0].node_count()
@@ -96,7 +96,7 @@ def _build_parent_map(
 
 
 def _path_from_root(
-    tmpl_ptr: UnsafePointer[Template, MutUntrackedOrigin],
+    tmpl_ptr: Pointer[Template, MutUntrackedOrigin],
     parents: List[Int],
     target: Int,
 ) -> List[UInt8]:
@@ -175,17 +175,17 @@ struct CreateEngine:
         # The writer contains the mutations to create the DOM
     """
 
-    var writer: UnsafePointer[MutationWriter, MutUntrackedOrigin]
-    var eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin]
-    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
-    var store: UnsafePointer[VNodeStore, MutUntrackedOrigin]
+    var writer: Pointer[MutationWriter, MutUntrackedOrigin]
+    var eid_alloc: Pointer[ElementIdAllocator, MutUntrackedOrigin]
+    var runtime: Pointer[Runtime, MutUntrackedOrigin]
+    var store: Pointer[VNodeStore, MutUntrackedOrigin]
 
     def __init__(
         out self,
-        writer: UnsafePointer[MutationWriter, MutUntrackedOrigin],
-        eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
-        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
+        writer: Pointer[MutationWriter, MutUntrackedOrigin],
+        eid_alloc: Pointer[ElementIdAllocator, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
+        store: Pointer[VNodeStore, MutUntrackedOrigin],
     ):
         self.writer = writer
         self.eid_alloc = eid_alloc

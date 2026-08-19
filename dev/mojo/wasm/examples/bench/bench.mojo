@@ -188,7 +188,7 @@
 #                 # select / remove
 #             return False
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from std.ffi import external_call
 from bridge import MutationWriter
 from mutations import CreateEngine
@@ -878,7 +878,7 @@ struct BenchmarkApp(Movable):
         return vb.build()
 
 
-def bench_app_init() -> UnsafePointer[BenchmarkApp, MutUntrackedOrigin]:
+def bench_app_init() -> Pointer[BenchmarkApp, MutUntrackedOrigin]:
     """Initialize the benchmark app.  Returns a pointer to the app state.
 
     All setup happens in BenchmarkApp.__init__() — this function just
@@ -889,7 +889,7 @@ def bench_app_init() -> UnsafePointer[BenchmarkApp, MutUntrackedOrigin]:
     return app_ptr
 
 
-def bench_app_destroy(app_ptr: UnsafePointer[BenchmarkApp, MutUntrackedOrigin]):
+def bench_app_destroy(app_ptr: Pointer[BenchmarkApp, MutUntrackedOrigin]):
     """Destroy the benchmark app and free all resources."""
     app_ptr[0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
@@ -898,7 +898,7 @@ def bench_app_destroy(app_ptr: UnsafePointer[BenchmarkApp, MutUntrackedOrigin]):
 
 def bench_app_rebuild(
     mut app: BenchmarkApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the benchmark app.
 
@@ -955,7 +955,7 @@ def bench_app_rebuild(
 
 def bench_app_flush(
     mut app: BenchmarkApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates after a benchmark operation.
 

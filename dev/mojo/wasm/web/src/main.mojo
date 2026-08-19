@@ -231,7 +231,7 @@ from apps.suspense_nest import (
     _sn_inner_resolve,
     _sn_flush,
 )
-from std.memory import UnsafePointer, unsafe_memset_zero, alloc
+from std.memory import Pointer, unsafe_memset_zero, alloc
 
 
 # ██████████████████████████████████████████████████████████████████████████████
@@ -248,25 +248,24 @@ from std.memory import UnsafePointer, unsafe_memset_zero, alloc
 # Pointer ↔ Int helpers
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# Mojo 0.25 does not support UnsafePointer construction from an integer
+# Mojo 0.25 does not support Pointer construction from an integer
 # address directly.  We reinterpret the bits via a temporary heap slot.
 #
 # Generic helpers — one function replaces all type-specific variants.
 
 
 @always_inline
-def _as_ptr[T: AnyType](addr: Int) -> UnsafePointer[T, MutUntrackedOrigin]:
-    """Reinterpret an integer address as an UnsafePointer[T, MutUntrackedOrigin].
-    """
+def _as_ptr[T: AnyType](addr: Int) -> Pointer[T, MutUntrackedOrigin]:
+    """Reinterpret an integer address as an Pointer[T, MutUntrackedOrigin]."""
     var slot = alloc[Int](1)
     slot[0] = addr
-    var result = slot.bitcast[UnsafePointer[T, MutUntrackedOrigin]]()[0]
+    var result = slot.bitcast[Pointer[T, MutUntrackedOrigin]]()[0]
     slot.free()
     return result
 
 
 @always_inline
-def _to_i64[T: AnyType](ptr: UnsafePointer[T, MutUntrackedOrigin]) -> Int64:
+def _to_i64[T: AnyType](ptr: Pointer[T, MutUntrackedOrigin]) -> Int64:
     """Return the raw address of a typed pointer as Int64."""
     return Int64(Int(ptr))
 
@@ -275,7 +274,7 @@ def _to_i64[T: AnyType](ptr: UnsafePointer[T, MutUntrackedOrigin]) -> Int64:
 
 
 @always_inline
-def _heap_new[T: Movable](var val: T) -> UnsafePointer[T, MutUntrackedOrigin]:
+def _heap_new[T: Movable](var val: T) -> Pointer[T, MutUntrackedOrigin]:
     """Allocate a single T on the heap and move val into it."""
     var ptr = alloc[T](1)
     ptr.unsafe_write(val^)
@@ -283,9 +282,7 @@ def _heap_new[T: Movable](var val: T) -> UnsafePointer[T, MutUntrackedOrigin]:
 
 
 @always_inline
-def _heap_del[
-    T: Movable & Deinitable
-](ptr: UnsafePointer[T, MutUntrackedOrigin]):
+def _heap_del[T: Movable & Deinitable](ptr: Pointer[T, MutUntrackedOrigin]):
     """Destroy and free a single heap-allocated T."""
     ptr.unsafe_deinit_pointee()
     ptr.free()
@@ -295,9 +292,8 @@ def _heap_del[
 
 
 @always_inline
-def _get[T: AnyType](ptr: Int64) -> UnsafePointer[T, MutUntrackedOrigin]:
-    """Reinterpret an Int64 WASM handle as an UnsafePointer[T, MutUntrackedOrigin].
-    """
+def _get[T: AnyType](ptr: Int64) -> Pointer[T, MutUntrackedOrigin]:
+    """Reinterpret an Int64 WASM handle as an Pointer[T, MutUntrackedOrigin]."""
     return _as_ptr[T](Int(ptr))
 
 
@@ -326,14 +322,14 @@ def _writer(buf: Int64, off: Int32) -> MutationWriter:
 @always_inline
 def _alloc_writer(
     buf_ptr: Int64, capacity: Int32
-) -> UnsafePointer[MutationWriter, MutUntrackedOrigin]:
+) -> Pointer[MutationWriter, MutUntrackedOrigin]:
     """Allocate a MutationWriter on the heap with the given buffer and capacity.
     """
     return _heap_new(MutationWriter(_get[UInt8](buf_ptr), Int(capacity)))
 
 
 @always_inline
-def _free_writer(ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin]):
+def _free_writer(ptr: Pointer[MutationWriter, MutUntrackedOrigin]):
     """Destroy and free a heap-allocated MutationWriter."""
     _heap_del(ptr)
 

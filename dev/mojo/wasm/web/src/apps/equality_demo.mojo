@@ -19,7 +19,7 @@
 #   - Input 10→11: clamped 10→10 (stable!), label "high"→"high" (stable!)
 #   - Input 11→12: clamped 10→10 (stable!), label "high"→"high" (stable!)
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import SignalI32 as _SignalI32, MemoI32, MemoString
@@ -139,14 +139,14 @@ struct EqualityDemoApp(Movable):
 # ── EqualityDemoApp lifecycle functions ───────────────────────────────────────
 
 
-def _eq_init() -> UnsafePointer[EqualityDemoApp, MutUntrackedOrigin]:
+def _eq_init() -> Pointer[EqualityDemoApp, MutUntrackedOrigin]:
     var app_ptr = alloc[EqualityDemoApp](1)
     app_ptr.unsafe_write(EqualityDemoApp())
     return app_ptr
 
 
 def _eq_destroy(
-    app_ptr: UnsafePointer[EqualityDemoApp, MutUntrackedOrigin],
+    app_ptr: Pointer[EqualityDemoApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
@@ -155,7 +155,7 @@ def _eq_destroy(
 
 def _eq_rebuild(
     mut app: EqualityDemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the equality-demo app."""
     # Run initial memo recomputation
@@ -178,7 +178,7 @@ def _eq_handle_event(
 
 def _eq_flush(
     mut app: EqualityDemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with equality-gated memo chain.
 

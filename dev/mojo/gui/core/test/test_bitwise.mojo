@@ -7,7 +7,7 @@
 # Run with:
 #   mojo test test/test_bitwise.mojo
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from std.testing import assert_equal
 
 from wasm_harness import (
@@ -18,16 +18,14 @@ from wasm_harness import (
 )
 
 
-def _get_wasm() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _get_wasm() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
 # ── Bitwise AND ──────────────────────────────────────────────────────────────
 
 
-def test_bitand_basic(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bitand_basic(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("bitand_int32", args_i32_i32(0b1100, 0b1010))),
         0b1000,
@@ -35,7 +33,7 @@ def test_bitand_basic(
     )
 
 
-def test_bitand_mask(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_bitand_mask(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("bitand_int32", args_i32_i32(0xFF, 0x0F))),
         0x0F,
@@ -43,7 +41,7 @@ def test_bitand_mask(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_bitand_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_bitand_zero(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("bitand_int32", args_i32_i32(0, 0xFFFF))),
         0,
@@ -54,7 +52,7 @@ def test_bitand_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 # ── Bitwise OR ───────────────────────────────────────────────────────────────
 
 
-def test_bitor_basic(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_bitor_basic(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("bitor_int32", args_i32_i32(0b1100, 0b1010))),
         0b1110,
@@ -62,7 +60,7 @@ def test_bitor_basic(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_bitor_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_bitor_zero(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("bitor_int32", args_i32_i32(0, 0))),
         0,
@@ -73,9 +71,7 @@ def test_bitor_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 # ── Bitwise XOR ──────────────────────────────────────────────────────────────
 
 
-def test_bitxor_basic(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_bitxor_basic(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("bitxor_int32", args_i32_i32(0b1100, 0b1010))),
         0b0110,
@@ -84,7 +80,7 @@ def test_bitxor_basic(
 
 
 def test_bitxor_self_is_zero(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bitxor_int32", args_i32_i32(42, 42))),
@@ -94,7 +90,7 @@ def test_bitxor_self_is_zero(
 
 
 def test_bitxor_with_zero_is_identity(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("bitxor_int32", args_i32_i32(42, 0))),
@@ -106,7 +102,7 @@ def test_bitxor_with_zero_is_identity(
 # ── Bitwise NOT ──────────────────────────────────────────────────────────────
 
 
-def test_bitnot_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_bitnot_zero(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("bitnot_int32", args_i32(0))),
         Int(~Int32(0)),
@@ -114,7 +110,7 @@ def test_bitnot_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_bitnot_one(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_bitnot_one(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("bitnot_int32", args_i32(1))),
         Int(~Int32(1)),
@@ -125,7 +121,7 @@ def test_bitnot_one(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 # ── Shifts ───────────────────────────────────────────────────────────────────
 
 
-def test_shl_by_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_shl_by_zero(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("shl_int32", args_i32_i32(1, 0))),
         1,
@@ -133,7 +129,7 @@ def test_shl_by_zero(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_shl_by_one(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_shl_by_one(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("shl_int32", args_i32_i32(1, 1))),
         2,
@@ -141,7 +137,7 @@ def test_shl_by_one(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
     )
 
 
-def test_shl_by_four(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
+def test_shl_by_four(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("shl_int32", args_i32_i32(1, 4))),
         16,
@@ -150,7 +146,7 @@ def test_shl_by_four(w: UnsafePointer[WasmInstance, MutUntrackedOrigin]) raises:
 
 
 def test_shl_three_by_three(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("shl_int32", args_i32_i32(3, 3))),
@@ -160,7 +156,7 @@ def test_shl_three_by_three(
 
 
 def test_shr_sixteen_by_four(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("shr_int32", args_i32_i32(16, 4))),
@@ -170,7 +166,7 @@ def test_shr_sixteen_by_four(
 
 
 def test_shr_twentyfour_by_three(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
+    w: Pointer[WasmInstance, MutUntrackedOrigin]
 ) raises:
     assert_equal(
         Int(w[].call_i32("shr_int32", args_i32_i32(24, 3))),
@@ -179,9 +175,7 @@ def test_shr_twentyfour_by_three(
     )
 
 
-def test_shr_255_by_one(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin]
-) raises:
+def test_shr_255_by_one(w: Pointer[WasmInstance, MutUntrackedOrigin]) raises:
     assert_equal(
         Int(w[].call_i32("shr_int32", args_i32_i32(255, 1))),
         127,

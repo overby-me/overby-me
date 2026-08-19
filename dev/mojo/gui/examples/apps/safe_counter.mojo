@@ -11,7 +11,7 @@
 #   flush hides fallback, shows normal child (re-creates from scratch).
 # Count signal persists across crash/recovery since it lives on the parent.
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -174,14 +174,14 @@ struct SafeCounterApp(Movable):
         return pvb.build()
 
 
-def _sc_init() -> UnsafePointer[SafeCounterApp, MutUntrackedOrigin]:
+def _sc_init() -> Pointer[SafeCounterApp, MutUntrackedOrigin]:
     var app_ptr = alloc[SafeCounterApp](1)
     app_ptr.unsafe_write(SafeCounterApp())
     return app_ptr
 
 
 def _sc_destroy(
-    app_ptr: UnsafePointer[SafeCounterApp, MutUntrackedOrigin],
+    app_ptr: Pointer[SafeCounterApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].normal.child_ctx)
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].fallback.child_ctx)
@@ -192,7 +192,7 @@ def _sc_destroy(
 
 def _sc_rebuild(
     mut app: SafeCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the safe-counter app."""
     # 1. Render parent with placeholders
@@ -254,7 +254,7 @@ def _sc_handle_event(
 
 def _sc_flush(
     mut app: SafeCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with error boundary logic."""
     var parent_dirty = app.ctx.consume_dirty()

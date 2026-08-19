@@ -29,7 +29,7 @@ Run with:
   mojo test test/test_batch_demo.mojo
 """
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 
 from std.testing import assert_equal, assert_true, assert_false
 from wasm_harness import (
@@ -46,7 +46,7 @@ from wasm_harness import (
 )
 
 
-def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
+def _load() raises -> Pointer[WasmInstance, MutUntrackedOrigin]:
     return get_instance()
 
 
@@ -54,7 +54,7 @@ def _load() raises -> UnsafePointer[WasmInstance, MutUntrackedOrigin]:
 
 
 def _create_bd(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a BatchDemoApp and mount it.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("bd_init", no_args()))
@@ -64,7 +64,7 @@ def _create_bd(
 
 
 def _create_bd_no_rebuild(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
 ) raises -> Tuple[Int, Int]:
     """Create a BatchDemoApp without mounting.  Returns (app_ptr, buf_ptr)."""
     var app = Int(w[].call_i64("bd_init", no_args()))
@@ -73,7 +73,7 @@ def _create_bd_no_rebuild(
 
 
 def _destroy_bd(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises:
@@ -83,7 +83,7 @@ def _destroy_bd(
 
 
 def _flush(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     buf: Int,
 ) raises -> Int32:
@@ -92,7 +92,7 @@ def _flush(
 
 
 def _handle_event(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     handler_id: Int32,
 ) raises -> Int32:
@@ -101,7 +101,7 @@ def _handle_event(
 
 
 def _set_names(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
     first: String,
     last: String,
@@ -113,7 +113,7 @@ def _set_names(
 
 
 def _reset(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises:
     """Call bd_reset(app) via WASM."""
@@ -121,7 +121,7 @@ def _reset(
 
 
 def _full_name_text(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
@@ -130,7 +130,7 @@ def _full_name_text(
 
 
 def _first_name_text(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
@@ -139,7 +139,7 @@ def _first_name_text(
 
 
 def _last_name_text(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> String:
     var out_ptr = w[].alloc_string_struct()
@@ -148,63 +148,63 @@ def _last_name_text(
 
 
 def _write_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("bd_write_count", args_ptr(app))
 
 
 def _full_name_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("bd_full_name_dirty", args_ptr(app)) != 0
 
 
 def _full_name_changed(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("bd_full_name_changed", args_ptr(app)) != 0
 
 
 def _has_dirty(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("bd_has_dirty", args_ptr(app)) != 0
 
 
 def _is_batching(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Bool:
     return w[].call_i32("bd_is_batching", args_ptr(app)) != 0
 
 
 def _scope_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("bd_scope_count", args_ptr(app))
 
 
 def _memo_count(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("bd_memo_count", args_ptr(app))
 
 
 def _set_handler(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("bd_set_handler", args_ptr(app))
 
 
 def _reset_handler(
-    w: UnsafePointer[WasmInstance, MutUntrackedOrigin],
+    w: Pointer[WasmInstance, MutUntrackedOrigin],
     app: Int,
 ) raises -> Int32:
     return w[].call_i32("bd_reset_handler", args_ptr(app))

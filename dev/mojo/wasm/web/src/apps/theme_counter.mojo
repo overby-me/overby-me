@@ -12,7 +12,7 @@
 #   CounterChild: div > p(dyn_text) + button("Reset")
 #   SummaryChild: p(dyn_text, dyn_attr[0])
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -201,14 +201,14 @@ struct ThemeCounterApp(Movable):
         return pvb.build()
 
 
-def _tc_init() -> UnsafePointer[ThemeCounterApp, MutUntrackedOrigin]:
+def _tc_init() -> Pointer[ThemeCounterApp, MutUntrackedOrigin]:
     var app_ptr = alloc[ThemeCounterApp](1)
     app_ptr.unsafe_write(ThemeCounterApp())
     return app_ptr
 
 
 def _tc_destroy(
-    app_ptr: UnsafePointer[ThemeCounterApp, MutUntrackedOrigin],
+    app_ptr: Pointer[ThemeCounterApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].counter_child.child_ctx)
     app_ptr[0].ctx.destroy_child_context(app_ptr[0].summary_child.child_ctx)
@@ -219,7 +219,7 @@ def _tc_destroy(
 
 def _tc_rebuild(
     mut app: ThemeCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the theme-counter app."""
     # 1. Render parent with placeholders
@@ -275,7 +275,7 @@ def _tc_handle_event(
 
 def _tc_flush(
     mut app: ThemeCounterApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates, handling reset callback."""
     # Check for reset callback from counter child

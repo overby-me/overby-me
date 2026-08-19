@@ -32,7 +32,7 @@
 #     destroying the AppShell.  The child scope, its signals, and its
 #     handlers are destroyed via destroy().
 
-from std.memory import UnsafePointer
+from std.memory import Pointer
 from signals import Runtime
 from signals.handle import (
     SignalI32,
@@ -72,9 +72,9 @@ struct ChildComponentContext(Movable):
 
     var child: ChildComponent
     var scope_id: UInt32
-    var runtime: UnsafePointer[Runtime, MutUntrackedOrigin]
-    var store: UnsafePointer[VNodeStore, MutUntrackedOrigin]
-    var eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin]
+    var runtime: Pointer[Runtime, MutUntrackedOrigin]
+    var store: Pointer[VNodeStore, MutUntrackedOrigin]
+    var eid_alloc: Pointer[ElementIdAllocator, MutUntrackedOrigin]
 
     # ── Construction ─────────────────────────────────────────────────
 
@@ -82,9 +82,9 @@ struct ChildComponentContext(Movable):
         out self,
         var child: ChildComponent,
         scope_id: UInt32,
-        runtime: UnsafePointer[Runtime, MutUntrackedOrigin],
-        store: UnsafePointer[VNodeStore, MutUntrackedOrigin],
-        eid_alloc: UnsafePointer[ElementIdAllocator, MutUntrackedOrigin],
+        runtime: Pointer[Runtime, MutUntrackedOrigin],
+        store: Pointer[VNodeStore, MutUntrackedOrigin],
+        eid_alloc: Pointer[ElementIdAllocator, MutUntrackedOrigin],
     ):
         """Create a ChildComponentContext from an existing ChildComponent.
 
@@ -362,7 +362,7 @@ struct ChildComponentContext(Movable):
 
     def flush(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
         new_vnode_idx: UInt32,
     ):
         """Flush the child: create or diff its VNode in the DOM.
@@ -386,7 +386,7 @@ struct ChildComponentContext(Movable):
 
     def flush_empty(
         mut self,
-        writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+        writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
     ):
         """Hide the child: remove its DOM content, restore placeholder.
 

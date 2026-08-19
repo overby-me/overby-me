@@ -25,7 +25,7 @@
 #   3. Increment: input += 1 → scope dirty + memo dirty
 #   4. Flush: consume_dirty → recompute memo → run effect → render → diff
 
-from std.memory import UnsafePointer, alloc
+from std.memory import Pointer, alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import (
@@ -127,14 +127,14 @@ struct EffectMemoApp(Movable):
 # ── EffectMemoApp lifecycle functions ────────────────────────────────────────
 
 
-def _em_init() -> UnsafePointer[EffectMemoApp, MutUntrackedOrigin]:
+def _em_init() -> Pointer[EffectMemoApp, MutUntrackedOrigin]:
     var app_ptr = alloc[EffectMemoApp](1)
     app_ptr.unsafe_write(EffectMemoApp())
     return app_ptr
 
 
 def _em_destroy(
-    app_ptr: UnsafePointer[EffectMemoApp, MutUntrackedOrigin],
+    app_ptr: Pointer[EffectMemoApp, MutUntrackedOrigin],
 ):
     app_ptr[0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
@@ -143,7 +143,7 @@ def _em_destroy(
 
 def _em_rebuild(
     mut app: EffectMemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Initial render (mount) of the effect-memo app.
 
@@ -170,7 +170,7 @@ def _em_handle_event(
 
 def _em_flush(
     mut app: EffectMemoApp,
-    writer_ptr: UnsafePointer[MutationWriter, MutUntrackedOrigin],
+    writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin],
 ) -> Int32:
     """Flush pending updates with memo + effect drain-and-run pattern.
 
