@@ -35,8 +35,11 @@
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nixos-raspberrypi";
     inputs.nixpkgs.follows = "nixpkgs";
   };
-  inputs.workspace-nix-wallpaper = {
-    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nix-wallpaper";
+  # Direct upstreams, not integrations: an input that exports a default
+  # package lands in pkgs under its own name, so declaring it is the whole
+  # of having it. zen-browser is also read for its home module.
+  inputs.nix-wallpaper = {
+    url = "github:lunik1/nix-wallpaper";
     inputs.nixpkgs.follows = "nixpkgs";
   };
   inputs.workspace-ragenix = {
@@ -47,9 +50,13 @@
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/system-manager";
     inputs.nixpkgs.follows = "nixpkgs";
   };
-  inputs.workspace-zen-browser = {
-    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/zen-browser";
+  inputs.zen-browser = {
+    # Pinned to the rev the retired integration had locked: zen tracks
+    # nixpkgs-unstable at HEAD (its package wants ffmpeg_9), and this rev is
+    # the one known to build against this tree's 26.05.
+    url = "github:0xc000022070/zen-browser-flake/945efbc704b7f8c1731a922aabbc5d95edc9eb74";
     inputs.nixpkgs.follows = "nixpkgs";
+    inputs.home-manager.follows = "workspace-home-manager/home-manager";
   };
 
   # This tree's nix configuration. Taking it is the whole of using it: the
