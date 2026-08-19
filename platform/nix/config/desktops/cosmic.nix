@@ -3,7 +3,7 @@
   lib,
   ...
 }: let
-  # cosmic-ext-quake-terminal is built from source out of platform/nix/packages/packages, so no
+  # cosmic-ext-quake-terminal is built from source out of platform/nix/packages, so no
   # binary cache has it and every aarch64 host compiles it under emulation,
   # where it is one of the slowest things in the closure.  x86_64 only.
   quakeTerminal = pkgs.stdenv.hostPlatform.isx86_64;

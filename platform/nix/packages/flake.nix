@@ -3,8 +3,9 @@
 # A workspace of its own so a tree can take the packages without taking eight
 # NixOS hosts and a secrets directory with them.
 #
-# The directory inside is named again because `packages/<name>.nix` becomes
-# `packages.<name>`: this flake is the workspace, `packages/` is the output.
+# The packages sit at the root - `<name>.nix` becomes `packages.<name>` -
+# because this workspace is one output, said by pointing `packages` at the
+# directory itself instead of holding a packages/packages/ stutter.
 #
 # Six of these link native libraries and briefly took the tree's own pkg-config
 # rewrite, which made a package set depend on a port of a build tool.
@@ -31,5 +32,9 @@
     };
   };
 
-  outputs = inputs: {workspaceModule = inputs.workspace.workspaceIn ./. inputs;};
+  outputs = inputs:
+    inputs.workspace ./. {
+      inherit inputs;
+      packages = ./.;
+    };
 }

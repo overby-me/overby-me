@@ -28,7 +28,7 @@
       withOverlays = [
         (final: _prev: {
           tree-sitter-mojo =
-            final.callPackage "${inputs.nix-packages}/packages/tree-sitter-mojo" {};
+            final.callPackage "${inputs.nix-packages}/tree-sitter-mojo" {};
         })
       ];
     };

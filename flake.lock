@@ -1414,11 +1414,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787000165,
-        "narHash": "sha256-/17sSY2oe3x99GY/g6bo6Mut36nL1MXWa1FFDkfML1A=",
+        "lastModified": 1787131175,
+        "narHash": "sha256-aZYBjQg9Ek2ANmmayOPZecHtIcIiGQXStgp34V2XWZc=",
         "ref": "refs/heads/main",
-        "rev": "66b489ea802f1f6e14ea73ad2ed14511486ca20d",
-        "revCount": 44,
+        "rev": "cbe95892dcbeb841db25864c4da703435c28e943",
+        "revCount": 45,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },

@@ -39,7 +39,7 @@
     # onlyoffice-desktopeditors it replaces was x86_64-only too, so the office
     # suite stays where it already was.
     #
-    # `.app` rather than the bare attribute: platform/nix/packages/packages/euro-office/default.nix
+    # `.app` rather than the bare attribute: platform/nix/packages/euro-office/default.nix
     # resolves the top level to the data bundle (fonts, dictionaries,
     # templates) so the flake's package set stays green everywhere, and hangs
     # the real application off passthru.  Installing the bare attribute gets
