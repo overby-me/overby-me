@@ -30,8 +30,9 @@ a rejected rule is not proposed twice.
 - `tests/` - one fixture file per rule, `valid:` and `invalid:` snippets.
   A dead rule and a clean tree are indistinguishable from scan output, so a
   rule without a fixture proving both directions does not land.
-- `default.nix` - the check: fixture tests plus a full scan, bound to the
-  pinned ast-grep and grammar so an engine bump cannot break rules silently.
+- `check/default.nix` - the check: fixture tests plus a full scan, bound to
+  the pinned ast-grep and grammar so an engine bump cannot break rules
+  silently.
 - `flake.nix` - the same check, runnable from a clone:
   `nix flake check`.
 
