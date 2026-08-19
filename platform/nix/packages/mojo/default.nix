@@ -83,6 +83,18 @@
     hash = "sha256-ieecVlQ6nyFyb3LebwhMTtCP6y9FCbVEkTIrNj63hbM=";
   };
 
+  # The FHS dynamic-linker path this platform's ELF binaries hardcode in
+  # PT_INTERP; the build namespace recreates exactly this path so the
+  # prebuilt tools bazel downloads can start inside the sandbox.
+  fhsInterp =
+    {
+      x86_64-linux = "/lib64/ld-linux-x86-64.so.2";
+      aarch64-linux = "/lib/ld-linux-aarch64.so.1";
+    }
+    .${
+      stdenv.hostPlatform.system
+    };
+
   mblackPythonEnv = python3.withPackages (ps:
     with ps; [
       click
@@ -110,8 +122,8 @@
     # sandbox from the moment they are linked: give every link the nix
     # dynamic linker and the runtime-library rpath up front. Both
     # configurations, because tools build in the exec config.
-    "--linkopt=-Wl,--dynamic-linker=${stdenv.cc.libc}/lib/ld-linux-x86-64.so.2"
-    "--host_linkopt=-Wl,--dynamic-linker=${stdenv.cc.libc}/lib/ld-linux-x86-64.so.2"
+    "--linkopt=-Wl,--dynamic-linker=${stdenv.cc.bintools.dynamicLinker}"
+    "--host_linkopt=-Wl,--dynamic-linker=${stdenv.cc.bintools.dynamicLinker}"
     "--linkopt=-Wl,-rpath,${lib.makeLibraryPath runtimeDeps}"
     "--host_linkopt=-Wl,-rpath,${lib.makeLibraryPath runtimeDeps}"
     # Prebuilt tools (clang's ld.lld wants libxml2.so.2 and libz) resolve
@@ -191,13 +203,12 @@
         done
         mkdir -p "$m/proc"
         mount -t proc proc "$m/proc" || mount --rbind /proc "$m/proc" || exit 97
-        mkdir -p "$m/usr/bin" "$m/lib64"
+        mkdir -p "$m/usr/bin" "$m${lib.dirOf fhsInterp}"
         ln -sf ${coreutils}/bin/env "$m/usr/bin/env"
         # Stage-1 bootstrap interpreter for rules_python tool stubs; they
         # re-exec the hermetic toolchain interpreter themselves.
         ln -sf ${python3}/bin/python3 "$m/usr/bin/python3"
-        ln -sf ${stdenv.cc.libc}/lib/ld-linux-x86-64.so.2 \
-          "$m/lib64/ld-linux-x86-64.so.2"
+        ln -sf ${stdenv.cc.bintools.dynamicLinker} "$m${fhsInterp}"
         exec chroot "$m" /bin/sh -c "cd \"$PWD\" && exec $BAZEL_NS_CMD"
       '; then
         return 0
@@ -245,10 +256,10 @@
       # named in the log instead of surfacing as a bare exec failure.
       local tool
       for tool in \
-        "$HOME"/.cache/bazel/_bazel_*/*/external/+http_archive+clang-linux-x86_64/bin/clang++ \
-        "$HOME"/.cache/bazel/_bazel_*/*/external/+http_archive+clang-linux-x86_64/bin/ld.lld \
-        "$HOME"/.cache/bazel/_bazel_*/*/external/+http_archive+clang-linux-x86_64/bin/llvm-ar \
-        "$HOME"/.cache/bazel/_bazel_*/*/external/rules_python++python+python_3_12_x86_64-unknown-linux-gnu/bin/python3; do
+        "$HOME"/.cache/bazel/_bazel_*/*/external/+http_archive+clang-linux-*/bin/clang++ \
+        "$HOME"/.cache/bazel/_bazel_*/*/external/+http_archive+clang-linux-*/bin/ld.lld \
+        "$HOME"/.cache/bazel/_bazel_*/*/external/+http_archive+clang-linux-*/bin/llvm-ar \
+        "$HOME"/.cache/bazel/_bazel_*/*/external/rules_python++python+python_3_12_*-unknown-linux-gnu/bin/python3; do
         [ -e "$tool" ] || continue
         if "$tool" --version >/dev/null 2>&1; then
           echo "sweep: ok $tool" >&2
@@ -301,7 +312,18 @@
     dontFixup = true;
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-Kgmvo2pyelMsC4SjsxPJjZUS4xE57LOpG/NtOLTSvdc=";
+    # Content-addressed per platform: bazel fetches host-arch prebuilt
+    # tools (clang, hermetic CPython), so each system pins its own hash.
+    # Bringing up a new platform: build once (the fake hash fails with
+    # the real one printed), paste it here, build again.
+    outputHash =
+      {
+        x86_64-linux = "sha256-Kgmvo2pyelMsC4SjsxPJjZUS4xE57LOpG/NtOLTSvdc=";
+        aarch64-linux = lib.fakeHash;
+      }
+      .${
+        stdenv.hostPlatform.system
+      };
   };
 
   # The multi-hour bazel run, exporting raw products only. Nothing in here
@@ -496,7 +518,7 @@ in
       description = "Mojo programming language, compiler and tools built from source";
       homepage = "https://www.modular.com/mojo";
       license = [lib.licenses.asl20 lib.licenses."llvm-exception"];
-      platforms = ["x86_64-linux"];
+      platforms = ["x86_64-linux" "aarch64-linux"];
       maintainers = with lib.maintainers; [overby-me];
     };
   }
