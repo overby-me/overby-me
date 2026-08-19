@@ -4,6 +4,8 @@
   makeRustPlatform,
   fetchFromGitHub,
 }: let
+  # Nightly is measured, not preferred: the crate opens with #![feature]
+  # and stable refuses it with E0554.
   rustPlatform = makeRustPlatform {
     cargo = rust-bin.nightly.latest.default;
     rustc = rust-bin.nightly.latest.default;
