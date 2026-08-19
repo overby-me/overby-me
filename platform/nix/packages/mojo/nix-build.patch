@@ -148,3 +148,16 @@ index f631f8b..e02b384 100755
 +# probes Xcode, and enforces bazelw usage. None of that applies inside the
 +# sandbox; just run the real bazel client.
 +exec "$BAZEL_REAL" "$@"
+--- a/KGEN/lib/Target/Host/HostTraits.h
++++ b/KGEN/lib/Target/Host/HostTraits.h
+@@ -25,8 +25,9 @@
+   bool matches(const llvm::Triple &triple) const override {
+     // Covers the CPU targets the shipped build carries an LLVM backend for
+     // (see BACKENDS in bazel/public-patches/llvm_project.bzl)
++    // plus WebAssembly, which this build's patched BACKENDS list adds.
+     return triple.isX86() || triple.isAArch64() || triple.isARM() ||
+-           triple.isRISCV();
++           triple.isRISCV() || triple.isWasm();
+   }
+   llvm::StringRef getAsmExtension() const override { return ".s"; }
+   llvm::StringRef getLLVMExtension() const override { return ".ll"; }
