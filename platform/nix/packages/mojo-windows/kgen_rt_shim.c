@@ -142,6 +142,29 @@ int64_t KGEN_CompilerRT_AsyncRT_ParallelismLevel(void) {
     return g_runtime_storage.parallelism;
 }
 
+/* Mojo 1.0 splits the runtime into refcounted "CPU devices".  The shim
+ * keeps the single fake runtime and hands it out as the device; the
+ * refcount is meaningless for a static object, so release is a no-op. */
+
+__attribute__((visibility("default")))
+void *KGEN_CompilerRT_AsyncRT_GetCurrentCPUDevice(void) {
+    return (void *)g_current_runtime;
+}
+
+__attribute__((visibility("default")))
+void *KGEN_CompilerRT_AsyncRT_GetOrCreateCPUDevice(void) {
+    if (!g_current_runtime) {
+        g_runtime_storage.parallelism = 1;
+        g_current_runtime = &g_runtime_storage;
+    }
+    return (void *)g_current_runtime;
+}
+
+__attribute__((visibility("default")))
+void KGEN_CompilerRT_AsyncRT_ReleaseCPUDevice(void *device) {
+    (void)device;
+}
+
 /* Execute a task synchronously (single-threaded fallback).
  * Signature: void Execute(runtime, fn_ptr, context, ...) — the exact
  * calling convention is opaque; we call fn_ptr(context) which is correct
