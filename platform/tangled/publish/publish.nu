@@ -177,13 +177,18 @@ def derive-filter [p: record, --current]: nothing -> string {
     })
   )
   let mapped = ($artifacts | each {|a|
-    # A project that ships the artifact itself overrides the generated one:
+    # A project that ships its own workflow overrides the generated one:
     # its current-path term moves after the generated term, where josh lets
     # it win. Moved rather than appended, because josh normalises the
     # filter and a duplicated term collapses back to its first position.
     # Anchored to the repo root, because filters are also derived from
-    # other working directories.
-    let shipped = ($env.FILE_PWD | path join "../../.." $p.path $a.then | path expand | path exists)
+    # other working directories. The workflow ONLY: a project's in-tree
+    # flake.lock is the monorepo's pin of it, and letting it win published
+    # oxidized-sed against a framework rev its new flake could not call.
+    let shipped = (
+      $a.dest == ".tangled/workflows/ci.yml"
+      and ($env.FILE_PWD | path join "../../.." $p.path $a.then | path expand | path exists)
+    )
     let former = ($eras | where {|era| (not $shipped) or $era.path != $p.path })
     ($former | each {|era| $"::($a.dest)=($era.path)/($a.then)" })
     | append [$"::($a.dest)=($a.now)"]
