@@ -81,5 +81,9 @@
   # evaluation, and the projects elsewhere in the tree build with a `lib`
   # defined in another workspace - a lib in another flake's evaluation is not
   # one they can reach.
-  outputs = inputs: {workspaceModule = inputs.workspace.workspaceIn {inherit inputs;};};
+  outputs = inputs:
+    inputs.workspace {
+      inherit inputs;
+      module = true;
+    };
 }
