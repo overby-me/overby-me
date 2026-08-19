@@ -1741,10 +1741,6 @@
         "nix-packages": "nix-packages",
         "nixpkgs": "nixpkgs_2",
         "publish-checks": "publish-checks",
-        "rust-overlay": [
-          "nix-config",
-          "rust-overlay"
-        ],
         "workspace": "workspace",
         "workspace-darwin": "workspace-darwin_2",
         "workspace-disko": "workspace-disko_2",

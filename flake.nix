@@ -80,12 +80,6 @@
     inputs.workspace.follows = "workspace";
   };
 
-  # nix-config and nix-packages both carry rust-overlay, and both hand their
-  # inputs to the module system, which takes one definition per name. This
-  # names the survivor; without it the tree fails evaluation with conflicting
-  # definitions of `inputs.rust-overlay`.
-  inputs.rust-overlay.follows = "nix-config/rust-overlay";
-
   # The published projects, as inputs, because the differential check builds
   # each project's own flake and holds it against this tree's build of the same
   # source. Declared one level down so this file does not carry twenty-two of

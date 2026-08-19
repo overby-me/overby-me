@@ -18,18 +18,6 @@
     # the second builds this against a nixpkgs of its own, silently - which is
     # how zen-browser came to want an ffmpeg the rest of the tree did not have.
     workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
-
-    # Three packages build with a nightly toolchain and take `rust-bin` from
-    # this. Declared here so the packages travel with the input they need: a
-    # consumer that takes only this workspace used to fail evaluation at
-    # forkfs with "called without required argument rust-bin". The monorepo
-    # pins it to nix-config's copy with a root-level follows, because two
-    # workspaces handing over the same input name is a definition conflict,
-    # not a merge.
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
   };
 
   outputs = inputs:
