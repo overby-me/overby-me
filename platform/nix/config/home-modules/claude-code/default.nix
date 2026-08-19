@@ -134,6 +134,14 @@
     documentation.** Rewrite the sentence, or use a comma, colon, parentheses, or a
     period instead.
 
+    ## Code Comments
+
+    **Every comment must pass the deepcomment test: could a competent reader
+    derive it from the code? Then delete it.** Keep only why-not-what,
+    contracts, and warnings, in 1-3 lines; a comment must never outweigh the
+    code it describes. After writing or editing comments, run the
+    `deepcomment` skill over the changes before committing.
+
     ## Shell
 
     **Commands most likely run in [nushell](https://www.nushell.sh/), not bash/POSIX sh.**
