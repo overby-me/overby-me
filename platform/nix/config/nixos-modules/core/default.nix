@@ -10,6 +10,7 @@
     ./locale.nix
     ./networking.nix
     ./nix.nix
+    ./oomd.nix
     ./system.nix
     ./uinput.nix
     ./users.nix

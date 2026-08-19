@@ -1,3 +1,38 @@
 #!/usr/bin/env nu
+# One session per project directory, each in its own systemd scope with
+# machine-relative limits.
+#
+# The scope exists so a runaway inside one project dies alone: the zellij
+# server inherits the first client's cgroup, every pane process inherits the
+# server's, and cgroup membership survives fork and daemonize. Memory limits
+# are percentages, which systemd resolves against the machine's physical RAM,
+# so one script fits every host; CPUQuota counts in per-core units, so that
+# one is computed. OOMPolicy=continue is load-bearing: without it, the kernel
+# killing a process at MemoryMax makes systemd fail the whole scope and reap
+# the session - which is exactly the 2026-08-19 incident this exists to
+# prevent. Builds are not bounded here; nix-daemon carries its own caps.
+#
+# Only a session whose server is not live gets a new scope: a plain reattach
+# adds a thin client wherever it runs, and a resurrected server should land
+# in a fresh scope rather than the terminal's.
 let session_name = (pwd | str replace $env.HOME "~" | str replace -a "/" "|")
-zellij attach -c $session_name
+let live = (
+  do { ^zellij list-sessions -n } | complete | get stdout | lines
+  | where {|l| not ($l | str contains "EXITED") }
+  | any {|l| ($l | split row " " | first) == $session_name }
+)
+if $live {
+  ^zellij attach $session_name
+} else {
+  let unit = $"zellij-($session_name | str replace -ra '[^A-Za-z0-9_.:-]' '-')"
+  let cores = ([1 ((^nproc | into int) - 2)] | math max)
+  (^systemd-run --user --scope --collect
+    $"--unit=($unit)"
+    -p "MemoryHigh=70%"
+    -p "MemoryMax=80%"
+    -p "MemorySwapMax=20%"
+    -p $"CPUQuota=($cores * 100)%"
+    -p CPUWeight=100
+    -p OOMPolicy=continue
+    zellij attach -c $session_name)
+}
