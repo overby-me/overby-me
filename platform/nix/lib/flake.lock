@@ -61,11 +61,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787146872,
-        "narHash": "sha256-EJonqsS4Vszwih2xqHi40hT/Oiin2vKpB1yTeq+kHAk=",
+        "lastModified": 1787161150,
+        "narHash": "sha256-Xh19iZYgNP6I2sjvuB/3tpUs6XEL/ki57nXL99z+GKk=",
         "ref": "refs/heads/main",
-        "rev": "ee963b104452c28b5cb90fd903cfbe5532058203",
-        "revCount": 42,
+        "rev": "901887e1edd7116b4653eccbcc37aa4f017fcb12",
+        "revCount": 43,
         "type": "git",
         "url": "https://tangled.org/overby.me/oxidized-ninja"
       },
@@ -81,11 +81,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787146872,
-        "narHash": "sha256-eoO9dnActNsRCRA2ApkJDn9H0yCKYfXTpPglbXsGL2Q=",
+        "lastModified": 1787161150,
+        "narHash": "sha256-RCxptPsfToJUK6+6/4COQ97nBTEZu/INGjW6eZRc/Mw=",
         "ref": "refs/heads/main",
-        "rev": "787245c156a26997d0f6015f29f343abf69de48b",
-        "revCount": 47,
+        "rev": "c8db0a6709cdd0572f50d3e666d4a5b71d7b4531",
+        "revCount": 48,
         "type": "git",
         "url": "https://tangled.org/overby.me/oxidized-xz"
       },
@@ -109,11 +109,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787146872,
-        "narHash": "sha256-UxQQqjDZ/KiUNsEtAdW79s5R0rO+K1aiFUCLghpMLCo=",
+        "lastModified": 1787161150,
+        "narHash": "sha256-3yq0hn3zE0C2RCz03J2z2nnRTL1KTKwP+5cyPLaYgZw=",
         "ref": "refs/heads/main",
-        "rev": "7b56b39f28680e92f70883362f2a535be6b7e2b6",
-        "revCount": 21,
+        "rev": "348440591f4856797af4fdfb09e85a29daf9a382",
+        "revCount": 22,
         "type": "git",
         "url": "https://tangled.org/overby.me/wclip"
       },

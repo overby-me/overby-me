@@ -41,11 +41,11 @@
     "nix-packages": {
       "flake": false,
       "locked": {
-        "lastModified": 1787138371,
-        "narHash": "sha256-2yWjj7W7ynGy3eco/S6QdCukuXpLnf+6Y+x/+kvGuz0=",
+        "lastModified": 1787161316,
+        "narHash": "sha256-9qzNYBw2GzuPgR7YOAh37XYOPIAtWYvCnOQ9DLQ1RWM=",
         "ref": "refs/heads/main",
-        "rev": "5ce8f180960a9afc47b399f53ebee409982f3acf",
-        "revCount": 131,
+        "rev": "6b7f037beafa7829e9f00e3e312f02496bb6ecd5",
+        "revCount": 139,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-packages"
       },

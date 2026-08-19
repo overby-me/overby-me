@@ -14,7 +14,7 @@
       # ast-grep-ignore: nix-prefer-lib
       src = builtins.fetchGit {
         url = "https://tangled.org/overby.me/wclip";
-        rev = "7b56b39f28680e92f70883362f2a535be6b7e2b6";
+        rev = "348440591f4856797af4fdfb09e85a29daf9a382";
       };
     in
       rustPlatform.buildRustPackage {
@@ -32,7 +32,7 @@
       # ast-grep-ignore: nix-prefer-lib
       src = builtins.fetchGit {
         url = "https://tangled.org/overby.me/nushell-plugin-tramp";
-        rev = "0f286d7eb341e726e572fc01bbc7602465edd307";
+        rev = "691224a788279dad79951e37b4ebbb1fd63e3a21";
       };
     in
       rustPlatform.buildRustPackage {
