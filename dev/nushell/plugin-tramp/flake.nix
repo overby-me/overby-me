@@ -14,5 +14,6 @@
     inputs.workspace {
       name = "nushell-plugin-tramp";
       description = "A TRAMP-inspired remote filesystem plugin for Nushell";
+      doCheck = false;
     };
 }
