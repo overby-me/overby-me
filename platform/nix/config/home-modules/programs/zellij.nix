@@ -8,10 +8,9 @@
     enable = true;
     settings = {
       default_shell = "nu";
-      copy_command =
-        if pkgs.stdenv.isDarwin
-        then "pbcopy"
-        else "${pkgs.pkgsUnstable.wclip}/bin/wclip -selection clipboard";
+      # No copy_command on purpose: it would run where the zellij server
+      # runs, which over ssh is the wrong machine. The OSC 52 fallback
+      # follows the connection to the terminal the user is looking at.
       scrollback_editor = "zed-uf";
       session_serialization = false;
       pane_frames = false;
