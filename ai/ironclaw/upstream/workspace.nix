@@ -28,7 +28,8 @@
     };
 
     # wasm32-wasip2 is what the WASM channels build for.
-    rustWithWasm = rust-bin.stable.latest.default.override {
+    # Pinned like zed's: latest floats with the rust-overlay lock.
+    rustWithWasm = rust-bin.stable."1.97.1".default.override {
       targets = ["wasm32-wasip2"];
     };
 

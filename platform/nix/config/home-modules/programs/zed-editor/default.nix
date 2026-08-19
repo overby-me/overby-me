@@ -10,7 +10,10 @@
     package = pkgs.pkgsUnstable.zed-editor;
     # Rust toolchain for compiling WASM dev extensions
     extraPackages = with pkgs; [
-      (rust-bin.stable.latest.default.override {
+      # Pinned, not latest: latest floats with the rust-overlay lock, so an
+      # unrelated nix flake update silently bumps the compiler. Recheck at
+      # nixpkgs bumps whether wasm32-wasip2 arrived and this can retire.
+      (rust-bin.stable."1.97.1".default.override {
         targets = ["wasm32-wasip2"];
       })
       clang
