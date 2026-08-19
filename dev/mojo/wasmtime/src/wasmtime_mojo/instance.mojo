@@ -16,7 +16,7 @@ Usage:
     var glob = instance_get_global(store.context(), inst, "__heap_base")
 """
 
-from std.memory import UnsafePointer, alloc, memcpy, free
+from std.memory import UnsafePointer, alloc, unsafe_memcpy
 
 from ._types import (
     ContextPtr,
@@ -53,7 +53,7 @@ from ._lib import (
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-fn instance_get_export(
+def instance_get_export(
     context: ContextPtr,
     instance: WasmtimeInstance,
     name: String,
@@ -81,7 +81,7 @@ fn instance_get_export(
 
     var name_bytes = name.as_bytes()
     var name_ptr = _as_ext(name_bytes.unsafe_ptr())
-    var name_len = len(name)
+    var name_len = name.byte_length()
 
     try:
         var found = wasmtime_instance_export_get(
@@ -95,7 +95,7 @@ fn instance_get_export(
         ext_buf.free()
 
 
-fn instance_get_func(
+def instance_get_func(
     context: ContextPtr,
     instance: WasmtimeInstance,
     name: String,
@@ -125,7 +125,7 @@ fn instance_get_func(
     return ext.get_func()
 
 
-fn instance_get_memory(
+def instance_get_memory(
     context: ContextPtr,
     instance: WasmtimeInstance,
     name: String,
@@ -155,7 +155,7 @@ fn instance_get_memory(
     return ext.get_memory()
 
 
-fn instance_get_global(
+def instance_get_global(
     context: ContextPtr,
     instance: WasmtimeInstance,
     name: String,
@@ -190,7 +190,7 @@ fn instance_get_global(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-fn global_get_i32(
+def global_get_i32(
     context: ContextPtr, `global`: WasmtimeGlobal
 ) raises -> Int32:
     """Read an i32 value from a WASM global."""
@@ -206,7 +206,7 @@ fn global_get_i32(
         val_buf.free()
 
 
-fn global_get_i64(
+def global_get_i64(
     context: ContextPtr, `global`: WasmtimeGlobal
 ) raises -> Int64:
     """Read an i64 value from a WASM global."""
@@ -227,7 +227,7 @@ fn global_get_i64(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-fn func_call(
+def func_call(
     context: ContextPtr,
     func: WasmtimeFunc,
     args: List[WasmtimeVal],
@@ -262,8 +262,8 @@ fn func_call(
         results_buf[i] = WasmtimeVal()
 
     # Heap-allocate trap output so FFI write is visible.
-    var trap_buf = alloc[UnsafePointer[NoneType, MutExternalOrigin]](1)
-    trap_buf[] = UnsafePointer[NoneType, MutExternalOrigin]()
+    var trap_buf = alloc[TrapPtr](1)
+    trap_buf[] = None
 
     try:
         var err = wasmtime_func_call(
@@ -299,7 +299,7 @@ fn func_call(
         results_buf.free()
 
 
-fn func_call_0(
+def func_call_0(
     context: ContextPtr,
     func: WasmtimeFunc,
     args: List[WasmtimeVal],
@@ -317,7 +317,7 @@ fn func_call_0(
     _ = func_call(context, func, args, nresults=0)
 
 
-fn func_call_i32(
+def func_call_i32(
     context: ContextPtr,
     func: WasmtimeFunc,
     args: List[WasmtimeVal],
@@ -339,7 +339,7 @@ fn func_call_i32(
     return results[0].get_i32()
 
 
-fn func_call_i64(
+def func_call_i64(
     context: ContextPtr,
     func: WasmtimeFunc,
     args: List[WasmtimeVal],
@@ -361,7 +361,7 @@ fn func_call_i64(
     return results[0].get_i64()
 
 
-fn func_call_f32(
+def func_call_f32(
     context: ContextPtr,
     func: WasmtimeFunc,
     args: List[WasmtimeVal],
@@ -383,7 +383,7 @@ fn func_call_f32(
     return results[0].get_f32()
 
 
-fn func_call_f64(
+def func_call_f64(
     context: ContextPtr,
     func: WasmtimeFunc,
     args: List[WasmtimeVal],
@@ -410,9 +410,9 @@ fn func_call_f64(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-fn memory_data_ptr(
+def memory_data_ptr(
     context: ContextPtr, memory: WasmtimeMemory
-) raises -> UnsafePointer[UInt8, MutExternalOrigin]:
+) raises -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """Return a raw pointer to the start of WASM linear memory.
 
     The pointer is only valid until the next memory-growing operation.
@@ -432,7 +432,7 @@ fn memory_data_ptr(
         m_buf.free()
 
 
-fn memory_data_size(context: ContextPtr, memory: WasmtimeMemory) raises -> Int:
+def memory_data_size(context: ContextPtr, memory: WasmtimeMemory) raises -> Int:
     """Return the current size of WASM linear memory in bytes.
 
     Args:
@@ -450,7 +450,7 @@ fn memory_data_size(context: ContextPtr, memory: WasmtimeMemory) raises -> Int:
         m_buf.free()
 
 
-fn memory_read_bytes(
+def memory_read_bytes(
     context: ContextPtr,
     memory: WasmtimeMemory,
     offset: Int,
@@ -474,7 +474,7 @@ fn memory_read_bytes(
     return result^
 
 
-fn memory_write_bytes(
+def memory_write_bytes(
     context: ContextPtr,
     memory: WasmtimeMemory,
     offset: Int,
@@ -493,7 +493,7 @@ fn memory_write_bytes(
         (base + offset + i)[] = data[i]
 
 
-fn memory_read_i32_le(
+def memory_read_i32_le(
     context: ContextPtr, memory: WasmtimeMemory, offset: Int
 ) raises -> Int32:
     """Read a little-endian i32 from WASM memory at the given byte offset."""
@@ -501,7 +501,7 @@ fn memory_read_i32_le(
     return (base + offset).bitcast[Int32]()[]
 
 
-fn memory_write_i32_le(
+def memory_write_i32_le(
     context: ContextPtr, memory: WasmtimeMemory, offset: Int, value: Int32
 ) raises:
     """Write a little-endian i32 into WASM memory at the given byte offset."""
@@ -509,7 +509,7 @@ fn memory_write_i32_le(
     (base + offset).bitcast[Int32]()[] = value
 
 
-fn memory_read_i64_le(
+def memory_read_i64_le(
     context: ContextPtr, memory: WasmtimeMemory, offset: Int
 ) raises -> Int64:
     """Read a little-endian i64 from WASM memory at the given byte offset."""
@@ -517,7 +517,7 @@ fn memory_read_i64_le(
     return (base + offset).bitcast[Int64]()[]
 
 
-fn memory_write_i64_le(
+def memory_write_i64_le(
     context: ContextPtr, memory: WasmtimeMemory, offset: Int, value: Int64
 ) raises:
     """Write a little-endian i64 into WASM memory at the given byte offset."""
@@ -525,7 +525,7 @@ fn memory_write_i64_le(
     (base + offset).bitcast[Int64]()[] = value
 
 
-fn memory_read_u64_le(
+def memory_read_u64_le(
     context: ContextPtr, memory: WasmtimeMemory, offset: Int
 ) raises -> UInt64:
     """Read a little-endian u64 from WASM memory at the given byte offset."""

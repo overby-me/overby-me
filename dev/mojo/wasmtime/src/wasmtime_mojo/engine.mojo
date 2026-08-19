@@ -36,11 +36,11 @@ struct Engine(Movable):
 
     var _ptr: EnginePtr
 
-    fn __init__(out self) raises:
+    def __init__(out self) raises:
         """Create a new Wasmtime engine with default settings."""
         self._ptr = wasm_engine_new()
 
-    fn __init__(out self, *, cache: Bool) raises:
+    def __init__(out self, *, cache: Bool) raises:
         """Create a new Wasmtime engine with optional module caching.
 
         When *cache* is True, compiled WASM modules are persisted to disk
@@ -57,9 +57,7 @@ struct Engine(Movable):
 
         var config = wasm_config_new()
         # Pass null path → use default cache directory
-        var err = wasmtime_config_cache_config_load(
-            config, UnsafePointer[UInt8, MutExternalOrigin]()
-        )
+        var err = wasmtime_config_cache_config_load(config, None)
         if err:
             var msg = error_message(err)
             # Config is NOT yet consumed if cache load fails; clean it up.
@@ -68,22 +66,21 @@ struct Engine(Movable):
         # wasm_engine_new_with_config takes ownership of config
         self._ptr = wasm_engine_new_with_config(config)
 
-    fn __del__(deinit self):
+    def __deinit__(deinit self):
         """Delete the engine, freeing all associated resources."""
-        if self._ptr:
-            try:
-                wasm_engine_delete(self._ptr)
-            except:
-                pass
+        try:
+            wasm_engine_delete(self._ptr)
+        except:
+            pass
 
-    fn __moveinit__(out self, deinit take: Self):
+    def __init__(out self, *, deinit move: Self):
         """Move constructor — transfers ownership of the engine pointer."""
-        self._ptr = take._ptr
+        self._ptr = move._ptr
 
-    fn ptr(self) -> EnginePtr:
+    def ptr(self) -> EnginePtr:
         """Return the raw engine pointer for FFI calls.
 
-        The returned pointer carries MutExternalOrigin, which tells the
+        The returned pointer carries MutUntrackedOrigin, which tells the
         compiler it does NOT borrow self. An Engine held in a local is
         therefore
         destroyed at its last use, so

@@ -35,7 +35,7 @@ struct Store(Movable):
     var _ptr: StorePtr
     var _context: ContextPtr
 
-    fn __init__(out self, engine_ptr: EnginePtr) raises:
+    def __init__(out self, engine_ptr: EnginePtr) raises:
         """Create a new Store backed by the given engine.
 
         Args:
@@ -44,25 +44,24 @@ struct Store(Movable):
         """
         self._ptr = wasmtime_store_new(
             engine_ptr,
-            UnsafePointer[NoneType, MutExternalOrigin](),
-            UnsafePointer[NoneType, MutExternalOrigin](),
+            None,
+            None,
         )
         self._context = wasmtime_store_context(self._ptr)
 
-    fn __del__(deinit self):
+    def __deinit__(deinit self):
         """Delete the store, freeing all runtime state it holds."""
-        if self._ptr:
-            try:
-                wasmtime_store_delete(self._ptr)
-            except:
-                pass
+        try:
+            wasmtime_store_delete(self._ptr)
+        except:
+            pass
 
-    fn __moveinit__(out self, deinit take: Self):
+    def __init__(out self, *, deinit move: Self):
         """Move constructor — transfers ownership of the store pointer."""
-        self._ptr = take._ptr
-        self._context = take._context
+        self._ptr = move._ptr
+        self._context = move._context
 
-    fn context(self) -> ContextPtr:
+    def context(self) -> ContextPtr:
         """Return the wasmtime_context_t for this store.
 
         The context is valid as long as the store is alive and is used
@@ -70,10 +69,10 @@ struct Store(Movable):
         """
         return self._context
 
-    fn ptr(self) -> StorePtr:
+    def ptr(self) -> StorePtr:
         """Return the raw store pointer for FFI calls.
 
-        The returned pointer carries MutExternalOrigin, which tells the
+        The returned pointer carries MutUntrackedOrigin, which tells the
         compiler it does NOT borrow self. A Store held in a local is therefore
         destroyed at its last use, so
 

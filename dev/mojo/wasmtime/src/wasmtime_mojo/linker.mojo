@@ -36,7 +36,7 @@ Usage:
     var instance = linker.instantiate(store.context(), module.ptr())
 """
 
-from std.memory import UnsafePointer, memcpy, alloc
+from std.memory import UnsafePointer, unsafe_memcpy, alloc
 
 from ._types import (
     EnginePtr,
@@ -71,7 +71,7 @@ struct Linker(Movable):
 
     var _ptr: LinkerPtr
 
-    fn __init__(out self, engine_ptr: EnginePtr) raises:
+    def __init__(out self, engine_ptr: EnginePtr) raises:
         """Create a new Linker for the given engine.
 
         Args:
@@ -80,22 +80,21 @@ struct Linker(Movable):
         """
         self._ptr = wasmtime_linker_new(engine_ptr)
 
-    fn __del__(deinit self):
+    def __deinit__(deinit self):
         """Delete the linker, freeing all associated definitions."""
-        if self._ptr:
-            try:
-                wasmtime_linker_delete(self._ptr)
-            except:
-                pass
+        try:
+            wasmtime_linker_delete(self._ptr)
+        except:
+            pass
 
-    fn __moveinit__(out self, deinit take: Self):
+    def __init__(out self, *, deinit move: Self):
         """Move constructor — transfers ownership of the linker pointer."""
-        self._ptr = take._ptr
+        self._ptr = move._ptr
 
-    fn ptr(self) -> LinkerPtr:
+    def ptr(self) -> LinkerPtr:
         """Return the raw linker pointer for FFI calls.
 
-        The returned pointer carries MutExternalOrigin, which tells the
+        The returned pointer carries MutUntrackedOrigin, which tells the
         compiler it does NOT borrow self. A Linker held in a local is therefore
         destroyed at its last use, so
 
@@ -112,19 +111,15 @@ struct Linker(Movable):
     # Define a host function import
     # ------------------------------------------------------------------
 
-    fn define_func(
+    def define_func(
         self,
         module_name: String,
         func_name: String,
         param_kinds: List[UInt8],
         result_kinds: List[UInt8],
         callback: WasmtimeCallback,
-        env: UnsafePointer[NoneType, MutExternalOrigin] = UnsafePointer[
-            NoneType, MutExternalOrigin
-        ](),
-        finalizer: UnsafePointer[NoneType, MutExternalOrigin] = UnsafePointer[
-            NoneType, MutExternalOrigin
-        ](),
+        env: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]] = None,
+        finalizer: Optional[UnsafePointer[NoneType, MutUntrackedOrigin]] = None,
     ) raises:
         """Define a host function to satisfy a WASM import.
 
@@ -150,12 +145,12 @@ struct Linker(Movable):
         # Convert module_name to raw bytes
         var mod_bytes = module_name.as_bytes()
         var mod_ptr = _as_ext(mod_bytes.unsafe_ptr())
-        var mod_len = len(module_name)
+        var mod_len = module_name.byte_length()
 
         # Convert func_name to raw bytes
         var fn_bytes = func_name.as_bytes()
         var fn_ptr = _as_ext(fn_bytes.unsafe_ptr())
-        var fn_len = len(func_name)
+        var fn_len = func_name.byte_length()
 
         var err = wasmtime_linker_define_func(
             self._ptr,
@@ -187,7 +182,7 @@ struct Linker(Movable):
     # Instantiate a module
     # ------------------------------------------------------------------
 
-    fn instantiate(
+    def instantiate(
         self,
         context: ContextPtr,
         module_ptr: ModulePtr,

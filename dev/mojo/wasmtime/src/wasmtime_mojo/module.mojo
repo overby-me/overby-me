@@ -19,7 +19,7 @@ Usage:
     var fast_module = Module.deserialize_file(engine.ptr(), "module.cwasm")
 """
 
-from std.memory import UnsafePointer, alloc, free
+from std.memory import UnsafePointer, alloc
 from std.pathlib import Path
 
 from ._types import EnginePtr, ModulePtr, ErrorPtr, WasmByteVec
@@ -43,7 +43,7 @@ struct Module(Movable):
 
     var _ptr: ModulePtr
 
-    fn __init__(
+    def __init__(
         out self, engine_ptr: EnginePtr, wasm_bytes: List[UInt8]
     ) raises:
         """Compile a WASM binary into a Module.
@@ -57,7 +57,7 @@ struct Module(Movable):
             Error: If compilation fails (e.g. invalid WASM binary).
         """
         var module_out = alloc[ModulePtr](1)
-        module_out[] = ModulePtr()
+        module_out.unsafe_write(ModulePtr.unsafe_dangling())
 
         var data_ptr = _as_ext(wasm_bytes.unsafe_ptr())
         try:
@@ -77,7 +77,7 @@ struct Module(Movable):
         finally:
             module_out.free()
 
-    fn __init__(out self, *, var _ptr: ModulePtr):
+    def __init__(out self, *, var _ptr: ModulePtr):
         """Create a Module from a raw pointer (takes ownership).
 
         Args:
@@ -86,22 +86,21 @@ struct Module(Movable):
         """
         self._ptr = _ptr
 
-    fn __del__(deinit self):
+    def __deinit__(deinit self):
         """Delete the module, freeing compilation artifacts."""
-        if self._ptr:
-            try:
-                wasmtime_module_delete(self._ptr)
-            except:
-                pass
+        try:
+            wasmtime_module_delete(self._ptr)
+        except:
+            pass
 
-    fn __moveinit__(out self, deinit take: Self):
+    def __init__(out self, *, deinit move: Self):
         """Move constructor — transfers ownership of the module pointer."""
-        self._ptr = take._ptr
+        self._ptr = move._ptr
 
-    fn ptr(self) -> ModulePtr:
+    def ptr(self) -> ModulePtr:
         """Return the raw module pointer for FFI calls.
 
-        The returned pointer carries MutExternalOrigin, which tells the
+        The returned pointer carries MutUntrackedOrigin, which tells the
         compiler it does NOT borrow self. A Module held in a local is therefore
         destroyed at its last use, so
 
@@ -118,7 +117,7 @@ struct Module(Movable):
     # Serialization
     # ------------------------------------------------------------------
 
-    fn serialize(self, path: String) raises:
+    def serialize(self, path: String) raises:
         """Serialize the compiled module to a file.
 
         The resulting file can be loaded later with `Module.deserialize_file`
@@ -161,7 +160,7 @@ struct Module(Movable):
         Path(path).write_bytes(data)
 
     @staticmethod
-    fn deserialize_file(engine_ptr: EnginePtr, path: String) raises -> Module:
+    def deserialize_file(engine_ptr: EnginePtr, path: String) raises -> Module:
         """Deserialize a pre-compiled module from a file.
 
         This is much faster than compiling from WASM bytes because the
@@ -188,7 +187,7 @@ struct Module(Movable):
         c_path[len(path_bytes)] = 0  # null terminator
 
         var module_out = alloc[ModulePtr](1)
-        module_out[] = ModulePtr()
+        module_out.unsafe_write(ModulePtr.unsafe_dangling())
 
         try:
             var err = wasmtime_module_deserialize_file(
