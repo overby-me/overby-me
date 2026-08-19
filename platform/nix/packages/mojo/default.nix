@@ -319,7 +319,7 @@
     outputHash =
       {
         x86_64-linux = "sha256-Kgmvo2pyelMsC4SjsxPJjZUS4xE57LOpG/NtOLTSvdc=";
-        aarch64-linux = lib.fakeHash;
+        aarch64-linux = "sha256-Z9/+252LTDm4zaAW6DFphxjcdGP5XmSNRuejSDOKQ40=";
       }
       .${
         stdenv.hostPlatform.system
