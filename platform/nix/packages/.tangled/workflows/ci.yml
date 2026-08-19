@@ -1,0 +1,23 @@
+# CI for the published repo, shipped from the project rather than generated:
+# evaluation only. A building `nix flake check` means building all 35
+# packages, and the CI microvm died mid-Mojo-toolchain trying. Evaluation
+# catches what publishing actually breaks - missing inputs, wiring - and the
+# builds are covered by the monorepo's own checks on real hardware.
+clone:
+  depth: 1
+  skip: false
+  submodules: false
+dependencies:
+  - git
+  - nix
+engine: microvm
+image: nixos
+steps:
+  - command: |-
+      nix --extra-experimental-features "nix-command flakes" \
+        flake check --no-build
+    name: nix flake check --no-build
+when:
+  - branch: '**'
+    event:
+      - push
