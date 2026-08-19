@@ -8,8 +8,7 @@
 # not pass flake inputs to modules - hence `specialArgs`.
 #
 # Downstream flakes compose `inputs.self.systemModules.core` with their own
-# host-specific modules in their own `systemConfigs.<host>`; the downstream
-# template's `system-manager/config/workhost.nix` is that pattern.
+# host-specific modules in their own `systemConfigs.<host>`.
 {inputs, ...}: {
   specialArgs = {inherit inputs;};
 

@@ -13,7 +13,7 @@
   # (it's POSIX `export` syntax that nushell can't parse), so none of
   # home.sessionVariables reaches nushell. Re-emit them here in nushell
   # syntax so nushell gets the same environment as zsh/bash, including the
-  # proxy-tool vars (PROXY_VARS, HTTPS_PROXY, *_CA_*, NIX_SSL_CERT_FILE, ...).
+  # proxy and CA vars (HTTPS_PROXY, *_CA_*, NIX_SSL_CERT_FILE, ...).
   sessionVars =
     lib.concatStringsSep "\n"
     (lib.mapAttrsToList (n: v: "$env.${n} = ${toNuString v}")
@@ -21,7 +21,7 @@
 
   # Likewise, nushell never picks up the nix / home-manager profile PATH
   # entries that /etc/zshenv and hm-session-vars.sh add for POSIX shells.
-  # Prepend them so `nix`, `proxy-tool` and other HM packages are on PATH.
+  # Prepend them so `nix` and the other HM packages are on PATH.
   #
   # `/run/wrappers/bin` MUST come first: it holds the setuid wrappers (sudo,
   # mount, ping, …). Without it here, `/run/current-system/sw/bin` — which ships
