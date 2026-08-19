@@ -551,6 +551,74 @@ def _cb_clock_gettime(
     return None
 
 
+# -- __multi3: (i64 sret, i64, i64, i64, i64) -> nil -----------------------
+# compiler-rt 128-bit multiply, emitted by wasm codegen for Dict/Set
+# hashing. The wasm libcall ABI passes an sret pointer plus the four
+# 64-bit halves; only the low 128 bits of the product are stored.
+
+
+def _cb_multi3(
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
+    nargs: Int,
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
+    nresults: Int,
+) abi("C") -> TrapPtr:
+    var state = _state(env)
+    var result_ptr = Int(args[0].get_i64())
+    var a_lo = UInt64(args[1].get_i64())
+    var a_hi = UInt64(args[2].get_i64())
+    var b_lo = UInt64(args[3].get_i64())
+    var b_hi = UInt64(args[4].get_i64())
+
+    # 64x64 -> 128 via 32-bit halves (wrapping, unsigned).
+    var al = a_lo & 0xFFFFFFFF
+    var ah = a_lo >> 32
+    var bl = b_lo & 0xFFFFFFFF
+    var bh = b_lo >> 32
+    var p0 = al * bl
+    var p1 = al * bh
+    var p2 = ah * bl
+    var p3 = ah * bh
+    var carry = ((p0 >> 32) + (p1 & 0xFFFFFFFF) + (p2 & 0xFFFFFFFF)) >> 32
+    var lo = p0 + ((p1 + p2) << 32)
+    var hi = p3 + (p1 >> 32) + (p2 >> 32) + carry
+    # Cross terms of the full 128x128 product, low 128 bits only.
+    hi += a_lo * b_hi + a_hi * b_lo
+
+    if not state[].has_memory:
+        return None
+    try:
+        memory_write_i64_le(
+            state[].context, state[].memory, result_ptr, Int64(lo)
+        )
+        memory_write_i64_le(
+            state[].context, state[].memory, result_ptr + 8, Int64(hi)
+        )
+    except:
+        pass
+    return None
+
+
+# -- clock_gettime_nsec_np: (i32) -> i64 -----------------------------------
+# Darwin-flavored clock the wasm-targeted stdlib calls; returns whole
+# nanoseconds directly. Same deterministic mock as clock_gettime.
+
+
+def _cb_clock_gettime_nsec_np(
+    env: Pointer[NoneType, MutUntrackedOrigin],
+    caller: Pointer[NoneType, MutUntrackedOrigin],
+    args: Pointer[WasmtimeVal, MutUntrackedOrigin],
+    nargs: Int,
+    results: Pointer[WasmtimeVal, MutUntrackedOrigin],
+    nresults: Int,
+) abi("C") -> TrapPtr:
+    var state = _state(env)
+    results[0] = WasmtimeVal.from_i64(Int64(state[].mock_time) * 1_000_000_000)
+    return None
+
+
 # -- func[16] performance_now: () -> f64 -----------------------------------
 # P24.3: Deterministic mock clock for benchmark timing tests.
 # Each call returns the current mock_time and advances it by 1.0,
@@ -770,6 +838,26 @@ struct WasmInstance(Movable):
             [WASM_I32, WASM_I64],
             [WASM_I32],
             _cb_clock_gettime,
+            env,
+        )
+
+        # __multi3: (i64 sret, i64, i64, i64, i64) -> nil
+        self._linker.define_func(
+            "env",
+            "__multi3",
+            [WASM_I64, WASM_I64, WASM_I64, WASM_I64, WASM_I64],
+            List[UInt8](),
+            _cb_multi3,
+            env,
+        )
+
+        # clock_gettime_nsec_np: (i32) -> i64
+        self._linker.define_func(
+            "env",
+            "clock_gettime_nsec_np",
+            [WASM_I32],
+            [WASM_I64],
+            _cb_clock_gettime_nsec_np,
             env,
         )
 

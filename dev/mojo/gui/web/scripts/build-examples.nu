@@ -32,7 +32,6 @@
 # Prerequisites:
 #
 #   - mojo (Mojo compiler)
-#   - llc (LLVM static compiler, wasm64 target)
 #   - wasm-ld (WebAssembly linker)
 #   - The mojo-gui/core source tree at ../core/
 #
@@ -88,7 +87,6 @@ def main [...examples: string] {
     # ── Preflight checks ──────────────────────────────────────────────────
 
     check-tool mojo
-    check-tool llc
     check-tool wasm-ld
 
     if not (($core_dir | path join src) | path exists) {
@@ -108,27 +106,9 @@ def main [...examples: string] {
     mkdir $build_dir
     rm -f ($build_dir | path join out.cwasm)
 
-    let out_ll = $build_dir | path join out.ll
-
-    # Compile Mojo → LLVM IR
-    mojo build ...$mojo_flags --emit llvm -I ($core_dir | path join src) -I $examples_dir -o $out_ll ($web_dir | path join src main.mojo)
-
-    # Strip the host CPU attributes before retargeting: their presence
-    # overrides the wasm target's default features (losing bulk-memory, so
-    # memmove lowers to an unresolved import) and the emptied attribute
-    # groups do not parse.
-    open --raw $out_ll
-    | str replace -a -r ' "target-cpu"="[^"]*"' ""
-    | str replace -a -r ' "target-features"="[^"]*"' ""
-    | lines
-    | where {|line| $line !~ '^attributes #\d+ = \{ \}$' }
-    | str join "\n"
-    | $"($in)\n"
-    | save -f --raw $out_ll
-
-
-    # LLVM IR → WASM object
-    llc --mtriple=wasm64-wasi -filetype=obj $out_ll
+    # Compile Mojo → WASM object (the SDK compiler targets wasm directly)
+    let out_obj = $build_dir | path join out.o
+    mojo build ...$mojo_flags --emit object --target-triple wasm64-wasi -I ($core_dir | path join src) -I $examples_dir -o $out_obj ($web_dir | path join src main.mojo)
 
     # Link → WASM binary
     let out_wasm = $build_dir | path join out.wasm

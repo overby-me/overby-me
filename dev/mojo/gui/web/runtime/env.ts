@@ -137,6 +137,10 @@ export const env: WebAssembly.ModuleImports = {
 		return 0;
 	},
 
+	// Darwin-flavored clock the wasm-targeted stdlib calls; whole nanoseconds.
+	clock_gettime_nsec_np: (_clockid: number): bigint =>
+		BigInt(Math.floor(performance.now() * 1_000_000)),
+
 	// high-resolution timer (P24.3)
 	performance_now: (): number => performance.now(),
 

@@ -10,14 +10,7 @@
 build:
     mkdir -p build
     rm -f build/out.cwasm
-    mojo build --emit llvm -I ../core/src -I ../examples -I src -o build/out.ll src/main.mojo
-    # Strip the host CPU attributes before retargeting: their presence
-    # overrides the wasm target's default features (losing bulk-memory, so
-    # memmove lowers to an unresolved import) and the emptied attribute
-    # groups do not parse.
-    sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' build/out.ll
-    sed -i '/^attributes #[0-9]* = { }$/d' build/out.ll
-    llc --mtriple=wasm64-wasi -filetype=obj build/out.ll
+    mojo build --emit object --target-triple wasm64-wasi -I ../core/src -I ../examples -I src -o build/out.o src/main.mojo
     wasm-ld --no-entry --export-all --allow-undefined -mwasm64 -z stack-size=8388608 --initial-memory=268435456 -o build/out.wasm build/out.o
 
 # Incremental build — skip if out.wasm is newer than all source files.

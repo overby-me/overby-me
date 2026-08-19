@@ -1036,6 +1036,10 @@ export class XRRuntime {
 				return 0;
 			},
 
+			// Darwin-flavored clock the wasm-targeted stdlib calls.
+			clock_gettime_nsec_np: (_clockid: number): bigint =>
+				BigInt(Math.floor(performance.now() * 1_000_000)),
+
 			performance_now: (): number => performance.now(),
 
 			push_state: (): void => {},

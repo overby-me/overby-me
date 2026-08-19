@@ -123,6 +123,10 @@ export const env: WebAssembly.ModuleImports = {
 	__multi3,
 
 	// high-resolution timer (P24.3)
+	// Darwin-flavored clock the wasm-targeted stdlib calls; whole nanoseconds.
+	clock_gettime_nsec_np: (_clockid: number): bigint =>
+		BigInt(Math.floor(performance.now() * 1_000_000)),
+
 	performance_now: (): number => performance.now(),
 
 	// client-side routing (P30.2) — no-ops in test environment

@@ -233,14 +233,8 @@
         # may not exist in the Nix sandbox).
         cd web
         mkdir -p build
-        mojo build --emit llvm -I ../core/src -I ../examples -o build/out.ll src/main.mojo
-        # Strip the host CPU attributes before retargeting: their presence
-        # overrides the wasm target's default features (losing bulk-memory, so
-        # memmove lowers to an unresolved import) and the emptied attribute
-        # groups do not parse.
-        sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' build/out.ll
-        sed -i '/^attributes #[0-9]* = { }$/d' build/out.ll
-        llc --mtriple=wasm64-wasi -filetype=obj build/out.ll
+        mojo build --emit object --target-triple wasm64-wasi \
+          -I ../core/src -I ../examples -o build/out.o src/main.mojo
         wasm-ld --no-entry --export-all --allow-undefined -mwasm64 -z stack-size=8388608 \
           --initial-memory=268435456 -o build/out.wasm build/out.o
 
@@ -295,14 +289,8 @@
         # may not exist in the Nix sandbox).
         cd web
         mkdir -p build
-        mojo build --emit llvm -I ../core/src -I ../examples -o build/out.ll src/main.mojo
-        # Strip the host CPU attributes before retargeting: their presence
-        # overrides the wasm target's default features (losing bulk-memory, so
-        # memmove lowers to an unresolved import) and the emptied attribute
-        # groups do not parse.
-        sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' build/out.ll
-        sed -i '/^attributes #[0-9]* = { }$/d' build/out.ll
-        llc --mtriple=wasm64-wasi -filetype=obj build/out.ll
+        mojo build --emit object --target-triple wasm64-wasi \
+          -I ../core/src -I ../examples -o build/out.o src/main.mojo
         wasm-ld --no-entry --export-all --allow-undefined -mwasm64 -z stack-size=8388608 \
           --initial-memory=268435456 -o build/out.wasm build/out.o
 
@@ -374,16 +362,9 @@
 
         echo "==> Building WASM (web target)..."
         mkdir -p web/build
-        mojo build --emit llvm \
+        mojo build --emit object --target-triple wasm64-wasi \
           -I core/src -I examples \
-          -o web/build/out.ll web/src/main.mojo
-        # Strip the host CPU attributes before retargeting: their presence
-        # overrides the wasm target's default features (losing bulk-memory, so
-        # memmove lowers to an unresolved import) and the emptied attribute
-        # groups do not parse.
-        sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' web/build/out.ll
-        sed -i '/^attributes #[0-9]* = { }$/d' web/build/out.ll
-        llc --mtriple=wasm64-wasi -filetype=obj web/build/out.ll
+          -o web/build/out.o web/src/main.mojo
         wasm-ld --no-entry --export-all --allow-undefined -mwasm64 -z stack-size=8388608 \
           --initial-memory=268435456 \
           -o web/build/out.wasm web/build/out.o
