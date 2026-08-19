@@ -478,6 +478,10 @@
     ]
   }
   {
+    name: "nushell-plugin-tramp"
+    path: "dev/nushell/plugin-tramp"
+  }
+  {
     name: "ast-grep-rules"
     kind: "nix"
     path: "dev/ast-grep-rules"

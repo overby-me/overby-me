@@ -1,5 +1,18 @@
 # Nushell Plugin Tramp
 
+<!-- publish:begin -->
+> Part of the [overby.me monorepo](https://tangled.org/overby.me/overby.me), where this lives in
+> [`dev/nushell/plugin-tramp`](https://tangled.org/overby.me/overby.me/tree/main/dev/nushell/plugin-tramp) and where all development happens.
+>
+> It is also published on its own, as
+> [tangled.org/overby.me/nushell-plugin-tramp](https://tangled.org/overby.me/nushell-plugin-tramp) and
+> [github.com/overby-me/nushell-plugin-tramp](https://github.com/overby-me/nushell-plugin-tramp). Both
+> are read-only mirrors, rebuilt from the monorepo with
+> [josh](https://github.com/josh-project/josh): a commit made to either is
+> overwritten by the next sync, so please open issues and pull requests on the
+> monorepo.
+<!-- publish:end -->
+
 > A TRAMP-inspired remote filesystem plugin for [Nushell](https://www.nushell.sh/), written in Rust.
 
 The key design principle — inherited from Emacs TRAMP — is that **the shell

@@ -1,9 +1,12 @@
 # What this tree's nix configuration talks to.
 #
-# Each workspace-* input is a flake owning one upstream and the module that
-# uses it, so a tree takes only what it talks to and the name says what taking
-# it costs. Project discovery stays with the root flake: a flake's source is
-# its own directory, so this one cannot see safety/ or apps/.
+# The workspace-* integrations are NOT declared here. An integration is
+# enabled by whoever declares it, and hosts force their modules lazily - so
+# the tree that evaluates a host declares the integrations that host needs
+# (the monorepo root does), and a consumer that takes this repo for its
+# users, modules and overlays inherits no pin it does not name. Project
+# discovery stays with the root flake: a flake's source is its own
+# directory, so this one cannot see safety/ or apps/.
 #
 # nixpkgs comes through the framework rather than being declared here. Declared
 # separately it has to be followed separately, and a consumer that forgets
@@ -33,43 +36,6 @@
     workspace = {
       url = "git+https://tangled.org/overby.me/nix-workspace";
       inputs.git-hooks.follows = "git-hooks";
-    };
-
-    workspace-darwin = {
-      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/darwin";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
-    workspace-disko = {
-      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/disko";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
-    workspace-home-manager = {
-      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/home-manager";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
-    workspace-nixos-hardware = {
-      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nixos-hardware";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
-    workspace-nixos-raspberrypi = {
-      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nixos-raspberrypi";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
-    workspace-nix-wallpaper = {
-      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nix-wallpaper";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
-    workspace-ragenix = {
-      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/ragenix";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
-    workspace-system-manager = {
-      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/system-manager";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
-    workspace-zen-browser = {
-      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/zen-browser";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
     };
   };
 

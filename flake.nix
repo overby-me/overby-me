@@ -11,6 +11,47 @@
     };
   };
 
+  # The integrations this tree's hosts force. An integration is enabled by
+  # whoever declares it, and declaring is the whole of enabling - nix-config
+  # deliberately declares none, so a consumer of it inherits no pin it does
+  # not name, and the tree that evaluates the hosts names them instead.
+  inputs.workspace-darwin = {
+    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/darwin";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  inputs.workspace-disko = {
+    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/disko";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  inputs.workspace-home-manager = {
+    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/home-manager";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  inputs.workspace-nixos-hardware = {
+    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nixos-hardware";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  inputs.workspace-nixos-raspberrypi = {
+    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nixos-raspberrypi";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  inputs.workspace-nix-wallpaper = {
+    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nix-wallpaper";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  inputs.workspace-ragenix = {
+    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/ragenix";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  inputs.workspace-system-manager = {
+    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/system-manager";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+  inputs.workspace-zen-browser = {
+    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/zen-browser";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
   # This tree's nix configuration. Taking it is the whole of using it: the
   # workspace imports every input that exports a module, so this file says
   # neither what is in there nor what it needs.
