@@ -40,12 +40,13 @@ import {
 	alignedAlloc,
 	alignedFree,
 	getMemory,
+	Interpreter,
 	loadWasm,
 	scratchFreeAll,
+	TemplateCache,
+	writeStringStruct,
 } from "./env.js";
 import { EventBridge } from "./events.js";
-import { Interpreter } from "./interpreter.js";
-import { writeStringStruct } from "./strings.js";
 
 // ── Defaults ────────────────────────────────────────────────────────────────
 
@@ -158,7 +159,7 @@ export async function launch(options) {
 		if (clearRoot) {
 			rootEl.innerHTML = "";
 		}
-		const interp = new Interpreter(rootEl, new Map());
+		const interp = new Interpreter(rootEl, new TemplateCache());
 		const bufPtr = alignedAlloc(8n, BigInt(bufferCapacity));
 
 		// 4. Flush helper — reusable by EventBridge and onBoot hook

@@ -73,6 +73,18 @@ export class Interpreter {
 		| null = null;
 
 	/**
+	 * Optional callback invoked when a RemoveEventListener mutation is
+	 * processed.  The callback receives the element ID and event name.
+	 *
+	 * This allows external code (e.g. the XR runtime's handler map) to
+	 * clean up its own bookkeeping when a listener is removed.
+	 *
+	 * If not set, only the DOM listener is removed (default behaviour).
+	 */
+	onRemoveListener: ((elementId: number, eventName: string) => void) | null =
+		null;
+
+	/**
 	 * @param root      - The mount-point element.  Gets ElementId 0.
 	 * @param templates - TemplateCache for LoadTemplate operations.
 	 * @param doc       - The Document to use.  Defaults to the root's
@@ -461,6 +473,8 @@ export class Interpreter {
 				elListeners.delete(name);
 			}
 		}
+
+		this.onRemoveListener?.(id, name);
 	}
 
 	/**

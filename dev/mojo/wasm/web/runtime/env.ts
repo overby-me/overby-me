@@ -122,11 +122,26 @@ export const env: WebAssembly.ModuleImports = {
 	// compiler-rt arithmetic builtins (used by Dict/Set hashing)
 	__multi3,
 
-	// high-resolution timer (P24.3)
+	// clock_gettime: (clockid: i32, timespec_ptr: i64) -> i32
+	// Mojo 26.1.0: the runtime now uses clock_gettime internally.
+	// struct timespec { i64 tv_sec; i64 tv_nsec; } in WASM64 layout.
+	clock_gettime: (_clockid: number, tsPtr: bigint): number => {
+		if (!memory) return -1;
+		const now = performance.now();
+		const sec = BigInt(Math.floor(now / 1000));
+		const nsec = BigInt(Math.floor((now % 1000) * 1_000_000));
+		const view = new DataView(memory.buffer);
+		const ptr = Number(tsPtr);
+		view.setBigInt64(ptr, sec, true);
+		view.setBigInt64(ptr + 8, nsec, true);
+		return 0;
+	},
+
 	// Darwin-flavored clock the wasm-targeted stdlib calls; whole nanoseconds.
 	clock_gettime_nsec_np: (_clockid: number): bigint =>
 		BigInt(Math.floor(performance.now() * 1_000_000)),
 
+	// high-resolution timer (P24.3)
 	performance_now: (): number => performance.now(),
 
 	// client-side routing (P30.2) — no-ops in test environment

@@ -125,7 +125,7 @@ export const env: WebAssembly.ModuleImports = {
 	// clock_gettime: (clockid: i32, timespec_ptr: i64) -> i32
 	// Mojo 26.1.0: the runtime now uses clock_gettime internally.
 	// struct timespec { i64 tv_sec; i64 tv_nsec; } in WASM64 layout.
-	clock_gettime: (clockid: number, tsPtr: bigint): number => {
+	clock_gettime: (_clockid: number, tsPtr: bigint): number => {
 		if (!memory) return -1;
 		const now = performance.now();
 		const sec = BigInt(Math.floor(now / 1000));

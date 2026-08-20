@@ -38,6 +38,17 @@ const write = (_fd: bigint, ptr: bigint, len: bigint): number => {
 /** The runtime's imports, with the host-specific write swapped in. */
 export const env: WebAssembly.ModuleImports = { ...denoEnv, write };
 
+// The rest of the runtime the examples used to keep second copies of.
+// examples/lib/{interpreter,protocol,strings}.js were leaner re-implementations
+// of these three with the same names and the same call signatures; the XR
+// renderer already drives the TypeScript Interpreter in a browser, so the
+// second set bought nothing but a place for the two to disagree.
+//
+// events.js is deliberately NOT here. Its EventBridge takes (interpreter,
+// dispatch) where runtime/events.ts takes (root, nodes) — two designs for one
+// name, not a copy, and folding them together is a change of behaviour rather
+// than a de-duplication.
+export { Interpreter, MutationBuilder } from "./interpreter.ts";
 export {
 	alignedAlloc,
 	alignedFree,
@@ -47,6 +58,13 @@ export {
 	scratchFreeAll,
 	setAllocatorReuse,
 } from "./memory.ts";
+export { MutationReader, Op } from "./protocol.ts";
+export {
+	allocStringStruct,
+	readStringStruct,
+	writeStringStruct,
+} from "./strings.ts";
+export { TemplateCache } from "./templates.ts";
 export { setMemory };
 
 /**

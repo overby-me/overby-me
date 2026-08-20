@@ -6,14 +6,17 @@
 // need direct control over the boot sequence.
 
 export { launch } from "./app.js";
-export { alignedAlloc, getMemory, loadWasm } from "./env.js";
+export {
+	alignedAlloc,
+	getMemory,
+	Interpreter,
+	loadWasm,
+	Op,
+	writeStringStruct,
+} from "./env.js";
 export { EventBridge } from "./events.js";
-export { Interpreter } from "./interpreter.js";
-export { Op } from "./protocol.js";
-export { writeStringStruct } from "./strings.js";
 
-import { alignedAlloc, getMemory } from "./env.js";
-import { Interpreter } from "./interpreter.js";
+import { alignedAlloc, getMemory, Interpreter } from "./env.js";
 
 /**
  * Create an Interpreter wired to a DOM root element with the given
