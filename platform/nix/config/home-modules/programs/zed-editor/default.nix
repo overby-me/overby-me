@@ -63,18 +63,21 @@
         cat ${pkgs.writeText "zed-tasks" userTasks} > "${tasksPath}"
       '';
 
-      # Dev Extensions - copied (not symlinked) so Zed can write build artifacts
+      # Dev Extensions - copied (not symlinked) so Zed can write build
+      # artifacts. Built by monorepo projects, so a standalone evaluation of
+      # this tree has none and installs none.
       installZedDevExtensions = lib.hm.dag.entryAfter ["linkGeneration"] ''
         dev_ext_dir="$HOME/.local/share/zed/dev_extensions"
         mkdir -p "$dev_ext_dir"
-
-        rm -rf "$dev_ext_dir/mojo"
-        cp -rL ${inputs.self.zedExtensions.mojo-zed} "$dev_ext_dir/mojo"
-        chmod -R u+w "$dev_ext_dir/mojo"
-
-        rm -rf "$dev_ext_dir/nickel"
-        cp -rL ${inputs.self.zedExtensions.nickel-zed} "$dev_ext_dir/nickel"
-        chmod -R u+w "$dev_ext_dir/nickel"
+        ${lib.concatStrings (lib.mapAttrsToList (name: ext: ''
+            rm -rf "$dev_ext_dir/${name}"
+            cp -rL ${ext} "$dev_ext_dir/${name}"
+            chmod -R u+w "$dev_ext_dir/${name}"
+          '') (let
+            exts = inputs.self.zedExtensions or {};
+          in
+            lib.optionalAttrs (exts ? mojo-zed) {mojo = exts.mojo-zed;}
+            // lib.optionalAttrs (exts ? nickel-zed) {nickel = exts.nickel-zed;}))}
       '';
     };
   };

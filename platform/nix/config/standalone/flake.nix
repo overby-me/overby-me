@@ -61,6 +61,11 @@
       url = "git+https://tangled.org/overby.me/nushell-plugin-tramp";
       inputs.workspace.follows = "workspace";
     };
+    # The package collection the desktops and home modules draw from.
+    nix-packages = {
+      url = "git+https://tangled.org/overby.me/nix-packages";
+      inputs.workspace.follows = "workspace";
+    };
     # Deliberately absent: rust-overlay - zed degrades to no wasm toolchain
     # without it, which a standalone host eval can live with.
   };

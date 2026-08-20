@@ -154,6 +154,26 @@
       },
       "parent": []
     },
+    "nix-packages": {
+      "inputs": {
+        "workspace": [
+          "workspace"
+        ]
+      },
+      "locked": {
+        "lastModified": 1787216139,
+        "narHash": "sha256-N9FHpj8RPtDTJ1XbLoU+MKf4buP/gc99YlAjhdN/mFI=",
+        "ref": "refs/heads/main",
+        "rev": "3227fe08820ad38202d3e3efedc02f7cc4b6bce2",
+        "revCount": 147,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-packages"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-packages"
+      }
+    },
     "nix-wallpaper": {
       "inputs": {
         "flake-utils": "flake-utils",
@@ -267,11 +287,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787210737,
-        "narHash": "sha256-IW/fXQJ0MFiX8gIdNIe0hR+6hhstpqJTRSIXvTxFIxc=",
+        "lastModified": 1787253145,
+        "narHash": "sha256-mUJoNgOmAy1Q/k9ssv+UC6IzWiglXmbQ1MC05wU4iaQ=",
         "ref": "refs/heads/main",
-        "rev": "52b424eaa80102e1a853db735b28f6e00618600a",
-        "revCount": 13,
+        "rev": "2420d2f813c7fa28d860e354abb5098d2d5dbeff",
+        "revCount": 14,
         "type": "git",
         "url": "https://tangled.org/overby.me/nushell-plugin-tramp"
       },
@@ -285,6 +305,7 @@
         "disko": "disko",
         "home-manager": "home-manager",
         "nix-config": "nix-config",
+        "nix-packages": "nix-packages",
         "nix-wallpaper": "nix-wallpaper",
         "nixos-hardware": "nixos-hardware",
         "nushell-plugin-tramp": "nushell-plugin-tramp",
