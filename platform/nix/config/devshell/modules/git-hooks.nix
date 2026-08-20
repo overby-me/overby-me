@@ -12,7 +12,7 @@
   ...
 }: let
   commitlintrc = import ./configs/commitlintrc.nix {inherit pkgs lib src;};
-  preCommit = inputs.git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
+  preCommit = inputs.workspace.inputs.git-hooks.lib.${pkgs.stdenv.hostPlatform.system}.run {
     src = inputs.self;
     package = pkgs.prek;
     hooks = {

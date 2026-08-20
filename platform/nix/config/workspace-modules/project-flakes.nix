@@ -19,8 +19,13 @@
 }: let
   # The list is publish/checks itself: it takes one input per published project
   # and exports them minus itself and the framework, so adding a project is one
-  # entry there and nothing here.
-  published = config.inputs.publish-checks.published;
+  # entry there and nothing here. Only the monorepo declares that input; a
+  # consumer of nix-config without it gets no publish checks rather than an
+  # evaluation error.
+  published =
+    if config.inputs ? publish-checks
+    then config.inputs.publish-checks.published
+    else {};
 
   check = name: input: pkgs: let
     tree = pkgs.${name};

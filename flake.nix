@@ -9,6 +9,13 @@
       url = "git+https://tangled.org/overby.me/nix-workspace";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Optional to nix-config, forced by this tree: zed's wasip2 toolchain
+    # and ironclaw's build take rust-bin from here.
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   # The integrations this tree's hosts force. An integration is enabled by

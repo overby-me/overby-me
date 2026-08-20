@@ -8,16 +8,19 @@
   programs.zed-editor = {
     enable = true;
     package = pkgs.pkgsUnstable.zed-editor;
-    # Rust toolchain for compiling WASM dev extensions
-    extraPackages = with pkgs; [
-      # Pinned, not latest: latest floats with the rust-overlay lock, so an
-      # unrelated nix flake update silently bumps the compiler. Recheck at
-      # nixpkgs bumps whether wasm32-wasip2 arrived and this can retire.
-      (rust-bin.stable."1.97.1".default.override {
-        targets = ["wasm32-wasip2"];
-      })
-      clang
-    ];
+    # Rust toolchain for compiling WASM dev extensions. rust-bin exists only
+    # when the evaluating tree declares rust-overlay; without it zed still
+    # works, minus the wasip2 toolchain.
+    extraPackages = with pkgs;
+      [clang]
+      ++ lib.optionals (pkgs ? rust-bin) [
+        # Pinned, not latest: latest floats with the rust-overlay lock, so an
+        # unrelated nix flake update silently bumps the compiler. Recheck at
+        # nixpkgs bumps whether wasm32-wasip2 arrived and this can retire.
+        (rust-bin.stable."1.97.1".default.override {
+          targets = ["wasm32-wasip2"];
+        })
+      ];
     extensions = [
       "biome"
       "nix"
