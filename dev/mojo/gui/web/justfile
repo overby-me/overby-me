@@ -1,8 +1,14 @@
-build:
+build: bundle-env
     mkdir -p build
     rm -f build/out.cwasm
     mojo build --emit object --target-triple wasm64-wasi -I ../core/src -I ../examples -o build/out.o src/main.mojo
     wasm-ld --no-entry --export-all --allow-undefined -mwasm64 -z stack-size=8388608 --initial-memory=268435456 -o build/out.wasm build/out.o
+
+# Generate examples/lib/env.js from runtime/browser.ts. The browser half of the
+# env glue is built, not hand-written, so it cannot drift from the TypeScript
+# the Deno suites instantiate.
+bundle-env:
+    deno run --allow-read --allow-write --allow-env --allow-run scripts/bundle-env.ts
 
 # Incremental build — skip if out.wasm is newer than all source files.
 build-if-changed:

@@ -42,6 +42,7 @@
 //   // Later:
 //   await runtime.stop();
 
+import { env, setMemory } from "../../../web/runtime/browser.ts";
 // Shared mutation interpreter and template cache from web/runtime.
 // These replace the inline mutation applier that was previously duplicated
 // in this file (~420 lines). Using the shared implementation ensures full
@@ -931,111 +932,19 @@ export class XRRuntime {
 		const response = await fetch(wasmUrl);
 		const wasmBuffer = await response.arrayBuffer();
 
-		// Minimal WASM environment imports (matching web/runtime/env.ts)
-		const decoder = new TextDecoder();
-		const importMemory = new WebAssembly.Memory({ initial: 4096 });
-		let wasmMemory: WebAssembly.Memory = importMemory;
-
-		const env: WebAssembly.ModuleImports = {
-			memory: importMemory,
-
-			__cxa_atexit: () => 0,
-
-			// The web renderer's heap, not a second one. It bumps upward from
-			// the module's exported __heap_base, which is the only region the
-			// module agrees is free; the allocator here used to carve blocks
-			// off the end of memory instead and hand back addresses the module
-			// was already using.
-			KGEN_CompilerRT_AlignedAlloc: alignedAlloc,
-			KGEN_CompilerRT_AlignedFree: alignedFree,
-
-			KGEN_CompilerRT_GetStackTrace: (): bigint => 0n,
-			KGEN_CompilerRT_fprintf: (): number => 0,
-
-			write: (fd: bigint, ptr: bigint, len: bigint): number => {
-				if (len === 0n) return 0;
-				try {
-					const data = new Uint8Array(
-						wasmMemory.buffer,
-						Number(ptr),
-						Number(len),
-					);
-					const text = decoder.decode(data);
-					if (fd === 1n) {
-						console.log(text);
-					} else if (fd === 2n) {
-						console.error(text);
-					}
-					return Number(len);
-				} catch {
-					return -1;
-				}
-			},
-
-			free: (_ptr: bigint): void => {},
-			dup: (): number => 1,
-			fdopen: (): number => 1,
-			fflush: (): number => 1,
-			fclose: (): number => 1,
-
-			__multi3: (
-				resultPtr: bigint,
-				aLo: bigint,
-				aHi: bigint,
-				bLo: bigint,
-				bHi: bigint,
-			): void => {
-				const mask64 = 0xffffffffffffffffn;
-				const a = ((aHi & mask64) << 64n) | (aLo & mask64);
-				const b = ((bHi & mask64) << 64n) | (bLo & mask64);
-				const product = a * b;
-				const lo = product & mask64;
-				const hi = (product >> 64n) & mask64;
-				const view = new DataView(wasmMemory.buffer);
-				const ptr = Number(resultPtr);
-				view.setBigInt64(ptr, lo, true);
-				view.setBigInt64(ptr + 8, hi, true);
-			},
-
-			clock_gettime: (_clockid: number, tsPtr: bigint): number => {
-				const now = performance.now();
-				const sec = BigInt(Math.floor(now / 1000));
-				const nsec = BigInt(Math.floor((now % 1000) * 1_000_000));
-				const view = new DataView(wasmMemory.buffer);
-				const ptr = Number(tsPtr);
-				view.setBigInt64(ptr, sec, true);
-				view.setBigInt64(ptr + 8, nsec, true);
-				return 0;
-			},
-
-			// Darwin-flavored clock the wasm-targeted stdlib calls.
-			clock_gettime_nsec_np: (_clockid: number): bigint =>
-				BigInt(Math.floor(performance.now() * 1_000_000)),
-
-			performance_now: (): number => performance.now(),
-
-			push_state: (): void => {},
-			replace_state: (): void => {},
-
-			fmaf: (x: number, y: number, z: number): number =>
-				Math.fround(Math.fround(x * y) + z),
-			fminf: (x: number, y: number): number => Math.min(x, y),
-			fmaxf: (x: number, y: number): number => Math.max(x, y),
-			fma: (x: number, y: number, z: number): number => x * y + z,
-			fmin: (x: number, y: number): number => Math.min(x, y),
-			fmax: (x: number, y: number): number => Math.max(x, y),
-		};
+		// The web renderer's env, not a fourth copy of it. What stood here
+		// was ~90 inlined lines described as "matching web/runtime/env.ts",
+		// and it did not match: its allocator carved blocks off the end of
+		// memory instead of bumping from __heap_base, and it looked up
+		// KGEN_CompilerRT_AlignedAlloc on the exports, which the module
+		// imports and never exports. browser.ts is the env the web examples
+		// load, console.log write stub included.
 
 		const { instance } = await WebAssembly.instantiate(wasmBuffer, { env });
 
-		// If the WASM module exports its own memory, use that
-		if (instance.exports.memory) {
-			wasmMemory = instance.exports.memory as WebAssembly.Memory;
-		}
-
-		// Point the shared heap at this instance. Until this runs, alignedAlloc
-		// has no memory and no __heap_base to bump from, so every allocation
-		// the env hands the module would be measured against the wrong buffer.
+		// Wire the write stub and the shared heap to this instance. Until this
+		// runs, alignedAlloc has no memory and no __heap_base to bump from.
+		setMemory((instance.exports as { memory: WebAssembly.Memory }).memory);
 		initializeHeap(instance);
 
 		return instance.exports as unknown as Record<string, CallableFunction>;
