@@ -130,17 +130,17 @@ struct DiffEngine:
         create or diff).  The new VNode's mount state will be populated
         as a side effect.
         """
-        var old_ptr = self.store[0].get_ptr(old_index)
-        var new_ptr = self.store[0].get_ptr(new_index)
+        var old_ptr = self.store[unsafe_offset=0].get_ptr(old_index)
+        var new_ptr = self.store[unsafe_offset=0].get_ptr(new_index)
 
-        var old_kind = old_ptr[0].kind
-        var new_kind = new_ptr[0].kind
+        var old_kind = old_ptr[unsafe_offset=0].kind
+        var new_kind = new_ptr[unsafe_offset=0].kind
 
         # Same kind — try incremental diff
         if old_kind == new_kind:
             if old_kind == VNODE_TEMPLATE_REF:
                 # Same template → diff dynamic content only
-                if old_ptr[0].template_id == new_ptr[0].template_id:
+                if old_ptr[unsafe_offset=0].template_id == new_ptr[unsafe_offset=0].template_id:
                     self._diff_template_ref(old_index, new_index)
                     return
                 else:
@@ -167,12 +167,12 @@ struct DiffEngine:
         Mount state is transferred from old to new, then updated
         where dynamic content has changed.
         """
-        var old_ptr = self.store[0].get_ptr(old_index)
-        var new_ptr = self.store[0].get_ptr(new_index)
+        var old_ptr = self.store[unsafe_offset=0].get_ptr(old_index)
+        var new_ptr = self.store[unsafe_offset=0].get_ptr(new_index)
 
         # Transfer mount state: the DOM elements are the same,
         # we just update their content/attributes
-        old_ptr[0].transfer_mount_state_to(new_ptr[0])
+        old_ptr[unsafe_offset=0].transfer_mount_state_to(new_ptr[unsafe_offset=0])
 
         # Diff dynamic attributes
         self._diff_dynamic_attrs(old_index, new_index)
@@ -186,27 +186,27 @@ struct DiffEngine:
         For each dynamic attribute that changed, emit SetAttribute or
         NewEventListener / RemoveEventListener mutations.
         """
-        var old_ptr = self.store[0].get_ptr(old_index)
-        var new_ptr = self.store[0].get_ptr(new_index)
+        var old_ptr = self.store[unsafe_offset=0].get_ptr(old_index)
+        var new_ptr = self.store[unsafe_offset=0].get_ptr(new_index)
 
-        var old_count = old_ptr[0].dynamic_attr_count()
-        var new_count = new_ptr[0].dynamic_attr_count()
+        var old_count = old_ptr[unsafe_offset=0].dynamic_attr_count()
+        var new_count = new_ptr[unsafe_offset=0].dynamic_attr_count()
         var min_count = old_count
         if new_count < min_count:
             min_count = new_count
 
         for i in range(min_count):
             # Re-read pointers each iteration (safety)
-            var old_p = self.store[0].get_ptr(old_index)
-            var new_p = self.store[0].get_ptr(new_index)
+            var old_p = self.store[unsafe_offset=0].get_ptr(old_index)
+            var new_p = self.store[unsafe_offset=0].get_ptr(new_index)
 
-            var old_attr = old_p[0].dynamic_attrs[i].copy()
-            var new_attr = new_p[0].dynamic_attrs[i].copy()
+            var old_attr = old_p[unsafe_offset=0].dynamic_attrs[i].copy()
+            var new_attr = new_p[unsafe_offset=0].dynamic_attrs[i].copy()
 
             # Get the ElementId for this attribute's target element
             var elem_id: UInt32 = 0
-            if i < new_p[0].dyn_attr_id_count():
-                elem_id = new_p[0].get_dyn_attr_id(i)
+            if i < new_p[unsafe_offset=0].dyn_attr_id_count():
+                elem_id = new_p[unsafe_offset=0].get_dyn_attr_id(i)
 
             # Check if the value changed
             if not _attr_values_equal(old_attr.value, new_attr.value):
@@ -218,17 +218,17 @@ struct DiffEngine:
                             old_attr.value.handler_id
                             != new_attr.value.handler_id
                         ):
-                            self.writer[0].remove_event_listener(
+                            self.writer[unsafe_offset=0].remove_event_listener(
                                 elem_id, old_attr.name
                             )
-                            self.writer[0].new_event_listener(
+                            self.writer[unsafe_offset=0].new_event_listener(
                                 elem_id,
                                 new_attr.value.handler_id,
                                 new_attr.name,
                             )
                     else:
                         # Was not an event, now is
-                        self.writer[0].new_event_listener(
+                        self.writer[unsafe_offset=0].new_event_listener(
                             elem_id,
                             new_attr.value.handler_id,
                             new_attr.name,
@@ -236,7 +236,7 @@ struct DiffEngine:
                 elif new_attr.value.kind == AVAL_NONE:
                     if old_attr.value.kind == AVAL_EVENT:
                         # Remove event listener
-                        self.writer[0].remove_event_listener(
+                        self.writer[unsafe_offset=0].remove_event_listener(
                             elem_id, old_attr.name
                         )
                     else:
@@ -244,20 +244,20 @@ struct DiffEngine:
                         var ns_byte: UInt8 = 0
                         if new_attr.has_namespace():
                             ns_byte = 1
-                        self.writer[0].remove_attribute(
+                        self.writer[unsafe_offset=0].remove_attribute(
                             elem_id, ns_byte, new_attr.name
                         )
                 else:
                     if old_attr.value.kind == AVAL_EVENT:
                         # Was event, now attribute — remove listener first
-                        self.writer[0].remove_event_listener(
+                        self.writer[unsafe_offset=0].remove_event_listener(
                             elem_id, old_attr.name
                         )
                     var ns_byte: UInt8 = 0
                     if new_attr.has_namespace():
                         ns_byte = 1
                     var val_str = _attr_value_to_string(new_attr.value)
-                    self.writer[0].set_attribute(
+                    self.writer[unsafe_offset=0].set_attribute(
                         elem_id, ns_byte, new_attr.name, val_str
                     )
 
@@ -266,113 +266,113 @@ struct DiffEngine:
 
         For each dynamic node that changed, emit SetText, ReplaceWith, etc.
         """
-        var old_ptr = self.store[0].get_ptr(old_index)
-        var new_ptr = self.store[0].get_ptr(new_index)
+        var old_ptr = self.store[unsafe_offset=0].get_ptr(old_index)
+        var new_ptr = self.store[unsafe_offset=0].get_ptr(new_index)
 
-        var old_count = len(old_ptr[0].dynamic_nodes)
-        var new_count = len(new_ptr[0].dynamic_nodes)
+        var old_count = len(old_ptr[unsafe_offset=0].dynamic_nodes)
+        var new_count = len(new_ptr[unsafe_offset=0].dynamic_nodes)
         var min_count = old_count
         if new_count < min_count:
             min_count = new_count
 
         for i in range(min_count):
             # Re-read pointers each iteration (safety)
-            var old_p = self.store[0].get_ptr(old_index)
-            var new_p = self.store[0].get_ptr(new_index)
+            var old_p = self.store[unsafe_offset=0].get_ptr(old_index)
+            var new_p = self.store[unsafe_offset=0].get_ptr(new_index)
 
-            var old_node = old_p[0].dynamic_nodes[i].copy()
-            var new_node = new_p[0].dynamic_nodes[i].copy()
+            var old_node = old_p[unsafe_offset=0].dynamic_nodes[i].copy()
+            var new_node = new_p[unsafe_offset=0].dynamic_nodes[i].copy()
 
             # Get the ElementId for this dynamic node
             var node_id: UInt32 = 0
-            if i < new_p[0].dyn_node_id_count():
-                node_id = new_p[0].get_dyn_node_id(i)
+            if i < new_p[unsafe_offset=0].dyn_node_id_count():
+                node_id = new_p[unsafe_offset=0].get_dyn_node_id(i)
 
             if old_node.kind == new_node.kind:
                 if old_node.kind == DNODE_TEXT:
                     # Both text — check if content changed
                     if old_node.text != new_node.text:
-                        self.writer[0].set_text(node_id, new_node.text)
+                        self.writer[unsafe_offset=0].set_text(node_id, new_node.text)
                 # Both placeholder — no change needed
             else:
                 # Kind changed — need to replace
                 if new_node.kind == DNODE_TEXT:
                     # Placeholder → Text: create text, replace old
-                    var new_eid = self.eid_alloc[0].alloc()
-                    self.writer[0].create_text_node(
+                    var new_eid = self.eid_alloc[unsafe_offset=0].alloc()
+                    self.writer[unsafe_offset=0].create_text_node(
                         new_eid.as_u32(), new_node.text
                     )
-                    self.writer[0].replace_with(node_id, 1)
+                    self.writer[unsafe_offset=0].replace_with(node_id, 1)
                     # Update the dyn_node_id
                     if (
                         i
-                        < self.store[0]
-                        .get_ptr(new_index)[0]
+                        < self.store[unsafe_offset=0]
+                        .get_ptr(new_index)[unsafe_offset=0]
                         .dyn_node_id_count()
                     ):
-                        self.store[0].get_ptr(new_index)[0].dyn_node_ids[
+                        self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].dyn_node_ids[
                             i
                         ] = new_eid.as_u32()
                 else:
                     # Text → Placeholder: create placeholder, replace old
-                    var new_eid = self.eid_alloc[0].alloc()
-                    self.writer[0].create_placeholder(new_eid.as_u32())
-                    self.writer[0].replace_with(node_id, 1)
+                    var new_eid = self.eid_alloc[unsafe_offset=0].alloc()
+                    self.writer[unsafe_offset=0].create_placeholder(new_eid.as_u32())
+                    self.writer[unsafe_offset=0].replace_with(node_id, 1)
                     if (
                         i
-                        < self.store[0]
-                        .get_ptr(new_index)[0]
+                        < self.store[unsafe_offset=0]
+                        .get_ptr(new_index)[unsafe_offset=0]
                         .dyn_node_id_count()
                     ):
-                        self.store[0].get_ptr(new_index)[0].dyn_node_ids[
+                        self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].dyn_node_ids[
                             i
                         ] = new_eid.as_u32()
 
     def _diff_text(mut self, old_index: UInt32, new_index: UInt32):
         """Diff two Text VNodes.  Emits SetText if content changed."""
-        var old_ptr = self.store[0].get_ptr(old_index)
-        var new_ptr = self.store[0].get_ptr(new_index)
+        var old_ptr = self.store[unsafe_offset=0].get_ptr(old_index)
+        var new_ptr = self.store[unsafe_offset=0].get_ptr(new_index)
 
         # Transfer mount state
-        new_ptr[0].element_id = old_ptr[0].element_id
-        new_ptr[0].root_ids = old_ptr[0].root_ids.copy()
+        new_ptr[unsafe_offset=0].element_id = old_ptr[unsafe_offset=0].element_id
+        new_ptr[unsafe_offset=0].root_ids = old_ptr[unsafe_offset=0].root_ids.copy()
 
-        if old_ptr[0].text != new_ptr[0].text:
-            self.writer[0].set_text(old_ptr[0].element_id, new_ptr[0].text)
+        if old_ptr[unsafe_offset=0].text != new_ptr[unsafe_offset=0].text:
+            self.writer[unsafe_offset=0].set_text(old_ptr[unsafe_offset=0].element_id, new_ptr[unsafe_offset=0].text)
 
     def _diff_placeholder(mut self, old_index: UInt32, new_index: UInt32):
         """Diff two Placeholder VNodes.  No mutations needed."""
-        var old_ptr = self.store[0].get_ptr(old_index)
-        var new_ptr = self.store[0].get_ptr(new_index)
+        var old_ptr = self.store[unsafe_offset=0].get_ptr(old_index)
+        var new_ptr = self.store[unsafe_offset=0].get_ptr(new_index)
 
         # Transfer mount state
-        new_ptr[0].element_id = old_ptr[0].element_id
-        new_ptr[0].root_ids = old_ptr[0].root_ids.copy()
+        new_ptr[unsafe_offset=0].element_id = old_ptr[unsafe_offset=0].element_id
+        new_ptr[unsafe_offset=0].root_ids = old_ptr[unsafe_offset=0].root_ids.copy()
 
     def _diff_fragment(mut self, old_index: UInt32, new_index: UInt32):
         """Diff two Fragment VNodes.  Dispatches to keyed or unkeyed."""
-        var old_ptr = self.store[0].get_ptr(old_index)
-        var new_ptr = self.store[0].get_ptr(new_index)
+        var old_ptr = self.store[unsafe_offset=0].get_ptr(old_index)
+        var new_ptr = self.store[unsafe_offset=0].get_ptr(new_index)
 
-        var old_child_count = old_ptr[0].fragment_child_count()
-        var new_child_count = new_ptr[0].fragment_child_count()
+        var old_child_count = old_ptr[unsafe_offset=0].fragment_child_count()
+        var new_child_count = new_ptr[unsafe_offset=0].fragment_child_count()
 
         # Determine whether to use keyed or unkeyed reconciliation.
         # If any child in either list has a key, use keyed diffing.
         var has_keys = False
         for i in range(old_child_count):
             var child_idx = (
-                self.store[0].get_ptr(old_index)[0].get_fragment_child(i)
+                self.store[unsafe_offset=0].get_ptr(old_index)[unsafe_offset=0].get_fragment_child(i)
             )
-            if self.store[0].get_ptr(child_idx)[0].has_key():
+            if self.store[unsafe_offset=0].get_ptr(child_idx)[unsafe_offset=0].has_key():
                 has_keys = True
                 break
         if not has_keys:
             for i in range(new_child_count):
                 var child_idx = (
-                    self.store[0].get_ptr(new_index)[0].get_fragment_child(i)
+                    self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].get_fragment_child(i)
                 )
-                if self.store[0].get_ptr(child_idx)[0].has_key():
+                if self.store[unsafe_offset=0].get_ptr(child_idx)[unsafe_offset=0].has_key():
                     has_keys = True
                     break
 
@@ -383,11 +383,11 @@ struct DiffEngine:
 
     def _diff_fragment_unkeyed(mut self, old_index: UInt32, new_index: UInt32):
         """Diff two Fragment VNodes with unkeyed children (pairwise)."""
-        var old_ptr = self.store[0].get_ptr(old_index)
-        var new_ptr = self.store[0].get_ptr(new_index)
+        var old_ptr = self.store[unsafe_offset=0].get_ptr(old_index)
+        var new_ptr = self.store[unsafe_offset=0].get_ptr(new_index)
 
-        var old_child_count = old_ptr[0].fragment_child_count()
-        var new_child_count = new_ptr[0].fragment_child_count()
+        var old_child_count = old_ptr[unsafe_offset=0].fragment_child_count()
+        var new_child_count = new_ptr[unsafe_offset=0].fragment_child_count()
 
         var min_count = old_child_count
         if new_child_count < min_count:
@@ -396,10 +396,10 @@ struct DiffEngine:
         # Diff common prefix (pairwise)
         for i in range(min_count):
             var old_child = (
-                self.store[0].get_ptr(old_index)[0].get_fragment_child(i)
+                self.store[unsafe_offset=0].get_ptr(old_index)[unsafe_offset=0].get_fragment_child(i)
             )
             var new_child = (
-                self.store[0].get_ptr(new_index)[0].get_fragment_child(i)
+                self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].get_fragment_child(i)
             )
             self.diff_node(old_child, new_child)
 
@@ -410,17 +410,17 @@ struct DiffEngine:
             var ref_id: UInt32 = 0
             if old_child_count > 0:
                 var last_old_child = (
-                    self.store[0]
-                    .get_ptr(old_index)[0]
+                    self.store[unsafe_offset=0]
+                    .get_ptr(old_index)[unsafe_offset=0]
                     .get_fragment_child(old_child_count - 1)
                 )
-                var last_child_ptr = self.store[0].get_ptr(last_old_child)
-                if last_child_ptr[0].root_id_count() > 0:
-                    ref_id = last_child_ptr[0].get_root_id(
-                        last_child_ptr[0].root_id_count() - 1
+                var last_child_ptr = self.store[unsafe_offset=0].get_ptr(last_old_child)
+                if last_child_ptr[unsafe_offset=0].root_id_count() > 0:
+                    ref_id = last_child_ptr[unsafe_offset=0].get_root_id(
+                        last_child_ptr[unsafe_offset=0].root_id_count() - 1
                     )
-                elif last_child_ptr[0].element_id != 0:
-                    ref_id = last_child_ptr[0].element_id
+                elif last_child_ptr[unsafe_offset=0].element_id != 0:
+                    ref_id = last_child_ptr[unsafe_offset=0].element_id
 
             # Create new children
             var create_engine = CreateEngine(
@@ -429,19 +429,19 @@ struct DiffEngine:
             var total_new_roots: UInt32 = 0
             for i in range(old_child_count, new_child_count):
                 var new_child = (
-                    self.store[0].get_ptr(new_index)[0].get_fragment_child(i)
+                    self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].get_fragment_child(i)
                 )
                 total_new_roots += create_engine.create_node(new_child)
 
             # Insert after the reference point
             if ref_id != 0 and total_new_roots > 0:
-                self.writer[0].insert_after(ref_id, total_new_roots)
+                self.writer[unsafe_offset=0].insert_after(ref_id, total_new_roots)
 
         elif old_child_count > new_child_count:
             # Old children removed — remove excess
             for i in range(new_child_count, old_child_count):
                 var old_child = (
-                    self.store[0].get_ptr(old_index)[0].get_fragment_child(i)
+                    self.store[unsafe_offset=0].get_ptr(old_index)[unsafe_offset=0].get_fragment_child(i)
                 )
                 self._remove_node(old_child)
 
@@ -462,10 +462,10 @@ struct DiffEngine:
         or changed are touched.
         """
         var old_child_count = (
-            self.store[0].get_ptr(old_index)[0].fragment_child_count()
+            self.store[unsafe_offset=0].get_ptr(old_index)[unsafe_offset=0].fragment_child_count()
         )
         var new_child_count = (
-            self.store[0].get_ptr(new_index)[0].fragment_child_count()
+            self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].fragment_child_count()
         )
 
         # Handle trivial cases
@@ -481,7 +481,7 @@ struct DiffEngine:
             # All removed — remove them all
             for i in range(old_child_count):
                 var old_child = (
-                    self.store[0].get_ptr(old_index)[0].get_fragment_child(i)
+                    self.store[unsafe_offset=0].get_ptr(old_index)[unsafe_offset=0].get_fragment_child(i)
                 )
                 self._remove_node(old_child)
             return
@@ -490,17 +490,17 @@ struct DiffEngine:
         var prefix_len = 0
         while prefix_len < old_child_count and prefix_len < new_child_count:
             var old_child = (
-                self.store[0]
-                .get_ptr(old_index)[0]
+                self.store[unsafe_offset=0]
+                .get_ptr(old_index)[unsafe_offset=0]
                 .get_fragment_child(prefix_len)
             )
             var new_child = (
-                self.store[0]
-                .get_ptr(new_index)[0]
+                self.store[unsafe_offset=0]
+                .get_ptr(new_index)[unsafe_offset=0]
                 .get_fragment_child(prefix_len)
             )
-            var old_key = self.store[0].get_ptr(old_child)[0].key
-            var new_key = self.store[0].get_ptr(new_child)[0].key
+            var old_key = self.store[unsafe_offset=0].get_ptr(old_child)[unsafe_offset=0].key
+            var new_key = self.store[unsafe_offset=0].get_ptr(new_child)[unsafe_offset=0].key
             if old_key != new_key:
                 break
             self.diff_node(old_child, new_child)
@@ -515,13 +515,13 @@ struct DiffEngine:
             var old_i = old_child_count - 1 - suffix_len
             var new_i = new_child_count - 1 - suffix_len
             var old_child = (
-                self.store[0].get_ptr(old_index)[0].get_fragment_child(old_i)
+                self.store[unsafe_offset=0].get_ptr(old_index)[unsafe_offset=0].get_fragment_child(old_i)
             )
             var new_child = (
-                self.store[0].get_ptr(new_index)[0].get_fragment_child(new_i)
+                self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].get_fragment_child(new_i)
             )
-            var old_key = self.store[0].get_ptr(old_child)[0].key
-            var new_key = self.store[0].get_ptr(new_child)[0].key
+            var old_key = self.store[unsafe_offset=0].get_ptr(old_child)[unsafe_offset=0].key
+            var new_key = self.store[unsafe_offset=0].get_ptr(new_child)[unsafe_offset=0].key
             if old_key != new_key:
                 break
             suffix_len += 1
@@ -531,10 +531,10 @@ struct DiffEngine:
             var old_i = old_child_count - suffix_len + s
             var new_i = new_child_count - suffix_len + s
             var old_child = (
-                self.store[0].get_ptr(old_index)[0].get_fragment_child(old_i)
+                self.store[unsafe_offset=0].get_ptr(old_index)[unsafe_offset=0].get_fragment_child(old_i)
             )
             var new_child = (
-                self.store[0].get_ptr(new_index)[0].get_fragment_child(new_i)
+                self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].get_fragment_child(new_i)
             )
             self.diff_node(old_child, new_child)
 
@@ -559,7 +559,7 @@ struct DiffEngine:
             # Only removals in the middle
             for i in range(old_start, old_end):
                 var old_child = (
-                    self.store[0].get_ptr(old_index)[0].get_fragment_child(i)
+                    self.store[unsafe_offset=0].get_ptr(old_index)[unsafe_offset=0].get_fragment_child(i)
                 )
                 self._remove_node(old_child)
             return
@@ -570,9 +570,9 @@ struct DiffEngine:
         var old_positions = List[Int]()
         for i in range(old_start, old_end):
             var old_child = (
-                self.store[0].get_ptr(old_index)[0].get_fragment_child(i)
+                self.store[unsafe_offset=0].get_ptr(old_index)[unsafe_offset=0].get_fragment_child(i)
             )
-            var key = self.store[0].get_ptr(old_child)[0].key
+            var key = self.store[unsafe_offset=0].get_ptr(old_child)[unsafe_offset=0].key
             old_keys.append(key)
             old_positions.append(i)
 
@@ -584,11 +584,11 @@ struct DiffEngine:
             old_matched.append(False)
         for j in range(new_mid_len):
             var new_child = (
-                self.store[0]
-                .get_ptr(new_index)[0]
+                self.store[unsafe_offset=0]
+                .get_ptr(new_index)[unsafe_offset=0]
                 .get_fragment_child(new_start + j)
             )
-            var new_key = self.store[0].get_ptr(new_child)[0].key
+            var new_key = self.store[unsafe_offset=0].get_ptr(new_child)[unsafe_offset=0].key
             var found_pos = -1
             for k in range(len(old_keys)):
                 if old_keys[k] == new_key:
@@ -604,8 +604,8 @@ struct DiffEngine:
         for k in range(old_mid_len):
             if not old_matched[k]:
                 var old_child = (
-                    self.store[0]
-                    .get_ptr(old_index)[0]
+                    self.store[unsafe_offset=0]
+                    .get_ptr(old_index)[unsafe_offset=0]
                     .get_fragment_child(old_start + k)
                 )
                 self._remove_node(old_child)
@@ -634,19 +634,19 @@ struct DiffEngine:
         # If there's a suffix, the first suffix child is the reference
         if suffix_len > 0:
             var first_suffix_old = (
-                self.store[0].get_ptr(old_index)[0].get_fragment_child(old_end)
+                self.store[unsafe_offset=0].get_ptr(old_index)[unsafe_offset=0].get_fragment_child(old_end)
             )
-            var suf_ptr = self.store[0].get_ptr(first_suffix_old)
-            if suf_ptr[0].root_id_count() > 0:
-                next_ref_id = suf_ptr[0].get_root_id(0)
-            elif suf_ptr[0].element_id != 0:
-                next_ref_id = suf_ptr[0].element_id
+            var suf_ptr = self.store[unsafe_offset=0].get_ptr(first_suffix_old)
+            if suf_ptr[unsafe_offset=0].root_id_count() > 0:
+                next_ref_id = suf_ptr[unsafe_offset=0].get_root_id(0)
+            elif suf_ptr[unsafe_offset=0].element_id != 0:
+                next_ref_id = suf_ptr[unsafe_offset=0].element_id
 
         for j_rev in range(new_mid_len):
             var j = new_mid_len - 1 - j_rev
             var new_child_idx = (
-                self.store[0]
-                .get_ptr(new_index)[0]
+                self.store[unsafe_offset=0]
+                .get_ptr(new_index)[unsafe_offset=0]
                 .get_fragment_child(new_start + j)
             )
             var old_pos = new_to_old[j]
@@ -658,32 +658,32 @@ struct DiffEngine:
                 )
                 var num_roots = create_engine.create_node(new_child_idx)
                 if next_ref_id != 0 and num_roots > 0:
-                    self.writer[0].insert_before(next_ref_id, num_roots)
+                    self.writer[unsafe_offset=0].insert_before(next_ref_id, num_roots)
             else:
                 # ── Existing node: diff content first ─────────────────
                 var old_child_idx = (
-                    self.store[0]
-                    .get_ptr(old_index)[0]
+                    self.store[unsafe_offset=0]
+                    .get_ptr(old_index)[unsafe_offset=0]
                     .get_fragment_child(old_start + old_pos)
                 )
                 self.diff_node(old_child_idx, new_child_idx)
 
                 if not in_lis[j]:
                     # ── Not in LIS: needs to be moved ─────────────────
-                    var new_child_ptr = self.store[0].get_ptr(new_child_idx)
-                    if new_child_ptr[0].root_id_count() > 0:
-                        var move_id = new_child_ptr[0].get_root_id(0)
+                    var new_child_ptr = self.store[unsafe_offset=0].get_ptr(new_child_idx)
+                    if new_child_ptr[unsafe_offset=0].root_id_count() > 0:
+                        var move_id = new_child_ptr[unsafe_offset=0].get_root_id(0)
                         # Push the node onto the stack, then insert before ref
-                        self.writer[0].push_root(move_id)
+                        self.writer[unsafe_offset=0].push_root(move_id)
                         if next_ref_id != 0:
-                            self.writer[0].insert_before(next_ref_id, 1)
+                            self.writer[unsafe_offset=0].insert_before(next_ref_id, 1)
 
             # Update next_ref_id to this node's first root
-            var placed_ptr = self.store[0].get_ptr(new_child_idx)
-            if placed_ptr[0].root_id_count() > 0:
-                next_ref_id = placed_ptr[0].get_root_id(0)
-            elif placed_ptr[0].element_id != 0:
-                next_ref_id = placed_ptr[0].element_id
+            var placed_ptr = self.store[unsafe_offset=0].get_ptr(new_child_idx)
+            if placed_ptr[unsafe_offset=0].root_id_count() > 0:
+                next_ref_id = placed_ptr[unsafe_offset=0].get_root_id(0)
+            elif placed_ptr[unsafe_offset=0].element_id != 0:
+                next_ref_id = placed_ptr[unsafe_offset=0].element_id
 
     def _keyed_create_all(mut self, old_index: UInt32, new_index: UInt32):
         """Create all children of a new fragment (old was empty).
@@ -692,7 +692,7 @@ struct DiffEngine:
         all new children.
         """
         var new_child_count = (
-            self.store[0].get_ptr(new_index)[0].fragment_child_count()
+            self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].fragment_child_count()
         )
         var create_engine = CreateEngine(
             self.writer, self.eid_alloc, self.runtime, self.store
@@ -700,7 +700,7 @@ struct DiffEngine:
         var total_roots: UInt32 = 0
         for i in range(new_child_count):
             var new_child = (
-                self.store[0].get_ptr(new_index)[0].get_fragment_child(i)
+                self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].get_fragment_child(i)
             )
             total_roots += create_engine.create_node(new_child)
         # The created nodes are on the stack; the caller is responsible
@@ -723,35 +723,35 @@ struct DiffEngine:
         # (which is the first suffix-matched node, if any, or the end)
         var ref_id: UInt32 = 0
         var new_child_count = (
-            self.store[0].get_ptr(new_index)[0].fragment_child_count()
+            self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].fragment_child_count()
         )
         # Check if there's a node after new_end that's already mounted
         # (it would have been diff'd in the suffix pass)
         if new_end < new_child_count:
             var after_child = (
-                self.store[0].get_ptr(new_index)[0].get_fragment_child(new_end)
+                self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].get_fragment_child(new_end)
             )
-            var after_ptr = self.store[0].get_ptr(after_child)
-            if after_ptr[0].root_id_count() > 0:
-                ref_id = after_ptr[0].get_root_id(0)
-            elif after_ptr[0].element_id != 0:
-                ref_id = after_ptr[0].element_id
+            var after_ptr = self.store[unsafe_offset=0].get_ptr(after_child)
+            if after_ptr[unsafe_offset=0].root_id_count() > 0:
+                ref_id = after_ptr[unsafe_offset=0].get_root_id(0)
+            elif after_ptr[unsafe_offset=0].element_id != 0:
+                ref_id = after_ptr[unsafe_offset=0].element_id
 
         # If no ref from suffix, try the node just before new_start
         if ref_id == 0 and new_start > 0:
             var before_child = (
-                self.store[0]
-                .get_ptr(new_index)[0]
+                self.store[unsafe_offset=0]
+                .get_ptr(new_index)[unsafe_offset=0]
                 .get_fragment_child(new_start - 1)
             )
-            var before_ptr = self.store[0].get_ptr(before_child)
+            var before_ptr = self.store[unsafe_offset=0].get_ptr(before_child)
             var before_ref: UInt32 = 0
-            if before_ptr[0].root_id_count() > 0:
-                before_ref = before_ptr[0].get_root_id(
-                    before_ptr[0].root_id_count() - 1
+            if before_ptr[unsafe_offset=0].root_id_count() > 0:
+                before_ref = before_ptr[unsafe_offset=0].get_root_id(
+                    before_ptr[unsafe_offset=0].root_id_count() - 1
                 )
-            elif before_ptr[0].element_id != 0:
-                before_ref = before_ptr[0].element_id
+            elif before_ptr[unsafe_offset=0].element_id != 0:
+                before_ref = before_ptr[unsafe_offset=0].element_id
 
             if before_ref != 0:
                 # Create all new nodes
@@ -761,13 +761,13 @@ struct DiffEngine:
                 var total: UInt32 = 0
                 for i in range(new_start, new_end):
                     var new_child = (
-                        self.store[0]
-                        .get_ptr(new_index)[0]
+                        self.store[unsafe_offset=0]
+                        .get_ptr(new_index)[unsafe_offset=0]
                         .get_fragment_child(i)
                     )
                     total += create_engine.create_node(new_child)
                 if total > 0:
-                    self.writer[0].insert_after(before_ref, total)
+                    self.writer[unsafe_offset=0].insert_after(before_ref, total)
                 return
 
         # Create all new nodes
@@ -777,26 +777,26 @@ struct DiffEngine:
         var total: UInt32 = 0
         for i in range(new_start, new_end):
             var new_child = (
-                self.store[0].get_ptr(new_index)[0].get_fragment_child(i)
+                self.store[unsafe_offset=0].get_ptr(new_index)[unsafe_offset=0].get_fragment_child(i)
             )
             total += create_engine.create_node(new_child)
 
         if ref_id != 0 and total > 0:
-            self.writer[0].insert_before(ref_id, total)
+            self.writer[unsafe_offset=0].insert_before(ref_id, total)
 
     def _replace_node(mut self, old_index: UInt32, new_index: UInt32):
         """Replace the old VNode entirely with the new one.
 
         Removes old DOM nodes and creates new ones in their place.
         """
-        var old_ptr = self.store[0].get_ptr(old_index)
+        var old_ptr = self.store[unsafe_offset=0].get_ptr(old_index)
 
         # Find the first root element ID of the old node (the replacement target)
         var old_root_id: UInt32 = 0
-        if old_ptr[0].root_id_count() > 0:
-            old_root_id = old_ptr[0].get_root_id(0)
-        elif old_ptr[0].element_id != 0:
-            old_root_id = old_ptr[0].element_id
+        if old_ptr[unsafe_offset=0].root_id_count() > 0:
+            old_root_id = old_ptr[unsafe_offset=0].get_root_id(0)
+        elif old_ptr[unsafe_offset=0].element_id != 0:
+            old_root_id = old_ptr[unsafe_offset=0].element_id
 
         if old_root_id == 0:
             # Old node was never mounted — just create the new one
@@ -814,39 +814,39 @@ struct DiffEngine:
 
         # Replace old node with new nodes from the stack
         if num_new_roots > 0:
-            self.writer[0].replace_with(old_root_id, num_new_roots)
+            self.writer[unsafe_offset=0].replace_with(old_root_id, num_new_roots)
 
         # Remove any additional old roots (if old had multiple roots)
-        var old_ptr2 = self.store[0].get_ptr(old_index)
-        for i in range(1, old_ptr2[0].root_id_count()):
-            self.writer[0].remove(old_ptr2[0].get_root_id(i))
+        var old_ptr2 = self.store[unsafe_offset=0].get_ptr(old_index)
+        for i in range(1, old_ptr2[unsafe_offset=0].root_id_count()):
+            self.writer[unsafe_offset=0].remove(old_ptr2[unsafe_offset=0].get_root_id(i))
 
         # Free old ElementIds
         self._free_mount_ids(old_index)
 
     def _remove_node(mut self, vnode_index: UInt32):
         """Remove a VNode's DOM nodes entirely."""
-        var node_ptr = self.store[0].get_ptr(vnode_index)
+        var node_ptr = self.store[unsafe_offset=0].get_ptr(vnode_index)
 
-        if node_ptr[0].kind == VNODE_FRAGMENT:
+        if node_ptr[unsafe_offset=0].kind == VNODE_FRAGMENT:
             # Remove all fragment children recursively
-            var child_count = node_ptr[0].fragment_child_count()
+            var child_count = node_ptr[unsafe_offset=0].fragment_child_count()
             for i in range(child_count):
                 var child = (
-                    self.store[0].get_ptr(vnode_index)[0].get_fragment_child(i)
+                    self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].get_fragment_child(i)
                 )
                 self._remove_node(child)
             return
 
         # Remove each root element
-        var root_count = node_ptr[0].root_id_count()
+        var root_count = node_ptr[unsafe_offset=0].root_id_count()
         for i in range(root_count):
-            var rid = self.store[0].get_ptr(vnode_index)[0].get_root_id(i)
-            self.writer[0].remove(rid)
+            var rid = self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].get_root_id(i)
+            self.writer[unsafe_offset=0].remove(rid)
 
         # If it's a non-fragment with element_id but no root_ids
-        if root_count == 0 and node_ptr[0].element_id != 0:
-            self.writer[0].remove(node_ptr[0].element_id)
+        if root_count == 0 and node_ptr[unsafe_offset=0].element_id != 0:
+            self.writer[unsafe_offset=0].remove(node_ptr[unsafe_offset=0].element_id)
 
         # Free the ElementIds
         self._free_mount_ids(vnode_index)
@@ -872,25 +872,25 @@ struct DiffEngine:
 
     def _free_mount_ids(mut self, vnode_index: UInt32):
         """Free all ElementIds associated with a VNode's mount state."""
-        var node_ptr = self.store[0].get_ptr(vnode_index)
+        var node_ptr = self.store[unsafe_offset=0].get_ptr(vnode_index)
 
         # Free root IDs
-        for i in range(node_ptr[0].root_id_count()):
-            var rid = self.store[0].get_ptr(vnode_index)[0].get_root_id(i)
-            self.eid_alloc[0].free(ElementId(rid))
+        for i in range(node_ptr[unsafe_offset=0].root_id_count()):
+            var rid = self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].get_root_id(i)
+            self.eid_alloc[unsafe_offset=0].free(ElementId(rid))
 
         # Free dynamic node IDs
-        for i in range(node_ptr[0].dyn_node_id_count()):
-            var nid = self.store[0].get_ptr(vnode_index)[0].get_dyn_node_id(i)
-            self.eid_alloc[0].free(ElementId(nid))
+        for i in range(node_ptr[unsafe_offset=0].dyn_node_id_count()):
+            var nid = self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].get_dyn_node_id(i)
+            self.eid_alloc[unsafe_offset=0].free(ElementId(nid))
 
         # Free dynamic attr element IDs
-        for i in range(node_ptr[0].dyn_attr_id_count()):
-            var aid = self.store[0].get_ptr(vnode_index)[0].get_dyn_attr_id(i)
-            self.eid_alloc[0].free(ElementId(aid))
+        for i in range(node_ptr[unsafe_offset=0].dyn_attr_id_count()):
+            var aid = self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].get_dyn_attr_id(i)
+            self.eid_alloc[unsafe_offset=0].free(ElementId(aid))
 
         # Clear mount state
-        self.store[0].get_ptr(vnode_index)[0].clear_mount_state()
+        self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].clear_mount_state()
 
 
 # ── Longest Increasing Subsequence ───────────────────────────────────────────

@@ -26,7 +26,8 @@
 #      shows content with loaded data
 #   4. Re-load: repeat cycle with new data
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -146,7 +147,7 @@ struct DataLoaderApp(Movable):
 
 
 def _dl_init() -> Pointer[DataLoaderApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[DataLoaderApp](1)
+    var app_ptr = unsafe_alloc[DataLoaderApp](1)
     app_ptr.unsafe_write(DataLoaderApp())
     return app_ptr
 
@@ -154,11 +155,11 @@ def _dl_init() -> Pointer[DataLoaderApp, MutUntrackedOrigin]:
 def _dl_destroy(
     app_ptr: Pointer[DataLoaderApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].content.child_ctx)
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].skeleton.child_ctx)
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].content.child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].skeleton.child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _dl_rebuild(
@@ -183,16 +184,16 @@ def _dl_rebuild(
     var num_roots = engine.create_node(parent_idx)
 
     # 4. Append to root element
-    writer_ptr[0].append_children(0, num_roots)
+    writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
     # 5. Extract anchors for content + skeleton slots
-    var vnode_ptr = app.ctx.store_ptr()[0].get_ptr(parent_idx)
+    var vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(parent_idx)
     var content_anchor: UInt32 = 0
     var skeleton_anchor: UInt32 = 0
-    if vnode_ptr[0].dyn_node_id_count() > 0:
-        content_anchor = vnode_ptr[0].get_dyn_node_id(0)
-    if vnode_ptr[0].dyn_node_id_count() > 1:
-        skeleton_anchor = vnode_ptr[0].get_dyn_node_id(1)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 0:
+        content_anchor = vnode_ptr[unsafe_offset=0].get_dyn_node_id(0)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 1:
+        skeleton_anchor = vnode_ptr[unsafe_offset=0].get_dyn_node_id(1)
     app.content.child_ctx.init_slot(content_anchor)
     app.skeleton.child_ctx.init_slot(skeleton_anchor)
 
@@ -202,8 +203,8 @@ def _dl_rebuild(
     # Skeleton starts hidden — do NOT flush it
 
     # 7. Finalize
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)
 
 
 def _dl_handle_event(

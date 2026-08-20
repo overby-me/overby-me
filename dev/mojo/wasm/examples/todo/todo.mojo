@@ -119,7 +119,8 @@
 #                 return True
 #             return False
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from mutations import CreateEngine
 from events import HandlerEntry
@@ -480,16 +481,16 @@ def todo_app_init() -> Pointer[TodoApp, MutUntrackedOrigin]:
     All setup happens in TodoApp.__init__() — this function just
     allocates the heap slot and moves the app into it.
     """
-    var app_ptr = alloc[TodoApp](1)
+    var app_ptr = unsafe_alloc[TodoApp](1)
     app_ptr.unsafe_write(TodoApp())
     return app_ptr
 
 
 def todo_app_destroy(app_ptr: Pointer[TodoApp, MutUntrackedOrigin]):
     """Destroy the todo app and free all resources."""
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def todo_app_rebuild(
@@ -530,19 +531,19 @@ def todo_app_rebuild(
     # After CreateEngine, dynamic[0]'s placeholder has an ElementId.
     # Initialize the KeyedList's slot with the anchor and empty fragment.
     var anchor_id: UInt32 = 0
-    var app_vnode_ptr = app.ctx.store_ptr()[0].get_ptr(app_vnode_idx)
-    if app_vnode_ptr[0].dyn_node_id_count() > 0:
-        anchor_id = app_vnode_ptr[0].get_dyn_node_id(0)
+    var app_vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(app_vnode_idx)
+    if app_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 0:
+        anchor_id = app_vnode_ptr[unsafe_offset=0].get_dyn_node_id(0)
     app.items.init_slot(anchor_id, frag_idx)
 
     # Phase 28: Extract the anchor for the empty message slot (dyn_node[1])
     var msg_anchor_id: UInt32 = 0
-    if app_vnode_ptr[0].dyn_node_id_count() > 1:
-        msg_anchor_id = app_vnode_ptr[0].get_dyn_node_id(1)
+    if app_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 1:
+        msg_anchor_id = app_vnode_ptr[unsafe_offset=0].get_dyn_node_id(1)
     app.empty_msg_slot = ConditionalSlot(msg_anchor_id)
 
     # Append the app shell to root element (id 0)
-    writer_ptr[0].append_children(0, num_roots)
+    writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
     # Phase 28: Show empty message on initial mount (list starts empty)
     var msg_idx = app.build_empty_message()
@@ -550,8 +551,8 @@ def todo_app_rebuild(
         writer_ptr, app.empty_msg_slot, msg_idx
     )
 
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)
 
 
 def todo_app_flush(
@@ -602,5 +603,5 @@ def todo_app_flush(
                 writer_ptr, app.empty_msg_slot
             )
 
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)

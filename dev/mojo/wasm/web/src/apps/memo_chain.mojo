@@ -21,7 +21,8 @@
 #   3. Increment to 5: input=5 → doubled=10 → is_big=True → label="BIG".
 #   4. Increment to 6: input=6 → doubled=12 → is_big=True → label="BIG".
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import (
@@ -139,7 +140,7 @@ struct MemoChainApp(Movable):
 
 
 def _mc_init() -> Pointer[MemoChainApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[MemoChainApp](1)
+    var app_ptr = unsafe_alloc[MemoChainApp](1)
     app_ptr.unsafe_write(MemoChainApp())
     return app_ptr
 
@@ -147,9 +148,9 @@ def _mc_init() -> Pointer[MemoChainApp, MutUntrackedOrigin]:
 def _mc_destroy(
     app_ptr: Pointer[MemoChainApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _mc_rebuild(

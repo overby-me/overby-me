@@ -29,7 +29,8 @@
 #   - version      : UInt32               — monotonic write counter (for staleness checks)
 
 from std.sys import size_of
-from std.memory import Pointer, unsafe_memcpy, alloc
+from std.memory import Pointer, unsafe_memcpy
+from std.memory.alloc import unsafe_alloc
 from scope import ScopeArena, ScopeState, HOOK_SIGNAL, HOOK_MEMO, HOOK_EFFECT
 from vdom import TemplateRegistry, VNodeStore
 from .memo import MemoStore, MemoEntry, MEMO_NO_STRING
@@ -90,7 +91,7 @@ struct SignalEntry(Copyable):
         self.subscribers = copy.subscribers.copy()
         self.version = copy.version
         if copy.value_size > 0:
-            self.value_ptr = alloc[UInt8](copy.value_size)
+            self.value_ptr = unsafe_alloc[UInt8](copy.value_size)
             unsafe_memcpy(
                 dest=self.value_ptr, src=copy.value_ptr, count=copy.value_size
             )
@@ -108,25 +109,25 @@ struct SignalEntry(Copyable):
     def __deinit__(deinit self):
         """Destroy the entry, freeing value storage."""
         if self.value_size > 0:
-            self.value_ptr.free()
+            self.value_ptr.unsafe_free()
 
     # ── Value access ─────────────────────────────────────────────────
 
     @always_inline
-    def read_value[T: Copyable & AnyType](self) -> T:
+    def read_value[T: Copyable ](self) -> T:
         """Reinterpret the raw bytes as T and return a copy."""
-        return self.value_ptr.bitcast[T]()[0].copy()
+        return self.value_ptr.unsafe_bitcast[T]()[unsafe_offset=0].copy()
 
     @always_inline
-    def write_value[T: Copyable & Deinitable & AnyType](mut self, value: T):
+    def write_value[T: Copyable & Deinitable ](mut self, value: T):
         """Overwrite the stored bytes with `value` and bump version."""
-        var tmp = alloc[T](1)
+        var tmp = unsafe_alloc[T](1)
         tmp.unsafe_write(value.copy())
         unsafe_memcpy(
-            dest=self.value_ptr, src=tmp.bitcast[UInt8](), count=self.value_size
+            dest=self.value_ptr, src=tmp.unsafe_bitcast[UInt8](), count=self.value_size
         )
         tmp.unsafe_deinit_pointee()
-        tmp.free()
+        tmp.unsafe_free()
         self.version += 1
 
     # ── Subscriber management ────────────────────────────────────────
@@ -197,18 +198,18 @@ struct SignalStore(Movable):
     # ── Create / Destroy ─────────────────────────────────────────────
 
     def create[
-        T: Copyable & Deinitable & AnyType
+        T: Copyable & Deinitable 
     ](mut self, initial: T) -> UInt32:
         """Create a new signal with `initial` value.  Returns its key."""
         var sz = size_of[T]()
 
         # Allocate value storage and copy initial value into it
-        var ptr = alloc[UInt8](sz)
-        var tmp = alloc[T](1)
+        var ptr = unsafe_alloc[UInt8](sz)
+        var tmp = unsafe_alloc[T](1)
         tmp.unsafe_write(initial.copy())
-        unsafe_memcpy(dest=ptr, src=tmp.bitcast[UInt8](), count=sz)
+        unsafe_memcpy(dest=ptr, src=tmp.unsafe_bitcast[UInt8](), count=sz)
         tmp.unsafe_deinit_pointee()
-        tmp.free()
+        tmp.unsafe_free()
 
         var entry = SignalEntry(ptr, sz)
 
@@ -244,7 +245,7 @@ struct SignalStore(Movable):
     # ── Read / Write ─────────────────────────────────────────────────
 
     @always_inline
-    def read[T: Copyable & AnyType](self, key: UInt32) -> T:
+    def read[T: Copyable ](self, key: UInt32) -> T:
         """Read the signal value at `key` as type T.
 
         This does NOT perform subscriber tracking — call `read_tracked`
@@ -253,7 +254,7 @@ struct SignalStore(Movable):
         return self._entries[Int(key)].read_value[T]()
 
     def read_tracked[
-        T: Copyable & AnyType
+        T: Copyable 
     ](mut self, key: UInt32, context_id: UInt32) -> T:
         """Read the signal value and subscribe `context_id`.
 
@@ -265,7 +266,7 @@ struct SignalStore(Movable):
         return self._entries[Int(key)].read_value[T]()
 
     def write[
-        T: Copyable & Deinitable & AnyType
+        T: Copyable & Deinitable 
     ](mut self, key: UInt32, value: T):
         """Write a new value to the signal at `key`.
 
@@ -274,7 +275,7 @@ struct SignalStore(Movable):
         """
         self._entries[Int(key)].write_value[T](value)
 
-    def peek[T: Copyable & AnyType](self, key: UInt32) -> T:
+    def peek[T: Copyable ](self, key: UInt32) -> T:
         """Read without subscribing.  Alias for `read`."""
         return self.read[T](key)
 
@@ -573,19 +574,19 @@ struct Runtime(Movable):
     # ── Signal operations (convenience wrappers) ─────────────────────
 
     def create_signal[
-        T: Copyable & Deinitable & AnyType
+        T: Copyable & Deinitable 
     ](mut self, initial: T) -> UInt32:
         """Create a signal and return its key."""
         return self.signals.create[T](initial)
 
-    def read_signal[T: Copyable & AnyType](mut self, key: UInt32) -> T:
+    def read_signal[T: Copyable ](mut self, key: UInt32) -> T:
         """Read a signal, auto-subscribing the current context if any."""
         if self.has_context():
             return self.signals.read_tracked[T](key, self.get_context())
         return self.signals.read[T](key)
 
     def write_signal[
-        T: Copyable & Deinitable & AnyType
+        T: Copyable & Deinitable 
     ](mut self, key: UInt32, value: T):
         """Write a signal and propagate dirtiness through memo chains.
 
@@ -733,7 +734,7 @@ struct Runtime(Movable):
                 if not found2:
                     self.dirty_scopes.append(sub_ctx)
 
-    def peek_signal[T: Copyable & AnyType](self, key: UInt32) -> T:
+    def peek_signal[T: Copyable ](self, key: UInt32) -> T:
         """Read a signal without subscribing."""
         return self.signals.peek[T](key)
 
@@ -1925,7 +1926,7 @@ struct Runtime(Movable):
 
 def create_runtime() -> Pointer[Runtime, MutUntrackedOrigin]:
     """Allocate a Runtime on the heap and return a pointer to it."""
-    var ptr = alloc[Runtime](1)
+    var ptr = unsafe_alloc[Runtime](1)
     ptr.unsafe_write(Runtime())
     return ptr
 
@@ -1933,4 +1934,4 @@ def create_runtime() -> Pointer[Runtime, MutUntrackedOrigin]:
 def destroy_runtime(ptr: Pointer[Runtime, MutUntrackedOrigin]):
     """Destroy and free a heap-allocated Runtime."""
     ptr.unsafe_deinit_pointee()
-    ptr.free()
+    ptr.unsafe_free()

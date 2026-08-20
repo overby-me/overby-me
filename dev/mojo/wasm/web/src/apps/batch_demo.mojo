@@ -23,7 +23,8 @@
 #   4. reset(): batch writes both names to "" + write_count to 0.
 #      full_name = " ".
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import SignalI32 as _SignalI32, SignalString, MemoString
@@ -137,7 +138,7 @@ struct BatchDemoApp(Movable):
 
 
 def _bd_init() -> Pointer[BatchDemoApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[BatchDemoApp](1)
+    var app_ptr = unsafe_alloc[BatchDemoApp](1)
     app_ptr.unsafe_write(BatchDemoApp())
     return app_ptr
 
@@ -145,9 +146,9 @@ def _bd_init() -> Pointer[BatchDemoApp, MutUntrackedOrigin]:
 def _bd_destroy(
     app_ptr: Pointer[BatchDemoApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _bd_rebuild(

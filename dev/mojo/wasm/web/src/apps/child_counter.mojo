@@ -16,7 +16,8 @@
 # Child template ("child-display"):
 #   p > dynamic_text[0]          ← "Count: N"
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponent
 from mutations import CreateEngine as _CreateEngine
@@ -104,16 +105,16 @@ struct ChildCounterApp(Movable):
 
 
 def _cc_init() -> Pointer[ChildCounterApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[ChildCounterApp](1)
+    var app_ptr = unsafe_alloc[ChildCounterApp](1)
     app_ptr.unsafe_write(ChildCounterApp())
     return app_ptr
 
 
 def _cc_destroy(app_ptr: Pointer[ChildCounterApp, MutUntrackedOrigin]):
-    app_ptr[0].ctx.destroy_child_component(app_ptr[0].child)
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy_child_component(app_ptr[unsafe_offset=0].child)
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _cc_rebuild(
@@ -151,13 +152,13 @@ def _cc_rebuild(
     var num_roots = engine.create_node(parent_idx)
 
     # 4. Append to root element (id 0)
-    writer_ptr[0].append_children(0, num_roots)
+    writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
     # 5. Extract anchor for the child slot (dyn_node[0])
     var anchor_id: UInt32 = 0
-    var vnode_ptr = app.ctx.store_ptr()[0].get_ptr(parent_idx)
-    if vnode_ptr[0].dyn_node_id_count() > 0:
-        anchor_id = vnode_ptr[0].get_dyn_node_id(0)
+    var vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(parent_idx)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 0:
+        anchor_id = vnode_ptr[unsafe_offset=0].get_dyn_node_id(0)
     app.child.init_slot(anchor_id)
 
     # 6. Build and flush the child VNode (create child DOM, replace placeholder)
@@ -171,8 +172,8 @@ def _cc_rebuild(
     )
 
     # 7. Single finalize for the entire mount + child flush
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)
 
 
 def _cc_handle_event(

@@ -19,7 +19,8 @@
 #      Flush → is_valid=True, status="✓ Valid: hi" → render → diff → SetText.
 #   4. Clear input: input="" → is_valid=False, status="✗ Empty".
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import SignalString, MemoBool, MemoString
@@ -122,7 +123,7 @@ struct MemoFormApp(Movable):
 
 
 def _mf_init() -> Pointer[MemoFormApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[MemoFormApp](1)
+    var app_ptr = unsafe_alloc[MemoFormApp](1)
     app_ptr.unsafe_write(MemoFormApp())
     return app_ptr
 
@@ -130,9 +131,9 @@ def _mf_init() -> Pointer[MemoFormApp, MutUntrackedOrigin]:
 def _mf_destroy(
     app_ptr: Pointer[MemoFormApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _mf_rebuild(

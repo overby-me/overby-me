@@ -188,7 +188,8 @@
 #                 # select / remove
 #             return False
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from std.ffi import external_call
 from bridge import MutationWriter
 from mutations import CreateEngine
@@ -884,16 +885,16 @@ def bench_app_init() -> Pointer[BenchmarkApp, MutUntrackedOrigin]:
     All setup happens in BenchmarkApp.__init__() — this function just
     allocates the heap slot and moves the app into it.
     """
-    var app_ptr = alloc[BenchmarkApp](1)
+    var app_ptr = unsafe_alloc[BenchmarkApp](1)
     app_ptr.unsafe_write(BenchmarkApp())
     return app_ptr
 
 
 def bench_app_destroy(app_ptr: Pointer[BenchmarkApp, MutUntrackedOrigin]):
     """Destroy the benchmark app and free all resources."""
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def bench_app_rebuild(
@@ -941,16 +942,16 @@ def bench_app_rebuild(
     # (dyn_node uses index 3 because 3 dyn_text nodes occupy indices 0-2)
     # Initialize the KeyedList's slot with the anchor and empty fragment.
     var anchor_id: UInt32 = 0
-    var app_vnode_ptr = app.ctx.store_ptr()[0].get_ptr(app_vnode_idx)
-    if app_vnode_ptr[0].dyn_node_id_count() > 3:
-        anchor_id = app_vnode_ptr[0].get_dyn_node_id(3)
+    var app_vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(app_vnode_idx)
+    if app_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 3:
+        anchor_id = app_vnode_ptr[unsafe_offset=0].get_dyn_node_id(3)
     app.rows_list.init_slot(anchor_id, frag_idx)
 
     # Append the app shell to root element (id 0)
-    writer_ptr[0].append_children(0, num_roots)
+    writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)
 
 
 def bench_app_flush(
@@ -984,5 +985,5 @@ def bench_app_flush(
     # Flush via KeyedList (handles all three transitions)
     app.rows_list.flush(app.ctx, writer_ptr, new_frag_idx)
 
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)

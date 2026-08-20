@@ -26,7 +26,8 @@
 #   SNInnerSkeletonChild:    p > dyn_text("Inner loading...")
 #   SNOuterSkeletonChild:    p > dyn_text("Outer loading...")
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -246,7 +247,7 @@ struct SuspenseNestApp(Movable):
 
 
 def _sn_init() -> Pointer[SuspenseNestApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[SuspenseNestApp](1)
+    var app_ptr = unsafe_alloc[SuspenseNestApp](1)
     app_ptr.unsafe_write(SuspenseNestApp())
     return app_ptr
 
@@ -254,17 +255,17 @@ def _sn_init() -> Pointer[SuspenseNestApp, MutUntrackedOrigin]:
 def _sn_destroy(
     app_ptr: Pointer[SuspenseNestApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy_child_context(
-        app_ptr[0].outer_content.inner_content.child_ctx
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(
+        app_ptr[unsafe_offset=0].outer_content.inner_content.child_ctx
     )
-    app_ptr[0].ctx.destroy_child_context(
-        app_ptr[0].outer_content.inner_skeleton.child_ctx
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(
+        app_ptr[unsafe_offset=0].outer_content.inner_skeleton.child_ctx
     )
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].outer_content.child_ctx)
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].outer_skeleton.child_ctx)
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].outer_content.child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].outer_skeleton.child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _sn_rebuild(
@@ -289,16 +290,16 @@ def _sn_rebuild(
     var num_roots = engine.create_node(parent_idx)
 
     # 4. Append to root element
-    writer_ptr[0].append_children(0, num_roots)
+    writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
     # 5. Extract anchors for outer content + outer skeleton slots
-    var vnode_ptr = app.ctx.store_ptr()[0].get_ptr(parent_idx)
+    var vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(parent_idx)
     var outer_content_anchor: UInt32 = 0
     var outer_skeleton_anchor: UInt32 = 0
-    if vnode_ptr[0].dyn_node_id_count() > 0:
-        outer_content_anchor = vnode_ptr[0].get_dyn_node_id(0)
-    if vnode_ptr[0].dyn_node_id_count() > 1:
-        outer_skeleton_anchor = vnode_ptr[0].get_dyn_node_id(1)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 0:
+        outer_content_anchor = vnode_ptr[unsafe_offset=0].get_dyn_node_id(0)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 1:
+        outer_skeleton_anchor = vnode_ptr[unsafe_offset=0].get_dyn_node_id(1)
     app.outer_content.child_ctx.init_slot(outer_content_anchor)
     app.outer_skeleton.child_ctx.init_slot(outer_skeleton_anchor)
 
@@ -307,7 +308,7 @@ def _sn_rebuild(
     app.outer_content.child_ctx.flush(writer_ptr, outer_content_idx)
 
     # 7. Extract anchors for inner content + inner skeleton slots
-    var oc_vnode_ptr = app.outer_content.child_ctx.store[0].get_ptr(
+    var oc_vnode_ptr = app.outer_content.child_ctx.store[unsafe_offset=0].get_ptr(
         outer_content_idx
     )
     # dyn_node_ids[0] = text node (dyn_text[0] = "Outer: ready")
@@ -315,10 +316,10 @@ def _sn_rebuild(
     # dyn_node_ids[2] = placeholder (dyn_node[2] = inner skeleton slot)
     var inner_content_anchor: UInt32 = 0
     var inner_skeleton_anchor: UInt32 = 0
-    if oc_vnode_ptr[0].dyn_node_id_count() > 1:
-        inner_content_anchor = oc_vnode_ptr[0].get_dyn_node_id(1)
-    if oc_vnode_ptr[0].dyn_node_id_count() > 2:
-        inner_skeleton_anchor = oc_vnode_ptr[0].get_dyn_node_id(2)
+    if oc_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 1:
+        inner_content_anchor = oc_vnode_ptr[unsafe_offset=0].get_dyn_node_id(1)
+    if oc_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 2:
+        inner_skeleton_anchor = oc_vnode_ptr[unsafe_offset=0].get_dyn_node_id(2)
     app.outer_content.inner_content.child_ctx.init_slot(inner_content_anchor)
     app.outer_content.inner_skeleton.child_ctx.init_slot(inner_skeleton_anchor)
 
@@ -333,8 +334,8 @@ def _sn_rebuild(
     # Outer skeleton starts hidden — do NOT flush it
 
     # 9. Finalize
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)
 
 
 def _sn_handle_event(
@@ -427,14 +428,14 @@ def _sn_flush(
         app.outer_content.child_ctx.flush(writer_ptr, oc_idx)
 
         # Re-extract inner anchors (outer_content was recreated)
-        var oc_vnode_ptr = app.outer_content.child_ctx.store[0].get_ptr(oc_idx)
+        var oc_vnode_ptr = app.outer_content.child_ctx.store[unsafe_offset=0].get_ptr(oc_idx)
         # dyn_node_ids[0] = text node, [1] = inner content, [2] = inner skeleton
         var inner_content_anchor: UInt32 = 0
         var inner_skeleton_anchor: UInt32 = 0
-        if oc_vnode_ptr[0].dyn_node_id_count() > 1:
-            inner_content_anchor = oc_vnode_ptr[0].get_dyn_node_id(1)
-        if oc_vnode_ptr[0].dyn_node_id_count() > 2:
-            inner_skeleton_anchor = oc_vnode_ptr[0].get_dyn_node_id(2)
+        if oc_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 1:
+            inner_content_anchor = oc_vnode_ptr[unsafe_offset=0].get_dyn_node_id(1)
+        if oc_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 2:
+            inner_skeleton_anchor = oc_vnode_ptr[unsafe_offset=0].get_dyn_node_id(2)
         app.outer_content.inner_content.child_ctx.init_slot(
             inner_content_anchor
         )

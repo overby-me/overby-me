@@ -713,7 +713,7 @@ struct VNodeStore(Movable):
 
         Valid until the store is mutated.
         """
-        var ptr = self._nodes.unsafe_ptr() + Int(index)
+        var ptr = self._nodes.unsafe_ptr().unsafe_offset(Int(index))
         return Pointer[VNode, MutUntrackedOrigin](unsafe_from_address=Int(ptr))
 
     def kind(self, index: UInt32) -> UInt8:

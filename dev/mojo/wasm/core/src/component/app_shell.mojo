@@ -24,7 +24,8 @@
 #             self.my_signal = self.shell.create_signal_i32(42)
 #             ...
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from arena import ElementIdAllocator
 from signals import Runtime, create_runtime, destroy_runtime
@@ -72,10 +73,10 @@ struct AppShell(Movable):
         """Allocate all subsystems.  Must be called once before use."""
         self.runtime = create_runtime()
 
-        self.store = alloc[VNodeStore](1)
+        self.store = unsafe_alloc[VNodeStore](1)
         self.store.unsafe_write(VNodeStore())
 
-        self.eid_alloc = alloc[ElementIdAllocator](1)
+        self.eid_alloc = unsafe_alloc[ElementIdAllocator](1)
         self.eid_alloc.unsafe_write(ElementIdAllocator())
 
         self.scheduler = Scheduler()
@@ -88,11 +89,11 @@ struct AppShell(Movable):
         self._alive = False
 
         self.store.unsafe_deinit_pointee()
-        self.store.free()
+        self.store.unsafe_free()
         self.store = Pointer[VNodeStore, MutUntrackedOrigin].unsafe_dangling()
 
         self.eid_alloc.unsafe_deinit_pointee()
-        self.eid_alloc.free()
+        self.eid_alloc.unsafe_free()
         self.eid_alloc = Pointer[
             ElementIdAllocator, MutUntrackedOrigin
         ].unsafe_dangling()
@@ -108,11 +109,11 @@ struct AppShell(Movable):
 
     def create_root_scope(mut self) -> UInt32:
         """Create a root scope (height 0, no parent).  Returns scope ID."""
-        return self.runtime[0].create_scope(0, -1)
+        return self.runtime[unsafe_offset=0].create_scope(0, -1)
 
     def create_child_scope(mut self, parent_id: UInt32) -> UInt32:
         """Create a child scope.  Returns scope ID."""
-        return self.runtime[0].create_child_scope(parent_id)
+        return self.runtime[unsafe_offset=0].create_child_scope(parent_id)
 
     def destroy_child_scopes(mut self, scope_ids: List[UInt32]):
         """Destroy a list of child scopes and clean up their handlers.
@@ -132,64 +133,64 @@ struct AppShell(Movable):
         """
         for i in range(len(scope_ids)):
             var sid = scope_ids[i]
-            self.runtime[0].handlers.remove_for_scope(sid)
-            self.runtime[0].destroy_scope(sid)
+            self.runtime[unsafe_offset=0].handlers.remove_for_scope(sid)
+            self.runtime[unsafe_offset=0].destroy_scope(sid)
 
     def begin_render(mut self, scope_id: UInt32) -> Int:
         """Begin rendering a scope.  Returns previous scope ID (or -1)."""
-        return self.runtime[0].begin_scope_render(scope_id)
+        return self.runtime[unsafe_offset=0].begin_scope_render(scope_id)
 
     def end_render(mut self, prev_scope: Int):
         """End rendering and restore the previous scope."""
-        self.runtime[0].end_scope_render(prev_scope)
+        self.runtime[unsafe_offset=0].end_scope_render(prev_scope)
 
     # ── Signal helpers ───────────────────────────────────────────────
 
     def create_signal_i32(mut self, initial: Int32) -> UInt32:
         """Create an Int32 signal.  Returns its key."""
-        return self.runtime[0].create_signal[Int32](initial)
+        return self.runtime[unsafe_offset=0].create_signal[Int32](initial)
 
     def read_signal_i32(mut self, key: UInt32) -> Int32:
         """Read an Int32 signal (with context tracking)."""
-        return self.runtime[0].read_signal[Int32](key)
+        return self.runtime[unsafe_offset=0].read_signal[Int32](key)
 
     def peek_signal_i32(self, key: UInt32) -> Int32:
         """Read an Int32 signal without subscribing."""
-        return self.runtime[0].peek_signal[Int32](key)
+        return self.runtime[unsafe_offset=0].peek_signal[Int32](key)
 
     def write_signal_i32(mut self, key: UInt32, value: Int32):
         """Write a new value to an Int32 signal."""
-        self.runtime[0].write_signal[Int32](key, value)
+        self.runtime[unsafe_offset=0].write_signal[Int32](key, value)
 
     def use_signal_i32(mut self, initial: Int32) -> UInt32:
         """Hook: create or retrieve an Int32 signal for the current scope."""
-        return self.runtime[0].use_signal_i32(initial)
+        return self.runtime[unsafe_offset=0].use_signal_i32(initial)
 
     # ── Memo helpers ─────────────────────────────────────────────────
 
     def create_memo_i32(mut self, scope_id: UInt32, initial: Int32) -> UInt32:
         """Create an Int32 memo.  Returns its ID."""
-        return self.runtime[0].create_memo_i32(scope_id, initial)
+        return self.runtime[unsafe_offset=0].create_memo_i32(scope_id, initial)
 
     def memo_begin_compute(mut self, memo_id: UInt32):
         """Begin memo computation (sets memo's context as current)."""
-        self.runtime[0].memo_begin_compute(memo_id)
+        self.runtime[unsafe_offset=0].memo_begin_compute(memo_id)
 
     def memo_end_compute_i32(mut self, memo_id: UInt32, value: Int32):
         """End memo computation and cache the result."""
-        self.runtime[0].memo_end_compute_i32(memo_id, value)
+        self.runtime[unsafe_offset=0].memo_end_compute_i32(memo_id, value)
 
     def memo_read_i32(mut self, memo_id: UInt32) -> Int32:
         """Read a memo's cached value (with context tracking)."""
-        return self.runtime[0].memo_read_i32(memo_id)
+        return self.runtime[unsafe_offset=0].memo_read_i32(memo_id)
 
     def memo_is_dirty(self, memo_id: UInt32) -> Bool:
         """Check whether the memo needs recomputation."""
-        return self.runtime[0].memo_is_dirty(memo_id)
+        return self.runtime[unsafe_offset=0].memo_is_dirty(memo_id)
 
     def use_memo_i32(mut self, initial: Int32) -> UInt32:
         """Hook: create or retrieve an Int32 memo for the current scope."""
-        return self.runtime[0].use_memo_i32(initial)
+        return self.runtime[unsafe_offset=0].use_memo_i32(initial)
 
     # ── MemoBool helpers ─────────────────────────────────────────────
 
@@ -203,11 +204,11 @@ struct AppShell(Movable):
 
     def memo_read_bool(mut self, memo_id: UInt32) -> Bool:
         """Read a Bool memo's cached value (with context tracking)."""
-        return self.runtime[0].memo_read_bool(memo_id)
+        return self.runtime[unsafe_offset=0].memo_read_bool(memo_id)
 
     def use_memo_bool(mut self, initial: Bool) -> UInt32:
         """Hook: create or retrieve a Bool memo for the current scope."""
-        return self.runtime[0].use_memo_bool(initial)
+        return self.runtime[unsafe_offset=0].use_memo_bool(initial)
 
     # ── MemoString helpers ───────────────────────────────────────────
 
@@ -223,7 +224,7 @@ struct AppShell(Movable):
 
     def memo_read_string(mut self, memo_id: UInt32) -> String:
         """Read a String memo's cached value (with context tracking)."""
-        return self.runtime[0].memo_read_string(memo_id)
+        return self.runtime[unsafe_offset=0].memo_read_string(memo_id)
 
     def memo_peek_string(self, memo_id: UInt32) -> String:
         """Read a String memo's cached value without subscribing."""
@@ -231,29 +232,29 @@ struct AppShell(Movable):
 
     def use_memo_string(mut self, initial: String) -> UInt32:
         """Hook: create or retrieve a String memo for the current scope."""
-        return self.runtime[0].use_memo_string(initial)
+        return self.runtime[unsafe_offset=0].use_memo_string(initial)
 
     # ── Effect helpers ───────────────────────────────────────────────
 
     def create_effect(mut self, scope_id: UInt32) -> UInt32:
         """Create an effect with a reactive context.  Returns its ID."""
-        return self.runtime[0].create_effect(scope_id)
+        return self.runtime[unsafe_offset=0].create_effect(scope_id)
 
     def effect_begin_run(mut self, effect_id: UInt32):
         """Begin effect execution (sets effect's context as current)."""
-        self.runtime[0].effect_begin_run(effect_id)
+        self.runtime[unsafe_offset=0].effect_begin_run(effect_id)
 
     def effect_end_run(mut self, effect_id: UInt32):
         """End effect execution (clears pending, restores context)."""
-        self.runtime[0].effect_end_run(effect_id)
+        self.runtime[unsafe_offset=0].effect_end_run(effect_id)
 
     def effect_is_pending(self, effect_id: UInt32) -> Bool:
         """Check whether the effect needs re-execution."""
-        return self.runtime[0].effect_is_pending(effect_id)
+        return self.runtime[unsafe_offset=0].effect_is_pending(effect_id)
 
     def use_effect(mut self) -> UInt32:
         """Hook: create or retrieve an effect for the current scope."""
-        return self.runtime[0].use_effect()
+        return self.runtime[unsafe_offset=0].use_effect()
 
     def drain_pending_effects(self) -> List[UInt32]:
         """Return a list of effect IDs that are currently pending.
@@ -265,11 +266,11 @@ struct AppShell(Movable):
 
     def pending_effect_count(self) -> Int:
         """Return the number of pending effects."""
-        return self.runtime[0].pending_effect_count()
+        return self.runtime[unsafe_offset=0].pending_effect_count()
 
     def pending_effect_at(self, index: Int) -> UInt32:
         """Return the effect ID at the given index in the pending list."""
-        return self.runtime[0].pending_effect_at(index)
+        return self.runtime[unsafe_offset=0].pending_effect_at(index)
 
     # ── Mount lifecycle ──────────────────────────────────────────────
 
@@ -294,11 +295,11 @@ struct AppShell(Movable):
         var num_roots = engine.create_node(vnode_idx)
 
         # Append to root element (id 0)
-        writer_ptr[0].append_children(0, num_roots)
+        writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
         # Finalize
-        writer_ptr[0].finalize()
-        return Int32(writer_ptr[0].offset)
+        writer_ptr[unsafe_offset=0].finalize()
+        return Int32(writer_ptr[unsafe_offset=0].offset)
 
     def mount_with_templates(
         mut self,
@@ -329,11 +330,11 @@ struct AppShell(Movable):
         var num_roots = engine.create_node(vnode_idx)
 
         # 3. Append to root element (id 0)
-        writer_ptr[0].append_children(0, num_roots)
+        writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
         # 4. Finalize
-        writer_ptr[0].finalize()
-        return Int32(writer_ptr[0].offset)
+        writer_ptr[unsafe_offset=0].finalize()
+        return Int32(writer_ptr[unsafe_offset=0].offset)
 
     # ── Update lifecycle ─────────────────────────────────────────────
 
@@ -359,14 +360,14 @@ struct AppShell(Movable):
         self, writer_ptr: Pointer[MutationWriter, MutUntrackedOrigin]
     ) -> Int32:
         """Write the End sentinel and return the byte length."""
-        writer_ptr[0].finalize()
-        return Int32(writer_ptr[0].offset)
+        writer_ptr[unsafe_offset=0].finalize()
+        return Int32(writer_ptr[unsafe_offset=0].offset)
 
     # ── Flush lifecycle ──────────────────────────────────────────────
 
     def has_dirty(self) -> Bool:
         """Check whether any scopes need re-rendering."""
-        return self.runtime[0].has_dirty()
+        return self.runtime[unsafe_offset=0].has_dirty()
 
     def collect_dirty(mut self):
         """Drain the runtime's dirty queue into the scheduler."""
@@ -483,16 +484,16 @@ struct AppShell(Movable):
         so that the JS interpreter can build DOM templates from the
         same mutation buffer pass.
         """
-        var count = self.runtime[0].templates.count()
+        var count = self.runtime[unsafe_offset=0].templates.count()
         for i in range(count):
-            var tmpl_ptr = self.runtime[0].templates.get_ptr(UInt32(i))
-            writer_ptr[0].register_template(tmpl_ptr[0])
+            var tmpl_ptr = self.runtime[unsafe_offset=0].templates.get_ptr(UInt32(i))
+            writer_ptr[unsafe_offset=0].register_template(tmpl_ptr[unsafe_offset=0])
 
     # ── Event dispatch ───────────────────────────────────────────────
 
     def dispatch_event(mut self, handler_id: UInt32, event_type: UInt8) -> Bool:
         """Dispatch an event to a handler.  Returns True if executed."""
-        return self.runtime[0].dispatch_event(handler_id, event_type)
+        return self.runtime[unsafe_offset=0].dispatch_event(handler_id, event_type)
 
     def dispatch_event_with_i32(
         mut self, handler_id: UInt32, event_type: UInt8, value: Int32
@@ -511,7 +512,7 @@ struct AppShell(Movable):
         to the target SignalString.  Falls back to normal dispatch for
         other action types.
         """
-        return self.runtime[0].dispatch_event_with_string(
+        return self.runtime[unsafe_offset=0].dispatch_event_with_string(
             handler_id, event_type, value
         )
 

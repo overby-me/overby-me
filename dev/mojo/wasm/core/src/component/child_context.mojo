@@ -145,8 +145,8 @@ struct ChildComponentContext(Movable):
             init_val = 1
         else:
             init_val = 0
-        var key = self.runtime[0].create_signal[Int32](init_val)
-        self.runtime[0].signals.subscribe(key, self.scope_id)
+        var key = self.runtime[unsafe_offset=0].create_signal[Int32](init_val)
+        self.runtime[unsafe_offset=0].signals.subscribe(key, self.scope_id)
         return SignalBool(key, self.runtime)
 
     def use_signal_string(mut self, initial: String) -> SignalString:
@@ -228,7 +228,7 @@ struct ChildComponentContext(Movable):
         Returns:
             A tuple of (found: Bool, value: Int32).
         """
-        return self.runtime[0].scopes.consume_context(self.scope_id, key)
+        return self.runtime[unsafe_offset=0].scopes.consume_context(self.scope_id, key)
 
     def has_context(self, key: UInt32) -> Bool:
         """Check whether a context value is reachable from the child scope.
@@ -414,8 +414,8 @@ struct ChildComponentContext(Movable):
         Returns:
             True if the child scope needs re-rendering.
         """
-        for i in range(len(self.runtime[0].dirty_scopes)):
-            if self.runtime[0].dirty_scopes[i] == self.scope_id:
+        for i in range(len(self.runtime[unsafe_offset=0].dirty_scopes)):
+            if self.runtime[unsafe_offset=0].dirty_scopes[i] == self.scope_id:
                 return True
         return False
 
@@ -470,7 +470,7 @@ struct ChildComponentContext(Movable):
             var child_ctx = parent_ctx.create_child_context(view, name)
             child_ctx.use_error_boundary()
         """
-        self.runtime[0].scopes.set_error_boundary(self.scope_id, True)
+        self.runtime[unsafe_offset=0].scopes.set_error_boundary(self.scope_id, True)
 
     def has_error(self) -> Bool:
         """Check whether this child scope (as a boundary) has captured an error.
@@ -478,7 +478,7 @@ struct ChildComponentContext(Movable):
         Returns:
             True if an error has been propagated to this boundary.
         """
-        return self.runtime[0].scopes.has_error(self.scope_id)
+        return self.runtime[unsafe_offset=0].scopes.has_error(self.scope_id)
 
     def error_message(self) -> String:
         """Get the error message captured by this boundary.
@@ -486,7 +486,7 @@ struct ChildComponentContext(Movable):
         Returns:
             The error message string, or empty if no error.
         """
-        return self.runtime[0].scopes.get_error_message(self.scope_id)
+        return self.runtime[unsafe_offset=0].scopes.get_error_message(self.scope_id)
 
     def clear_error(mut self):
         """Clear the error state on this boundary scope.
@@ -495,8 +495,8 @@ struct ChildComponentContext(Movable):
         instead of fallback UI.  Marks the scope dirty so the flush
         cycle processes the state change.
         """
-        self.runtime[0].scopes.clear_error(self.scope_id)
-        self.runtime[0].mark_scope_dirty(self.scope_id)
+        self.runtime[unsafe_offset=0].scopes.clear_error(self.scope_id)
+        self.runtime[unsafe_offset=0].mark_scope_dirty(self.scope_id)
 
     # ── Error reporting ──────────────────────────────────────────────
 
@@ -517,22 +517,22 @@ struct ChildComponentContext(Movable):
         """
         # If this scope is itself a boundary, set the error directly
         # (propagate_error only checks ancestors, not self).
-        if self.runtime[0].scopes.is_error_boundary(self.scope_id):
-            self.runtime[0].scopes.set_error(self.scope_id, message)
-            self.runtime[0].mark_scope_dirty(self.scope_id)
+        if self.runtime[unsafe_offset=0].scopes.is_error_boundary(self.scope_id):
+            self.runtime[unsafe_offset=0].scopes.set_error(self.scope_id, message)
+            self.runtime[unsafe_offset=0].mark_scope_dirty(self.scope_id)
             return Int(self.scope_id)
-        var boundary_id = self.runtime[0].scopes.propagate_error(
+        var boundary_id = self.runtime[unsafe_offset=0].scopes.propagate_error(
             self.scope_id, message
         )
         if boundary_id != -1:
-            self.runtime[0].mark_scope_dirty(UInt32(boundary_id))
+            self.runtime[unsafe_offset=0].mark_scope_dirty(UInt32(boundary_id))
         return boundary_id
 
     # ── Suspense ─────────────────────────────────────────────────────
 
     def use_suspense_boundary(mut self):
         """Mark this child scope as a suspense boundary."""
-        self.runtime[0].scopes.set_suspense_boundary(self.scope_id, True)
+        self.runtime[unsafe_offset=0].scopes.set_suspense_boundary(self.scope_id, True)
 
     def set_pending(self, pending: Bool):
         """Set the pending (loading) state on this child scope.
@@ -542,14 +542,14 @@ struct ChildComponentContext(Movable):
         Args:
             pending: True to enter pending state, False to resolve.
         """
-        self.runtime[0].scopes.set_pending(self.scope_id, pending)
-        var boundary_id = self.runtime[0].scopes.find_suspense_boundary(
+        self.runtime[unsafe_offset=0].scopes.set_pending(self.scope_id, pending)
+        var boundary_id = self.runtime[unsafe_offset=0].scopes.find_suspense_boundary(
             self.scope_id
         )
         if boundary_id != -1:
-            self.runtime[0].mark_scope_dirty(UInt32(boundary_id))
-        elif self.runtime[0].scopes.is_suspense_boundary(self.scope_id):
-            self.runtime[0].mark_scope_dirty(self.scope_id)
+            self.runtime[unsafe_offset=0].mark_scope_dirty(UInt32(boundary_id))
+        elif self.runtime[unsafe_offset=0].scopes.is_suspense_boundary(self.scope_id):
+            self.runtime[unsafe_offset=0].mark_scope_dirty(self.scope_id)
 
     def has_pending(self) -> Bool:
         """Check whether any descendant of this child scope is pending."""
@@ -557,7 +557,7 @@ struct ChildComponentContext(Movable):
 
     def is_pending(self) -> Bool:
         """Check whether this child scope itself is pending."""
-        return self.runtime[0].scopes.is_pending(self.scope_id)
+        return self.runtime[unsafe_offset=0].scopes.is_pending(self.scope_id)
 
     # ── Destroy ──────────────────────────────────────────────────────
 

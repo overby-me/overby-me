@@ -12,7 +12,8 @@
 #   CounterChild: div > p(dyn_text) + button("Reset")
 #   SummaryChild: p(dyn_text, dyn_attr[0])
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -202,7 +203,7 @@ struct ThemeCounterApp(Movable):
 
 
 def _tc_init() -> Pointer[ThemeCounterApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[ThemeCounterApp](1)
+    var app_ptr = unsafe_alloc[ThemeCounterApp](1)
     app_ptr.unsafe_write(ThemeCounterApp())
     return app_ptr
 
@@ -210,11 +211,11 @@ def _tc_init() -> Pointer[ThemeCounterApp, MutUntrackedOrigin]:
 def _tc_destroy(
     app_ptr: Pointer[ThemeCounterApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].counter_child.child_ctx)
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].summary_child.child_ctx)
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].counter_child.child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].summary_child.child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _tc_rebuild(
@@ -239,16 +240,16 @@ def _tc_rebuild(
     var num_roots = engine.create_node(parent_idx)
 
     # 4. Append to root element
-    writer_ptr[0].append_children(0, num_roots)
+    writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
     # 5. Extract anchors for child slots (dyn_node[0] and dyn_node[1])
-    var vnode_ptr = app.ctx.store_ptr()[0].get_ptr(parent_idx)
+    var vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(parent_idx)
     var counter_anchor: UInt32 = 0
     var summary_anchor: UInt32 = 0
-    if vnode_ptr[0].dyn_node_id_count() > 0:
-        counter_anchor = vnode_ptr[0].get_dyn_node_id(0)
-    if vnode_ptr[0].dyn_node_id_count() > 1:
-        summary_anchor = vnode_ptr[0].get_dyn_node_id(1)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 0:
+        counter_anchor = vnode_ptr[unsafe_offset=0].get_dyn_node_id(0)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 1:
+        summary_anchor = vnode_ptr[unsafe_offset=0].get_dyn_node_id(1)
     app.counter_child.child_ctx.init_slot(counter_anchor)
     app.summary_child.child_ctx.init_slot(summary_anchor)
 
@@ -261,8 +262,8 @@ def _tc_rebuild(
     app.summary_child.child_ctx.flush(writer_ptr, summary_idx)
 
     # 8. Finalize
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)
 
 
 def _tc_handle_event(

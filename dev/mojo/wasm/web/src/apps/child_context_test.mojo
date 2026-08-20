@@ -5,7 +5,8 @@
 # The parent provides a count signal via context; the child consumes it
 # and also owns a local bool signal (show_hex toggle).
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -87,7 +88,7 @@ struct ChildContextTestApp(Movable):
 
 
 def _cct_init() -> Pointer[ChildContextTestApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[ChildContextTestApp](1)
+    var app_ptr = unsafe_alloc[ChildContextTestApp](1)
     app_ptr.unsafe_write(ChildContextTestApp())
     return app_ptr
 
@@ -95,10 +96,10 @@ def _cct_init() -> Pointer[ChildContextTestApp, MutUntrackedOrigin]:
 def _cct_destroy(
     app_ptr: Pointer[ChildContextTestApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].child_ctx)
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _cct_rebuild(
@@ -123,13 +124,13 @@ def _cct_rebuild(
     var num_roots = engine.create_node(parent_idx)
 
     # 4. Append to root element
-    writer_ptr[0].append_children(0, num_roots)
+    writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
     # 5. Extract anchor for child slot
     var anchor_id: UInt32 = 0
-    var vnode_ptr = app.ctx.store_ptr()[0].get_ptr(parent_idx)
-    if vnode_ptr[0].dyn_node_id_count() > 0:
-        anchor_id = vnode_ptr[0].get_dyn_node_id(0)
+    var vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(parent_idx)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 0:
+        anchor_id = vnode_ptr[unsafe_offset=0].get_dyn_node_id(0)
     app.child_ctx.init_slot(anchor_id)
 
     # 6. Build and flush child
@@ -137,8 +138,8 @@ def _cct_rebuild(
     app.child_ctx.flush(writer_ptr, child_idx)
 
     # 7. Finalize
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)
 
 
 def _cct_handle_event(

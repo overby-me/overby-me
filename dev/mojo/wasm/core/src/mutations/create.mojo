@@ -83,14 +83,14 @@ def _build_parent_map(
     tmpl_ptr: Pointer[Template, MutUntrackedOrigin]
 ) -> List[Int]:
     """Build parent[i] = parent node index of node i, or -1 for roots."""
-    var n = tmpl_ptr[0].node_count()
+    var n = tmpl_ptr[unsafe_offset=0].node_count()
     var parents = List[Int](capacity=n)
     for _ in range(n):
         parents.append(-1)
     for i in range(n):
-        var node_ptr = tmpl_ptr[0].get_node_ptr(i)
-        for j in range(node_ptr[0].child_count()):
-            var child = Int(node_ptr[0].child_at(j))
+        var node_ptr = tmpl_ptr[unsafe_offset=0].get_node_ptr(i)
+        for j in range(node_ptr[unsafe_offset=0].child_count()):
+            var child = Int(node_ptr[unsafe_offset=0].child_at(j))
             parents[child] = i
     return parents^
 
@@ -108,10 +108,10 @@ def _path_from_root(
     var current = target
     while parents[current] != -1:
         var parent_idx = parents[current]
-        var parent_node_ptr = tmpl_ptr[0].get_node_ptr(parent_idx)
+        var parent_node_ptr = tmpl_ptr[unsafe_offset=0].get_node_ptr(parent_idx)
         # Find which child slot `current` occupies under parent
-        for i in range(parent_node_ptr[0].child_count()):
-            if Int(parent_node_ptr[0].child_at(i)) == current:
+        for i in range(parent_node_ptr[unsafe_offset=0].child_count()):
+            if Int(parent_node_ptr[unsafe_offset=0].child_at(i)) == current:
                 rev_path.append(UInt8(i))
                 break
         current = parent_idx
@@ -198,8 +198,8 @@ struct CreateEngine:
         Emits the mutations and populates the VNode's mount state.
         Returns the number of root-level nodes placed on the stack.
         """
-        var node_ptr = self.store[0].get_ptr(vnode_index)
-        var kind = node_ptr[0].kind
+        var node_ptr = self.store[unsafe_offset=0].get_ptr(vnode_index)
+        var kind = node_ptr[unsafe_offset=0].kind
 
         if kind == VNODE_TEMPLATE_REF:
             return self._create_template_ref(vnode_index)
@@ -214,23 +214,23 @@ struct CreateEngine:
 
     def _create_template_ref(mut self, vnode_index: UInt32) -> UInt32:
         """Create a TemplateRef VNode.  Returns number of roots (on stack)."""
-        var node_ptr = self.store[0].get_ptr(vnode_index)
-        var tmpl_id = node_ptr[0].template_id
-        var tmpl_ptr = self.runtime[0].templates.get_ptr(tmpl_id)
+        var node_ptr = self.store[unsafe_offset=0].get_ptr(vnode_index)
+        var tmpl_id = node_ptr[unsafe_offset=0].template_id
+        var tmpl_ptr = self.runtime[unsafe_offset=0].templates.get_ptr(tmpl_id)
 
-        var root_count = tmpl_ptr[0].root_count()
+        var root_count = tmpl_ptr[unsafe_offset=0].root_count()
 
         # Build parent map for path computation
         var parents = _build_parent_map(tmpl_ptr)
 
         # 1. LoadTemplate for each root — assigns ElementIds, pushes to stack
         for i in range(root_count):
-            var _ = tmpl_ptr[0].get_root_index(i)
-            var eid = self.eid_alloc[0].alloc()
-            self.writer[0].load_template(tmpl_id, UInt32(i), eid.as_u32())
+            var _ = tmpl_ptr[unsafe_offset=0].get_root_index(i)
+            var eid = self.eid_alloc[unsafe_offset=0].alloc()
+            self.writer[unsafe_offset=0].load_template(tmpl_id, UInt32(i), eid.as_u32())
             # Store root ElementId on the VNode
             # Re-read pointer in case store was mutated
-            self.store[0].get_ptr(vnode_index)[0].push_root_id(eid.as_u32())
+            self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].push_root_id(eid.as_u32())
 
         # 2. Process dynamic attributes
         #    Walk all nodes in the template looking for dynamic attributes.
@@ -241,45 +241,45 @@ struct CreateEngine:
         #    Template traversal order may differ from dynamic_index order,
         #    so we pre-allocate the array and assign by dyn_idx.
         var num_dyn_attrs = (
-            self.store[0].get_ptr(vnode_index)[0].dynamic_attr_count()
+            self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].dynamic_attr_count()
         )
         # Pre-allocate dyn_attr_ids with zeros so we can index by dyn_idx
         for _ in range(num_dyn_attrs):
-            self.store[0].get_ptr(vnode_index)[0].push_dyn_attr_id(0)
+            self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].push_dyn_attr_id(0)
 
         # Build a mapping: dynamic_attr_index → (node_index in template)
         # by scanning template nodes for dynamic attrs
-        for node_i in range(tmpl_ptr[0].node_count()):
-            var tnode_ptr = tmpl_ptr[0].get_node_ptr(node_i)
-            if tnode_ptr[0].kind != TNODE_ELEMENT:
+        for node_i in range(tmpl_ptr[unsafe_offset=0].node_count()):
+            var tnode_ptr = tmpl_ptr[unsafe_offset=0].get_node_ptr(node_i)
+            if tnode_ptr[unsafe_offset=0].kind != TNODE_ELEMENT:
                 continue
-            var first_attr = Int(tnode_ptr[0].first_attr)
-            var n_attrs = tnode_ptr[0].attr_count()
+            var first_attr = Int(tnode_ptr[unsafe_offset=0].first_attr)
+            var n_attrs = tnode_ptr[unsafe_offset=0].attr_count()
             for attr_j in range(n_attrs):
                 var attr_idx = first_attr + attr_j
-                var attr = tmpl_ptr[0].get_attr(attr_idx)
+                var attr = tmpl_ptr[unsafe_offset=0].get_attr(attr_idx)
                 if attr.kind == TATTR_DYNAMIC:
                     var dyn_idx = Int(attr.dynamic_index)
                     if dyn_idx < num_dyn_attrs:
                         # Compute path from root to this element
                         var path = _path_from_root(tmpl_ptr, parents, node_i)
                         # Assign an ElementId to this element
-                        var elem_eid = self.eid_alloc[0].alloc()
+                        var elem_eid = self.eid_alloc[unsafe_offset=0].alloc()
                         var path_ptr = path.unsafe_ptr()
-                        self.writer[0].assign_id(
+                        self.writer[unsafe_offset=0].assign_id(
                             path_ptr, len(path), elem_eid.as_u32()
                         )
                         # Store the element ID indexed by dyn_idx (not push order)
-                        self.store[0].get_ptr(vnode_index)[0].dyn_attr_ids[
+                        self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].dyn_attr_ids[
                             dyn_idx
                         ] = elem_eid.as_u32()
                         # Now emit the attribute mutation
-                        var vnode_ptr2 = self.store[0].get_ptr(vnode_index)
+                        var vnode_ptr2 = self.store[unsafe_offset=0].get_ptr(vnode_index)
                         var dyn_attr = (
-                            vnode_ptr2[0].dynamic_attrs[dyn_idx].copy()
+                            vnode_ptr2[unsafe_offset=0].dynamic_attrs[dyn_idx].copy()
                         )
                         if dyn_attr.value.kind == AVAL_EVENT:
-                            self.writer[0].new_event_listener(
+                            self.writer[unsafe_offset=0].new_event_listener(
                                 elem_eid.as_u32(),
                                 dyn_attr.value.handler_id,
                                 dyn_attr.name,
@@ -290,7 +290,7 @@ struct CreateEngine:
                             if dyn_attr.has_namespace():
                                 ns_byte = 1  # simplified: 1 = has namespace
                             var val_str = _attr_value_to_string(dyn_attr.value)
-                            self.writer[0].set_attribute(
+                            self.writer[unsafe_offset=0].set_attribute(
                                 elem_eid.as_u32(),
                                 ns_byte,
                                 dyn_attr.name,
@@ -299,60 +299,60 @@ struct CreateEngine:
 
         # 3. Process dynamic nodes
         #    Walk template nodes looking for Dynamic and DynamicText nodes.
-        for node_i in range(tmpl_ptr[0].node_count()):
-            var tnode_ptr = tmpl_ptr[0].get_node_ptr(node_i)
-            if tnode_ptr[0].kind == TNODE_DYNAMIC:
-                var dyn_idx = Int(tnode_ptr[0].dynamic_index)
-                var vnode_ptr3 = self.store[0].get_ptr(vnode_index)
-                if dyn_idx < len(vnode_ptr3[0].dynamic_nodes):
-                    var dyn_node = vnode_ptr3[0].dynamic_nodes[dyn_idx].copy()
+        for node_i in range(tmpl_ptr[unsafe_offset=0].node_count()):
+            var tnode_ptr = tmpl_ptr[unsafe_offset=0].get_node_ptr(node_i)
+            if tnode_ptr[unsafe_offset=0].kind == TNODE_DYNAMIC:
+                var dyn_idx = Int(tnode_ptr[unsafe_offset=0].dynamic_index)
+                var vnode_ptr3 = self.store[unsafe_offset=0].get_ptr(vnode_index)
+                if dyn_idx < len(vnode_ptr3[unsafe_offset=0].dynamic_nodes):
+                    var dyn_node = vnode_ptr3[unsafe_offset=0].dynamic_nodes[dyn_idx].copy()
                     var path = _path_from_root(tmpl_ptr, parents, node_i)
                     if dyn_node.kind == DNODE_TEXT:
                         # Create a text node
-                        var text_eid = self.eid_alloc[0].alloc()
-                        self.writer[0].create_text_node(
+                        var text_eid = self.eid_alloc[unsafe_offset=0].alloc()
+                        self.writer[unsafe_offset=0].create_text_node(
                             text_eid.as_u32(), dyn_node.text
                         )
                         # Replace the placeholder in the template clone
                         var path_ptr = path.unsafe_ptr()
-                        self.writer[0].replace_placeholder(
+                        self.writer[unsafe_offset=0].replace_placeholder(
                             path_ptr, len(path), 1
                         )
-                        self.store[0].get_ptr(vnode_index)[0].push_dyn_node_id(
+                        self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].push_dyn_node_id(
                             text_eid.as_u32()
                         )
                     elif dyn_node.kind == DNODE_PLACEHOLDER:
                         # Create a placeholder node
-                        var ph_eid = self.eid_alloc[0].alloc()
-                        self.writer[0].create_placeholder(ph_eid.as_u32())
+                        var ph_eid = self.eid_alloc[unsafe_offset=0].alloc()
+                        self.writer[unsafe_offset=0].create_placeholder(ph_eid.as_u32())
                         var path_ptr = path.unsafe_ptr()
-                        self.writer[0].replace_placeholder(
+                        self.writer[unsafe_offset=0].replace_placeholder(
                             path_ptr, len(path), 1
                         )
-                        self.store[0].get_ptr(vnode_index)[0].push_dyn_node_id(
+                        self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].push_dyn_node_id(
                             ph_eid.as_u32()
                         )
 
-            elif tnode_ptr[0].kind == TNODE_DYNAMIC_TEXT:
-                var dyn_idx = Int(tnode_ptr[0].dynamic_index)
-                var vnode_ptr4 = self.store[0].get_ptr(vnode_index)
-                if dyn_idx < len(vnode_ptr4[0].dynamic_nodes):
-                    var dyn_node = vnode_ptr4[0].dynamic_nodes[dyn_idx].copy()
+            elif tnode_ptr[unsafe_offset=0].kind == TNODE_DYNAMIC_TEXT:
+                var dyn_idx = Int(tnode_ptr[unsafe_offset=0].dynamic_index)
+                var vnode_ptr4 = self.store[unsafe_offset=0].get_ptr(vnode_index)
+                if dyn_idx < len(vnode_ptr4[unsafe_offset=0].dynamic_nodes):
+                    var dyn_node = vnode_ptr4[unsafe_offset=0].dynamic_nodes[dyn_idx].copy()
                     if dyn_node.kind == DNODE_TEXT:
                         # DynamicText is text that replaces inline —
                         # assign an ID so we can update it later via SetText
                         var path = _path_from_root(tmpl_ptr, parents, node_i)
-                        var text_eid = self.eid_alloc[0].alloc()
+                        var text_eid = self.eid_alloc[unsafe_offset=0].alloc()
                         # Assign the ID to the text node position in template
                         var path_ptr = path.unsafe_ptr()
-                        self.writer[0].assign_id(
+                        self.writer[unsafe_offset=0].assign_id(
                             path_ptr, len(path), text_eid.as_u32()
                         )
                         # Set its text content
-                        self.writer[0].set_text(
+                        self.writer[unsafe_offset=0].set_text(
                             text_eid.as_u32(), dyn_node.text
                         )
-                        self.store[0].get_ptr(vnode_index)[0].push_dyn_node_id(
+                        self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].push_dyn_node_id(
                             text_eid.as_u32()
                         )
 
@@ -360,36 +360,36 @@ struct CreateEngine:
 
     def _create_text(mut self, vnode_index: UInt32) -> UInt32:
         """Create a Text VNode.  Returns 1 (one root on stack)."""
-        var node_ptr = self.store[0].get_ptr(vnode_index)
-        var eid = self.eid_alloc[0].alloc()
-        self.writer[0].create_text_node(eid.as_u32(), node_ptr[0].text)
+        var node_ptr = self.store[unsafe_offset=0].get_ptr(vnode_index)
+        var eid = self.eid_alloc[unsafe_offset=0].alloc()
+        self.writer[unsafe_offset=0].create_text_node(eid.as_u32(), node_ptr[unsafe_offset=0].text)
         # Store the ElementId on the VNode
-        node_ptr[0].element_id = eid.as_u32()
-        node_ptr[0].push_root_id(eid.as_u32())
+        node_ptr[unsafe_offset=0].element_id = eid.as_u32()
+        node_ptr[unsafe_offset=0].push_root_id(eid.as_u32())
         return 1
 
     def _create_placeholder(mut self, vnode_index: UInt32) -> UInt32:
         """Create a Placeholder VNode.  Returns 1 (one root on stack)."""
-        var node_ptr = self.store[0].get_ptr(vnode_index)
+        var node_ptr = self.store[unsafe_offset=0].get_ptr(vnode_index)
         var eid: ElementId
-        if node_ptr[0].element_id != 0:
+        if node_ptr[unsafe_offset=0].element_id != 0:
             # Placeholder already has an assigned ID (e.g. pre-allocated)
-            eid = ElementId(node_ptr[0].element_id)
+            eid = ElementId(node_ptr[unsafe_offset=0].element_id)
         else:
-            eid = self.eid_alloc[0].alloc()
-            node_ptr[0].element_id = eid.as_u32()
-        self.writer[0].create_placeholder(eid.as_u32())
-        node_ptr[0].push_root_id(eid.as_u32())
+            eid = self.eid_alloc[unsafe_offset=0].alloc()
+            node_ptr[unsafe_offset=0].element_id = eid.as_u32()
+        self.writer[unsafe_offset=0].create_placeholder(eid.as_u32())
+        node_ptr[unsafe_offset=0].push_root_id(eid.as_u32())
         return 1
 
     def _create_fragment(mut self, vnode_index: UInt32) -> UInt32:
         """Create a Fragment VNode.  Returns total roots from all children."""
-        var node_ptr = self.store[0].get_ptr(vnode_index)
-        var child_count = node_ptr[0].fragment_child_count()
+        var node_ptr = self.store[unsafe_offset=0].get_ptr(vnode_index)
+        var child_count = node_ptr[unsafe_offset=0].fragment_child_count()
         var total_roots: UInt32 = 0
         for i in range(child_count):
             var child_idx = (
-                self.store[0].get_ptr(vnode_index)[0].get_fragment_child(i)
+                self.store[unsafe_offset=0].get_ptr(vnode_index)[unsafe_offset=0].get_fragment_child(i)
             )
             total_roots += self.create_node(child_idx)
         return total_roots

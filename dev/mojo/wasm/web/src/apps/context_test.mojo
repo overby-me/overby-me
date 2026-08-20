@@ -4,7 +4,8 @@
 # consume_context(), and the typed signal-sharing helpers.  Has a root
 # scope + one child scope so that parent-chain walk-up can be verified.
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from component import ComponentContext
 from signals.handle import SignalI32 as _SignalI32
 
@@ -34,7 +35,7 @@ struct ContextTestApp(Movable):
 
 
 def _cta_init() -> Pointer[ContextTestApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[ContextTestApp](1)
+    var app_ptr = unsafe_alloc[ContextTestApp](1)
     app_ptr.unsafe_write(ContextTestApp())
     return app_ptr
 
@@ -42,8 +43,8 @@ def _cta_init() -> Pointer[ContextTestApp, MutUntrackedOrigin]:
 def _cta_destroy(app_ptr: Pointer[ContextTestApp, MutUntrackedOrigin]):
     # Destroy child scope
     var scope_ids = List[UInt32]()
-    scope_ids.append(app_ptr[0].child_scope_id)
-    app_ptr[0].ctx.destroy_child_scopes(scope_ids)
-    app_ptr[0].ctx.destroy()
+    scope_ids.append(app_ptr[unsafe_offset=0].child_scope_id)
+    app_ptr[unsafe_offset=0].ctx.destroy_child_scopes(scope_ids)
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()

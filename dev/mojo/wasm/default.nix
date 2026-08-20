@@ -22,27 +22,20 @@ _: {
       ];
   };
 
-  # One check, modeled on dev/mojo/gui's mojo-gui-test: build the WASM binary,
-  # then compile and run all 52 Mojo test suites through wasmtime. Before this
-  # existed the project had no check at all - 83 of its 115 files were verified
-  # only transitively, being byte-identical to gui counterparts, and the other
-  # 32 only by hand.
+  # One check, modeled on dev/mojo/gui's mojo-gui-test: build the WASM binary
+  # under -Werror, then compile and run all 52 Mojo test suites through
+  # wasmtime. Before this existed the project had no check at all - 83 of its
+  # 115 files were verified only transitively, being byte-identical to gui
+  # counterparts, and the other 32 only by hand.
   #
-  # The build was a -Werror build until mojo started being built from source.
-  # That compiler warns where the packaged 26.2.0 did not, and this tree trips
-  # 2310 of those warnings in six classes:
-  #
-  #     1432  positional `__getitem__`      p[0]  ->  p[unsafe_offset=0]
-  #      792  @export without an abi effect  def f() -> T:  ->  def f() abi("c") -> T:
-  #       43  deprecated symbols
-  #       32  `alloc` without a `Layout`
-  #       11  redundant trait composition
-  #
-  # Every one is a deprecation, not a defect: the same sources compile clean
-  # without -Werror, and the test suites below still run and still gate. The
-  # flag comes back with the migration, which is its own change - these are
-  # 2310 edits to hand-written Mojo, and none of them belong in a commit about
-  # something else.
+  # -Werror is what keeps this tree off deprecated Mojo. The from-source
+  # compiler warns where the packaged 26.2.0 did not, and the sources have
+  # been migrated to match: pointer subscripts name unsafe_offset, @export'd
+  # functions carry an explicit abi("c") effect, allocation goes through
+  # std.memory.alloc's unsafe_alloc, and the trait bounds no longer restate
+  # what Copyable already implies. The build warns about nothing, so the flag
+  # costs nothing until the next deprecation lands - which is when it is
+  # worth having.
   checks = pkgs: let
     inherit (pkgs) lib;
     # The repo root as a path literal, not the `src` module argument:
@@ -85,7 +78,7 @@ _: {
 
         cd dev/mojo/wasm/web
         mkdir -p build
-        mojo build --emit llvm -I ../core/src -I ../examples -I src -o build/out.ll src/main.mojo
+        mojo build -Werror --emit llvm -I ../core/src -I ../examples -I src -o build/out.ll src/main.mojo
         sed -i '/call void @llvm\.lifetime\.\(start\|end\)/d' build/out.ll
         sed -i 's/ nocreateundeforpoison//g' build/out.ll
         sed -i 's/ "target-cpu"="[^"]*"//g; s/ "target-features"="[^"]*"//g' build/out.ll
@@ -108,7 +101,7 @@ _: {
 
       installPhase = "touch $out";
 
-      meta.description = "mojo-wasm build + 52 Mojo test suites via wasmtime";
+      meta.description = "mojo-wasm build (-Werror) + 52 Mojo test suites via wasmtime";
     };
   };
 }

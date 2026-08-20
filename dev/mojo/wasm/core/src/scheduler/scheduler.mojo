@@ -69,12 +69,12 @@ struct Scheduler(Movable):
         Deduplicates against any entries already in the queue.
         Marks the queue as unsorted so the next `next()` call will sort.
         """
-        var dirty = rt[0].drain_dirty()
+        var dirty = rt[unsafe_offset=0].drain_dirty()
         for i in range(len(dirty)):
             var sid = dirty[i]
             # Deduplicate: skip if already queued
             if not self._contains(sid):
-                var h = rt[0].scopes.height(sid)
+                var h = rt[unsafe_offset=0].scopes.height(sid)
                 self._queue.append(SchedulerEntry(sid, h))
         if len(dirty) > 0:
             self._sorted = False
@@ -90,7 +90,7 @@ struct Scheduler(Movable):
         draining the full runtime queue.
         """
         if not self._contains(scope_id):
-            var h = rt[0].scopes.height(scope_id)
+            var h = rt[unsafe_offset=0].scopes.height(scope_id)
             self._queue.append(SchedulerEntry(scope_id, h))
             self._sorted = False
 

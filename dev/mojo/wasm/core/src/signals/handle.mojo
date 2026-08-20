@@ -106,7 +106,7 @@ struct SignalI32(Copyable, Writable):
         Returns:
             The current Int32 value.
         """
-        return self.runtime[0].peek_signal[Int32](self.key)
+        return self.runtime[unsafe_offset=0].peek_signal[Int32](self.key)
 
     def read(self) -> Int32:
         """Read the signal value AND subscribe the current reactive context.
@@ -118,7 +118,7 @@ struct SignalI32(Copyable, Writable):
         Returns:
             The current Int32 value.
         """
-        return self.runtime[0].read_signal[Int32](self.key)
+        return self.runtime[unsafe_offset=0].read_signal[Int32](self.key)
 
     # ── Write ────────────────────────────────────────────────────────
 
@@ -130,7 +130,7 @@ struct SignalI32(Copyable, Writable):
         Args:
             value: The new Int32 value.
         """
-        self.runtime[0].write_signal[Int32](self.key, value)
+        self.runtime[unsafe_offset=0].write_signal[Int32](self.key, value)
 
     # ── Operator overloading — read-modify-write ─────────────────────
 
@@ -264,7 +264,7 @@ struct MemoI32(Copyable, Writable):
         Returns:
             The cached Int32 value.
         """
-        return self.runtime[0].memo_read_i32(self.id)
+        return self.runtime[unsafe_offset=0].memo_read_i32(self.id)
 
     def peek(self) -> Int32:
         """Read the memo's cached value WITHOUT subscribing.
@@ -275,8 +275,8 @@ struct MemoI32(Copyable, Writable):
         # memo_read_i32 does context tracking; we need to read without it.
         # The MemoStore stores the value in its output signal (output_key),
         # which we can peek directly.
-        return self.runtime[0].peek_signal[Int32](
-            self.runtime[0].memos.output_key(self.id)
+        return self.runtime[unsafe_offset=0].peek_signal[Int32](
+            self.runtime[unsafe_offset=0].memos.output_key(self.id)
         )
 
     # ── Dirty / Recompute lifecycle ──────────────────────────────────
@@ -289,7 +289,7 @@ struct MemoI32(Copyable, Writable):
         Returns:
             True if the memo should be recomputed before reading.
         """
-        return self.runtime[0].memo_is_dirty(self.id)
+        return self.runtime[unsafe_offset=0].memo_is_dirty(self.id)
 
     def begin_compute(self):
         """Begin memo recomputation.
@@ -298,7 +298,7 @@ struct MemoI32(Copyable, Writable):
         read during computation will be tracked as dependencies.
         Must be paired with end_compute().
         """
-        self.runtime[0].memo_begin_compute(self.id)
+        self.runtime[unsafe_offset=0].memo_begin_compute(self.id)
 
     def end_compute(self, value: Int32):
         """End memo recomputation and cache the result.
@@ -309,7 +309,7 @@ struct MemoI32(Copyable, Writable):
         Args:
             value: The newly computed Int32 value to cache.
         """
-        self.runtime[0].memo_end_compute_i32(self.id, value)
+        self.runtime[unsafe_offset=0].memo_end_compute_i32(self.id, value)
 
     def recompute_from(self, value: Int32):
         """Convenience: begin_compute + end_compute in one call.
@@ -410,7 +410,7 @@ struct EffectHandle(Copyable):
         Returns:
             True if the effect should be executed.
         """
-        return self.runtime[0].effect_is_pending(self.id)
+        return self.runtime[unsafe_offset=0].effect_is_pending(self.id)
 
     def begin_run(self):
         """Begin effect execution.
@@ -419,7 +419,7 @@ struct EffectHandle(Copyable):
         read during execution will be tracked as dependencies.
         Must be paired with end_run().
         """
-        self.runtime[0].effect_begin_run(self.id)
+        self.runtime[unsafe_offset=0].effect_begin_run(self.id)
 
     def end_run(self):
         """End effect execution.
@@ -427,7 +427,7 @@ struct EffectHandle(Copyable):
         Clears the pending flag and restores the previous reactive
         context.
         """
-        self.runtime[0].effect_end_run(self.id)
+        self.runtime[unsafe_offset=0].effect_end_run(self.id)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -491,7 +491,7 @@ struct SignalBool(Copyable, Writable):
         Returns:
             True if the stored Int32 value is non-zero, False otherwise.
         """
-        return self.runtime[0].peek_signal[Int32](self.key) != 0
+        return self.runtime[unsafe_offset=0].peek_signal[Int32](self.key) != 0
 
     def read(self) -> Bool:
         """Read the signal value as Bool AND subscribe the current context.
@@ -512,7 +512,7 @@ struct SignalBool(Copyable, Writable):
         Returns:
             The raw Int32 value (0 or 1).
         """
-        return self.runtime[0].peek_signal[Int32](self.key)
+        return self.runtime[unsafe_offset=0].peek_signal[Int32](self.key)
 
     # ── Write ────────────────────────────────────────────────────────
 
@@ -534,11 +534,11 @@ struct SignalBool(Copyable, Writable):
 
         Reads the current value and writes its logical inverse.
         """
-        var current = self.runtime[0].peek_signal[Int32](self.key)
+        var current = self.runtime[unsafe_offset=0].peek_signal[Int32](self.key)
         if current == 0:
-            self.runtime[0].write_signal[Int32](self.key, 1)
+            self.runtime[unsafe_offset=0].write_signal[Int32](self.key, 1)
         else:
-            self.runtime[0].write_signal[Int32](self.key, 0)
+            self.runtime[unsafe_offset=0].write_signal[Int32](self.key, 0)
 
     # ── Queries ──────────────────────────────────────────────────────
 
@@ -639,7 +639,7 @@ struct SignalString(Copyable, Writable):
         Returns:
             A copy of the current String value.
         """
-        return self.runtime[0].peek_signal_string(self.string_key)
+        return self.runtime[unsafe_offset=0].peek_signal_string(self.string_key)
 
     def peek(self) -> String:
         """Alias for get() — read without subscribing.
@@ -659,7 +659,7 @@ struct SignalString(Copyable, Writable):
         Returns:
             A copy of the current String value.
         """
-        return self.runtime[0].read_signal_string(
+        return self.runtime[unsafe_offset=0].read_signal_string(
             self.string_key, self.version_key
         )
 
@@ -674,7 +674,7 @@ struct SignalString(Copyable, Writable):
         Args:
             value: The new String value.
         """
-        self.runtime[0].write_signal_string(
+        self.runtime[unsafe_offset=0].write_signal_string(
             self.string_key, self.version_key, value
         )
 
@@ -686,7 +686,7 @@ struct SignalString(Copyable, Writable):
         Useful for staleness checks — if the version hasn't changed,
         the value hasn't changed.
         """
-        return self.runtime[0].signals.version(self.version_key)
+        return self.runtime[unsafe_offset=0].signals.version(self.version_key)
 
     def is_empty(self) -> Bool:
         """Check whether the string value is empty.
@@ -783,7 +783,7 @@ struct MemoBool(Copyable, Writable):
         Returns:
             The cached Bool value.
         """
-        return self.runtime[0].memo_read_bool(self.id)
+        return self.runtime[unsafe_offset=0].memo_read_bool(self.id)
 
     def peek(self) -> Bool:
         """Read the memo's cached value WITHOUT subscribing.
@@ -792,8 +792,8 @@ struct MemoBool(Copyable, Writable):
             The cached Bool value.
         """
         return (
-            self.runtime[0].peek_signal[Int32](
-                self.runtime[0].memos.output_key(self.id)
+            self.runtime[unsafe_offset=0].peek_signal[Int32](
+                self.runtime[unsafe_offset=0].memos.output_key(self.id)
             )
             != 0
         )
@@ -808,7 +808,7 @@ struct MemoBool(Copyable, Writable):
         Returns:
             True if the memo should be recomputed before reading.
         """
-        return self.runtime[0].memo_is_dirty(self.id)
+        return self.runtime[unsafe_offset=0].memo_is_dirty(self.id)
 
     def begin_compute(self):
         """Begin memo recomputation.
@@ -817,7 +817,7 @@ struct MemoBool(Copyable, Writable):
         read during computation will be tracked as dependencies.
         Must be paired with end_compute().
         """
-        self.runtime[0].memo_begin_compute(self.id)
+        self.runtime[unsafe_offset=0].memo_begin_compute(self.id)
 
     def end_compute(self, value: Bool):
         """End memo recomputation and cache the result.
@@ -828,7 +828,7 @@ struct MemoBool(Copyable, Writable):
         Args:
             value: The newly computed Bool value to cache.
         """
-        self.runtime[0].memo_end_compute_bool(self.id, value)
+        self.runtime[unsafe_offset=0].memo_end_compute_bool(self.id, value)
 
     def recompute_from(self, value: Bool):
         """Convenience: begin_compute + end_compute in one call.
@@ -944,7 +944,7 @@ struct MemoString(Copyable, Writable):
         Returns:
             A copy of the cached String value.
         """
-        return self.runtime[0].memo_peek_string(self.id)
+        return self.runtime[unsafe_offset=0].memo_peek_string(self.id)
 
     def get(self) -> String:
         """Alias for read() — read with context tracking.
@@ -966,7 +966,7 @@ struct MemoString(Copyable, Writable):
         Returns:
             True if the memo should be recomputed before reading.
         """
-        return self.runtime[0].memo_is_dirty(self.id)
+        return self.runtime[unsafe_offset=0].memo_is_dirty(self.id)
 
     def begin_compute(self):
         """Begin memo recomputation.
@@ -975,7 +975,7 @@ struct MemoString(Copyable, Writable):
         read during computation will be tracked as dependencies.
         Must be paired with end_compute().
         """
-        self.runtime[0].memo_begin_compute(self.id)
+        self.runtime[unsafe_offset=0].memo_begin_compute(self.id)
 
     def end_compute(self, value: String):
         """End memo recomputation and cache the result.
@@ -986,7 +986,7 @@ struct MemoString(Copyable, Writable):
         Args:
             value: The newly computed String value to cache.
         """
-        self.runtime[0].memo_end_compute_string(self.id, value)
+        self.runtime[unsafe_offset=0].memo_end_compute_string(self.id, value)
 
     def recompute_from(self, value: String):
         """Convenience: begin_compute + end_compute in one call.

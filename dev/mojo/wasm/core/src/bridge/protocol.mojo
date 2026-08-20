@@ -87,21 +87,21 @@ struct MutationWriter(Movable):
 
     @always_inline
     def _write_u8(mut self, val: UInt8):
-        self.buf[self.offset] = val
+        self.buf[unsafe_offset=self.offset] = val
         self.offset += 1
 
     @always_inline
     def _write_u16_le(mut self, val: UInt16):
-        self.buf[self.offset] = UInt8(val & 0xFF)
-        self.buf[self.offset + 1] = UInt8((val >> 8) & 0xFF)
+        self.buf[unsafe_offset=self.offset] = UInt8(val & 0xFF)
+        self.buf[unsafe_offset=self.offset + 1] = UInt8((val >> 8) & 0xFF)
         self.offset += 2
 
     @always_inline
     def _write_u32_le(mut self, val: UInt32):
-        self.buf[self.offset] = UInt8(val & 0xFF)
-        self.buf[self.offset + 1] = UInt8((val >> 8) & 0xFF)
-        self.buf[self.offset + 2] = UInt8((val >> 16) & 0xFF)
-        self.buf[self.offset + 3] = UInt8((val >> 24) & 0xFF)
+        self.buf[unsafe_offset=self.offset] = UInt8(val & 0xFF)
+        self.buf[unsafe_offset=self.offset + 1] = UInt8((val >> 8) & 0xFF)
+        self.buf[unsafe_offset=self.offset + 2] = UInt8((val >> 16) & 0xFF)
+        self.buf[unsafe_offset=self.offset + 3] = UInt8((val >> 24) & 0xFF)
         self.offset += 4
 
     def _write_str(mut self, text: String):
@@ -110,7 +110,7 @@ struct MutationWriter(Movable):
         self._write_u32_le(UInt32(text_len))
         var ptr = text.unsafe_ptr()
         for i in range(text_len):
-            self.buf[self.offset + i] = ptr[i]
+            self.buf[unsafe_offset=self.offset + i] = ptr[unsafe_offset=i]
         self.offset += text_len
 
     def _write_short_str(mut self, text: String):
@@ -120,7 +120,7 @@ struct MutationWriter(Movable):
         self._write_u16_le(UInt16(text_len))
         var ptr = text.unsafe_ptr()
         for i in range(text_len):
-            self.buf[self.offset + i] = ptr[i]
+            self.buf[unsafe_offset=self.offset + i] = ptr[unsafe_offset=i]
         self.offset += text_len
 
     def _write_path[
@@ -129,7 +129,7 @@ struct MutationWriter(Movable):
         """Write a u8-length-prefixed byte path (template traversal indices)."""
         self._write_u8(UInt8(path_len))
         for i in range(path_len):
-            self.buf[self.offset] = path_ptr[i]
+            self.buf[unsafe_offset=self.offset] = path_ptr[unsafe_offset=i]
             self.offset += 1
 
     # ── Mutation operations ──────────────────────────────────────────────
@@ -349,22 +349,22 @@ struct MutationWriter(Movable):
         # Nodes
         for i in range(tmpl.node_count()):
             var node_ptr = tmpl.get_node_ptr(i)
-            var kind = node_ptr[0].kind
+            var kind = node_ptr[unsafe_offset=0].kind
             self._write_u8(kind)
             if kind == TNODE_ELEMENT:
-                self._write_u8(node_ptr[0].html_tag)
-                var cc = node_ptr[0].child_count()
+                self._write_u8(node_ptr[unsafe_offset=0].html_tag)
+                var cc = node_ptr[unsafe_offset=0].child_count()
                 self._write_u16_le(UInt16(cc))
                 for c in range(cc):
-                    self._write_u16_le(UInt16(node_ptr[0].child_at(c)))
-                self._write_u16_le(UInt16(node_ptr[0].first_attr))
-                self._write_u16_le(UInt16(node_ptr[0].num_attrs))
+                    self._write_u16_le(UInt16(node_ptr[unsafe_offset=0].child_at(c)))
+                self._write_u16_le(UInt16(node_ptr[unsafe_offset=0].first_attr))
+                self._write_u16_le(UInt16(node_ptr[unsafe_offset=0].num_attrs))
             elif kind == TNODE_TEXT:
-                self._write_str(node_ptr[0].text)
+                self._write_str(node_ptr[unsafe_offset=0].text)
             elif kind == TNODE_DYNAMIC:
-                self._write_u32_le(node_ptr[0].dynamic_index)
+                self._write_u32_le(node_ptr[unsafe_offset=0].dynamic_index)
             elif kind == TNODE_DYNAMIC_TEXT:
-                self._write_u32_le(node_ptr[0].dynamic_index)
+                self._write_u32_le(node_ptr[unsafe_offset=0].dynamic_index)
 
         # Attributes
         for i in range(tmpl.attr_total_count()):

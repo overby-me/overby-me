@@ -241,7 +241,7 @@ def flush_conditional(
         var num_roots = create_eng.create_node(new_vnode_idx)
 
         if slot.anchor_id != 0 and num_roots > 0:
-            writer_ptr[0].replace_with(slot.anchor_id, num_roots)
+            writer_ptr[unsafe_offset=0].replace_with(slot.anchor_id, num_roots)
         result.mounted = True
 
     else:
@@ -291,22 +291,22 @@ def flush_conditional_empty(
 
     # ── Transition: branch → empty ────────────────────────────────────
     var old_vnode_idx = UInt32(slot.current_vnode)
-    var old_ptr = store_ptr[0].get_ptr(old_vnode_idx)
+    var old_ptr = store_ptr[unsafe_offset=0].get_ptr(old_vnode_idx)
 
     # Find the first root ElementId of the old VNode
     var first_old_root_id: UInt32 = 0
-    if old_ptr[0].root_id_count() > 0:
-        first_old_root_id = old_ptr[0].get_root_id(0)
-    elif old_ptr[0].element_id != 0:
-        first_old_root_id = old_ptr[0].element_id
+    if old_ptr[unsafe_offset=0].root_id_count() > 0:
+        first_old_root_id = old_ptr[unsafe_offset=0].get_root_id(0)
+    elif old_ptr[unsafe_offset=0].element_id != 0:
+        first_old_root_id = old_ptr[unsafe_offset=0].element_id
 
     # Create a new anchor placeholder
-    var new_anchor = eid_ptr[0].alloc()
-    writer_ptr[0].create_placeholder(new_anchor.as_u32())
+    var new_anchor = eid_ptr[unsafe_offset=0].alloc()
+    writer_ptr[unsafe_offset=0].create_placeholder(new_anchor.as_u32())
 
     # Insert the placeholder before the first old root
     if first_old_root_id != 0:
-        writer_ptr[0].insert_before(first_old_root_id, 1)
+        writer_ptr[unsafe_offset=0].insert_before(first_old_root_id, 1)
 
     # Remove all old VNode roots
     var diff_eng = DiffEngine(writer_ptr, eid_ptr, rt_ptr, store_ptr)
@@ -357,10 +357,10 @@ def flush_fragment(
     """
     var old_frag_idx = UInt32(slot.current_frag)
 
-    var old_frag_ptr = store_ptr[0].get_ptr(old_frag_idx)
-    var new_frag_ptr = store_ptr[0].get_ptr(new_frag_idx)
-    var old_count = old_frag_ptr[0].fragment_child_count()
-    var new_count = new_frag_ptr[0].fragment_child_count()
+    var old_frag_ptr = store_ptr[unsafe_offset=0].get_ptr(old_frag_idx)
+    var new_frag_ptr = store_ptr[unsafe_offset=0].get_ptr(new_frag_idx)
+    var old_count = old_frag_ptr[unsafe_offset=0].fragment_child_count()
+    var new_count = new_frag_ptr[unsafe_offset=0].fragment_child_count()
 
     if not slot.mounted and new_count > 0:
         # ── Transition: empty → populated ─────────────────────────────
@@ -369,12 +369,12 @@ def flush_fragment(
         var total_roots: UInt32 = 0
         for i in range(new_count):
             var child_idx = (
-                store_ptr[0].get_ptr(new_frag_idx)[0].get_fragment_child(i)
+                store_ptr[unsafe_offset=0].get_ptr(new_frag_idx)[unsafe_offset=0].get_fragment_child(i)
             )
             total_roots += create_eng.create_node(child_idx)
 
         if slot.anchor_id != 0 and total_roots > 0:
-            writer_ptr[0].replace_with(slot.anchor_id, total_roots)
+            writer_ptr[unsafe_offset=0].replace_with(slot.anchor_id, total_roots)
         slot.mounted = True
 
     elif slot.mounted and new_count == 0:
@@ -383,27 +383,27 @@ def flush_fragment(
         var first_old_root_id: UInt32 = 0
         if old_count > 0:
             var first_child = (
-                store_ptr[0].get_ptr(old_frag_idx)[0].get_fragment_child(0)
+                store_ptr[unsafe_offset=0].get_ptr(old_frag_idx)[unsafe_offset=0].get_fragment_child(0)
             )
-            var fc_ptr = store_ptr[0].get_ptr(first_child)
-            if fc_ptr[0].root_id_count() > 0:
-                first_old_root_id = fc_ptr[0].get_root_id(0)
-            elif fc_ptr[0].element_id != 0:
-                first_old_root_id = fc_ptr[0].element_id
+            var fc_ptr = store_ptr[unsafe_offset=0].get_ptr(first_child)
+            if fc_ptr[unsafe_offset=0].root_id_count() > 0:
+                first_old_root_id = fc_ptr[unsafe_offset=0].get_root_id(0)
+            elif fc_ptr[unsafe_offset=0].element_id != 0:
+                first_old_root_id = fc_ptr[unsafe_offset=0].element_id
 
         # Create a new anchor placeholder
-        var new_anchor = eid_ptr[0].alloc()
-        writer_ptr[0].create_placeholder(new_anchor.as_u32())
+        var new_anchor = eid_ptr[unsafe_offset=0].alloc()
+        writer_ptr[unsafe_offset=0].create_placeholder(new_anchor.as_u32())
 
         # Insert the placeholder before the first old item
         if first_old_root_id != 0:
-            writer_ptr[0].insert_before(first_old_root_id, 1)
+            writer_ptr[unsafe_offset=0].insert_before(first_old_root_id, 1)
 
         # Remove all old items
         var diff_eng = DiffEngine(writer_ptr, eid_ptr, rt_ptr, store_ptr)
         for i in range(old_count):
             var old_child = (
-                store_ptr[0].get_ptr(old_frag_idx)[0].get_fragment_child(i)
+                store_ptr[unsafe_offset=0].get_ptr(old_frag_idx)[unsafe_offset=0].get_fragment_child(i)
             )
             diff_eng._remove_node(old_child)
 

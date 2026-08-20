@@ -3358,7 +3358,7 @@ struct VNodeBuilder(Movable):
             store: Pointer to the VNodeStore to push the VNode into.
         """
         self._store = store
-        self._vnode_idx = store[0].push(VNode.template_ref(template_id))
+        self._vnode_idx = store[unsafe_offset=0].push(VNode.template_ref(template_id))
 
     def __init__(
         out self,
@@ -3374,7 +3374,7 @@ struct VNodeBuilder(Movable):
             store: Pointer to the VNodeStore.
         """
         self._store = store
-        self._vnode_idx = store[0].push(
+        self._vnode_idx = store[unsafe_offset=0].push(
             VNode.template_ref_keyed(template_id, key)
         )
 
@@ -3390,7 +3390,7 @@ struct VNodeBuilder(Movable):
         Call in order corresponding to DYN_TEXT placeholders in the template
         (dyn_text(0), dyn_text(1), ...).
         """
-        self._store[0].push_dynamic_node(
+        self._store[unsafe_offset=0].push_dynamic_node(
             self._vnode_idx, DynamicNode.text_node(value)
         )
 
@@ -3399,7 +3399,7 @@ struct VNodeBuilder(Movable):
 
         Used for conditional content that is currently absent.
         """
-        self._store[0].push_dynamic_node(
+        self._store[unsafe_offset=0].push_dynamic_node(
             self._vnode_idx, DynamicNode.placeholder()
         )
 
@@ -3412,7 +3412,7 @@ struct VNodeBuilder(Movable):
             event_name: The event name (e.g. "click", "input").
             handler_id: The handler ID from the HandlerRegistry.
         """
-        self._store[0].push_dynamic_attr(
+        self._store[unsafe_offset=0].push_dynamic_attr(
             self._vnode_idx,
             DynamicAttr(
                 event_name, AttributeValue.event(handler_id), UInt32(0)
@@ -3443,7 +3443,7 @@ struct VNodeBuilder(Movable):
             name: The attribute name.
             value: The attribute text value.
         """
-        self._store[0].push_dynamic_attr(
+        self._store[unsafe_offset=0].push_dynamic_attr(
             self._vnode_idx,
             DynamicAttr(name, AttributeValue.text(value), UInt32(0)),
         )
@@ -3470,7 +3470,7 @@ struct VNodeBuilder(Movable):
             name: The attribute name.
             value: The integer value.
         """
-        self._store[0].push_dynamic_attr(
+        self._store[unsafe_offset=0].push_dynamic_attr(
             self._vnode_idx,
             DynamicAttr(name, AttributeValue.integer(value), UInt32(0)),
         )
@@ -3504,13 +3504,13 @@ struct VNodeBuilder(Movable):
         """
         if value:
             # Present: set attribute to empty string (HTML boolean convention)
-            self._store[0].push_dynamic_attr(
+            self._store[unsafe_offset=0].push_dynamic_attr(
                 self._vnode_idx,
                 DynamicAttr(name, AttributeValue.text(String("")), UInt32(0)),
             )
         else:
             # Absent: use AVAL_NONE → diff engine emits RemoveAttribute
-            self._store[0].push_dynamic_attr(
+            self._store[unsafe_offset=0].push_dynamic_attr(
                 self._vnode_idx,
                 DynamicAttr(name, AttributeValue.none(), UInt32(0)),
             )
@@ -3523,7 +3523,7 @@ struct VNodeBuilder(Movable):
         Args:
             name: The attribute name to remove.
         """
-        self._store[0].push_dynamic_attr(
+        self._store[unsafe_offset=0].push_dynamic_attr(
             self._vnode_idx,
             DynamicAttr(name, AttributeValue.none(), UInt32(0)),
         )

@@ -25,7 +25,8 @@
 #   3. Increment: input += 1 → scope dirty + memo dirty
 #   4. Flush: consume_dirty → recompute memo → run effect → render → diff
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import (
@@ -128,7 +129,7 @@ struct EffectMemoApp(Movable):
 
 
 def _em_init() -> Pointer[EffectMemoApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[EffectMemoApp](1)
+    var app_ptr = unsafe_alloc[EffectMemoApp](1)
     app_ptr.unsafe_write(EffectMemoApp())
     return app_ptr
 
@@ -136,9 +137,9 @@ def _em_init() -> Pointer[EffectMemoApp, MutUntrackedOrigin]:
 def _em_destroy(
     app_ptr: Pointer[EffectMemoApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _em_rebuild(

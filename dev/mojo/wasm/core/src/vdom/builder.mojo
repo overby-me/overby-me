@@ -23,7 +23,8 @@
 # The builder can also be used from WASM exports, where it is heap-allocated
 # and manipulated via pointer handles (Int64).
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from .template import (
     Template,
     TemplateNode,
@@ -305,7 +306,7 @@ def create_builder(
     name: String,
 ) -> Pointer[TemplateBuilder, MutUntrackedOrigin]:
     """Allocate a TemplateBuilder on the heap and return a pointer."""
-    var ptr = alloc[TemplateBuilder](1)
+    var ptr = unsafe_alloc[TemplateBuilder](1)
     ptr.unsafe_write(TemplateBuilder(name))
     return ptr
 
@@ -313,4 +314,4 @@ def create_builder(
 def destroy_builder(ptr: Pointer[TemplateBuilder, MutUntrackedOrigin]):
     """Destroy and free a heap-allocated TemplateBuilder."""
     ptr.unsafe_deinit_pointee()
-    ptr.free()
+    ptr.unsafe_free()

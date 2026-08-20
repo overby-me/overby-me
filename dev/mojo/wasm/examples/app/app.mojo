@@ -52,7 +52,8 @@
 #         Todo {},
 #     }
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import (
     ComponentContext,
@@ -329,7 +330,7 @@ struct MultiViewApp(Movable):
 
 def multi_view_app_init() -> Pointer[MultiViewApp, MutUntrackedOrigin]:
     """Initialize the multi-view app.  Returns a pointer to the app state."""
-    var app_ptr = alloc[MultiViewApp](1)
+    var app_ptr = unsafe_alloc[MultiViewApp](1)
     app_ptr.unsafe_write(MultiViewApp())
     return app_ptr
 
@@ -338,9 +339,9 @@ def multi_view_app_destroy(
     app_ptr: Pointer[MultiViewApp, MutUntrackedOrigin],
 ):
     """Destroy the multi-view app and free all resources."""
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def multi_view_app_rebuild(
@@ -376,14 +377,14 @@ def multi_view_app_rebuild(
         app.ctx.shell.store,
     )
     var num_roots = engine.create_node(vnode_idx)
-    writer_ptr[0].append_children(0, num_roots)
+    writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
     # 4. Extract the anchor ElementId for the router's ConditionalSlot
     #    dyn_node[0] is the routed content placeholder
     var anchor_id: UInt32 = 0
-    var app_vnode_ptr = app.ctx.store_ptr()[0].get_ptr(vnode_idx)
-    if app_vnode_ptr[0].dyn_node_id_count() > 0:
-        anchor_id = app_vnode_ptr[0].get_dyn_node_id(0)
+    var app_vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(vnode_idx)
+    if app_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 0:
+        anchor_id = app_vnode_ptr[unsafe_offset=0].get_dyn_node_id(0)
     app.router.init_slot(anchor_id)
 
     # 5. Build and flush the initial route's view (still before finalize)
@@ -395,8 +396,8 @@ def multi_view_app_rebuild(
     _ = app.router.consume_dirty()
 
     # 6. Finalize — one End sentinel for the entire mount + initial view
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)
 
 
 def multi_view_app_handle_event(

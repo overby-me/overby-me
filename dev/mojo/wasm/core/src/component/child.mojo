@@ -352,7 +352,7 @@ struct ChildRenderBuilder(Movable):
                         self._auto_bindings[i].handler_id,
                     )
                 elif self._auto_bindings[i].is_value():
-                    var value = self._runtime[0].peek_signal_string(
+                    var value = self._runtime[unsafe_offset=0].peek_signal_string(
                         self._auto_bindings[i].string_key
                     )
                     self._vb.add_dyn_text_attr(
@@ -659,5 +659,5 @@ struct ChildComponent(Copyable, Movable):
         Args:
             runtime: The Runtime pointer (shared with parent).
         """
-        runtime[0].handlers.remove_for_scope(self.scope_id)
-        runtime[0].destroy_scope(self.scope_id)
+        runtime[unsafe_offset=0].handlers.remove_for_scope(self.scope_id)
+        runtime[unsafe_offset=0].destroy_scope(self.scope_id)

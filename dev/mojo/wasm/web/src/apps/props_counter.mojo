@@ -7,7 +7,8 @@
 #   - Count signal shared from parent to child via context (props)
 #   - Child's show_hex signal owned by child scope
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -103,7 +104,7 @@ struct PropsCounterApp(Movable):
         )
         # Pre-create the show_hex signal so it can be referenced in
         # the child's view tree (onclick_toggle needs the key).
-        var show_hex_key = self.ctx.shell.runtime[0].create_signal[Int32](
+        var show_hex_key = self.ctx.shell.runtime[unsafe_offset=0].create_signal[Int32](
             Int32(0)
         )
         var show_hex_handle = SignalBool(show_hex_key, self.ctx.shell.runtime)
@@ -120,7 +121,7 @@ struct PropsCounterApp(Movable):
         )
         # Subscribe the show_hex signal to the child scope so writes
         # mark the child dirty (not the parent).
-        self.ctx.shell.runtime[0].signals.subscribe(
+        self.ctx.shell.runtime[unsafe_offset=0].signals.subscribe(
             show_hex_key, child_ctx.scope_id
         )
         var prop_count = child_ctx.consume_signal_i32(_PC_PROP_COUNT)
@@ -139,7 +140,7 @@ struct PropsCounterApp(Movable):
 
 
 def _pc_init() -> Pointer[PropsCounterApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[PropsCounterApp](1)
+    var app_ptr = unsafe_alloc[PropsCounterApp](1)
     app_ptr.unsafe_write(PropsCounterApp())
     return app_ptr
 
@@ -147,10 +148,10 @@ def _pc_init() -> Pointer[PropsCounterApp, MutUntrackedOrigin]:
 def _pc_destroy(
     app_ptr: Pointer[PropsCounterApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].display.child_ctx)
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].display.child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _pc_rebuild(
@@ -175,13 +176,13 @@ def _pc_rebuild(
     var num_roots = engine.create_node(parent_idx)
 
     # 4. Append to root element
-    writer_ptr[0].append_children(0, num_roots)
+    writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
     # 5. Extract anchor for child slot (dyn_node[0])
     var anchor_id: UInt32 = 0
-    var vnode_ptr = app.ctx.store_ptr()[0].get_ptr(parent_idx)
-    if vnode_ptr[0].dyn_node_id_count() > 0:
-        anchor_id = vnode_ptr[0].get_dyn_node_id(0)
+    var vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(parent_idx)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 0:
+        anchor_id = vnode_ptr[unsafe_offset=0].get_dyn_node_id(0)
     app.display.child_ctx.init_slot(anchor_id)
 
     # 6. Build and flush child (initial render)
@@ -189,8 +190,8 @@ def _pc_rebuild(
     app.display.child_ctx.flush(writer_ptr, child_idx)
 
     # 7. Finalize
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)
 
 
 def _pc_handle_event(

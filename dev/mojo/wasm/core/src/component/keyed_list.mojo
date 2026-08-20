@@ -304,12 +304,12 @@ struct ItemBuilder(Movable):
             data: App-defined data (e.g. item ID for toggle/remove).
         """
         # 1. Register the custom handler in the Runtime
-        var handler_id = self._runtime[0].register_handler(
+        var handler_id = self._runtime[unsafe_offset=0].register_handler(
             HandlerEntry.custom(self.scope_id, event_name)
         )
 
         # 2. Store the handler → action mapping
-        self._handler_map_ptr[0].append(
+        self._handler_map_ptr[unsafe_offset=0].append(
             _HandlerMapping(handler_id, action_tag, data)
         )
 

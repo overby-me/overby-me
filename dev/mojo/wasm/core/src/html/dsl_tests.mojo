@@ -123,7 +123,7 @@ from .tags import (
 from vdom.template import TNODE_ELEMENT, TNODE_TEXT
 from vdom.vnode import VNodeStore, VNODE_TEMPLATE_REF
 from vdom.builder import TemplateBuilder
-from std.memory import alloc
+from std.memory.alloc import unsafe_alloc
 from signals import create_runtime, destroy_runtime, Runtime
 from signals.handle import SignalString
 from events.registry import (
@@ -338,41 +338,41 @@ def test_counter_template() -> Int32:
     # Convert to Template
     var rt_ptr = create_runtime()
     var template = to_template(view, String("dsl-counter"))
-    var tmpl_id = rt_ptr[0].templates.register(template^)
+    var tmpl_id = rt_ptr[unsafe_offset=0].templates.register(template^)
 
     # Verify template properties
     # 1 root (the div)
-    if rt_ptr[0].templates.root_count(tmpl_id) != 1:
+    if rt_ptr[unsafe_offset=0].templates.root_count(tmpl_id) != 1:
         destroy_runtime(rt_ptr)
         return 0
 
     # 7 nodes total: div, span, dyn_text, btn1, text("+"), btn2, text("-")
-    if rt_ptr[0].templates.node_count(tmpl_id) != 7:
+    if rt_ptr[unsafe_offset=0].templates.node_count(tmpl_id) != 7:
         destroy_runtime(rt_ptr)
         return 0
 
     # Root node is an element (div)
-    if rt_ptr[0].templates.node_kind(tmpl_id, 0) != TNODE_ELEMENT:
+    if rt_ptr[unsafe_offset=0].templates.node_kind(tmpl_id, 0) != TNODE_ELEMENT:
         destroy_runtime(rt_ptr)
         return 0
 
     # Root node tag is TAG_DIV
-    if rt_ptr[0].templates.node_html_tag(tmpl_id, 0) != TAG_DIV:
+    if rt_ptr[unsafe_offset=0].templates.node_html_tag(tmpl_id, 0) != TAG_DIV:
         destroy_runtime(rt_ptr)
         return 0
 
     # Div has 3 children: span, button, button
-    if rt_ptr[0].templates.node_child_count(tmpl_id, 0) != 3:
+    if rt_ptr[unsafe_offset=0].templates.node_child_count(tmpl_id, 0) != 3:
         destroy_runtime(rt_ptr)
         return 0
 
     # 1 dynamic text slot
-    if rt_ptr[0].templates.dynamic_text_count(tmpl_id) != 1:
+    if rt_ptr[unsafe_offset=0].templates.dynamic_text_count(tmpl_id) != 1:
         destroy_runtime(rt_ptr)
         return 0
 
     # 2 dynamic attr slots
-    if rt_ptr[0].templates.dynamic_attr_count(tmpl_id) != 2:
+    if rt_ptr[unsafe_offset=0].templates.dynamic_attr_count(tmpl_id) != 2:
         destroy_runtime(rt_ptr)
         return 0
 
@@ -385,25 +385,25 @@ def test_to_template_simple() -> Int32:
     var view = el_div([text(String("hello"))])
     var rt_ptr = create_runtime()
     var template = to_template(view, String("dsl-simple"))
-    var tmpl_id = rt_ptr[0].templates.register(template^)
+    var tmpl_id = rt_ptr[unsafe_offset=0].templates.register(template^)
 
     # 2 nodes: div + text
-    if rt_ptr[0].templates.node_count(tmpl_id) != 2:
+    if rt_ptr[unsafe_offset=0].templates.node_count(tmpl_id) != 2:
         destroy_runtime(rt_ptr)
         return 0
 
     # 1 root
-    if rt_ptr[0].templates.root_count(tmpl_id) != 1:
+    if rt_ptr[unsafe_offset=0].templates.root_count(tmpl_id) != 1:
         destroy_runtime(rt_ptr)
         return 0
 
     # Root is element
-    if rt_ptr[0].templates.node_kind(tmpl_id, 0) != TNODE_ELEMENT:
+    if rt_ptr[unsafe_offset=0].templates.node_kind(tmpl_id, 0) != TNODE_ELEMENT:
         destroy_runtime(rt_ptr)
         return 0
 
     # Child is text
-    if rt_ptr[0].templates.node_kind(tmpl_id, 1) != TNODE_TEXT:
+    if rt_ptr[unsafe_offset=0].templates.node_kind(tmpl_id, 1) != TNODE_TEXT:
         destroy_runtime(rt_ptr)
         return 0
 
@@ -422,23 +422,23 @@ def test_to_template_attrs() -> Int32:
     )
     var rt_ptr = create_runtime()
     var template = to_template(view, String("dsl-attrs"))
-    var tmpl_id = rt_ptr[0].templates.register(template^)
+    var tmpl_id = rt_ptr[unsafe_offset=0].templates.register(template^)
 
     # 2 nodes: div + text("content")
-    if rt_ptr[0].templates.node_count(tmpl_id) != 2:
+    if rt_ptr[unsafe_offset=0].templates.node_count(tmpl_id) != 2:
         destroy_runtime(rt_ptr)
         return 0
 
     # 1 static attr + 1 dynamic attr = 2 total attrs
-    if rt_ptr[0].templates.attr_total_count(tmpl_id) != 2:
+    if rt_ptr[unsafe_offset=0].templates.attr_total_count(tmpl_id) != 2:
         destroy_runtime(rt_ptr)
         return 0
 
-    if rt_ptr[0].templates.static_attr_count(tmpl_id) != 1:
+    if rt_ptr[unsafe_offset=0].templates.static_attr_count(tmpl_id) != 1:
         destroy_runtime(rt_ptr)
         return 0
 
-    if rt_ptr[0].templates.dynamic_attr_count(tmpl_id) != 1:
+    if rt_ptr[unsafe_offset=0].templates.dynamic_attr_count(tmpl_id) != 1:
         destroy_runtime(rt_ptr)
         return 0
 
@@ -454,15 +454,15 @@ def test_to_template_multi_root() -> Int32:
     ]
     var rt_ptr = create_runtime()
     var template = to_template_multi(roots, String("dsl-multi"))
-    var tmpl_id = rt_ptr[0].templates.register(template^)
+    var tmpl_id = rt_ptr[unsafe_offset=0].templates.register(template^)
 
     # 2 roots
-    if rt_ptr[0].templates.root_count(tmpl_id) != 2:
+    if rt_ptr[unsafe_offset=0].templates.root_count(tmpl_id) != 2:
         destroy_runtime(rt_ptr)
         return 0
 
     # 4 nodes: h1 + "Title" + p + "Body"
-    if rt_ptr[0].templates.node_count(tmpl_id) != 4:
+    if rt_ptr[unsafe_offset=0].templates.node_count(tmpl_id) != 4:
         destroy_runtime(rt_ptr)
         return 0
 
@@ -473,13 +473,13 @@ def test_to_template_multi_root() -> Int32:
 def test_vnode_builder() -> Int32:
     """Test: VNodeBuilder creates a VNode with correct dynamic content."""
     var rt_ptr = create_runtime()
-    var store_ptr = alloc[VNodeStore](1)
+    var store_ptr = unsafe_alloc[VNodeStore](1)
     store_ptr.unsafe_write(VNodeStore())
 
     # Register a template (we just need an ID)
     var view = el_div([dyn_text(0), dyn_attr(0), dyn_attr(1)])
     var template = to_template(view, String("dsl-vb-test"))
-    var tmpl_id = rt_ptr[0].templates.register(template^)
+    var tmpl_id = rt_ptr[unsafe_offset=0].templates.register(template^)
 
     # Build VNode using VNodeBuilder
     var vb = VNodeBuilder(tmpl_id, store_ptr)
@@ -489,34 +489,34 @@ def test_vnode_builder() -> Int32:
     var idx = vb.index()
 
     # Verify VNode
-    if store_ptr[0].kind(idx) != VNODE_TEMPLATE_REF:
+    if store_ptr[unsafe_offset=0].kind(idx) != VNODE_TEMPLATE_REF:
         store_ptr.unsafe_deinit_pointee()
-        store_ptr.free()
+        store_ptr.unsafe_free()
         destroy_runtime(rt_ptr)
         return 0
 
-    if store_ptr[0].template_id(idx) != tmpl_id:
+    if store_ptr[unsafe_offset=0].template_id(idx) != tmpl_id:
         store_ptr.unsafe_deinit_pointee()
-        store_ptr.free()
+        store_ptr.unsafe_free()
         destroy_runtime(rt_ptr)
         return 0
 
     # 1 dynamic text node
-    if store_ptr[0].dynamic_node_count(idx) != 1:
+    if store_ptr[unsafe_offset=0].dynamic_node_count(idx) != 1:
         store_ptr.unsafe_deinit_pointee()
-        store_ptr.free()
+        store_ptr.unsafe_free()
         destroy_runtime(rt_ptr)
         return 0
 
     # 2 dynamic attrs (event + text attr)
-    if store_ptr[0].dynamic_attr_count(idx) != 2:
+    if store_ptr[unsafe_offset=0].dynamic_attr_count(idx) != 2:
         store_ptr.unsafe_deinit_pointee()
-        store_ptr.free()
+        store_ptr.unsafe_free()
         destroy_runtime(rt_ptr)
         return 0
 
     store_ptr.unsafe_deinit_pointee()
-    store_ptr.free()
+    store_ptr.unsafe_free()
     destroy_runtime(rt_ptr)
     return 1
 
@@ -524,24 +524,24 @@ def test_vnode_builder() -> Int32:
 def test_vnode_builder_keyed() -> Int32:
     """Test: keyed VNodeBuilder creates a keyed VNode."""
     var rt_ptr = create_runtime()
-    var store_ptr = alloc[VNodeStore](1)
+    var store_ptr = unsafe_alloc[VNodeStore](1)
     store_ptr.unsafe_write(VNodeStore())
 
     var view = el_div([text(String("item"))])
     var template = to_template(view, String("dsl-keyed"))
-    var tmpl_id = rt_ptr[0].templates.register(template^)
+    var tmpl_id = rt_ptr[unsafe_offset=0].templates.register(template^)
 
     var vb = VNodeBuilder(tmpl_id, String("item-42"), store_ptr)
     var idx = vb.index()
 
-    if not store_ptr[0].has_key(idx):
+    if not store_ptr[unsafe_offset=0].has_key(idx):
         store_ptr.unsafe_deinit_pointee()
-        store_ptr.free()
+        store_ptr.unsafe_free()
         destroy_runtime(rt_ptr)
         return 0
 
     store_ptr.unsafe_deinit_pointee()
-    store_ptr.free()
+    store_ptr.unsafe_free()
     destroy_runtime(rt_ptr)
     return 1
 
@@ -697,7 +697,7 @@ def test_template_equivalence() -> Int32:
     _ = b.push_text(String("-"), Int(btn2_idx))
     b.push_dynamic_attr(Int(btn2_idx), 1)
     var manual_tmpl = b.build()
-    var m_id = rt1[0].templates.register(manual_tmpl^)
+    var m_id = rt1[unsafe_offset=0].templates.register(manual_tmpl^)
 
     # ── Method 2: DSL builder ────────────────────────────────────────
     var rt2 = create_runtime()
@@ -709,24 +709,24 @@ def test_template_equivalence() -> Int32:
         ]
     )
     var dsl_tmpl = to_template(view, String("dsl-counter"))
-    var d_id = rt2[0].templates.register(dsl_tmpl^)
+    var d_id = rt2[unsafe_offset=0].templates.register(dsl_tmpl^)
 
     # ── Compare ──────────────────────────────────────────────────────
 
     # Node counts must match
-    if rt1[0].templates.node_count(m_id) != rt2[0].templates.node_count(d_id):
+    if rt1[unsafe_offset=0].templates.node_count(m_id) != rt2[unsafe_offset=0].templates.node_count(d_id):
         destroy_runtime(rt1)
         destroy_runtime(rt2)
         return 0
 
     # Root counts must match
-    if rt1[0].templates.root_count(m_id) != rt2[0].templates.root_count(d_id):
+    if rt1[unsafe_offset=0].templates.root_count(m_id) != rt2[unsafe_offset=0].templates.root_count(d_id):
         destroy_runtime(rt1)
         destroy_runtime(rt2)
         return 0
 
     # Dynamic text slot counts must match
-    if rt1[0].templates.dynamic_text_count(m_id) != rt2[
+    if rt1[unsafe_offset=0].templates.dynamic_text_count(m_id) != rt2[unsafe_offset=
         0
     ].templates.dynamic_text_count(d_id):
         destroy_runtime(rt1)
@@ -734,7 +734,7 @@ def test_template_equivalence() -> Int32:
         return 0
 
     # Dynamic attr slot counts must match
-    if rt1[0].templates.dynamic_attr_count(m_id) != rt2[
+    if rt1[unsafe_offset=0].templates.dynamic_attr_count(m_id) != rt2[unsafe_offset=
         0
     ].templates.dynamic_attr_count(d_id):
         destroy_runtime(rt1)
@@ -742,7 +742,7 @@ def test_template_equivalence() -> Int32:
         return 0
 
     # Attr total counts must match
-    if rt1[0].templates.attr_total_count(m_id) != rt2[
+    if rt1[unsafe_offset=0].templates.attr_total_count(m_id) != rt2[unsafe_offset=
         0
     ].templates.attr_total_count(d_id):
         destroy_runtime(rt1)
@@ -750,21 +750,21 @@ def test_template_equivalence() -> Int32:
         return 0
 
     # Compare each node kind and tag
-    var node_count = rt1[0].templates.node_count(m_id)
+    var node_count = rt1[unsafe_offset=0].templates.node_count(m_id)
     for i in range(node_count):
-        if rt1[0].templates.node_kind(m_id, i) != rt2[0].templates.node_kind(
+        if rt1[unsafe_offset=0].templates.node_kind(m_id, i) != rt2[unsafe_offset=0].templates.node_kind(
             d_id, i
         ):
             destroy_runtime(rt1)
             destroy_runtime(rt2)
             return 0
-        if rt1[0].templates.node_html_tag(m_id, i) != rt2[
+        if rt1[unsafe_offset=0].templates.node_html_tag(m_id, i) != rt2[unsafe_offset=
             0
         ].templates.node_html_tag(d_id, i):
             destroy_runtime(rt1)
             destroy_runtime(rt2)
             return 0
-        if rt1[0].templates.node_child_count(m_id, i) != rt2[
+        if rt1[unsafe_offset=0].templates.node_child_count(m_id, i) != rt2[unsafe_offset=
             0
         ].templates.node_child_count(d_id, i):
             destroy_runtime(rt1)
@@ -834,7 +834,7 @@ def test_onclick_custom_with_binding() -> Int32:
     """Test: onclick_custom + bind_value + oninput_set_string in sibling elements.
     """
     var rt_ptr = create_runtime()
-    var keys = rt_ptr[0].create_signal_string(String(""))
+    var keys = rt_ptr[unsafe_offset=0].create_signal_string(String(""))
     var sig = SignalString(keys[0], keys[1], rt_ptr)
 
     # Simulates the M20.5 TodoApp pattern:
@@ -882,7 +882,7 @@ def test_onclick_custom_with_binding() -> Int32:
 def test_oninput_set_string_node() -> Int32:
     """Test: oninput_set_string creates a NODE_EVENT with correct fields."""
     var rt_ptr = create_runtime()
-    var keys = rt_ptr[0].create_signal_string(String("hello"))
+    var keys = rt_ptr[unsafe_offset=0].create_signal_string(String("hello"))
     var sig = SignalString(keys[0], keys[1], rt_ptr)
 
     var n = oninput_set_string(sig)
@@ -923,7 +923,7 @@ def test_oninput_set_string_node() -> Int32:
 def test_onchange_set_string_node() -> Int32:
     """Test: onchange_set_string creates a NODE_EVENT with correct fields."""
     var rt_ptr = create_runtime()
-    var keys = rt_ptr[0].create_signal_string(String("world"))
+    var keys = rt_ptr[unsafe_offset=0].create_signal_string(String("world"))
     var sig = SignalString(keys[0], keys[1], rt_ptr)
 
     var n = onchange_set_string(sig)
@@ -956,7 +956,7 @@ def test_onchange_set_string_node() -> Int32:
 def test_oninput_in_element() -> Int32:
     """Test: oninput_set_string inside an element counts as a dynamic attr."""
     var rt_ptr = create_runtime()
-    var keys = rt_ptr[0].create_signal_string(String(""))
+    var keys = rt_ptr[unsafe_offset=0].create_signal_string(String(""))
     var sig = SignalString(keys[0], keys[1], rt_ptr)
 
     var n = el_input(
@@ -990,7 +990,7 @@ def test_oninput_in_element() -> Int32:
 def test_bind_value_node() -> Int32:
     """Test: bind_value creates a NODE_BIND_VALUE with attr_name='value'."""
     var rt_ptr = create_runtime()
-    var keys = rt_ptr[0].create_signal_string(String("initial"))
+    var keys = rt_ptr[unsafe_offset=0].create_signal_string(String("initial"))
     var sig = SignalString(keys[0], keys[1], rt_ptr)
 
     var n = bind_value(sig)
@@ -1031,7 +1031,7 @@ def test_bind_value_node() -> Int32:
 def test_bind_attr_node() -> Int32:
     """Test: bind_attr creates a NODE_BIND_VALUE with custom attr name."""
     var rt_ptr = create_runtime()
-    var keys = rt_ptr[0].create_signal_string(String("hint"))
+    var keys = rt_ptr[unsafe_offset=0].create_signal_string(String("hint"))
     var sig = SignalString(keys[0], keys[1], rt_ptr)
 
     var n = bind_attr(String("placeholder"), sig)
@@ -1060,7 +1060,7 @@ def test_bind_attr_node() -> Int32:
 def test_bind_value_in_element() -> Int32:
     """Test: bind_value inside an element counts as a dynamic attr."""
     var rt_ptr = create_runtime()
-    var keys = rt_ptr[0].create_signal_string(String("text"))
+    var keys = rt_ptr[unsafe_offset=0].create_signal_string(String("text"))
     var sig = SignalString(keys[0], keys[1], rt_ptr)
 
     var n = el_input(
@@ -1089,7 +1089,7 @@ def test_bind_value_in_element() -> Int32:
 def test_two_way_binding_element() -> Int32:
     """Test: bind_value + oninput_set_string together in an element."""
     var rt_ptr = create_runtime()
-    var keys = rt_ptr[0].create_signal_string(String(""))
+    var keys = rt_ptr[unsafe_offset=0].create_signal_string(String(""))
     var sig = SignalString(keys[0], keys[1], rt_ptr)
 
     var n = el_input(
@@ -1127,7 +1127,7 @@ def test_two_way_binding_element() -> Int32:
 def test_bind_value_to_template() -> Int32:
     """Test: bind_value converts to a TATTR_DYNAMIC in the template."""
     var rt_ptr = create_runtime()
-    var keys = rt_ptr[0].create_signal_string(String("test"))
+    var keys = rt_ptr[unsafe_offset=0].create_signal_string(String("test"))
     var sig = SignalString(keys[0], keys[1], rt_ptr)
 
     # Build a template with bind_value
@@ -1138,13 +1138,13 @@ def test_bind_value_to_template() -> Int32:
         bind_value(sig),
     )
     var template = to_template(view, String("bind-test"))
-    var tmpl_id = rt_ptr[0].templates.register(template^)
+    var tmpl_id = rt_ptr[unsafe_offset=0].templates.register(template^)
 
     # Template should have: input element with 1 static attr + 1 dynamic attr
-    if rt_ptr[0].templates.node_count(tmpl_id) != 1:
+    if rt_ptr[unsafe_offset=0].templates.node_count(tmpl_id) != 1:
         destroy_runtime(rt_ptr)
         return 0
-    if rt_ptr[0].templates.dynamic_attr_count(tmpl_id) != 1:
+    if rt_ptr[unsafe_offset=0].templates.dynamic_attr_count(tmpl_id) != 1:
         destroy_runtime(rt_ptr)
         return 0
 
@@ -1155,7 +1155,7 @@ def test_bind_value_to_template() -> Int32:
 def test_two_way_to_template() -> Int32:
     """Test: bind_value + oninput_set_string converts to 2 TATTR_DYNAMICs."""
     var rt_ptr = create_runtime()
-    var keys = rt_ptr[0].create_signal_string(String(""))
+    var keys = rt_ptr[unsafe_offset=0].create_signal_string(String(""))
     var sig = SignalString(keys[0], keys[1], rt_ptr)
 
     var view = el_input(
@@ -1164,13 +1164,13 @@ def test_two_way_to_template() -> Int32:
         oninput_set_string(sig),
     )
     var template = to_template(view, String("two-way-test"))
-    var tmpl_id = rt_ptr[0].templates.register(template^)
+    var tmpl_id = rt_ptr[unsafe_offset=0].templates.register(template^)
 
     # 1 node (input), 2 dynamic attrs (bind_value + event)
-    if rt_ptr[0].templates.node_count(tmpl_id) != 1:
+    if rt_ptr[unsafe_offset=0].templates.node_count(tmpl_id) != 1:
         destroy_runtime(rt_ptr)
         return 0
-    if rt_ptr[0].templates.dynamic_attr_count(tmpl_id) != 2:
+    if rt_ptr[unsafe_offset=0].templates.dynamic_attr_count(tmpl_id) != 2:
         destroy_runtime(rt_ptr)
         return 0
 
@@ -1231,7 +1231,7 @@ def test_onkeydown_enter_custom_with_binding() -> Int32:
     """Test: onkeydown_enter_custom + bind_value + oninput + onclick_custom (Phase 22 TodoApp pattern).
     """
     var rt_ptr = create_runtime()
-    var keys = rt_ptr[0].create_signal_string(String(""))
+    var keys = rt_ptr[unsafe_offset=0].create_signal_string(String(""))
     var sig = SignalString(keys[0], keys[1], rt_ptr)
 
     # Simulates the Phase 22 TodoApp pattern:

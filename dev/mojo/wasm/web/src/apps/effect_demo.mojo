@@ -21,7 +21,8 @@
 # and parity.  The drain-and-run pattern ensures all derived state is
 # settled before render().
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext
 from signals.handle import SignalI32 as _SignalI32, SignalString, EffectHandle
@@ -110,7 +111,7 @@ struct EffectDemoApp(Movable):
 
 
 def _ed_init() -> Pointer[EffectDemoApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[EffectDemoApp](1)
+    var app_ptr = unsafe_alloc[EffectDemoApp](1)
     app_ptr.unsafe_write(EffectDemoApp())
     return app_ptr
 
@@ -118,9 +119,9 @@ def _ed_init() -> Pointer[EffectDemoApp, MutUntrackedOrigin]:
 def _ed_destroy(
     app_ptr: Pointer[EffectDemoApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _ed_rebuild(

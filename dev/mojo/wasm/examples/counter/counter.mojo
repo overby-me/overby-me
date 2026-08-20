@@ -77,7 +77,8 @@
 #     p > dynamic_text[0]   ← "Count is even" / "Count is odd"
 #     p > dynamic_text[1]   ← "Doubled: N"
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext, ConditionalSlot
 from signals import SignalI32, SignalBool
@@ -220,16 +221,16 @@ def counter_app_init() -> Pointer[CounterApp, MutUntrackedOrigin]:
     All setup happens in CounterApp.__init__() — this function just
     allocates the heap slot and moves the app into it.
     """
-    var app_ptr = alloc[CounterApp](1)
+    var app_ptr = unsafe_alloc[CounterApp](1)
     app_ptr.unsafe_write(CounterApp())
     return app_ptr
 
 
 def counter_app_destroy(app_ptr: Pointer[CounterApp, MutUntrackedOrigin]):
     """Destroy the counter app and free all resources."""
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def counter_app_rebuild(
@@ -254,9 +255,9 @@ def counter_app_rebuild(
     # dyn_node_ids[0] is the dyn_text node, dyn_node_ids[1] is the
     # conditional placeholder.
     var anchor_id: UInt32 = 0
-    var app_vnode_ptr = app.ctx.store_ptr()[0].get_ptr(vnode_idx)
-    if app_vnode_ptr[0].dyn_node_id_count() > 1:
-        anchor_id = app_vnode_ptr[0].get_dyn_node_id(1)
+    var app_vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(vnode_idx)
+    if app_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 1:
+        anchor_id = app_vnode_ptr[unsafe_offset=0].get_dyn_node_id(1)
     app.cond_slot = ConditionalSlot(anchor_id)
 
     return result

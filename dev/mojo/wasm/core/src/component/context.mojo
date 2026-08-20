@@ -403,7 +403,7 @@ struct RenderBuilder(Movable):
                         self._auto_bindings[i].handler_id,
                     )
                 elif self._auto_bindings[i].is_value():
-                    var value = self._runtime[0].peek_signal_string(
+                    var value = self._runtime[unsafe_offset=0].peek_signal_string(
                         self._auto_bindings[i].string_key
                     )
                     self._vb.add_dyn_text_attr(
@@ -618,9 +618,9 @@ struct ComponentContext(Movable):
         Returns:
             A SignalString handle with string semantics.
         """
-        var keys = self.shell.runtime[0].use_signal_string(initial)
+        var keys = self.shell.runtime[unsafe_offset=0].use_signal_string(initial)
         # Read the version signal during render to subscribe the scope
-        _ = self.shell.runtime[0].read_signal[Int32](keys[1])
+        _ = self.shell.runtime[unsafe_offset=0].read_signal[Int32](keys[1])
         return SignalString(keys[0], keys[1], self.shell.runtime)
 
     def create_signal_string(mut self, initial: String) -> SignalString:
@@ -635,7 +635,7 @@ struct ComponentContext(Movable):
         Returns:
             A SignalString handle.
         """
-        var keys = self.shell.runtime[0].create_signal_string(initial)
+        var keys = self.shell.runtime[unsafe_offset=0].create_signal_string(initial)
         return SignalString(keys[0], keys[1], self.shell.runtime)
 
     # ── Memo hooks ───────────────────────────────────────────────────
@@ -801,7 +801,7 @@ struct ComponentContext(Movable):
             The registered template ID for use with `vnode_builder_for()`.
         """
         var template = to_template(view, name)
-        return UInt32(self.shell.runtime[0].templates.register(template^))
+        return UInt32(self.shell.runtime[unsafe_offset=0].templates.register(template^))
 
     def setup_view(mut self, view: Node, name: String):
         """End setup and register a view in one call.
@@ -893,7 +893,7 @@ struct ComponentContext(Movable):
         # 2. Build and register template from processed tree
         var template = to_template(processed, name)
         self.template_id = UInt32(
-            self.shell.runtime[0].templates.register(template^)
+            self.shell.runtime[unsafe_offset=0].templates.register(template^)
         )
 
         # 3. Register handlers and store bindings
@@ -921,7 +921,7 @@ struct ComponentContext(Movable):
                 use_event = False
 
             if use_event:
-                var handler_id = self.shell.runtime[0].register_handler(
+                var handler_id = self.shell.runtime[unsafe_offset=0].register_handler(
                     HandlerEntry(
                         self.scope_id,
                         events[ev_idx].action,
@@ -1018,7 +1018,7 @@ struct ComponentContext(Movable):
         Returns:
             The handler ID for use in VNode event attributes.
         """
-        return self.shell.runtime[0].register_handler(
+        return self.shell.runtime[unsafe_offset=0].register_handler(
             HandlerEntry.signal_add(
                 self.scope_id, signal.key, delta, String("click")
             )
@@ -1036,7 +1036,7 @@ struct ComponentContext(Movable):
         Returns:
             The handler ID for use in VNode event attributes.
         """
-        return self.shell.runtime[0].register_handler(
+        return self.shell.runtime[unsafe_offset=0].register_handler(
             HandlerEntry.signal_sub(
                 self.scope_id, signal.key, delta, String("click")
             )
@@ -1182,7 +1182,7 @@ struct ComponentContext(Movable):
         Returns:
             The handler ID.
         """
-        return self.shell.runtime[0].register_handler(
+        return self.shell.runtime[unsafe_offset=0].register_handler(
             HandlerEntry.custom(self.scope_id, event_name)
         )
 
@@ -1195,7 +1195,7 @@ struct ComponentContext(Movable):
         so this is only needed for state changes that bypass the reactive
         system.
         """
-        self.shell.runtime[0].mark_scope_dirty(self.scope_id)
+        self.shell.runtime[unsafe_offset=0].mark_scope_dirty(self.scope_id)
 
     # ── VNode building ───────────────────────────────────────────────
 
@@ -1340,21 +1340,21 @@ struct ComponentContext(Movable):
         Call after run_memos() (and run_effects() if applicable) and
         before render() to skip unnecessary re-renders.
         """
-        self.shell.runtime[0].settle_scopes()
+        self.shell.runtime[unsafe_offset=0].settle_scopes()
 
     # ── Batch signal writes (Phase 38) ───────────────────────────────
 
     def begin_batch(mut self):
         """Enter batch mode for signal writes."""
-        self.shell.runtime[0].begin_batch()
+        self.shell.runtime[unsafe_offset=0].begin_batch()
 
     def end_batch(mut self):
         """Exit batch mode and propagate all deferred writes."""
-        self.shell.runtime[0].end_batch()
+        self.shell.runtime[unsafe_offset=0].end_batch()
 
     def is_batching(self) -> Bool:
         """Return True if currently inside a batch."""
-        return self.shell.runtime[0].is_batching()
+        return self.shell.runtime[unsafe_offset=0].is_batching()
 
     def diff(
         mut self,
@@ -1463,7 +1463,7 @@ struct ComponentContext(Movable):
         # 3. Build and register template
         var template = to_template(processed, name)
         var tmpl_id = UInt32(
-            self.shell.runtime[0].templates.register(template^)
+            self.shell.runtime[unsafe_offset=0].templates.register(template^)
         )
 
         # 4. Register handlers under the CHILD scope and store bindings
@@ -1485,7 +1485,7 @@ struct ComponentContext(Movable):
                 use_event = False
 
             if use_event:
-                var handler_id = self.shell.runtime[0].register_handler(
+                var handler_id = self.shell.runtime[unsafe_offset=0].register_handler(
                     HandlerEntry(
                         child_scope_id,
                         events[ev_idx].action,
@@ -1611,7 +1611,7 @@ struct ComponentContext(Movable):
         # 3. Build and register template
         var template = to_template(processed, name)
         var tmpl_id = UInt32(
-            self.shell.runtime[0].templates.register(template^)
+            self.shell.runtime[unsafe_offset=0].templates.register(template^)
         )
 
         # 4. Register handlers under the CHILD scope and store bindings
@@ -1633,7 +1633,7 @@ struct ComponentContext(Movable):
                 use_event = False
 
             if use_event:
-                var handler_id = self.shell.runtime[0].register_handler(
+                var handler_id = self.shell.runtime[unsafe_offset=0].register_handler(
                     HandlerEntry(
                         child_scope_id,
                         events[ev_idx].action,
@@ -1687,7 +1687,7 @@ struct ComponentContext(Movable):
             key: A unique UInt32 identifier for the context entry.
             value: The Int32 value to provide.
         """
-        self.shell.runtime[0].scopes.provide_context(self.scope_id, key, value)
+        self.shell.runtime[unsafe_offset=0].scopes.provide_context(self.scope_id, key, value)
 
     def consume_context(self, key: UInt32) -> Tuple[Bool, Int32]:
         """Look up a context value walking up the scope tree.
@@ -1701,7 +1701,7 @@ struct ComponentContext(Movable):
         Returns:
             A tuple of (found: Bool, value: Int32).
         """
-        return self.shell.runtime[0].scopes.consume_context(self.scope_id, key)
+        return self.shell.runtime[unsafe_offset=0].scopes.consume_context(self.scope_id, key)
 
     def has_context(self, key: UInt32) -> Bool:
         """Check whether a context value is reachable from the root scope.
@@ -1828,7 +1828,7 @@ struct ComponentContext(Movable):
             self.ctx.use_error_boundary()
             # ... use_signal, setup_view, etc. ...
         """
-        self.shell.runtime[0].scopes.set_error_boundary(self.scope_id, True)
+        self.shell.runtime[unsafe_offset=0].scopes.set_error_boundary(self.scope_id, True)
 
     def report_error(mut self, message: String) -> Int:
         """Report an error to the nearest error boundary.
@@ -1846,15 +1846,15 @@ struct ComponentContext(Movable):
         """
         # If this scope is itself a boundary, set the error directly
         # (propagate_error only checks ancestors, not self).
-        if self.shell.runtime[0].scopes.is_error_boundary(self.scope_id):
-            self.shell.runtime[0].scopes.set_error(self.scope_id, message)
-            self.shell.runtime[0].mark_scope_dirty(self.scope_id)
+        if self.shell.runtime[unsafe_offset=0].scopes.is_error_boundary(self.scope_id):
+            self.shell.runtime[unsafe_offset=0].scopes.set_error(self.scope_id, message)
+            self.shell.runtime[unsafe_offset=0].mark_scope_dirty(self.scope_id)
             return Int(self.scope_id)
-        var boundary_id = self.shell.runtime[0].scopes.propagate_error(
+        var boundary_id = self.shell.runtime[unsafe_offset=0].scopes.propagate_error(
             self.scope_id, message
         )
         if boundary_id != -1:
-            self.shell.runtime[0].mark_scope_dirty(UInt32(boundary_id))
+            self.shell.runtime[unsafe_offset=0].mark_scope_dirty(UInt32(boundary_id))
         return boundary_id
 
     def has_error(self) -> Bool:
@@ -1863,7 +1863,7 @@ struct ComponentContext(Movable):
         Returns:
             True if an error has been propagated to this boundary.
         """
-        return self.shell.runtime[0].scopes.has_error(self.scope_id)
+        return self.shell.runtime[unsafe_offset=0].scopes.has_error(self.scope_id)
 
     def error_message(self) -> String:
         """Get the error message captured by this boundary.
@@ -1871,7 +1871,7 @@ struct ComponentContext(Movable):
         Returns:
             The error message string, or empty if no error.
         """
-        return self.shell.runtime[0].scopes.get_error_message(self.scope_id)
+        return self.shell.runtime[unsafe_offset=0].scopes.get_error_message(self.scope_id)
 
     def clear_error(mut self):
         """Clear the error state on this boundary scope.
@@ -1880,8 +1880,8 @@ struct ComponentContext(Movable):
         instead of fallback UI.  Marks the scope dirty so the flush
         cycle processes the state change.
         """
-        self.shell.runtime[0].scopes.clear_error(self.scope_id)
-        self.shell.runtime[0].mark_scope_dirty(self.scope_id)
+        self.shell.runtime[unsafe_offset=0].scopes.clear_error(self.scope_id)
+        self.shell.runtime[unsafe_offset=0].mark_scope_dirty(self.scope_id)
 
     # ── Suspense ─────────────────────────────────────────────────────
 
@@ -1899,7 +1899,7 @@ struct ComponentContext(Movable):
             self.ctx.use_suspense_boundary()
             # ... use_signal, setup_view, etc. ...
         """
-        self.shell.runtime[0].scopes.set_suspense_boundary(self.scope_id, True)
+        self.shell.runtime[unsafe_offset=0].scopes.set_suspense_boundary(self.scope_id, True)
 
     def set_pending(mut self, pending: Bool):
         """Set the pending (loading) state on the root scope.
@@ -1912,14 +1912,14 @@ struct ComponentContext(Movable):
         Args:
             pending: True to enter pending state, False to resolve.
         """
-        self.shell.runtime[0].scopes.set_pending(self.scope_id, pending)
-        var boundary_id = self.shell.runtime[0].scopes.find_suspense_boundary(
+        self.shell.runtime[unsafe_offset=0].scopes.set_pending(self.scope_id, pending)
+        var boundary_id = self.shell.runtime[unsafe_offset=0].scopes.find_suspense_boundary(
             self.scope_id
         )
         if boundary_id != -1:
-            self.shell.runtime[0].mark_scope_dirty(UInt32(boundary_id))
-        elif self.shell.runtime[0].scopes.is_suspense_boundary(self.scope_id):
-            self.shell.runtime[0].mark_scope_dirty(self.scope_id)
+            self.shell.runtime[unsafe_offset=0].mark_scope_dirty(UInt32(boundary_id))
+        elif self.shell.runtime[unsafe_offset=0].scopes.is_suspense_boundary(self.scope_id):
+            self.shell.runtime[unsafe_offset=0].mark_scope_dirty(self.scope_id)
 
     def has_pending(self) -> Bool:
         """Check whether any descendant of this scope is pending.
@@ -1940,7 +1940,7 @@ struct ComponentContext(Movable):
         Returns:
             True if this scope is pending.
         """
-        return self.shell.runtime[0].scopes.is_pending(self.scope_id)
+        return self.shell.runtime[unsafe_offset=0].scopes.is_pending(self.scope_id)
 
     # ── Fragment lifecycle (for dynamic keyed lists) ─────────────────
 
@@ -2072,7 +2072,7 @@ struct ComponentContext(Movable):
         Returns:
             The VNode index of the empty fragment.
         """
-        return self.shell.store[0].push(VNode.fragment())
+        return self.shell.store[unsafe_offset=0].push(VNode.fragment())
 
     def push_fragment_child(self, frag_idx: UInt32, child_idx: UInt32):
         """Append a child VNode to an existing Fragment VNode.
@@ -2081,7 +2081,7 @@ struct ComponentContext(Movable):
             frag_idx: Index of the Fragment VNode.
             child_idx: Index of the child VNode to append.
         """
-        self.shell.store[0].push_fragment_child(frag_idx, child_idx)
+        self.shell.store[unsafe_offset=0].push_fragment_child(frag_idx, child_idx)
 
     # ── Accessors for WASM exports ───────────────────────────────────
 
@@ -2098,7 +2098,7 @@ struct ComponentContext(Movable):
 
         Useful for testing and introspection.
         """
-        return UInt32(self.shell.runtime[0].handler_count())
+        return UInt32(self.shell.runtime[unsafe_offset=0].handler_count())
 
     def view_events(self) -> List[EventBinding]:
         """Return a copy of the registered view event bindings.

@@ -91,7 +91,7 @@ struct TemplateRegistry(Movable):
         The pointer is valid until the next mutation of the registry.
         Precondition: `id` < `count()`.
         """
-        var ptr = self._templates.unsafe_ptr() + Int(id)
+        var ptr = self._templates.unsafe_ptr().unsafe_offset(Int(id))
         return Pointer[Template, MutUntrackedOrigin](
             unsafe_from_address=Int(ptr)
         )

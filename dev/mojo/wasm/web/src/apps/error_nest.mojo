@@ -25,7 +25,8 @@
 #   InnerFallbackChild:   p > dyn_text("Inner error: ...") + button("Inner Retry")
 #   OuterFallbackChild:   p > dyn_text("Outer error: ...") + button("Outer Retry")
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -257,7 +258,7 @@ struct ErrorNestApp(Movable):
 
 
 def _en_init() -> Pointer[ErrorNestApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[ErrorNestApp](1)
+    var app_ptr = unsafe_alloc[ErrorNestApp](1)
     app_ptr.unsafe_write(ErrorNestApp())
     return app_ptr
 
@@ -265,17 +266,17 @@ def _en_init() -> Pointer[ErrorNestApp, MutUntrackedOrigin]:
 def _en_destroy(
     app_ptr: Pointer[ErrorNestApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy_child_context(
-        app_ptr[0].outer_normal.inner_normal.child_ctx
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(
+        app_ptr[unsafe_offset=0].outer_normal.inner_normal.child_ctx
     )
-    app_ptr[0].ctx.destroy_child_context(
-        app_ptr[0].outer_normal.inner_fallback.child_ctx
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(
+        app_ptr[unsafe_offset=0].outer_normal.inner_fallback.child_ctx
     )
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].outer_normal.child_ctx)
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].outer_fallback.child_ctx)
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].outer_normal.child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].outer_fallback.child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _en_rebuild(
@@ -300,16 +301,16 @@ def _en_rebuild(
     var num_roots = engine.create_node(parent_idx)
 
     # 4. Append to root element
-    writer_ptr[0].append_children(0, num_roots)
+    writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
     # 5. Extract anchors for outer normal + outer fallback slots
-    var vnode_ptr = app.ctx.store_ptr()[0].get_ptr(parent_idx)
+    var vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(parent_idx)
     var outer_normal_anchor: UInt32 = 0
     var outer_fallback_anchor: UInt32 = 0
-    if vnode_ptr[0].dyn_node_id_count() > 0:
-        outer_normal_anchor = vnode_ptr[0].get_dyn_node_id(0)
-    if vnode_ptr[0].dyn_node_id_count() > 1:
-        outer_fallback_anchor = vnode_ptr[0].get_dyn_node_id(1)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 0:
+        outer_normal_anchor = vnode_ptr[unsafe_offset=0].get_dyn_node_id(0)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 1:
+        outer_fallback_anchor = vnode_ptr[unsafe_offset=0].get_dyn_node_id(1)
     app.outer_normal.child_ctx.init_slot(outer_normal_anchor)
     app.outer_fallback.child_ctx.init_slot(outer_fallback_anchor)
 
@@ -318,7 +319,7 @@ def _en_rebuild(
     app.outer_normal.child_ctx.flush(writer_ptr, outer_normal_idx)
 
     # 7. Extract anchors for inner normal + inner fallback slots
-    var on_vnode_ptr = app.outer_normal.child_ctx.store[0].get_ptr(
+    var on_vnode_ptr = app.outer_normal.child_ctx.store[unsafe_offset=0].get_ptr(
         outer_normal_idx
     )
     # dyn_node_ids[0] = text node (dyn_text[0] = "Status: OK")
@@ -326,10 +327,10 @@ def _en_rebuild(
     # dyn_node_ids[2] = placeholder (dyn_node[2] = inner fallback slot)
     var inner_normal_anchor: UInt32 = 0
     var inner_fallback_anchor: UInt32 = 0
-    if on_vnode_ptr[0].dyn_node_id_count() > 1:
-        inner_normal_anchor = on_vnode_ptr[0].get_dyn_node_id(1)
-    if on_vnode_ptr[0].dyn_node_id_count() > 2:
-        inner_fallback_anchor = on_vnode_ptr[0].get_dyn_node_id(2)
+    if on_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 1:
+        inner_normal_anchor = on_vnode_ptr[unsafe_offset=0].get_dyn_node_id(1)
+    if on_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 2:
+        inner_fallback_anchor = on_vnode_ptr[unsafe_offset=0].get_dyn_node_id(2)
     app.outer_normal.inner_normal.child_ctx.init_slot(inner_normal_anchor)
     app.outer_normal.inner_fallback.child_ctx.init_slot(inner_fallback_anchor)
 
@@ -340,8 +341,8 @@ def _en_rebuild(
     # Outer fallback starts hidden — do NOT flush it
 
     # 9. Finalize
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)
 
 
 def _en_handle_event(
@@ -427,14 +428,14 @@ def _en_flush(
         app.outer_normal.child_ctx.flush(writer_ptr, on_idx)
 
         # Re-extract inner anchors (outer_normal was recreated)
-        var on_vnode_ptr = app.outer_normal.child_ctx.store[0].get_ptr(on_idx)
+        var on_vnode_ptr = app.outer_normal.child_ctx.store[unsafe_offset=0].get_ptr(on_idx)
         # dyn_node_ids[0] = text node, [1] = inner normal, [2] = inner fallback
         var inner_normal_anchor: UInt32 = 0
         var inner_fallback_anchor: UInt32 = 0
-        if on_vnode_ptr[0].dyn_node_id_count() > 1:
-            inner_normal_anchor = on_vnode_ptr[0].get_dyn_node_id(1)
-        if on_vnode_ptr[0].dyn_node_id_count() > 2:
-            inner_fallback_anchor = on_vnode_ptr[0].get_dyn_node_id(2)
+        if on_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 1:
+            inner_normal_anchor = on_vnode_ptr[unsafe_offset=0].get_dyn_node_id(1)
+        if on_vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 2:
+            inner_fallback_anchor = on_vnode_ptr[unsafe_offset=0].get_dyn_node_id(2)
         app.outer_normal.inner_normal.child_ctx.init_slot(inner_normal_anchor)
         app.outer_normal.inner_fallback.child_ctx.init_slot(
             inner_fallback_anchor

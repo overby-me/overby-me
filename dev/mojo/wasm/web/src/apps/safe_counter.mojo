@@ -11,7 +11,8 @@
 #   flush hides fallback, shows normal child (re-creates from scratch).
 # Count signal persists across crash/recovery since it lives on the parent.
 
-from std.memory import Pointer, alloc
+from std.memory import Pointer
+from std.memory.alloc import unsafe_alloc
 from bridge import MutationWriter
 from component import ComponentContext, ChildComponentContext
 from mutations import CreateEngine as _CreateEngine
@@ -175,7 +176,7 @@ struct SafeCounterApp(Movable):
 
 
 def _sc_init() -> Pointer[SafeCounterApp, MutUntrackedOrigin]:
-    var app_ptr = alloc[SafeCounterApp](1)
+    var app_ptr = unsafe_alloc[SafeCounterApp](1)
     app_ptr.unsafe_write(SafeCounterApp())
     return app_ptr
 
@@ -183,11 +184,11 @@ def _sc_init() -> Pointer[SafeCounterApp, MutUntrackedOrigin]:
 def _sc_destroy(
     app_ptr: Pointer[SafeCounterApp, MutUntrackedOrigin],
 ):
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].normal.child_ctx)
-    app_ptr[0].ctx.destroy_child_context(app_ptr[0].fallback.child_ctx)
-    app_ptr[0].ctx.destroy()
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].normal.child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy_child_context(app_ptr[unsafe_offset=0].fallback.child_ctx)
+    app_ptr[unsafe_offset=0].ctx.destroy()
     app_ptr.unsafe_deinit_pointee()
-    app_ptr.free()
+    app_ptr.unsafe_free()
 
 
 def _sc_rebuild(
@@ -212,16 +213,16 @@ def _sc_rebuild(
     var num_roots = engine.create_node(parent_idx)
 
     # 4. Append to root element
-    writer_ptr[0].append_children(0, num_roots)
+    writer_ptr[unsafe_offset=0].append_children(0, num_roots)
 
     # 5. Extract anchors for child slots
-    var vnode_ptr = app.ctx.store_ptr()[0].get_ptr(parent_idx)
+    var vnode_ptr = app.ctx.store_ptr()[unsafe_offset=0].get_ptr(parent_idx)
     var normal_anchor: UInt32 = 0
     var fallback_anchor: UInt32 = 0
-    if vnode_ptr[0].dyn_node_id_count() > 0:
-        normal_anchor = vnode_ptr[0].get_dyn_node_id(0)
-    if vnode_ptr[0].dyn_node_id_count() > 1:
-        fallback_anchor = vnode_ptr[0].get_dyn_node_id(1)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 0:
+        normal_anchor = vnode_ptr[unsafe_offset=0].get_dyn_node_id(0)
+    if vnode_ptr[unsafe_offset=0].dyn_node_id_count() > 1:
+        fallback_anchor = vnode_ptr[unsafe_offset=0].get_dyn_node_id(1)
     app.normal.child_ctx.init_slot(normal_anchor)
     app.fallback.child_ctx.init_slot(fallback_anchor)
 
@@ -231,8 +232,8 @@ def _sc_rebuild(
     # Fallback starts hidden — do NOT flush it
 
     # 7. Finalize
-    writer_ptr[0].finalize()
-    return Int32(writer_ptr[0].offset)
+    writer_ptr[unsafe_offset=0].finalize()
+    return Int32(writer_ptr[unsafe_offset=0].offset)
 
 
 def _sc_handle_event(

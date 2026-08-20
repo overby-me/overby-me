@@ -367,7 +367,7 @@ struct Template(Copyable):
 
         The pointer is valid until the next mutation of the template.
         """
-        var ptr = self.nodes.unsafe_ptr() + index
+        var ptr = self.nodes.unsafe_ptr().unsafe_offset(index)
         return Pointer[TemplateNode, MutUntrackedOrigin](
             unsafe_from_address=Int(ptr)
         )
