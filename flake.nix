@@ -38,10 +38,6 @@
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nixos-hardware";
     inputs.workspace.follows = "workspace";
   };
-  inputs.nixos-raspberrypi = {
-    url = "github:nvmd/nixos-raspberrypi/main";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
   # Direct upstreams, not integrations: an input that exports a default
   # package lands in pkgs under its own name, so declaring it is the whole
   # of having it. zen-browser is also read for its home module.
