@@ -83,8 +83,6 @@
     "disko": {
       "inputs": {
         "nixpkgs": [
-          "workspace-disko",
-          "workspace",
           "nixpkgs"
         ]
       },
@@ -135,6 +133,21 @@
       }
     },
     "flake-compat_3": {
+      "locked": {
+        "lastModified": 1767039857,
+        "narHash": "sha256-vNpUSpF5Nuw8xvDLj2KCwwksIbjua2LZCqhV1LNRDns=",
+        "owner": "edolstra",
+        "repo": "flake-compat",
+        "rev": "5edf11c44bc78a0d334f6334cdaf7d60d732daab",
+        "type": "github"
+      },
+      "original": {
+        "owner": "edolstra",
+        "repo": "flake-compat",
+        "type": "github"
+      }
+    },
+    "flake-compat_4": {
       "flake": false,
       "locked": {
         "lastModified": 1767039857,
@@ -146,21 +159,6 @@
       },
       "original": {
         "owner": "NixOS",
-        "repo": "flake-compat",
-        "type": "github"
-      }
-    },
-    "flake-compat_4": {
-      "locked": {
-        "lastModified": 1767039857,
-        "narHash": "sha256-vNpUSpF5Nuw8xvDLj2KCwwksIbjua2LZCqhV1LNRDns=",
-        "owner": "edolstra",
-        "repo": "flake-compat",
-        "rev": "5edf11c44bc78a0d334f6334cdaf7d60d732daab",
-        "type": "github"
-      },
-      "original": {
-        "owner": "edolstra",
         "repo": "flake-compat",
         "type": "github"
       }
@@ -265,7 +263,7 @@
     },
     "git-hooks_2": {
       "inputs": {
-        "flake-compat": "flake-compat_3",
+        "flake-compat": "flake-compat_4",
         "nixpkgs": [
           "workspace",
           "nixpkgs"
@@ -502,12 +500,10 @@
     "nixos-images": {
       "inputs": {
         "nixos-stable": [
-          "workspace-nixos-raspberrypi",
           "nixos-raspberrypi",
           "nixpkgs"
         ],
         "nixos-unstable": [
-          "workspace-nixos-raspberrypi",
           "nixos-raspberrypi",
           "nixpkgs"
         ]
@@ -530,11 +526,9 @@
     "nixos-raspberrypi": {
       "inputs": {
         "argononed": "argononed",
-        "flake-compat": "flake-compat_4",
+        "flake-compat": "flake-compat_3",
         "nixos-images": "nixos-images",
         "nixpkgs": [
-          "workspace-nixos-raspberrypi",
-          "workspace",
           "nixpkgs"
         ]
       },
@@ -1153,18 +1147,18 @@
     },
     "root": {
       "inputs": {
+        "disko": "disko",
         "nix-config": "nix-config",
         "nix-lib": "nix-lib",
         "nix-packages": "nix-packages",
         "nix-wallpaper": "nix-wallpaper",
+        "nixos-raspberrypi": "nixos-raspberrypi",
         "nixpkgs": "nixpkgs",
         "publish-checks": "publish-checks",
         "workspace": "workspace",
         "workspace-darwin": "workspace-darwin",
-        "workspace-disko": "workspace-disko",
         "workspace-home-manager": "workspace-home-manager",
         "workspace-nixos-hardware": "workspace-nixos-hardware",
-        "workspace-nixos-raspberrypi": "workspace-nixos-raspberrypi",
         "workspace-ragenix": "workspace-ragenix",
         "workspace-system-manager": "workspace-system-manager",
         "zen-browser": "zen-browser"
@@ -1369,11 +1363,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787164895,
-        "narHash": "sha256-EhvvAZ1eol819zxMpAK4Ncm1DK1YsnusPvqUSPsGiTY=",
+        "lastModified": 1787210584,
+        "narHash": "sha256-GZLnhP26vBSe6l/MVYM9Or0aG2rgS2W5ZX+nJ5sWL2Q=",
         "ref": "refs/heads/main",
-        "rev": "c30f5cc0bef0290c0e407843901c21a5a88cffac",
-        "revCount": 52,
+        "rev": "d9eb9370edb5a0fc9394336ac9c65c55dba6dae5",
+        "revCount": 54,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1391,39 +1385,16 @@
       },
       "locked": {
         "dir": "modules/darwin",
-        "lastModified": 1787168063,
-        "narHash": "sha256-tGRnMf7XmiLEry2+hQtu50B4VLxQYJpC1FL8KlW1YF4=",
+        "lastModified": 1787210584,
+        "narHash": "sha256-GZLnhP26vBSe6l/MVYM9Or0aG2rgS2W5ZX+nJ5sWL2Q=",
         "ref": "refs/heads/main",
-        "rev": "5699033aadc1346bf46459ac270c11fc9c474438",
-        "revCount": 53,
+        "rev": "d9eb9370edb5a0fc9394336ac9c65c55dba6dae5",
+        "revCount": 54,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
       "original": {
         "dir": "modules/darwin",
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      }
-    },
-    "workspace-disko": {
-      "inputs": {
-        "disko": "disko",
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "dir": "modules/disko",
-        "lastModified": 1787168063,
-        "narHash": "sha256-tGRnMf7XmiLEry2+hQtu50B4VLxQYJpC1FL8KlW1YF4=",
-        "ref": "refs/heads/main",
-        "rev": "5699033aadc1346bf46459ac270c11fc9c474438",
-        "revCount": 53,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      },
-      "original": {
-        "dir": "modules/disko",
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       }
@@ -1437,11 +1408,11 @@
       },
       "locked": {
         "dir": "modules/home-manager",
-        "lastModified": 1787168063,
-        "narHash": "sha256-tGRnMf7XmiLEry2+hQtu50B4VLxQYJpC1FL8KlW1YF4=",
+        "lastModified": 1787210584,
+        "narHash": "sha256-GZLnhP26vBSe6l/MVYM9Or0aG2rgS2W5ZX+nJ5sWL2Q=",
         "ref": "refs/heads/main",
-        "rev": "5699033aadc1346bf46459ac270c11fc9c474438",
-        "revCount": 53,
+        "rev": "d9eb9370edb5a0fc9394336ac9c65c55dba6dae5",
+        "revCount": 54,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1460,39 +1431,16 @@
       },
       "locked": {
         "dir": "modules/nixos-hardware",
-        "lastModified": 1787168063,
-        "narHash": "sha256-tGRnMf7XmiLEry2+hQtu50B4VLxQYJpC1FL8KlW1YF4=",
+        "lastModified": 1787210584,
+        "narHash": "sha256-GZLnhP26vBSe6l/MVYM9Or0aG2rgS2W5ZX+nJ5sWL2Q=",
         "ref": "refs/heads/main",
-        "rev": "5699033aadc1346bf46459ac270c11fc9c474438",
-        "revCount": 53,
+        "rev": "d9eb9370edb5a0fc9394336ac9c65c55dba6dae5",
+        "revCount": 54,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
       "original": {
         "dir": "modules/nixos-hardware",
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      }
-    },
-    "workspace-nixos-raspberrypi": {
-      "inputs": {
-        "nixos-raspberrypi": "nixos-raspberrypi",
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "dir": "modules/nixos-raspberrypi",
-        "lastModified": 1787168063,
-        "narHash": "sha256-tGRnMf7XmiLEry2+hQtu50B4VLxQYJpC1FL8KlW1YF4=",
-        "ref": "refs/heads/main",
-        "rev": "5699033aadc1346bf46459ac270c11fc9c474438",
-        "revCount": 53,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      },
-      "original": {
-        "dir": "modules/nixos-raspberrypi",
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       }
@@ -1506,11 +1454,11 @@
       },
       "locked": {
         "dir": "modules/ragenix",
-        "lastModified": 1787168063,
-        "narHash": "sha256-tGRnMf7XmiLEry2+hQtu50B4VLxQYJpC1FL8KlW1YF4=",
+        "lastModified": 1787210584,
+        "narHash": "sha256-GZLnhP26vBSe6l/MVYM9Or0aG2rgS2W5ZX+nJ5sWL2Q=",
         "ref": "refs/heads/main",
-        "rev": "5699033aadc1346bf46459ac270c11fc9c474438",
-        "revCount": 53,
+        "rev": "d9eb9370edb5a0fc9394336ac9c65c55dba6dae5",
+        "revCount": 54,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1529,11 +1477,11 @@
       },
       "locked": {
         "dir": "modules/system-manager",
-        "lastModified": 1787168063,
-        "narHash": "sha256-tGRnMf7XmiLEry2+hQtu50B4VLxQYJpC1FL8KlW1YF4=",
+        "lastModified": 1787210584,
+        "narHash": "sha256-GZLnhP26vBSe6l/MVYM9Or0aG2rgS2W5ZX+nJ5sWL2Q=",
         "ref": "refs/heads/main",
-        "rev": "5699033aadc1346bf46459ac270c11fc9c474438",
-        "revCount": 53,
+        "rev": "d9eb9370edb5a0fc9394336ac9c65c55dba6dae5",
+        "revCount": 54,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },

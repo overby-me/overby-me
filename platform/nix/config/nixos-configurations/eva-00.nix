@@ -58,7 +58,9 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
     inputs.ragenix.nixosModules.default
 
     # ── Overlays (make pkgs.ironclaw etc. available) ────────────────────
-    {nixpkgs.overlays = [inputs.self.overlays.default];}
+    # rust-overlay too: ironclaw's package takes rust-bin for its wasip2
+    # target, and this host builds its own pkgs outside the workspace's.
+    {nixpkgs.overlays = [(import inputs.rust-overlay) inputs.self.overlays.default];}
 
     # ── zswap ──────────────────────────────────────────────────────────
     ../nixos-modules/core/zswap.nix
