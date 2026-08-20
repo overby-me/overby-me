@@ -438,7 +438,7 @@ def test-xr-counter [session_id: string, timeout: int, passed: int, failed: int]
             log-ok "status indicates flat fallback mode"
             $p = $p + 1
         } else {
-            log-warn $"status text unexpected: \"($status_text)\" (may still be loading)"
+            log-warn $"status text unexpected: \"($status_text)\" \(may still be loading)"
         }
     }
 
@@ -477,7 +477,7 @@ def test-xr-counter [session_id: string, timeout: int, passed: int, failed: int]
         log-ok $"panel has ($btn_count) buttons \(counter +/- buttons rendered)"
         $p = $p + 1
     } else if $btn_count >= 1 {
-        log-ok $"panel has ($btn_count) button(s) (partial render)"
+        log-ok $"panel has ($btn_count) button\(s) \(partial render)"
         $p = $p + 1
     } else {
         log-warn "no buttons found in panel — WASM app may not have fully rendered"
@@ -578,7 +578,7 @@ def test-xr-bench [session_id: string, timeout: int, passed: int, failed: int]: 
         log-ok $"bench panel has ($btn_count) toolbar buttons"
         $p = $p + 1
     } else if $btn_count >= 1 {
-        log-ok $"bench panel has ($btn_count) button(s)"
+        log-ok $"bench panel has ($btn_count) button\(s)"
         $p = $p + 1
     } else {
         log-warn "no buttons found in bench panel"

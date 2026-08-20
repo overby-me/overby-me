@@ -341,7 +341,7 @@ def assert-count [
 
 # ── App test: Counter ──────────────────────────────────────────────────────
 
-def test-counter [session_id: string, timeout: int, passed: int, failed: int] -> record<passed: int, failed: int> {
+def test-counter [session_id: string, timeout: int, passed: int, failed: int]: nothing -> record<passed: int, failed: int> {
     mut p = $passed
     mut f = $failed
     let bu = (base-url)
@@ -420,7 +420,7 @@ def test-counter [session_id: string, timeout: int, passed: int, failed: int] ->
 
 # ── App test: Todo ─────────────────────────────────────────────────────────
 
-def test-todo [session_id: string, timeout: int, passed: int, failed: int] -> record<passed: int, failed: int> {
+def test-todo [session_id: string, timeout: int, passed: int, failed: int]: nothing -> record<passed: int, failed: int> {
     mut p = $passed
     mut f = $failed
     let bu = (base-url)
@@ -520,7 +520,7 @@ def test-todo [session_id: string, timeout: int, passed: int, failed: int] -> re
 
 # ── App test: Bench ────────────────────────────────────────────────────────
 
-def test-bench [session_id: string, timeout: int, passed: int, failed: int] -> record<passed: int, failed: int> {
+def test-bench [session_id: string, timeout: int, passed: int, failed: int]: nothing -> record<passed: int, failed: int> {
     mut p = $passed
     mut f = $failed
     let bu = (base-url)
@@ -582,7 +582,7 @@ def test-bench [session_id: string, timeout: int, passed: int, failed: int] -> r
 
 # ── App test: Multi-View App ──────────────────────────────────────────────
 
-def test-app [session_id: string, timeout: int, passed: int, failed: int] -> record<passed: int, failed: int> {
+def test-app [session_id: string, timeout: int, passed: int, failed: int]: nothing -> record<passed: int, failed: int> {
     mut p = $passed
     mut f = $failed
     let bu = (base-url)
@@ -760,162 +760,161 @@ def main [
     }
 
     # Wrap everything in try so we can clean up on failure
-    try {
-        # ── Build WASM ────────────────────────────────────────────────
+    # Note: no try/catch wrapper — nushell 0.110.0 cannot capture mutable
+    # variables in catch blocks.  Stale processes from crashed runs are
+    # cleaned up by the kill-port calls below at the start of each run.
+    # ── Build WASM ────────────────────────────────────────────────
 
-        log-info "Building WASM..."
-        cd $script_dir
-        ^just build
+    log-info "Building WASM..."
+    cd $script_dir
+    ^just build
 
-        # ── Kill stale processes on our ports ─────────────────────────
+    # ── Kill stale processes on our ports ─────────────────────────
 
-        kill-port $SERVE_PORT
-        kill-port $WD_PORT
+    kill-port $SERVE_PORT
+    kill-port $WD_PORT
 
-        # ── Start file server ─────────────────────────────────────────
+    # ── Start file server ─────────────────────────────────────────
 
-        log-info $"Starting file server on :($SERVE_PORT)..."
-        # nushell waits on the whole process group of an external command, so
-        # the server has to leave that group or the PID read below blocks for
-        # as long as it runs - forever, since it is meant to outlive its
-        # launch. setsid moves it out. The document root is an argument rather
-        # than a `cd` on the left of `&&` because `&` binds looser than `&&`:
-        # `cd d && setsid srv &` backgrounds the whole list as a subshell, and
-        # that subshell stays in the group waiting on the server setsid just
-        # detached. Plain bash never waits, so the shape reads correct and
-        # hangs only here.
-        $server_pid = (^bash -c $'setsid deno run --allow-net --allow-read jsr:@std/http/file-server "($script_dir)" -p ($SERVE_PORT) > /dev/null 2>&1 < /dev/null & echo $!' | str trim | into int)
+    log-info $"Starting file server on :($SERVE_PORT)..."
+    # nushell waits on the whole process group of an external command, so
+    # the server has to leave that group or the PID read below blocks for
+    # as long as it runs - forever, since it is meant to outlive its
+    # launch. setsid moves it out. The document root is an argument rather
+    # than a `cd` on the left of `&&` because `&` binds looser than `&&`:
+    # `cd d && setsid srv &` backgrounds the whole list as a subshell, and
+    # that subshell stays in the group waiting on the server setsid just
+    # detached. Plain bash never waits, so the shape reads correct and
+    # hangs only here.
+    $server_pid = (^bash -c $'setsid deno run --allow-net --allow-read jsr:@std/http/file-server "($script_dir)" -p ($SERVE_PORT) > /dev/null 2>&1 < /dev/null & echo $!' | str trim | into int)
 
-        # Wait for file server to be ready
-        mut ready = false
-        for _ in 1..31 {
-            let check = (do -i { ^curl -sf $"(base-url)/" } | complete)
-            if $check.exit_code == 0 {
-                $ready = true
-                break
-            }
-            let alive = (do -i { ^kill -0 $server_pid } | complete)
-            if $alive.exit_code != 0 {
-                log-fail "File server exited unexpectedly"
-                exit 2
-            }
-            sleep 200ms
+    # Wait for file server to be ready
+    mut ready = false
+    for _ in 1..31 {
+        let check = (do -i { ^curl -sf $"(base-url)/" } | complete)
+        if $check.exit_code == 0 {
+            $ready = true
+            break
         }
-
-        if not $ready {
-            log-fail "File server did not become ready"
+        let _srv_pid = $server_pid
+        let alive = (do -i { ^kill -0 $_srv_pid } | complete)
+        if $alive.exit_code != 0 {
+            log-fail "File server exited unexpectedly"
             exit 2
         }
+        sleep 200ms
+    }
 
-        log-info $"File server ready \(PID ($server_pid))"
-
-        # ── Start Servo (headless + WebDriver) ────────────────────────
-
-        $servo_log = (^mktemp /tmp/servo-test-XXXXXX.log | str trim)
-
-        log-info $"Starting Servo \(headless, WebDriver on :($WD_PORT))..."
-
-        $servo_pid = (^bash -c $'setsid ($servo_bin) --headless --webdriver=($WD_PORT) "about:blank" > "($servo_log)" 2>&1 < /dev/null & echo $!' | str trim | into int)
-
-        # Wait for WebDriver to become ready
-        mut wd_ready = false
-        for _ in 1..51 {
-            let check = (do -i { ^curl -sf $"(wd-url)/status" } | complete)
-            if $check.exit_code == 0 {
-                $wd_ready = true
-                break
-            }
-            let alive = (do -i { ^kill -0 $servo_pid } | complete)
-            if $alive.exit_code != 0 {
-                log-fail "Servo exited before WebDriver was ready"
-                if $verbose and ($servo_log | path exists) {
-                    log-warn "Servo output:"
-                    print -e (open --raw $servo_log)
-                }
-                exit 2
-            }
-            sleep 200ms
-        }
-
-        if not $wd_ready {
-            log-fail $"WebDriver did not become ready on :($WD_PORT)"
-            if ($servo_log | path exists) {
-                log-warn "Last 20 lines of Servo output:"
-                print -e (open --raw $servo_log | lines | last 20 | str join "\n")
-            }
-            exit 2
-        }
-
-        log-info $"Servo ready \(PID ($servo_pid))"
-
-        # ── Create WebDriver session ──────────────────────────────────
-
-        log-info "Creating WebDriver session..."
-        $session_id = (wd-new-session)
-
-        if ($session_id | is-empty) {
-            log-fail "Failed to create WebDriver session"
-            exit 2
-        }
-
-        log-info $"Session: ($session_id)"
-
-        # ── Run tests ─────────────────────────────────────────────────
-
-        log-info ""
-        log-info $"Running browser tests \(timeout: ($timeout)s per wait)..."
-
-        if ($app | is-empty) or $app == "counter" {
-            let r = (test-counter $session_id $timeout $passed $failed)
-            $passed = $r.passed; $failed = $r.failed
-        }
-        if ($app | is-empty) or $app == "todo" {
-            let r = (test-todo $session_id $timeout $passed $failed)
-            $passed = $r.passed; $failed = $r.failed
-        }
-        if ($app | is-empty) or $app == "bench" {
-            let r = (test-bench $session_id $timeout $passed $failed)
-            $passed = $r.passed; $failed = $r.failed
-        }
-        if ($app | is-empty) or $app == "app" {
-            let r = (test-app $session_id $timeout $passed $failed)
-            $passed = $r.passed; $failed = $r.failed
-        }
-
-        # ── Summary ───────────────────────────────────────────────────
-
-        print -e ""
-        let total = $passed + $failed
-
-        if $verbose and ($servo_log | path exists) and (($servo_log | path type) == "file") {
-            let content = (open --raw $servo_log)
-            if ($content | is-not-empty) {
-                log-info "--- Servo output ---"
-                print -e $content
-                log-info "--- End Servo output ---"
-                print -e ""
-            }
-        }
-
-        # Clean up before exit
-        do-cleanup $session_id $servo_pid $server_pid $servo_log
-
-        if $failed == 0 {
-            log-ok $"($total) tests: ($passed) passed, 0 failed"
-            if $keep and $servo_pid > 0 {
-                log-info $"Servo still running \(PID ($servo_pid)). Press Ctrl-C to stop."
-                # Block until servo exits
-                try { ^waitpid $servo_pid } catch { }
-            }
-            exit 0
-        } else {
-            log-fail $"($total) tests: ($passed) passed, ($failed) failed"
-            exit 1
-        }
-    } catch {|err|
-        # Ensure cleanup on any error
-        do-cleanup $session_id $servo_pid $server_pid $servo_log
-        log-fail $"Unexpected error: ($err.msg)"
+    if not $ready {
+        log-fail "File server did not become ready"
         exit 2
+    }
+
+    log-info $"File server ready \(PID ($server_pid))"
+
+    # ── Start Servo (headless + WebDriver) ────────────────────────
+
+    $servo_log = (^mktemp /tmp/servo-test-XXXXXX.log | str trim)
+
+    log-info $"Starting Servo \(headless, WebDriver on :($WD_PORT))..."
+
+    $servo_pid = (^bash -c $'setsid ($servo_bin) --headless --webdriver=($WD_PORT) "about:blank" > "($servo_log)" 2>&1 < /dev/null & echo $!' | str trim | into int)
+
+    # Wait for WebDriver to become ready
+    mut wd_ready = false
+    for _ in 1..51 {
+        let check = (do -i { ^curl -sf $"(wd-url)/status" } | complete)
+        if $check.exit_code == 0 {
+            $wd_ready = true
+            break
+        }
+        let _svpid = $servo_pid
+        let alive = (do -i { ^kill -0 $_svpid } | complete)
+        if $alive.exit_code != 0 {
+            log-fail "Servo exited before WebDriver was ready"
+            if $verbose and ($servo_log | path exists) {
+                log-warn "Servo output:"
+                print -e (open --raw $servo_log)
+            }
+            exit 2
+        }
+        sleep 200ms
+    }
+
+    if not $wd_ready {
+        log-fail $"WebDriver did not become ready on :($WD_PORT)"
+        if ($servo_log | path exists) {
+            log-warn "Last 20 lines of Servo output:"
+            print -e (open --raw $servo_log | lines | last 20 | str join "\n")
+        }
+        exit 2
+    }
+
+    log-info $"Servo ready \(PID ($servo_pid))"
+
+    # ── Create WebDriver session ──────────────────────────────────
+
+    log-info "Creating WebDriver session..."
+    $session_id = (wd-new-session)
+
+    if ($session_id | is-empty) {
+        log-fail "Failed to create WebDriver session"
+        exit 2
+    }
+
+    log-info $"Session: ($session_id)"
+
+    # ── Run tests ─────────────────────────────────────────────────
+
+    log-info ""
+    log-info $"Running browser tests \(timeout: ($timeout)s per wait)..."
+
+    if ($app | is-empty) or $app == "counter" {
+        let r = (test-counter $session_id $timeout $passed $failed)
+        $passed = $r.passed; $failed = $r.failed
+    }
+    if ($app | is-empty) or $app == "todo" {
+        let r = (test-todo $session_id $timeout $passed $failed)
+        $passed = $r.passed; $failed = $r.failed
+    }
+    if ($app | is-empty) or $app == "bench" {
+        let r = (test-bench $session_id $timeout $passed $failed)
+        $passed = $r.passed; $failed = $r.failed
+    }
+    if ($app | is-empty) or $app == "app" {
+        let r = (test-app $session_id $timeout $passed $failed)
+        $passed = $r.passed; $failed = $r.failed
+    }
+
+    # ── Summary ───────────────────────────────────────────────────
+
+    print -e ""
+    let total = $passed + $failed
+
+    if $verbose and ($servo_log | path exists) and (($servo_log | path type) == "file") {
+        let content = (open --raw $servo_log)
+        if ($content | is-not-empty) {
+            log-info "--- Servo output ---"
+            print -e $content
+            log-info "--- End Servo output ---"
+            print -e ""
+        }
+    }
+
+    # Clean up before exit
+    do-cleanup $session_id $servo_pid $server_pid $servo_log
+
+    if $failed == 0 {
+        log-ok $"($total) tests: ($passed) passed, 0 failed"
+        if $keep and $servo_pid > 0 {
+            log-info $"Servo still running \(PID ($servo_pid)). Press Ctrl-C to stop."
+            # Block until servo exits
+            let _svpid = $servo_pid
+            try { ^waitpid $_svpid } catch { }
+        }
+        exit 0
+    } else {
+        log-fail $"($total) tests: ($passed) passed, ($failed) failed"
+        exit 1
     }
 }
