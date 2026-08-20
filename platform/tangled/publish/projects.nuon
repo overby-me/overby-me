@@ -487,6 +487,7 @@
   }
   {
     name: "nushell-plugin-tramp"
+    homeModules: {nushell-plugin-tramp: "hm-module.nix"}
     path: "dev/nushell/plugin-tramp"
     # One test writes to the real cache dir, which the sandbox forbids; the
     # in-tree build disables checks for the same reason.

@@ -32,7 +32,7 @@
       # ast-grep-ignore: nix-prefer-lib
       src = builtins.fetchGit {
         url = "https://tangled.org/overby.me/nushell-plugin-tramp";
-        rev = "691224a788279dad79951e37b4ebbb1fd63e3a21";
+        rev = "52b424eaa80102e1a853db735b28f6e00618600a";
       };
     in
       rustPlatform.buildRustPackage {

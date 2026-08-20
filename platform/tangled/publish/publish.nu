@@ -139,7 +139,12 @@ def derive-filter [p: record, --current]: nothing -> string {
       # flake.nix is let back through: it is the published repo's own build,
       # and since the framework left this tree it is the same file here and
       # there rather than one mapped over the other.
-      [$":/($path):exclude[::*.nix]($generated)" $":/($path)::flake.nix"]
+      # Module files named in `nixosModules` are the project's own
+      # interface, so they ship the way flake.nix does.
+      ([$":/($path):exclude[::*.nix]($generated)" $":/($path)::flake.nix"]
+        | append (($p | get -o nixosModules | default {} | values)
+          | append ($p | get -o homeModules | default {} | values)
+          | each {|f| $":/($path)::($f)"}))
     } else {
       # Each directory keeps its own name at the root, so a Cargo.toml's
       # `path = "../pcre2"` still resolves once they are side by side. The
