@@ -47,6 +47,9 @@
   inputs.nix-wallpaper = {
     url = "github:lunik1/nix-wallpaper";
     inputs.nixpkgs.follows = "nixpkgs";
+    # Their devshell tooling, never evaluated here; deduped onto the copy
+    # the framework already carries.
+    inputs.pre-commit-hooks.follows = "workspace/git-hooks";
   };
   inputs.workspace-secretspec = {
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/secretspec";
