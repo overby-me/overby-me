@@ -46,6 +46,10 @@
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/ragenix";
     inputs.workspace.follows = "workspace";
   };
+  inputs.workspace-secretspec = {
+    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/secretspec";
+    inputs.workspace.follows = "workspace";
+  };
   inputs.workspace-system-manager = {
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/system-manager";
     inputs.workspace.follows = "workspace";

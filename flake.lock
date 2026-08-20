@@ -1160,6 +1160,7 @@
         "workspace-home-manager": "workspace-home-manager",
         "workspace-nixos-hardware": "workspace-nixos-hardware",
         "workspace-ragenix": "workspace-ragenix",
+        "workspace-secretspec": "workspace-secretspec",
         "workspace-system-manager": "workspace-system-manager",
         "zen-browser": "zen-browser"
       }
@@ -1205,6 +1206,23 @@
       "original": {
         "owner": "oxalica",
         "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "secretspec": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1786550683,
+        "narHash": "sha256-sEr7RtfJhk1f2tOv+ICIEcVHDTYi/VAGKyLcgPeEuKI=",
+        "owner": "cachix",
+        "repo": "secretspec",
+        "rev": "b90afe381452918134c40f9d91a7a7246c9fb9ca",
+        "type": "github"
+      },
+      "original": {
+        "owner": "cachix",
+        "ref": "v0.19.1",
+        "repo": "secretspec",
         "type": "github"
       }
     },
@@ -1464,6 +1482,29 @@
       },
       "original": {
         "dir": "modules/ragenix",
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
+      }
+    },
+    "workspace-secretspec": {
+      "inputs": {
+        "secretspec": "secretspec",
+        "workspace": [
+          "workspace"
+        ]
+      },
+      "locked": {
+        "dir": "modules/secretspec",
+        "lastModified": 1787225669,
+        "narHash": "sha256-ltL4EyxjGVA4/ACA1FXgRjbbsSYZFIns7rwgNUg4RE4=",
+        "ref": "refs/heads/main",
+        "rev": "c644b6e602799ef72e852fda15efb9d8aec8e298",
+        "revCount": 56,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
+      },
+      "original": {
+        "dir": "modules/secretspec",
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       }
