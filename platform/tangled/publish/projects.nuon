@@ -373,6 +373,13 @@
     description: "An indoor navigation drone's firmware and its simulator, in Rust and Dioxus"
   }
   {
+    name: "tangled-spindle-nix-engine"
+    path: "platform/tangled/spindle-nix-engine"
+    description: "Rust reimplementation of the Tangled Spindle CI runner with native Nix engine"
+    nativeBuildInputs: ["git"]
+    nixosModules: {tangled-spindle-nix-engine: "nixos-module.nix"}
+  }
+  {
     name: "wclip"
     path: "dev/wclip"
     fineBuild: true

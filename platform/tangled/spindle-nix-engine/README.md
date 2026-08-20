@@ -1,5 +1,18 @@
 # Tangled Spindle Nix Engine
 
+<!-- publish:begin -->
+> Part of the [overby.me monorepo](https://tangled.org/overby.me/overby.me), where this lives in
+> [`platform/tangled/spindle-nix-engine`](https://tangled.org/overby.me/overby.me/tree/main/platform/tangled/spindle-nix-engine) and where all development happens.
+>
+> It is also published on its own, as
+> [tangled.org/overby.me/tangled-spindle-nix-engine](https://tangled.org/overby.me/tangled-spindle-nix-engine) and
+> [github.com/overby-me/tangled-spindle-nix-engine](https://github.com/overby-me/tangled-spindle-nix-engine). Both
+> are read-only mirrors, rebuilt from the monorepo with
+> [josh](https://github.com/josh-project/josh): a commit made to either is
+> overwritten by the next sync, so please open issues and pull requests on the
+> monorepo.
+<!-- publish:end -->
+
 A Rust reimplementation of the [Tangled Spindle](https://docs.tangled.org/spindles.html) CI runner that replaces Docker-based isolation with **native Nix** for dependency management and **systemd service-level sandboxing** for isolation.
 
 Includes a NixOS module (`services.tangled-spindles`) for declarative multi-runner deployment, modeled after [`services.github-runners`](https://search.nixos.org/options?channel=unstable&query=services.github-runners).

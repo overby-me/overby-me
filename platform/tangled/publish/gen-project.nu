@@ -49,6 +49,7 @@ def flake-text [
     aliases: record = {}
     setup_hook: string = ""
     fine: bool = false
+    nixos_modules: record = {}
 ]: nothing -> string {
     let quoted = {|xs| $xs | each {|x| $"\"($x)\"" } | str join " " }
 
@@ -128,6 +129,14 @@ def flake-text [
 # particular to this project is all that is left to say."
     }
 
+    # A project's own NixOS module rides beside the build, exported the way
+    # a workspace module is, so a tree that takes this repo as an input gets
+    # the module folded in with nothing further to say.
+    let module_exports = if ($nixos_modules | is-empty) { "" } else {
+        let lines = ($nixos_modules | items {|k, v| $"      workspaceModule.nixosModules.\"($k)\" = ./($v);" } | str join (char nl))
+        $"\n    // {\n($lines)\n    }"
+    }
+
     $"($header)
 {
   description = \"($description)\";
@@ -138,7 +147,7 @@ def flake-text [
     inputs.workspace {
       name = \"($name)\";
       description = \"($description)\";($extra)
-    };
+    }($module_exports);
 }
 "
 }
@@ -294,6 +303,7 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
                 ($p | get -o aliases | default {})
                 ($p | get -o setupHook | default "")
                 ($p | get -o fineBuild | default false)
+                ($p | get -o nixosModules | default {})
         ) }
         let flake = ($dir | path join "flake.nix")
         # Only a crate has a generated flake. Checking every project for one
