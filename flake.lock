@@ -25,13 +25,13 @@
       "locked": {
         "lastModified": 1767039857,
         "narHash": "sha256-vNpUSpF5Nuw8xvDLj2KCwwksIbjua2LZCqhV1LNRDns=",
-        "owner": "NixOS",
+        "owner": "edolstra",
         "repo": "flake-compat",
         "rev": "5edf11c44bc78a0d334f6334cdaf7d60d732daab",
         "type": "github"
       },
       "original": {
-        "owner": "NixOS",
+        "owner": "edolstra",
         "repo": "flake-compat",
         "type": "github"
       }
@@ -41,13 +41,13 @@
       "locked": {
         "lastModified": 1767039857,
         "narHash": "sha256-vNpUSpF5Nuw8xvDLj2KCwwksIbjua2LZCqhV1LNRDns=",
-        "owner": "edolstra",
+        "owner": "NixOS",
         "repo": "flake-compat",
         "rev": "5edf11c44bc78a0d334f6334cdaf7d60d732daab",
         "type": "github"
       },
       "original": {
-        "owner": "edolstra",
+        "owner": "NixOS",
         "repo": "flake-compat",
         "type": "github"
       }
@@ -55,18 +55,17 @@
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
-          "workspace-system-manager",
           "system-manager",
           "userborn",
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1785627969,
-        "narHash": "sha256-4dtXQk/NMePegK/nWp5NSeuZKLATItOq61lpEvmXqGw=",
+        "lastModified": 1768135262,
+        "narHash": "sha256-PVvu7OqHBGWN16zSi6tEmPwwHQ4rLPU9Plvs8/1TUBY=",
         "owner": "hercules-ci",
         "repo": "flake-parts",
-        "rev": "427bf4bd9435fdf21321c8cc628c24efc14c0f7a",
+        "rev": "80daad04eddbbf5a4d883996a73f3f542fa437ac",
         "type": "github"
       },
       "original": {
@@ -95,7 +94,7 @@
     },
     "git-hooks": {
       "inputs": {
-        "flake-compat": "flake-compat",
+        "flake-compat": "flake-compat_2",
         "nixpkgs": [
           "workspace",
           "nixpkgs"
@@ -118,17 +117,15 @@
     "home-manager": {
       "inputs": {
         "nixpkgs": [
-          "workspace-home-manager",
-          "workspace",
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1785119570,
-        "narHash": "sha256-Rgs2xKnGLFWQscxUaXX07oyZeuMDOHEbqDOsgliLFGM=",
+        "lastModified": 1787146702,
+        "narHash": "sha256-YbRcLdU/yK4gWsQg7V8WTKZHfXL33g8+wSFUX3wyevs=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "d4fd24667c8cbef124bb70a20380cab75ec8474d",
+        "rev": "173b7e8d40fdc8c296a9c99854314f17a3a1704c",
         "type": "github"
       },
       "original": {
@@ -158,8 +155,6 @@
     "nix-darwin": {
       "inputs": {
         "nixpkgs": [
-          "workspace-darwin",
-          "workspace",
           "nixpkgs"
         ]
       },
@@ -781,7 +776,9 @@
     "root": {
       "inputs": {
         "disko": "disko",
+        "home-manager": "home-manager",
         "nix-config": "nix-config",
+        "nix-darwin": "nix-darwin",
         "nix-lib": "nix-lib",
         "nix-packages": "nix-packages",
         "nix-wallpaper": "nix-wallpaper",
@@ -789,11 +786,9 @@
         "nixpkgs": "nixpkgs",
         "publish-checks": "publish-checks",
         "rust-overlay": "rust-overlay",
+        "secretspec": "secretspec",
+        "system-manager": "system-manager",
         "workspace": "workspace",
-        "workspace-darwin": "workspace-darwin",
-        "workspace-home-manager": "workspace-home-manager",
-        "workspace-secretspec": "workspace-secretspec",
-        "workspace-system-manager": "workspace-system-manager",
         "zen-browser": "zen-browser"
       }
     },
@@ -836,7 +831,7 @@
     },
     "system-manager": {
       "inputs": {
-        "flake-compat": "flake-compat_2",
+        "flake-compat": "flake-compat",
         "nixpkgs": "nixpkgs_2",
         "userborn": "userborn"
       },
@@ -851,6 +846,7 @@
       "original": {
         "owner": "numtide",
         "repo": "system-manager",
+        "rev": "48d47346e0c6ad05b6c869ea92649c47723d1cfc",
         "type": "github"
       }
     },
@@ -887,18 +883,15 @@
     "userborn": {
       "inputs": {
         "flake-compat": [
-          "workspace-system-manager",
           "system-manager",
           "flake-compat"
         ],
         "flake-parts": "flake-parts",
         "nixpkgs": [
-          "workspace-system-manager",
           "system-manager",
           "nixpkgs"
         ],
         "pre-commit-hooks-nix": [
-          "workspace-system-manager",
           "workspace",
           "git-hooks"
         ],
@@ -963,107 +956,15 @@
         ]
       },
       "locked": {
-        "lastModified": 1787239570,
-        "narHash": "sha256-IEBccYw2QtBnAESsKMyOY5biF6y7MtQj7c1QUPXptXY=",
+        "lastModified": 1787243913,
+        "narHash": "sha256-pU6s+9vTWUZj1Adtb5NPSbYTTrj9jzeQxSXVSj5rJs0=",
         "ref": "refs/heads/main",
-        "rev": "c147053e46661de7f2e417a2f9a2fa8b9099ade3",
-        "revCount": 63,
+        "rev": "0e5e301fa936791fad471ee36aab830ca108128e",
+        "revCount": 64,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
       "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      }
-    },
-    "workspace-darwin": {
-      "inputs": {
-        "nix-darwin": "nix-darwin",
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "dir": "modules/darwin",
-        "lastModified": 1787210584,
-        "narHash": "sha256-GZLnhP26vBSe6l/MVYM9Or0aG2rgS2W5ZX+nJ5sWL2Q=",
-        "ref": "refs/heads/main",
-        "rev": "d9eb9370edb5a0fc9394336ac9c65c55dba6dae5",
-        "revCount": 54,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      },
-      "original": {
-        "dir": "modules/darwin",
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      }
-    },
-    "workspace-home-manager": {
-      "inputs": {
-        "home-manager": "home-manager",
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "dir": "modules/home-manager",
-        "lastModified": 1787210584,
-        "narHash": "sha256-GZLnhP26vBSe6l/MVYM9Or0aG2rgS2W5ZX+nJ5sWL2Q=",
-        "ref": "refs/heads/main",
-        "rev": "d9eb9370edb5a0fc9394336ac9c65c55dba6dae5",
-        "revCount": 54,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      },
-      "original": {
-        "dir": "modules/home-manager",
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      }
-    },
-    "workspace-secretspec": {
-      "inputs": {
-        "secretspec": "secretspec",
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "dir": "modules/secretspec",
-        "lastModified": 1787231697,
-        "narHash": "sha256-BzPWiVqQkSyXL+kxXa80owdg4fYXWBy8+Zle9AU3lPI=",
-        "ref": "refs/heads/main",
-        "rev": "01a156203fc69831d2e3e0ce4e551f71b3ad5b0a",
-        "revCount": 59,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      },
-      "original": {
-        "dir": "modules/secretspec",
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      }
-    },
-    "workspace-system-manager": {
-      "inputs": {
-        "system-manager": "system-manager",
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "dir": "modules/system-manager",
-        "lastModified": 1787239570,
-        "narHash": "sha256-IEBccYw2QtBnAESsKMyOY5biF6y7MtQj7c1QUPXptXY=",
-        "ref": "refs/heads/main",
-        "rev": "c147053e46661de7f2e417a2f9a2fa8b9099ade3",
-        "revCount": 63,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      },
-      "original": {
-        "dir": "modules/system-manager",
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       }
@@ -1071,7 +972,6 @@
     "zen-browser": {
       "inputs": {
         "home-manager": [
-          "workspace-home-manager",
           "home-manager"
         ],
         "nixpkgs": [
