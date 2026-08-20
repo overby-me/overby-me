@@ -11,6 +11,12 @@ in {
   # Wrapped in an `if` (rather than an early `return`) because devshell module
   # shellHooks are concatenated: an early return would abort later hooks too.
   config.shellHook = ''
+    # stdenv exports SHELL=bash into every derivation env, direnv re-exports
+    # it into the session, and everything that execs $SHELL - nix shell,
+    # nested tools - then lands in bash with nushell-flavoured starship
+    # state and a prompt full of literal escape markers. Put it back.
+    export SHELL=${lib.getExe pkgs.nushell}
+
     # Only copy config files when running at the root of a git/jj repo.
     if [ -d .jj ] || [ -d .git ]; then
       # Copied rather than symlinked, so they are real writable files and not
