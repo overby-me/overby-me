@@ -135,12 +135,11 @@
         files = "\\.ncl$";
         pass_filenames = true;
       };
-      # mojo is packaged from the conda linux-64 and osx-arm64 artifacts, so it
-      # has no aarch64-linux build. Naming it unconditionally made `${pkgs.mojo}`
-      # a checkMeta throw there, which took down the whole devshell rather than
-      # this one hook. The guard is meta.available rather than a system test so
-      # that a mojo gone broken, or unfree under a stricter config, drops the
-      # hook the same way.
+      # The guard is meta.available rather than a system test: mojo builds from
+      # source on both x86_64-linux and aarch64-linux now, so no platform is
+      # excluded, but naming `${pkgs.mojo}` unconditionally would still make a
+      # mojo gone broken, or unfree under a stricter config, a checkMeta throw
+      # that took down the whole devshell rather than this one hook.
       #
       # Where it is unavailable, *.mojo files go unformatted: `nix fmt` skips
       # them too (platform/nix/config/formatters.nix), so no formatter reaches

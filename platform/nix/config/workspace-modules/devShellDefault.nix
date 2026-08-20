@@ -34,10 +34,12 @@
         });
 
   # Folding in the union of every shell means the default shell is only as
-  # portable as the least portable one: devShells.mojo-{gui,wasm} name pkgs.mojo,
-  # which has no aarch64-linux build, so on armitas plain `nix develop` was a
-  # checkMeta throw rather than a shell. Drop what this system cannot build and
-  # keep the rest.
+  # portable as the least portable one: one shell naming a package this system
+  # cannot build turns plain `nix develop` into a checkMeta throw rather than a
+  # shell. That is what devShells.mojo-{gui,wasm} did on armitas until mojo
+  # started building from source on aarch64-linux, and what the next
+  # single-platform package to reach a shell would do again. Drop what this
+  # system cannot build and keep the rest.
   #
   # tryEval takes any evaluation failure, not just an unsupported platform, so a
   # shell broken by a mistake leaves the union quietly. Asking for it by name -
