@@ -42,7 +42,7 @@
 // waiver is reversed and every block documents its claim.
 #![warn(clippy::undocumented_unsafe_blocks)]
 use std::collections::HashMap;
-use std::ffi::{CString, c_void};
+use std::ffi::{CString, c_char, c_void};
 
 use ash::vk::Handle;
 use openxr as xr;
@@ -233,7 +233,7 @@ impl OpenXrBackend {
             .filter_map(|s| CString::new(s).ok())
             .collect();
 
-        let vk_instance_ext_ptrs: Vec<*const i8> =
+        let vk_instance_ext_ptrs: Vec<*const c_char> =
             vk_instance_ext_names.iter().map(|s| s.as_ptr()).collect();
 
         // Create Vulkan entry and instance.
@@ -269,7 +269,7 @@ impl OpenXrBackend {
             .filter_map(|s| CString::new(s).ok())
             .collect();
 
-        let vk_device_ext_ptrs: Vec<*const i8> =
+        let vk_device_ext_ptrs: Vec<*const c_char> =
             vk_device_ext_names.iter().map(|s| s.as_ptr()).collect();
 
         // Find a graphics queue family.
