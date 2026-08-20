@@ -25,26 +25,28 @@
     home-manager
     cloud-hypervisor
     tangled-spindle-nix-engine
+    inputs.self.nixosModules.secretspec
     (
-      {pkgs, ...}: {
-        age.secrets = {
-          spindle-token = {
-            file = inputs.self.secrets.spindle-token;
-            mode = "600";
+      {
+        pkgs,
+        config,
+        ...
+      }: {
+        secretspec = {
+          enable = true;
+          projectFile = ../secretspec.toml;
+          profile = "home";
+          provider = "age://secrets/secretspec.age?identity=/etc/ssh/ssh_host_ed25519_key&recipients-file=secrets/secretspec.age.recipients";
+          secrets = {
+            SPINDLE_TOKEN.owner = "tangled-spindle";
+            STALWART_ADMIN_PASSWORD.owner = "stalwart-mail";
           };
-          ironclaw-env = {
-            file = inputs.self.secrets.ironclaw-env;
-            owner = "ironclaw";
-            mode = "600";
-          };
-          searxng-env = {
-            file = inputs.self.secrets.searxng-env;
-            mode = "600";
-          };
-          stalwart-admin-password = {
-            file = inputs.self.secrets.stalwart-admin-password;
-            owner = "stalwart-mail";
-            mode = "600";
+          envFiles = {
+            ironclaw = {
+              secrets = ["LLM_BACKEND"];
+              owner = "ironclaw";
+            };
+            searxng.secrets = ["SEARX_SECRET_KEY"];
           };
         };
 
@@ -52,7 +54,7 @@
           ironclaw = {
             enable = true;
             logLevel = "ironclaw=info";
-            environmentFile = "/run/agenix/ironclaw-env";
+            environmentFile = config.secretspec.envFiles.ironclaw.path;
             activatedChannels = [
               "matrix"
               "mail"
@@ -129,7 +131,7 @@
               };
             };
             credentials = {
-              stalwart-admin-password = "/run/agenix/stalwart-admin-password";
+              stalwart-admin-password = config.secretspec.secrets.STALWART_ADMIN_PASSWORD.path;
             };
           };
 
@@ -137,7 +139,7 @@
             enable = true;
             hostname = "spindle.overby.me";
             owner = "did:plc:eukcx4amfqmhfrnkix7zwm34";
-            tokenFile = "/run/agenix/spindle-token";
+            tokenFile = config.secretspec.secrets.SPINDLE_TOKEN.path;
             nixPackage = pkgs.pkgsUnstable.nixVersions.latest;
             user = "tangled-spindle";
             group = "tangled-spindle";
@@ -171,7 +173,7 @@
                 disabled = true;
               };
             };
-            environmentFile = "/run/agenix/searxng-env";
+            environmentFile = config.secretspec.envFiles.searxng.path;
           };
 
           caddy = {
