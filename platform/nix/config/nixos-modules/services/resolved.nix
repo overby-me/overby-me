@@ -1,13 +1,12 @@
 {
-  inputs,
   lib,
   hasSecrets ? true,
   ...
 }: {
   imports = lib.optionals hasSecrets [
     {
-      age.secrets."resolved-secret.conf" = {
-        file = inputs.self.secrets.resolved;
+      secretspec.secrets.RESOLVED_SECRET_CONF = {
+        encoding = "base64";
         path = "/etc/systemd/resolved.conf.d/9-secret.conf";
         owner = "systemd-resolve";
         group = "systemd-resolve";

@@ -1,14 +1,7 @@
-{
-  config,
-  inputs,
-  ...
-}: {
-  age.secrets.u2f-keys = {
-    file = inputs.self.secrets.u2f-keys;
-    path = "/run/agenix/u2f-keys";
+{config, ...}: {
+  secretspec.secrets.U2F_KEYS = {
+    encoding = "base64";
     mode = "0444"; # Readable by PAM
-    owner = "root";
-    group = "root";
   };
 
   # Smart card daemon
@@ -20,7 +13,7 @@
     control = "sufficient";
     settings = {
       cue = true;
-      authfile = config.age.secrets.u2f-keys.path;
+      authfile = config.secretspec.secrets.U2F_KEYS.path;
     };
   };
 

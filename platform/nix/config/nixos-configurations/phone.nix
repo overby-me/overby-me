@@ -42,22 +42,23 @@
     inputs.self.nixosModules.home-manager
 
     # ── Secrets ───────────────────────────────────────────────────────
-    inputs.ragenix.nixosModules.default
-    ({pkgs, ...}: {
-      # Simplified age config for the phone (no FIDO2/Nitrokey needed).
-      # Decryption uses the pre-generated SSH host key injected into the
-      # rootfs image at build time.  The key is stored age-encrypted in
-      # secrets/phone-host-key.age and must be decrypted before
-      # building the rootfs image:
+    inputs.self.nixosModules.secretspec
+    {
+      # The provider decrypts with the pre-generated SSH host key injected
+      # into the rootfs image at build time.  The key is stored
+      # age-encrypted in secrets/phone-host-key.age and must be decrypted
+      # before building the rootfs image:
       #   rage -d -i ~/.ssh/id_ed25519 secrets/phone-host-key.age \
       #     -o /tmp/phone-hostkeys/ssh_host_ed25519_key
       # The mkRootfsImage populateImageCommands then copies it into the
       # ext4 image at /etc/ssh/.
-      age = {
-        ageBin = "${pkgs.rage}/bin/rage";
-        identityPaths = ["/etc/ssh/ssh_host_ed25519_key"];
+      secretspec = {
+        enable = true;
+        projectFile = ../secretspec.toml;
+        profile = "phone";
+        provider = "age://secrets/secretspec.age?identity=/etc/ssh/ssh_host_ed25519_key&recipients-file=secrets/secretspec.age.recipients";
       };
-    })
+    }
 
     # ── Desktop environment ───────────────────────────────────────────
     inputs.self.desktops.cosmic
@@ -110,11 +111,9 @@
       };
 
       # Pre-configured WiFi network for headless SSH access.
-      age.secrets."wifi-concero.nmconnection" = {
-        file = inputs.self.secrets.wifi-concero;
+      secretspec.secrets.WIFI_CONCERO_NMCONNECTION = {
+        encoding = "base64";
         path = "/etc/NetworkManager/system-connections/Concero.nmconnection";
-        owner = "root";
-        group = "root";
         mode = "0600";
       };
 

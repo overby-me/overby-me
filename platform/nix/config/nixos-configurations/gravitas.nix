@@ -30,26 +30,30 @@
     home-manager
     cloud-hypervisor
     android-tools
+    secretspec
     {
-      # Decrypt the user SSH keys at boot using the host SSH key (no
-      # Nitrokey touch needed) and drop them straight into ~overby.me/.ssh.
-      # The keys are also backed up in Bitwarden.
-      age.secrets = {
-        overby-me-id_ed25519 = {
-          file = inputs.self.secrets.id_ed25519;
-          path = "/home/overby.me/.ssh/id_ed25519";
-          owner = "overby.me";
-          group = "users";
-          mode = "600";
-          symlink = false;
-        };
-        overby-me-id_rsa = {
-          file = inputs.self.secrets.id_rsa;
-          path = "/home/overby.me/.ssh/id_rsa";
-          owner = "overby.me";
-          group = "users";
-          mode = "600";
-          symlink = false;
+      secretspec = {
+        enable = true;
+        projectFile = ../secretspec.toml;
+        profile = "gravitas";
+        provider = "age://secrets/secretspec.age?identity=/etc/ssh/ssh_host_ed25519_key&recipients-file=secrets/secretspec.age.recipients";
+        # The user SSH keys land straight in ~overby.me/.ssh at boot (no
+        # Nitrokey touch needed); they are also backed up in Bitwarden.
+        secrets = {
+          SSH_ID_ED25519 = {
+            encoding = "base64";
+            path = "/home/overby.me/.ssh/id_ed25519";
+            owner = "overby.me";
+            group = "users";
+            mode = "600";
+          };
+          SSH_ID_RSA = {
+            encoding = "base64";
+            path = "/home/overby.me/.ssh/id_rsa";
+            owner = "overby.me";
+            group = "users";
+            mode = "600";
+          };
         };
       };
     }
