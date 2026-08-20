@@ -48,6 +48,7 @@ def flake-text [
     test_flags: list<string> = []
     aliases: record = {}
     setup_hook: string = ""
+    fine: bool = false
 ]: nothing -> string {
     let quoted = {|xs| $xs | each {|x| $"\"($x)\"" } | str join " " }
 
@@ -64,6 +65,7 @@ def flake-text [
         $opts = ($opts | append $"      cargoTestFlags = [(do $quoted $test_flags)];")
     }
     if $toolchain { $opts = ($opts | append "      toolchain = true;") }
+    if $fine { $opts = ($opts | append "      inherit inputs;") }
     # Keys are quoted without exception: c++filt, pkg-config and opt-rs are
     # not nix identifiers, and quoting only the ones that need it means the
     # generator has to know which those are.
@@ -91,11 +93,15 @@ def flake-text [
     let extra = if ($opts | is-empty) { "" } else { "\n" + ($opts | str join "\n") }
 
     # One input reads better on one line; a project with a second gets the
-    # block, so the overlay lands inside `inputs` rather than beside it.
-    let inputs_block = if not $toolchain {
+    # block, so the extras land inside `inputs` rather than beside it.
+    let extra_inputs = ([
+        (if $toolchain { "\n    # This project pins rustc through its own rust-toolchain.toml.\n    rust-overlay.url = \"github:oxalica/rust-overlay\";" } else { "" })
+        (if $fine { "\n    # Declaring nix-lib is the whole of opting into the fine-grained\n    # per-crate build; the input carries the builder and its index.\n    nix-lib = {\n      url = \"git+https://tangled.org/overby.me/nix-lib\";\n      inputs.workspace.follows = \"workspace\";\n    };" } else { "" })
+    ] | where {|s| $s != "" })
+    let inputs_block = if ($extra_inputs | is-empty) {
         $"  inputs.workspace.url = \"($project_url)\";"
     } else {
-        $"  inputs = {\n    workspace.url = \"($project_url)\";\n\n    # This project pins rustc through its own rust-toolchain.toml.\n    rust-overlay.url = \"github:oxalica/rust-overlay\";\n  };"
+        $"  inputs = {\n    workspace.url = \"($project_url)\";\n($extra_inputs | str join (char nl))\n  };"
     }
 
     # The two variants differ in that one line and in what they say about
@@ -287,6 +293,7 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
                 ($p | get -o cargoTestFlags | default [])
                 ($p | get -o aliases | default {})
                 ($p | get -o setupHook | default "")
+                ($p | get -o fineBuild | default false)
         ) }
         let flake = ($dir | path join "flake.nix")
         # Only a crate has a generated flake. Checking every project for one

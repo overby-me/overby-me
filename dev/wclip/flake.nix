@@ -8,11 +8,21 @@
 {
   description = "An xclip-style Wayland clipboard tool written in Rust";
 
-  inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
+  inputs = {
+    workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
+
+    # Declaring nix-lib is the whole of opting into the fine-grained
+    # per-crate build; the input carries the builder and its index.
+    nix-lib = {
+      url = "git+https://tangled.org/overby.me/nix-lib";
+      inputs.workspace.follows = "workspace";
+    };
+  };
 
   outputs = inputs:
     inputs.workspace {
       name = "wclip";
       description = "An xclip-style Wayland clipboard tool written in Rust";
+      inherit inputs;
     };
 }

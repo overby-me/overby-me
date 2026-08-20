@@ -375,6 +375,7 @@
   {
     name: "wclip"
     path: "dev/wclip"
+    fineBuild: true
     description: "An xclip-style Wayland clipboard tool written in Rust"
     formerPaths: [{path: "rust/wclip" deps: []} {path: "safety/oxidized/wclip" deps: []}]
   }
