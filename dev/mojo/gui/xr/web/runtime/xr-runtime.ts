@@ -47,6 +47,11 @@
 // in this file (~420 lines). Using the shared implementation ensures full
 // DOM feature parity with the web renderer.
 import { Interpreter } from "../../../web/runtime/interpreter.ts";
+import {
+	alignedAlloc,
+	alignedFree,
+	initialize as initializeHeap,
+} from "../../../web/runtime/memory.ts";
 import { TemplateCache } from "../../../web/runtime/templates.ts";
 import type { XRPointerEventNameType } from "./xr-input.ts";
 import { XRInputHandler } from "./xr-input.ts";
@@ -458,30 +463,13 @@ export class XRRuntime {
 		// 4. Initialize the app
 		const appPtr = initFn();
 
-		// 5. Allocate mutation buffer
-		// We need access to the WASM memory's allocator. The WASM env module
-		// provides alignedAlloc. We call the WASM-exported aligned_alloc if
-		// available, otherwise use our memory helper.
-		const allocFn = fns.KGEN_CompilerRT_AlignedAlloc as
-			| ((align: bigint, size: bigint) => bigint)
-			| undefined;
-		const freeFn = fns.KGEN_CompilerRT_AlignedFree as
-			| ((ptr: bigint) => void)
-			| undefined;
-
-		let bufPtr: bigint;
-		if (allocFn) {
-			bufPtr = allocFn(8n, BigInt(bufCapacity));
-		} else {
-			// Fallback: use a fixed offset in WASM memory. This is fragile
-			// but works for simple cases. Production code should always export
-			// the allocator.
-			console.warn(
-				"XRRuntime: WASM module does not export KGEN_CompilerRT_AlignedAlloc. " +
-					"Using zero buffer pointer — mutations may not work correctly.",
-			);
-			bufPtr = 0n;
-		}
+		// 5. Allocate mutation buffer from the JS-side heap, the same way
+		// web/examples/lib/app.js does. KGEN_CompilerRT_AlignedAlloc is
+		// something the module imports, never something it exports, so
+		// looking for it on `fns` found nothing every time and the fallback
+		// handed out a null pointer; the first mutation written through it
+		// trapped the module out of bounds during boot.
+		const bufPtr = alignedAlloc(8n, BigInt(bufCapacity));
 
 		// 6. Set up a shared Interpreter for mutations.
 		// We use the web/runtime Interpreter and TemplateCache to apply
@@ -572,10 +560,11 @@ export class XRRuntime {
 				if (handle.destroyed) return;
 				handle.destroyed = true;
 
-				// Free the mutation buffer
-				if (freeFn && handle.bufPtr !== 0n) {
+				// Free the mutation buffer back to the same JS-side heap it
+				// was taken from.
+				if (handle.bufPtr !== 0n) {
 					try {
-						freeFn(handle.bufPtr);
+						alignedFree(handle.bufPtr);
 					} catch {
 						// May fail if WASM instance is already dead
 					}
@@ -952,30 +941,13 @@ export class XRRuntime {
 
 			__cxa_atexit: () => 0,
 
-			KGEN_CompilerRT_AlignedAlloc: (align: bigint, size: bigint): bigint => {
-				// Simple bump allocator within WASM memory.
-				// In production, this would use the WASM module's own allocator.
-				const alignNum = Number(align);
-				const sizeNum = Number(size);
-				const currentPages = wasmMemory.buffer.byteLength / 65536;
-				const needed = Math.ceil(sizeNum / 65536) + 1;
-				if (needed > currentPages) {
-					try {
-						wasmMemory.grow(needed - currentPages);
-					} catch {
-						return 0n;
-					}
-				}
-				// Allocate from the end of the current memory
-				// This is a simplified allocator — real code uses the module's allocator
-				const offset = wasmMemory.buffer.byteLength - sizeNum;
-				const aligned = offset - (offset % alignNum);
-				return BigInt(aligned);
-			},
-
-			KGEN_CompilerRT_AlignedFree: (_ptr: bigint): void => {
-				// No-op in simplified allocator
-			},
+			// The web renderer's heap, not a second one. It bumps upward from
+			// the module's exported __heap_base, which is the only region the
+			// module agrees is free; the allocator here used to carve blocks
+			// off the end of memory instead and hand back addresses the module
+			// was already using.
+			KGEN_CompilerRT_AlignedAlloc: alignedAlloc,
+			KGEN_CompilerRT_AlignedFree: alignedFree,
 
 			KGEN_CompilerRT_GetStackTrace: (): bigint => 0n,
 			KGEN_CompilerRT_fprintf: (): number => 0,
@@ -1060,6 +1032,11 @@ export class XRRuntime {
 		if (instance.exports.memory) {
 			wasmMemory = instance.exports.memory as WebAssembly.Memory;
 		}
+
+		// Point the shared heap at this instance. Until this runs, alignedAlloc
+		// has no memory and no __heap_base to bump from, so every allocation
+		// the env hands the module would be measured against the wrong buffer.
+		initializeHeap(instance);
 
 		return instance.exports as unknown as Record<string, CallableFunction>;
 	}
