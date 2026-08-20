@@ -83,8 +83,9 @@ in {
       type = lib.types.nullOr lib.types.path;
       default = null;
       description = ''
-        Optional path to a file holding BETTERSTACK_SOURCE_TOKEN (e.g. an agenix
-        secret), loaded via systemd EnvironmentFile so it never enters the store.
+        Optional path to a file holding BETTERSTACK_SOURCE_TOKEN (e.g. a
+        materialised secret), loaded via systemd EnvironmentFile so it never
+        enters the store.
       '';
     };
 

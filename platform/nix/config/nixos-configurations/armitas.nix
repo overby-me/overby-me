@@ -44,8 +44,10 @@
     # encrypted to this machine and boot-time decryption would fail.
     # To turn this on: install, then add the generated
     # /etc/ssh/ssh_host_ed25519_key.pub to platform/nix/config/secrets/publicKeys.nix as
-    # `armitas-ssh-ed25519`, include it in `all`, run `just -f platform/nix/config/nixos-configurations/justfile
-    # rekey`, and flip this to true.
+    # `armitas-ssh-ed25519` and to secrets/secretspec.age.recipients, re-run
+    # `secretspec set` for every value so the blob re-encrypts to the new
+    # roster, add a secretspec block like the other hosts', and flip this
+    # to true.
     hasSecrets = false;
   };
 
@@ -58,9 +60,6 @@
 
     inputs.home-manager.nixosModules.home-manager
     inputs.self.nixosModules.home-manager
-
-    inputs.ragenix.nixosModules.default
-    inputs.self.nixosModules.age
 
     # ── Desktop environment ───────────────────────────────────────────
     inputs.self.desktops.cosmic

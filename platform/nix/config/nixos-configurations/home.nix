@@ -17,8 +17,6 @@
     inputs.self.hardware.dell-xps-9320
     inputs.self.desktops.cosmic
     inputs.self.desktops.gnome
-    inputs.ragenix.nixosModules.default
-    age
     core
     programs
     services
@@ -127,7 +125,7 @@
 
               authentication.fallback-admin = {
                 user = "admin";
-                secret = "%{file:/run/agenix/stalwart-admin-password}%";
+                secret = "%{file:${config.secretspec.secrets.STALWART_ADMIN_PASSWORD.path}}%";
               };
             };
             credentials = {

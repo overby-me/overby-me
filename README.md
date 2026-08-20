@@ -585,7 +585,7 @@
 | ✅ | TOML Formatter | [Tombi 🦀](https://github.com/tombi-toml/tombi) | | 🆗 | [Taplo 🦀💀](https://github.com/tamasfe/taplo) |
 | ✅ | Binary Cache | [Harmonia 🦀](https://github.com/nix-community/harmonia) | [Attic 🦀](https://github.com/zhaofengli/attic) | [Oxidized Cachix 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/cachix) | [Cachix 🔒λ](https://github.com/cachix/cachix) |
 | ✅ | Config Manager | [Home Manager 🌐❄️](https://github.com/nix-community/home-manager) | | 🆗 | |
-| ✅ | Repository Secrets | [Ragenix 🦀❄️](https://github.com/yaxitech/ragenix) | | 🆗 | [Agenix 🐹❄️](https://github.com/ryantm/agenix) |
+| ✅ | Repository Secrets | [SecretSpec 🦀](https://github.com/cachix/secretspec) | | 🆗 | [Ragenix 🦀❄️](https://github.com/yaxitech/ragenix), [Agenix 🐹❄️](https://github.com/ryantm/agenix) |
 | ✅ | Developer Secrets | [SecretSpec 🦀](https://github.com/cachix/secretspec) | | 🆗 | |
 | ✅ | Deployment | [Colmena 🦀️❄️](https://github.com/zhaofengli/colmena) | [Navi 🦀❄️](https://github.com/cafkafk/navi) | 🆗 | |
 | ✅ | Developer Environment | [devShells ❄️](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) + [git-hooks.nix ❄️](https://github.com/cachix/git-hooks.nix) | [Organist ❄️](https://github.com/nickel-lang/organist) | 🆗 | [Devenv 🦀️❄️](https://github.com/cachix/devenv) |

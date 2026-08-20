@@ -54,9 +54,6 @@ inputs.nixos-raspberrypi.lib.nixosSystem {
     inputs.nixos-raspberrypi.nixosModules.raspberry-pi-5.page-size-16k
     inputs.nixos-raspberrypi.nixosModules.raspberry-pi-5.bluetooth
 
-    # ── Secrets ─────────────────────────────────────────────────────────
-    inputs.ragenix.nixosModules.default
-
     # ── Overlays (make pkgs.ironclaw etc. available) ────────────────────
     # rust-overlay too: ironclaw's package takes rust-bin for its wasip2
     # target, and this host builds its own pkgs outside the workspace's.

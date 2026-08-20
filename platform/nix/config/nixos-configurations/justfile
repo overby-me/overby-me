@@ -13,9 +13,6 @@ deploy-build-on-target host:
 deploy-all:
     colmena apply --verbose --impure
 
-rekey:
-    cd ../secrets && agenix --rekey
-
 # Mobile device image building and flashing
 
 # The flake root is two levels up from platform/nix/config/nixos, not one. With a single ".."

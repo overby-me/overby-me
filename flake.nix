@@ -42,10 +42,6 @@
     url = "github:lunik1/nix-wallpaper";
     inputs.nixpkgs.follows = "nixpkgs";
   };
-  inputs.workspace-ragenix = {
-    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/ragenix";
-    inputs.workspace.follows = "workspace";
-  };
   inputs.workspace-secretspec = {
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/secretspec";
     inputs.workspace.follows = "workspace";

@@ -16,7 +16,7 @@
 #     sshHostKeyDir - a directory of pre-generated SSH host keys, named
 #                     ssh_host_*_key with matching .pub files. They land in
 #                     /etc/ssh/ in the image, private keys 0600 and public 0644,
-#                     so agenix can decrypt secrets on first boot.
+#                     so the secretspec age provider can decrypt on first boot.
 #
 #                     To produce it from an age-encrypted key:
 #                       mkdir -p /tmp/phone-hostkeys

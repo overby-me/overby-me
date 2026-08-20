@@ -251,7 +251,8 @@ in {
         Channel-specific tokens (e.g. MATRIX_ACCESS_TOKEN) are
         auto-persisted to the encrypted secrets store on startup.
 
-        When using agenix, point this at the decrypted secret path.
+        Point this at a materialised secret path, e.g.
+        config.secretspec.envFiles.ironclaw.path.
       '';
     };
 

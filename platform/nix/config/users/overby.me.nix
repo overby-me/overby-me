@@ -14,7 +14,6 @@
   };
   imports =
     (with inputs.self.homeModules; [
-      inputs.ragenix.homeManagerModules.default
       nushell-plugin-tramp
       nix
       home
