@@ -29,14 +29,16 @@
         darwin-apps
       ]
     )
-    # Linux-only modules: the Zen Browser app plus the home modules that rely
-    # on systemd user units.
+    # Linux-only modules: the home modules that rely on systemd user units,
+    # plus the Zen Browser app when the evaluating tree declares its input.
     ++ lib.optionals pkgs.stdenv.isLinux (
       with inputs.self.homeModules; [
-        inputs.zen-browser.homeModules.default
         systemd
       ]
     )
+    ++ lib.optionals (pkgs.stdenv.isLinux && inputs ? zen-browser) [
+      inputs.zen-browser.homeModules.default
+    ]
     # vibe is built from platform/nix/packages, so no binary cache has it and an aarch64
     # host compiles it under emulation.  It is a desktop audio visualiser,
     # not worth that on armitas or phone.

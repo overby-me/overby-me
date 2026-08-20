@@ -26,22 +26,26 @@
   };
 
   # Linux-only files: the standard XDG directory symlinks (on macOS these
-  # collide with Finder/iCloud-managed ~/Desktop, ~/Documents, etc.) and the
-  # nix-wallpaper desktop background.
-  linuxFiles = {
-    Pictures.source = symlink "${homeDirectory}/Sync/Pictures";
-    Documents.source = symlink "${homeDirectory}/Sync/Documents";
-    Desktop.source = symlink "${homeDirectory}/Sync/Desktop";
-    Videos.source = symlink "${homeDirectory}/Sync/Videos";
-    Music.source = symlink "${homeDirectory}/Sync/Music";
-    Templates.source = symlink "${homeDirectory}/Sync/Templates";
-    ".local/share/wallpapers/current.png".source = "${
-      (pkgs.nix-wallpaper.override {
-        preset = "gruvbox-dark";
-        logoSize = 10;
-      })
-    }/share/wallpapers/nixos-wallpaper.png";
-  };
+  # collide with Finder/iCloud-managed ~/Desktop, ~/Documents, etc.) and,
+  # when the evaluating tree declares the input, the nix-wallpaper desktop
+  # background.
+  linuxFiles =
+    {
+      Pictures.source = symlink "${homeDirectory}/Sync/Pictures";
+      Documents.source = symlink "${homeDirectory}/Sync/Documents";
+      Desktop.source = symlink "${homeDirectory}/Sync/Desktop";
+      Videos.source = symlink "${homeDirectory}/Sync/Videos";
+      Music.source = symlink "${homeDirectory}/Sync/Music";
+      Templates.source = symlink "${homeDirectory}/Sync/Templates";
+    }
+    // lib.optionalAttrs (pkgs ? nix-wallpaper) {
+      ".local/share/wallpapers/current.png".source = "${
+        (pkgs.nix-wallpaper.override {
+          preset = "gruvbox-dark";
+          logoSize = 10;
+        })
+      }/share/wallpapers/nixos-wallpaper.png";
+    };
 in {
   home = {
     inherit stateVersion;

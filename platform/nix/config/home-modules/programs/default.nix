@@ -1,6 +1,7 @@
 {
   pkgs,
   lib,
+  inputs,
   ...
 }: {
   imports =
@@ -29,9 +30,12 @@
       ./zellij.nix
     ]
     # Linux-only programs: obs-studio's plugin set is Linux-only, and Zen
-    # Browser has no aarch64-darwin build.
+    # Browser has no aarch64-darwin build. Its config module only makes
+    # sense once the upstream input's home module declares the options.
     ++ lib.optionals pkgs.stdenv.isLinux [
       ./obs-studio.nix
+    ]
+    ++ lib.optionals (pkgs.stdenv.isLinux && inputs ? zen-browser) [
       ./zen-browser
     ];
 
