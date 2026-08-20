@@ -22,6 +22,10 @@ _: {
         wasmtime.lib
         wasmtime.dev
         jq
+        # test-browser.nu frees its ports with fuser before binding them. It
+        # asks inside a try, so an absent fuser reads as "port is free" and the
+        # stale server from a previous run survives to answer the next one.
+        psmisc
 
         # Desktop renderer (Blitz shim build)
         pkg-config

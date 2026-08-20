@@ -222,6 +222,13 @@ export const env = {
 		view.setBigInt64(Number(resultPtr), product & mask, true);
 		view.setBigInt64(Number(resultPtr) + 8, (product >> 64n) & mask, true);
 	},
+	// Darwin-flavored clock the wasm-targeted stdlib calls; whole nanoseconds.
+	// Kept in step with web/runtime/env.ts: that one is what the Deno suites
+	// instantiate, this one is what a browser loads, and a symbol present in
+	// only one of them fails in exactly the half nothing covers.
+	clock_gettime_nsec_np: () =>
+		BigInt(Math.floor(performance.now() * 1_000_000)),
+
 	performance_now: () => performance.now(),
 
 	// client-side routing (P30.2) — push/replace browser history

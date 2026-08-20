@@ -46,6 +46,12 @@ def log-warn [...msg: string] {
     print -e $"(ansi yellow_bold)[warn](ansi reset)  ($text)"
 }
 
+# nixpkgs installs the browser as `servoshell`; a source build is usually
+# `servo`. Same idiom as apps/wiki/test-browser.nu.
+def servo-bin [] {
+    if (which servoshell | is-not-empty) { "servoshell" } else if (which servo | is-not-empty) { "servo" } else { "" }
+}
+
 # ── WebDriver helpers (http + from json — no curl/jq needed) ──────────────
 
 def wd-post [path: string, body: string] {
@@ -373,8 +379,10 @@ def test-counter [session_id: string, timeout: int, passed: int, failed: int] ->
     let r = (assert-text $session_id "count after 1 increment" "#root h1" "High-Five counter: 1" -p $p -f $f)
     $p = $r.passed; $f = $r.failed
 
-    # Click 4 more times
-    for _ in 1..5 {
+    # Click 4 more times, for 5 total. Nushell ranges include their end, so
+    # 1..4 is the four the assertion below counts on; 1..5 clicked five and
+    # read the app's correct 6 as the app's fault.
+    for _ in 1..4 {
         wd-click $session_id $btn_incr
         sleep 50ms
     }
@@ -389,8 +397,10 @@ def test-counter [session_id: string, timeout: int, passed: int, failed: int] ->
     let r = (assert-text $session_id "count after decrement" "#root h1" "High-Five counter: 4" -p $p -f $f)
     $p = $r.passed; $f = $r.failed
 
-    # Decrement past zero
-    for _ in 1..7 {
+    # Decrement past zero: six clicks from 4 reaches -2. The inclusive range
+    # cost a seventh here too, and the two off-by-ones cancelled - a count one
+    # too high went one too far down and landed on the expected -2.
+    for _ in 1..6 {
         wd-click $session_id $btn_decr
         sleep 50ms
     }
@@ -537,10 +547,10 @@ def test-bench [session_id: string, timeout: int, passed: int, failed: int] -> r
     # Bench should have toolbar buttons (Create 1,000 / Append / Update / etc.)
     let btn_count = try { wd-find-all-count $session_id "#root button" } catch { 0 }
     if $btn_count >= 4 {
-        log-ok $"bench toolbar has ($btn_count) buttons (>= 4 expected)"
+        log-ok $"bench toolbar has ($btn_count) buttons \(>= 4 expected)"
         $p = $p + 1
     } else {
-        log-fail $"bench toolbar has ($btn_count) buttons (expected >= 4)"
+        log-fail $"bench toolbar has ($btn_count) buttons \(expected >= 4)"
         $f = $f + 1
     }
 
@@ -556,7 +566,7 @@ def test-bench [session_id: string, timeout: int, passed: int, failed: int] -> r
             log-ok $"bench created ($row_count) rows after 'Create 1,000'"
             $p = $p + 1
         } else {
-            log-fail $"bench created ($row_count) rows (expected >= 100)"
+            log-fail $"bench created ($row_count) rows \(expected >= 100)"
             $f = $f + 1
         }
 
@@ -733,11 +743,20 @@ def main [
 
     # ── Preflight checks ──────────────────────────────────────────────
 
-    for cmd in [servo deno curl jq] {
+    # fuser is checked, not assumed: kill-port asks for it inside a try, so
+    # without it every port looks free and a stale server answers in place of
+    # the one this run starts.
+    for cmd in [deno curl jq fuser] {
         if (which $cmd | is-empty) {
             log-fail $"Required command not found: ($cmd)"
             exit 2
         }
+    }
+
+    let servo_bin = (servo-bin)
+    if ($servo_bin | is-empty) {
+        log-fail "Required command not found: servoshell (or servo)"
+        exit 2
     }
 
     # Wrap everything in try so we can clean up on failure
@@ -756,7 +775,16 @@ def main [
         # ── Start file server ─────────────────────────────────────────
 
         log-info $"Starting file server on :($SERVE_PORT)..."
-        $server_pid = (^bash -c $'cd "($script_dir)" && deno run --allow-net --allow-read jsr:@std/http/file-server -p ($SERVE_PORT) 2>/dev/null & echo $!' | str trim | into int)
+        # nushell waits on the whole process group of an external command, so
+        # the server has to leave that group or the PID read below blocks for
+        # as long as it runs - forever, since it is meant to outlive its
+        # launch. setsid moves it out. The document root is an argument rather
+        # than a `cd` on the left of `&&` because `&` binds looser than `&&`:
+        # `cd d && setsid srv &` backgrounds the whole list as a subshell, and
+        # that subshell stays in the group waiting on the server setsid just
+        # detached. Plain bash never waits, so the shape reads correct and
+        # hangs only here.
+        $server_pid = (^bash -c $'setsid deno run --allow-net --allow-read jsr:@std/http/file-server "($script_dir)" -p ($SERVE_PORT) > /dev/null 2>&1 < /dev/null & echo $!' | str trim | into int)
 
         # Wait for file server to be ready
         mut ready = false
@@ -787,7 +815,7 @@ def main [
 
         log-info $"Starting Servo \(headless, WebDriver on :($WD_PORT))..."
 
-        $servo_pid = (^bash -c $'servo --headless --webdriver=($WD_PORT) "about:blank" > "($servo_log)" 2>&1 & echo $!' | str trim | into int)
+        $servo_pid = (^bash -c $'setsid ($servo_bin) --headless --webdriver=($WD_PORT) "about:blank" > "($servo_log)" 2>&1 < /dev/null & echo $!' | str trim | into int)
 
         # Wait for WebDriver to become ready
         mut wd_ready = false

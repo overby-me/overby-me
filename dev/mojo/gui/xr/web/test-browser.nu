@@ -58,6 +58,12 @@ def log-warn [...msg: string] {
     print -e $"(ansi yellow_bold)[warn](ansi reset)  ($text)"
 }
 
+# nixpkgs installs the browser as `servoshell`; a source build is usually
+# `servo`. Same idiom as apps/wiki/test-browser.nu.
+def servo-bin [] {
+    if (which servoshell | is-not-empty) { "servoshell" } else if (which servo | is-not-empty) { "servo" } else { "" }
+}
+
 # ── WebDriver helpers ──────────────────────────────────────────────────────
 
 def wd-post [path: string, body: string] {
@@ -468,7 +474,7 @@ def test-xr-counter [session_id: string, timeout: int, passed: int, failed: int]
     # Check for buttons rendered by the counter app
     let btn_count = try { wd-find-all-count $session_id "[data-xr-panel] button" } catch { 0 }
     if $btn_count >= 2 {
-        log-ok $"panel has ($btn_count) buttons (counter +/- buttons rendered)"
+        log-ok $"panel has ($btn_count) buttons \(counter +/- buttons rendered)"
         $p = $p + 1
     } else if $btn_count >= 1 {
         log-ok $"panel has ($btn_count) button(s) (partial render)"
@@ -705,11 +711,20 @@ def main [
 
     # ── Preflight checks ──────────────────────────────────────────────
 
-    for cmd in [servo deno curl] {
+    # fuser is checked, not assumed: kill-port asks for it inside a try, so
+    # without it every port looks free and a stale server answers in place of
+    # the one this run starts.
+    for cmd in [deno curl fuser] {
         if (which $cmd | is-empty) {
             log-fail $"Required command not found: ($cmd)"
             exit 2
         }
+    }
+
+    let servo_bin = (servo-bin)
+    if ($servo_bin | is-empty) {
+        log-fail "Required command not found: servoshell (or servo)"
+        exit 2
     }
 
     # ── Verify build artifacts exist ──────────────────────────────────
@@ -736,7 +751,15 @@ def main [
     # ── Start file server (from project root — serves both web/ and xr/) ──
 
     log-info $"Starting file server on :($SERVE_PORT) from ($project_root)..."
-    $server_pid = (^bash -c $'cd "($project_root)" && deno run --allow-net --allow-read jsr:@std/http/file-server -p ($SERVE_PORT) 2>/dev/null & echo $!' | str trim | into int)
+    # nushell waits on the whole process group of an external command, so the
+    # server has to leave that group or the PID read below blocks for as long
+    # as it runs - forever, since it is meant to outlive its launch. setsid
+    # moves it out. The document root is an argument rather than a `cd` on the
+    # left of `&&` because `&` binds looser than `&&`: `cd d && setsid srv &`
+    # backgrounds the whole list as a subshell, and that subshell stays in the
+    # group waiting on the server setsid just detached. Plain bash never waits,
+    # so the shape reads correct and hangs only here.
+    $server_pid = (^bash -c $'setsid deno run --allow-net --allow-read jsr:@std/http/file-server "($project_root)" -p ($SERVE_PORT) > /dev/null 2>&1 < /dev/null & echo $!' | str trim | into int)
 
     mut ready = false
     for _ in 1..31 {
@@ -767,7 +790,7 @@ def main [
 
     log-info $"Starting Servo \(headless, WebDriver on :($WD_PORT))..."
 
-    $servo_pid = (^bash -c $'servo --headless --webdriver=($WD_PORT) "about:blank" > "($servo_log)" 2>&1 & echo $!' | str trim | into int)
+    $servo_pid = (^bash -c $'setsid ($servo_bin) --headless --webdriver=($WD_PORT) "about:blank" > "($servo_log)" 2>&1 < /dev/null & echo $!' | str trim | into int)
 
     mut wd_ready = false
     for _ in 1..51 {
