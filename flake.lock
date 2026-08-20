@@ -341,17 +341,15 @@
     "nixos-hardware": {
       "inputs": {
         "nixpkgs": [
-          "workspace-nixos-hardware",
-          "workspace",
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1785232496,
-        "narHash": "sha256-65EQYIRRpTdpH8lUiB6Mvo5uBkG60aBIzAJuALfx+O0=",
+        "lastModified": 1787144466,
+        "narHash": "sha256-HHfv2/HkNSKbbSyU9iD/g8lbP6r4tl33sSw1W4rXCk0=",
         "owner": "NixOS",
         "repo": "nixos-hardware",
-        "rev": "2e790b0a6be8ec2b76174ac0931b8ff11919ec98",
+        "rev": "0471accf8d0a8210b31d947497d179ecc99e0021",
         "type": "github"
       },
       "original": {
@@ -940,13 +938,13 @@
         "nix-lib": "nix-lib",
         "nix-packages": "nix-packages",
         "nix-wallpaper": "nix-wallpaper",
+        "nixos-hardware": "nixos-hardware",
         "nixpkgs": "nixpkgs",
         "publish-checks": "publish-checks",
         "rust-overlay": "rust-overlay_2",
         "workspace": "workspace",
         "workspace-darwin": "workspace-darwin",
         "workspace-home-manager": "workspace-home-manager",
-        "workspace-nixos-hardware": "workspace-nixos-hardware",
         "workspace-secretspec": "workspace-secretspec",
         "workspace-system-manager": "workspace-system-manager",
         "zen-browser": "zen-browser"
@@ -1191,29 +1189,6 @@
       },
       "original": {
         "dir": "modules/home-manager",
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      }
-    },
-    "workspace-nixos-hardware": {
-      "inputs": {
-        "nixos-hardware": "nixos-hardware",
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "dir": "modules/nixos-hardware",
-        "lastModified": 1787210584,
-        "narHash": "sha256-GZLnhP26vBSe6l/MVYM9Or0aG2rgS2W5ZX+nJ5sWL2Q=",
-        "ref": "refs/heads/main",
-        "rev": "d9eb9370edb5a0fc9394336ac9c65c55dba6dae5",
-        "revCount": 54,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      },
-      "original": {
-        "dir": "modules/nixos-hardware",
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       }

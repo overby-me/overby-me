@@ -34,9 +34,12 @@
     url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/home-manager";
     inputs.workspace.follows = "workspace";
   };
-  inputs.workspace-nixos-hardware = {
-    url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/nixos-hardware";
-    inputs.workspace.follows = "workspace";
+  # Direct upstream, not an integration: hosts import its nixosModules by
+  # name and there is no module logic to carry, so declaring it is the
+  # whole of having it.
+  inputs.nixos-hardware = {
+    url = "github:NixOS/nixos-hardware/master";
+    inputs.nixpkgs.follows = "nixpkgs";
   };
   # Direct upstreams, not integrations: an input that exports a default
   # package lands in pkgs under its own name, so declaring it is the whole
