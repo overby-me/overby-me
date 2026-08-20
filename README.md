@@ -586,10 +586,10 @@
 | ✅ | Binary Cache | [Harmonia 🦀](https://github.com/nix-community/harmonia) | [Attic 🦀](https://github.com/zhaofengli/attic) | [Oxidized Cachix 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/cachix) | [Cachix 🔒λ](https://github.com/cachix/cachix) |
 | ✅ | Config Manager | [Home Manager 🌐❄️](https://github.com/nix-community/home-manager) | | 🆗 | |
 | ✅ | Repository Secrets | [Ragenix 🦀❄️](https://github.com/yaxitech/ragenix) | | 🆗 | [Agenix 🐹❄️](https://github.com/ryantm/agenix) |
-| 🚧 | Developer Secrets | | [SecretSpec 🦀](https://github.com/cachix/secretspec) | 🆗 | |
+| ✅ | Developer Secrets | [SecretSpec 🦀](https://github.com/cachix/secretspec) | | 🆗 | |
 | ✅ | Deployment | [Colmena 🦀️❄️](https://github.com/zhaofengli/colmena) | [Navi 🦀❄️](https://github.com/cafkafk/navi) | 🆗 | |
 | ✅ | Developer Environment | [devShells ❄️](https://nixos.org/manual/nixpkgs/stable/#sec-pkgs-mkShell) + [git-hooks.nix ❄️](https://github.com/cachix/git-hooks.nix) | [Organist ❄️](https://github.com/nickel-lang/organist) | 🆗 | [Devenv 🦀️❄️](https://github.com/cachix/devenv) |
-| 🚧 | Project Organization | [Flakelight ❄️](https://github.com/nix-community/flakelight) | [Nickel Workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/workspace) | 🆗 | [Flake-parts ❄️](https://github.com/hercules-ci/flake-parts) |
+| ✅ | Project Organization | [Nix Workspace ❄️](https://tangled.org/@overby.me/nix-workspace) | [Nickel Workspace ❄️](https://tangled.org/@overby.me/overby.me/tree/main/dev/nickel/workspace) | 🆗 | [Flakelight ❄️](https://github.com/nix-community/flakelight), [Flake-parts ❄️](https://github.com/hercules-ci/flake-parts) |
 | ✅ | File Locator | [Nix-index 🦀](https://github.com/nix-community/nix-index), [Comma 🦀](https://github.com/nix-community/comma) | | 🆗 | |
 | ✅ | Rust Integration | [Crate2nix 🦀❄️](https://github.com/nix-community/crate2nix) | | 🆗 | [Crane ❄️](https://github.com/ipetkov/crane) |
 | ✅ | Python Integration | [Uv2nix ❄️](https://github.com/pyproject-nix/uv2nix) | | 🆗 | |
