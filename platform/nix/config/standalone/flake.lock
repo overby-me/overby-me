@@ -154,6 +154,28 @@
       },
       "parent": []
     },
+    "nix-darwin": {
+      "inputs": {
+        "nixpkgs": [
+          "workspace",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1783744694,
+        "narHash": "sha256-2cp6N3rrwnGYLTx9l6N+NI+kwrCWxvJUbj5WJhvB29A=",
+        "owner": "nix-darwin",
+        "repo": "nix-darwin",
+        "rev": "c3e90c89649b07d1a96e4b9dd6cd0d6e44b91a74",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-darwin",
+        "ref": "nix-darwin-26.05",
+        "repo": "nix-darwin",
+        "type": "github"
+      }
+    },
     "nix-packages": {
       "inputs": {
         "workspace": [
@@ -305,6 +327,7 @@
         "disko": "disko",
         "home-manager": "home-manager",
         "nix-config": "nix-config",
+        "nix-darwin": "nix-darwin",
         "nix-packages": "nix-packages",
         "nix-wallpaper": "nix-wallpaper",
         "nixos-hardware": "nixos-hardware",

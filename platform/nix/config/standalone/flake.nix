@@ -24,6 +24,10 @@
       url = "github:nix-community/home-manager/release-26.05";
       inputs.nixpkgs.follows = "workspace/nixpkgs";
     };
+    nix-darwin = {
+      url = "github:nix-darwin/nix-darwin/nix-darwin-26.05";
+      inputs.nixpkgs.follows = "workspace/nixpkgs";
+    };
     secretspec = {
       url = "github:cachix/secretspec/v0.19.1";
       flake = false;
