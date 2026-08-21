@@ -242,6 +242,31 @@
       },
       "parent": []
     },
+    "nix-lib_2": {
+      "inputs": {
+        "oxidized-ninja": "oxidized-ninja_2",
+        "oxidized-xz": "oxidized-xz_2",
+        "wclip": "wclip_2",
+        "workspace": [
+          "nix-lib",
+          "wclip",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "lastModified": 1787232042,
+        "narHash": "sha256-0mdVsfMjvxXKLPdstGnVb0G/7/+g7jf3FSiPdfsDgEs=",
+        "ref": "refs/heads/main",
+        "rev": "60a22e302531db04305110d04dfb4312946ec4df",
+        "revCount": 115,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-lib"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-lib"
+      }
+    },
     "nix-packages": {
       "inputs": {
         "workspace": [
@@ -696,6 +721,29 @@
     "oxidized-ninja_2": {
       "inputs": {
         "workspace": [
+          "nix-lib",
+          "wclip",
+          "nix-lib",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "lastModified": 1787161150,
+        "narHash": "sha256-Xh19iZYgNP6I2sjvuB/3tpUs6XEL/ki57nXL99z+GKk=",
+        "ref": "refs/heads/main",
+        "rev": "901887e1edd7116b4653eccbcc37aa4f017fcb12",
+        "revCount": 43,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/oxidized-ninja"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://tangled.org/overby.me/oxidized-ninja"
+      }
+    },
+    "oxidized-ninja_3": {
+      "inputs": {
+        "workspace": [
           "publish-checks",
           "workspace"
         ]
@@ -862,6 +910,29 @@
       },
       "parent": []
     },
+    "oxidized-xz_2": {
+      "inputs": {
+        "workspace": [
+          "nix-lib",
+          "wclip",
+          "nix-lib",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "lastModified": 1787161150,
+        "narHash": "sha256-RCxptPsfToJUK6+6/4COQ97nBTEZu/INGjW6eZRc/Mw=",
+        "ref": "refs/heads/main",
+        "rev": "c8db0a6709cdd0572f50d3e666d4a5b71d7b4531",
+        "revCount": 48,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/oxidized-xz"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://tangled.org/overby.me/oxidized-xz"
+      }
+    },
     "publish-checks": {
       "inputs": {
         "oxidized-awk": "oxidized-awk",
@@ -877,7 +948,7 @@
         "oxidized-help2man": "oxidized-help2man",
         "oxidized-llvm": "oxidized-llvm",
         "oxidized-make": "oxidized-make",
-        "oxidized-ninja": "oxidized-ninja_2",
+        "oxidized-ninja": "oxidized-ninja_3",
         "oxidized-patch": "oxidized-patch",
         "oxidized-patchelf": "oxidized-patchelf",
         "oxidized-pcre2": "oxidized-pcre2",
@@ -885,7 +956,7 @@
         "oxidized-pipewire": "oxidized-pipewire",
         "oxidized-sed": "oxidized-sed",
         "oxidized-texinfo": "oxidized-texinfo",
-        "wclip": "wclip_2",
+        "wclip": "wclip_3",
         "workspace": [
           "workspace"
         ]
@@ -1053,6 +1124,7 @@
     },
     "wclip": {
       "inputs": {
+        "nix-lib": "nix-lib_2",
         "workspace": [
           "nix-lib",
           "workspace"
@@ -1069,6 +1141,29 @@
       "parent": []
     },
     "wclip_2": {
+      "inputs": {
+        "workspace": [
+          "nix-lib",
+          "wclip",
+          "nix-lib",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "lastModified": 1787161150,
+        "narHash": "sha256-3yq0hn3zE0C2RCz03J2z2nnRTL1KTKwP+5cyPLaYgZw=",
+        "ref": "refs/heads/main",
+        "rev": "348440591f4856797af4fdfb09e85a29daf9a382",
+        "revCount": 22,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/wclip"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://tangled.org/overby.me/wclip"
+      }
+    },
+    "wclip_3": {
       "inputs": {
         "workspace": [
           "publish-checks",
@@ -1098,11 +1193,11 @@
         "system-manager": "system-manager"
       },
       "locked": {
-        "lastModified": 1787343340,
-        "narHash": "sha256-0qKs6SMkYwkVb7Co1CPKy9nF/moOFMsplsXrFt6QJig=",
+        "lastModified": 1787346376,
+        "narHash": "sha256-T186a4LU/EL53SqAvCZeA3PCpN3w44PNdbZk5LJORgA=",
         "ref": "refs/heads/main",
-        "rev": "e412098531b3643f5a602d8929cc7b9c3452c55c",
-        "revCount": 70,
+        "rev": "a8b09c6fbff46c429e4ddfba2a48fdc4b53af5b3",
+        "revCount": 72,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },

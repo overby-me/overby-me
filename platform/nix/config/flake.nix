@@ -65,7 +65,7 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      module = true;
+
       outputDirs = [./.];
     };
 }
