@@ -935,23 +935,6 @@
         "type": "github"
       }
     },
-    "secretspec": {
-      "locked": {
-        "dir": "upstreams/secretspec",
-        "lastModified": 1787342019,
-        "narHash": "sha256-FmVNzhPmIfGB4sAjSATPBlvhsjwe34b9lWRroCsHSHk=",
-        "ref": "refs/heads/main",
-        "rev": "8763884da47d5cedc10ff4280a662a04fd383519",
-        "revCount": 69,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      },
-      "original": {
-        "dir": "upstreams/secretspec",
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-workspace"
-      }
-    },
     "system-manager": {
       "inputs": {
         "flake-compat": "flake-compat_2",
@@ -1112,15 +1095,14 @@
         "nixpkgs": [
           "nixpkgs"
         ],
-        "secretspec": "secretspec",
         "system-manager": "system-manager"
       },
       "locked": {
-        "lastModified": 1787342019,
-        "narHash": "sha256-FmVNzhPmIfGB4sAjSATPBlvhsjwe34b9lWRroCsHSHk=",
+        "lastModified": 1787343340,
+        "narHash": "sha256-0qKs6SMkYwkVb7Co1CPKy9nF/moOFMsplsXrFt6QJig=",
         "ref": "refs/heads/main",
-        "rev": "8763884da47d5cedc10ff4280a662a04fd383519",
-        "revCount": 69,
+        "rev": "e412098531b3643f5a602d8929cc7b9c3452c55c",
+        "revCount": 70,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },

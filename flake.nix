@@ -10,8 +10,6 @@
       url = "git+https://tangled.org/overby.me/nix-workspace";
       inputs = {
         nixpkgs.follows = "nixpkgs";
-        # Upstream ships no flake, so the framework carries one holding the pin.
-        secretspec.url = "git+https://tangled.org/overby.me/nix-workspace?dir=upstreams/secretspec";
 
         nix-darwin = {
           url = "github:nix-darwin/nix-darwin/nix-darwin-26.05";

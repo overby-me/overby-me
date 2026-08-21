@@ -43,7 +43,7 @@
 
     # ── Secrets ───────────────────────────────────────────────────────
     inputs.self.nixosModules.secretspec
-    {
+    ({pkgs, ...}: {
       # The provider decrypts with the pre-generated SSH host key injected
       # into the rootfs image at build time.  The key is stored
       # age-encrypted in secrets/phone-host-key.age and must be decrypted
@@ -54,11 +54,13 @@
       # ext4 image at /etc/ssh/.
       secretspec = {
         enable = true;
+        # 26.05 carries 0.10.1; the modules need the 0.19 `--reason` flag.
+        package = pkgs.pkgsUnstable.secretspec;
         projectFile = ../secretspec.toml;
         profile = "phone";
         provider = "age://secrets/secretspec.age?identity=/etc/ssh/ssh_host_ed25519_key&recipients-file=secrets/secretspec.age.recipients";
       };
-    }
+    })
 
     # ── Desktop environment ───────────────────────────────────────────
     inputs.self.desktops.cosmic

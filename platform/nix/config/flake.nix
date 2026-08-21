@@ -20,9 +20,6 @@
     workspace = {
       url = "git+https://tangled.org/overby.me/nix-workspace";
       inputs = {
-        # Upstream ships no flake, so the framework carries one holding the pin.
-        secretspec.url = "git+https://tangled.org/overby.me/nix-workspace?dir=upstreams/secretspec";
-
         home-manager.url = "github:nix-community/home-manager/release-26.05";
         nix-darwin.url = "github:nix-darwin/nix-darwin/nix-darwin-26.05";
         system-manager.url = "github:numtide/system-manager";

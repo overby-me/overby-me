@@ -32,6 +32,8 @@
       }: {
         secretspec = {
           enable = true;
+          # 26.05 carries 0.10.1; the modules need the 0.19 `--reason` flag.
+          package = pkgs.pkgsUnstable.secretspec;
           projectFile = ../secretspec.toml;
           profile = "home";
           provider = "age://secrets/secretspec.age?identity=/etc/ssh/ssh_host_ed25519_key&recipients-file=secrets/secretspec.age.recipients";
