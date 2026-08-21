@@ -49,7 +49,10 @@
       tasksPath = "${configDir}/tasks.json";
 
       userKeymaps = lib.readFile ./keymap.json;
-      userSettings = lib.readFile ./settings.json;
+      # @opencode@ stands in for the store path of the opencode binary that
+      # serves ACP to the agent panel: the file stays plain JSON for editors,
+      # and a running zed is insulated from PATH differences.
+      userSettings = lib.replaceStrings ["@opencode@"] ["${pkgs.pkgsUnstable.opencode}/bin/opencode"] (lib.readFile ./settings.json);
       userTasks = lib.readFile ./tasks.json;
     in {
       removeExistingZedSettings = lib.hm.dag.entryBefore ["checkLinkTargets"] ''

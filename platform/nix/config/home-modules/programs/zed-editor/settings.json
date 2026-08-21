@@ -9,6 +9,13 @@
 		},
 		"play_sound_when_agent_done": true
 	},
+	"agent_servers": {
+		"OpenCode": {
+			"type": "custom",
+			"command": "@opencode@",
+			"args": ["acp"]
+		}
+	},
 	"lsp_document_colors": "inlay",
 	"auto_update": false,
 	"autosave": {
