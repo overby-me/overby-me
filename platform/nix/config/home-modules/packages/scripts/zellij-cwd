@@ -23,9 +23,13 @@ let live = (
 )
 if $live {
   ^zellij attach $session_name
+} else if $nu.os-info.name != "linux" {
+  # The scope is the Linux OOM containment; darwin has neither systemd nor
+  # the incident class, so the session just starts.
+  ^zellij attach -c $session_name
 } else {
   let unit = $"zellij-($session_name | str replace -ra '[^A-Za-z0-9_.:-]' '-')"
-  let cores = ([1 ((^nproc | into int) - 2)] | math max)
+  let cores = ([1 ((sys cpu | length) - 2)] | math max)
   (^systemd-run --user --scope --collect
     $"--unit=($unit)"
     -p "MemoryHigh=70%"
