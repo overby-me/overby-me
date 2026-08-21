@@ -25,13 +25,13 @@
       "locked": {
         "lastModified": 1767039857,
         "narHash": "sha256-vNpUSpF5Nuw8xvDLj2KCwwksIbjua2LZCqhV1LNRDns=",
-        "owner": "edolstra",
+        "owner": "NixOS",
         "repo": "flake-compat",
         "rev": "5edf11c44bc78a0d334f6334cdaf7d60d732daab",
         "type": "github"
       },
       "original": {
-        "owner": "edolstra",
+        "owner": "NixOS",
         "repo": "flake-compat",
         "type": "github"
       }
@@ -41,13 +41,13 @@
       "locked": {
         "lastModified": 1767039857,
         "narHash": "sha256-vNpUSpF5Nuw8xvDLj2KCwwksIbjua2LZCqhV1LNRDns=",
-        "owner": "NixOS",
+        "owner": "edolstra",
         "repo": "flake-compat",
         "rev": "5edf11c44bc78a0d334f6334cdaf7d60d732daab",
         "type": "github"
       },
       "original": {
-        "owner": "NixOS",
+        "owner": "edolstra",
         "repo": "flake-compat",
         "type": "github"
       }
@@ -55,6 +55,7 @@
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
+          "workspace",
           "system-manager",
           "userborn",
           "nixpkgs"
@@ -94,7 +95,7 @@
     },
     "git-hooks": {
       "inputs": {
-        "flake-compat": "flake-compat_2",
+        "flake-compat": "flake-compat",
         "nixpkgs": [
           "workspace",
           "nixpkgs"
@@ -776,9 +777,7 @@
     "root": {
       "inputs": {
         "disko": "disko",
-        "home-manager": "home-manager",
         "nix-config": "nix-config",
-        "nix-darwin": "nix-darwin",
         "nix-lib": "nix-lib",
         "nix-packages": "nix-packages",
         "nix-wallpaper": "nix-wallpaper",
@@ -786,8 +785,6 @@
         "nixpkgs": "nixpkgs",
         "publish-checks": "publish-checks",
         "rust-overlay": "rust-overlay",
-        "secretspec": "secretspec",
-        "system-manager": "system-manager",
         "workspace": "workspace",
         "zen-browser": "zen-browser"
       }
@@ -813,25 +810,25 @@
       }
     },
     "secretspec": {
-      "flake": false,
       "locked": {
-        "lastModified": 1786550683,
-        "narHash": "sha256-sEr7RtfJhk1f2tOv+ICIEcVHDTYi/VAGKyLcgPeEuKI=",
-        "owner": "cachix",
-        "repo": "secretspec",
-        "rev": "b90afe381452918134c40f9d91a7a7246c9fb9ca",
-        "type": "github"
+        "dir": "upstreams/secretspec",
+        "lastModified": 1787338299,
+        "narHash": "sha256-0SzWJ5oOYloVA5bxHIfpEKT7ZTpQqPk54/AuvjqIrd8=",
+        "ref": "refs/heads/main",
+        "rev": "490a8d7ea09f8ff17b085ddbf49d8dc3a59f5ff1",
+        "revCount": 68,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
       },
       "original": {
-        "owner": "cachix",
-        "ref": "v0.19.1",
-        "repo": "secretspec",
-        "type": "github"
+        "dir": "upstreams/secretspec",
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
       }
     },
     "system-manager": {
       "inputs": {
-        "flake-compat": "flake-compat",
+        "flake-compat": "flake-compat_2",
         "nixpkgs": "nixpkgs_2",
         "userborn": "userborn"
       },
@@ -883,11 +880,13 @@
     "userborn": {
       "inputs": {
         "flake-compat": [
+          "workspace",
           "system-manager",
           "flake-compat"
         ],
         "flake-parts": "flake-parts",
         "nixpkgs": [
+          "workspace",
           "system-manager",
           "nixpkgs"
         ],
@@ -951,16 +950,20 @@
     "workspace": {
       "inputs": {
         "git-hooks": "git-hooks",
+        "home-manager": "home-manager",
+        "nix-darwin": "nix-darwin",
         "nixpkgs": [
           "nixpkgs"
-        ]
+        ],
+        "secretspec": "secretspec",
+        "system-manager": "system-manager"
       },
       "locked": {
-        "lastModified": 1787325255,
-        "narHash": "sha256-dk2gFS7tyDyxcW+riTs9EGOrij9zp9MwfvwbgT24x3k=",
+        "lastModified": 1787338299,
+        "narHash": "sha256-0SzWJ5oOYloVA5bxHIfpEKT7ZTpQqPk54/AuvjqIrd8=",
         "ref": "refs/heads/main",
-        "rev": "8c8f3f48edf5b305e6781073d0904cde579959f3",
-        "revCount": 66,
+        "rev": "490a8d7ea09f8ff17b085ddbf49d8dc3a59f5ff1",
+        "revCount": 68,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -972,6 +975,7 @@
     "zen-browser": {
       "inputs": {
         "home-manager": [
+          "workspace",
           "home-manager"
         ],
         "nixpkgs": [

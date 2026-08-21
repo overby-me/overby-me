@@ -30,25 +30,37 @@
     # second declaration here. One input is one thing for a consuming flake
     # to follow, and there is no arrangement of it that leaves the framework
     # and this directory on different nixpkgs.
-    workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
+    #
+    # The host upstreams are set through this input rather than declared
+    # beside the others, so this one flake still evaluates its hosts
+    # standalone while naming each pin in one place. The framework declares
+    # them as optional inputs defaulting to a stub; overriding one is what
+    # enables it, and a consumer that follows this flake's `workspace` gets
+    # the same upstreams without restating any of them.
+    #
+    # secretspec points back at the framework's own repo: upstream has no
+    # flake, so it carries a wrapper that holds the pin.
+    workspace = {
+      url = "git+https://tangled.org/overby.me/nix-workspace";
+      inputs = {
+        secretspec.url = "git+https://tangled.org/overby.me/nix-workspace?dir=upstreams/secretspec";
 
-    # The host upstreams, declared here so this one flake also evaluates its
-    # hosts standalone. A consumer importing only the module never forces
-    # them, and input fetching is lazy (measured), so these cost such a
-    # consumer lock lines and nothing else.
+        home-manager.url = "github:nix-community/home-manager/release-26.05";
+        nix-darwin.url = "github:nix-darwin/nix-darwin/nix-darwin-26.05";
+        # Narrow-window upstream: newer revisions drop the nix.* module the
+        # system-modules set. Both pins match what the monorepo proved.
+        system-manager = {
+          url = "github:numtide/system-manager/48d47346e0c6ad05b6c869ea92649c47723d1cfc";
+          inputs.nixpkgs.url = "github:NixOS/nixpkgs/61b7c44c4073f0b827768aff0049561b5110ea5a";
+        };
+      };
+    };
 
-    home-manager = {
-      url = "github:nix-community/home-manager/release-26.05";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
-    nix-darwin = {
-      url = "github:nix-darwin/nix-darwin/nix-darwin-26.05";
-      inputs.nixpkgs.follows = "workspace/nixpkgs";
-    };
-    secretspec = {
-      url = "github:cachix/secretspec/v0.19.1";
-      flake = false;
-    };
+    # The remaining upstreams: direct, not integrations. An input exporting
+    # a default package lands in pkgs under its own name, and hosts import
+    # nixos-hardware's modules by name, so declaring one is the whole of
+    # having it.
+
     disko = {
       url = "github:nix-community/disko";
       inputs.nixpkgs.follows = "workspace/nixpkgs";
@@ -58,19 +70,12 @@
       # Pinned as in the monorepo root: zen tracks nixpkgs-unstable at HEAD.
       url = "github:0xc000022070/zen-browser-flake/945efbc704b7f8c1731a922aabbc5d95edc9eb74";
       inputs.nixpkgs.follows = "workspace/nixpkgs";
-      inputs.home-manager.follows = "home-manager";
+      inputs.home-manager.follows = "workspace/home-manager";
     };
     nix-wallpaper = {
       url = "github:lunik1/nix-wallpaper";
       inputs.nixpkgs.follows = "workspace/nixpkgs";
       inputs.pre-commit-hooks.follows = "workspace/git-hooks";
-    };
-    # Narrow-window upstream: newer revisions drop the nix.* module the
-    # system-modules set. Both pins match what the monorepo proved.
-    system-manager = {
-      url = "github:numtide/system-manager/48d47346e0c6ad05b6c869ea92649c47723d1cfc";
-      inputs.nixpkgs.url = "github:NixOS/nixpkgs/61b7c44c4073f0b827768aff0049561b5110ea5a";
-      inputs.userborn.inputs.pre-commit-hooks-nix.follows = "workspace/git-hooks";
     };
     # Published projects whose modules and packages the hosts consume; each
     # repo exports its own module beside its build.
