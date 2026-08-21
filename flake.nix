@@ -21,11 +21,8 @@
           url = "github:nix-community/home-manager/release-26.05";
           inputs.nixpkgs.follows = "nixpkgs";
         };
-        # Narrow window, not a channel: newer revs drop the nix.* module the
-        # configs set, so upstream and its nixpkgs are pinned to agree.
         system-manager = {
-          url = "github:numtide/system-manager/48d47346e0c6ad05b6c869ea92649c47723d1cfc";
-          inputs.nixpkgs.url = "github:NixOS/nixpkgs/61b7c44c4073f0b827768aff0049561b5110ea5a";
+          url = "github:numtide/system-manager";
           inputs.userborn.inputs.pre-commit-hooks-nix.follows = "workspace/git-hooks";
         };
       };
@@ -54,8 +51,8 @@
     inputs.pre-commit-hooks.follows = "workspace/git-hooks";
   };
   inputs.zen-browser = {
-    # Zen tracks nixpkgs-unstable at HEAD; this rev is the one that builds
-    # against 26.05.
+    # Not the default branch: zen tracks nixpkgs-unstable, and its HEAD package
+    # calls for ffmpeg_9, which 26.05 does not carry. Unpin when 26.05 does.
     url = "github:0xc000022070/zen-browser-flake/945efbc704b7f8c1731a922aabbc5d95edc9eb74";
     inputs.nixpkgs.follows = "nixpkgs";
     inputs.home-manager.follows = "workspace/home-manager";

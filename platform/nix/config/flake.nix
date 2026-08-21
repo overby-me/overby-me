@@ -25,11 +25,7 @@
 
         home-manager.url = "github:nix-community/home-manager/release-26.05";
         nix-darwin.url = "github:nix-darwin/nix-darwin/nix-darwin-26.05";
-        # Narrow window: newer revs drop the nix.* module the system-modules set.
-        system-manager = {
-          url = "github:numtide/system-manager/48d47346e0c6ad05b6c869ea92649c47723d1cfc";
-          inputs.nixpkgs.url = "github:NixOS/nixpkgs/61b7c44c4073f0b827768aff0049561b5110ea5a";
-        };
+        system-manager.url = "github:numtide/system-manager";
       };
     };
 
@@ -40,7 +36,7 @@
     };
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
     zen-browser = {
-      # Pinned as in the monorepo root: zen tracks nixpkgs-unstable at HEAD.
+      # Pinned as in the monorepo root: HEAD wants ffmpeg_9, absent from 26.05.
       url = "github:0xc000022070/zen-browser-flake/945efbc704b7f8c1731a922aabbc5d95edc9eb74";
       inputs.nixpkgs.follows = "workspace/nixpkgs";
       inputs.home-manager.follows = "workspace/home-manager";
