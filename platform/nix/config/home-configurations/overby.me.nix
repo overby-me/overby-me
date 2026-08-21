@@ -4,7 +4,8 @@
   lib,
   ...
 }: {
-  system = "x86_64-linux";
+  # No system: builds once per framework system as overby.me@<system>
+  # (nix-workspace's fallback for a systemless home configuration).
   inherit lib;
   extraSpecialArgs = {
     inherit inputs src;
