@@ -74,52 +74,10 @@
         "url": "https://tangled.org/overby.me/oxidized-ninja"
       }
     },
-    "oxidized-xz": {
-      "inputs": {
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "lastModified": 1787161150,
-        "narHash": "sha256-RCxptPsfToJUK6+6/4COQ97nBTEZu/INGjW6eZRc/Mw=",
-        "ref": "refs/heads/main",
-        "rev": "c8db0a6709cdd0572f50d3e666d4a5b71d7b4531",
-        "revCount": 48,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-xz"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-xz"
-      }
-    },
     "root": {
       "inputs": {
         "oxidized-ninja": "oxidized-ninja",
-        "oxidized-xz": "oxidized-xz",
-        "wclip": "wclip",
         "workspace": "workspace"
-      }
-    },
-    "wclip": {
-      "inputs": {
-        "workspace": [
-          "workspace"
-        ]
-      },
-      "locked": {
-        "lastModified": 1787161150,
-        "narHash": "sha256-3yq0hn3zE0C2RCz03J2z2nnRTL1KTKwP+5cyPLaYgZw=",
-        "ref": "refs/heads/main",
-        "rev": "348440591f4856797af4fdfb09e85a29daf9a382",
-        "revCount": 22,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/wclip"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/wclip"
       }
     },
     "workspace": {

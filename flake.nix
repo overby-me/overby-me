@@ -69,13 +69,11 @@
     };
   };
 
-  # The build systems. Its port inputs point at this tree's own copies.
+  # The build systems. Its ninja input points at this tree's own copy.
   inputs.nix-lib = {
     url = "path:./platform/nix/lib";
     inputs = {
       workspace.follows = "workspace";
-      wclip.url = "path:./dev/wclip";
-      oxidized-xz.url = "path:./safety/oxidized/xz";
       oxidized-ninja.url = "path:./safety/oxidized/ninja";
     };
   };

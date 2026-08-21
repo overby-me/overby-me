@@ -156,9 +156,6 @@ absolute dev-machine path).
   tarballs when `index` is omitted
 - `tools/diff-cargo.nu` differential oracle against `cargo tree`
 - `index/` committed snapshot covering this repo's lockfiles
-- `tests/` eval unit tests (`nix eval -f platform/nix/lib/lib/cargo/tests/<mod>.nix`).
-  `lock`, `manifest` and `resolve-real` resolve real workspaces and take them
-  as arguments, so those three need `--apply 'f: f {}'` to run rather than
-  print themselves.
-- `checks.nix` flake checks: `cargo-lib`, `cargo-build-wclip`,
-  `cargo-build-xz` (build individually; never `nix flake check` here)
+- `tests/` eval unit tests (`nix eval -f platform/nix/lib/lib/cargo/tests/<mod>.nix`)
+- `checks.nix` flake check `cargo-lib` (build it directly; never `nix flake
+  check` here)

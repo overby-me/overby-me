@@ -19,20 +19,6 @@
     # disagreeing.
     workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
-    # Real Cargo workspaces the resolver is tested against. Fixtures rather
-    # than vendored copies, because what the tests catch is the resolver
-    # meeting a manifest feature it does not handle, which a snapshot stops
-    # doing the day after it is taken. The tree above overrides these onto its
-    # own copies, so a change to a port is what the check builds.
-    wclip = {
-      url = "git+https://tangled.org/overby.me/wclip";
-      inputs.workspace.follows = "workspace";
-    };
-    oxidized-xz = {
-      url = "git+https://tangled.org/overby.me/oxidized-xz";
-      inputs.workspace.follows = "workspace";
-    };
-
     # Not a fixture: `buildNinjaProject` extracts its graph by running
     # `oxidized-ninja -t graph-json`, a subcommand of the rewrite. There is no
     # nixpkgs ninja to fall back to.
