@@ -90,7 +90,16 @@
   # neither what is in there nor what it needs.
   inputs.nix-config = {
     url = "path:./platform/nix/config";
-    inputs.workspace.follows = "workspace";
+    inputs = {
+      workspace.follows = "workspace";
+      # Pointed at this tree's own copies, so a change to one is what the
+      # hosts get rather than whatever was last published - and so the module
+      # arrives once. Both copies declare the same home-manager options, and
+      # two paths to one option is a duplicate declaration, not an override.
+      nushell-plugin-tramp.url = "path:./dev/nushell/plugin-tramp";
+      tangled-spindle-nix-engine.url = "path:./platform/tangled/spindle-nix-engine";
+      nix-packages.follows = "nix-packages";
+    };
   };
 
   # The build systems. Its three port inputs are pointed at this tree's own

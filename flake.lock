@@ -20,6 +20,28 @@
         "type": "github"
       }
     },
+    "disko_2": {
+      "inputs": {
+        "nixpkgs": [
+          "nix-config",
+          "workspace",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1781152676,
+        "narHash": "sha256-RxWs5ND31KzTG7wvMM+PMfUjyNpmIEr999lqNARaM5o=",
+        "owner": "nix-community",
+        "repo": "disko",
+        "rev": "ff8702b4de27f72b4c78573dfb89ec74e36abdf1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "disko",
+        "type": "github"
+      }
+    },
     "flake-compat": {
       "flake": false,
       "locked": {
@@ -93,6 +115,24 @@
         "type": "github"
       }
     },
+    "flake-utils_2": {
+      "inputs": {
+        "systems": "systems_2"
+      },
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
     "git-hooks": {
       "inputs": {
         "flake-compat": "flake-compat",
@@ -138,10 +178,19 @@
     },
     "nix-config": {
       "inputs": {
+        "disko": "disko_2",
+        "nix-packages": [
+          "nix-packages"
+        ],
+        "nix-wallpaper": "nix-wallpaper",
+        "nixos-hardware": "nixos-hardware",
         "nixpkgs-unstable": "nixpkgs-unstable",
+        "nushell-plugin-tramp": "nushell-plugin-tramp",
+        "tangled-spindle-nix-engine": "tangled-spindle-nix-engine",
         "workspace": [
           "workspace"
-        ]
+        ],
+        "zen-browser": "zen-browser"
       },
       "locked": {
         "path": "./platform/nix/config",
@@ -213,6 +262,34 @@
       "inputs": {
         "flake-utils": "flake-utils",
         "nixpkgs": [
+          "nix-config",
+          "workspace",
+          "nixpkgs"
+        ],
+        "pre-commit-hooks": [
+          "nix-config",
+          "workspace",
+          "git-hooks"
+        ]
+      },
+      "locked": {
+        "lastModified": 1769821964,
+        "narHash": "sha256-WcfoLCZbo32Psw2mP9bF8uHCF50SMAhQFkWq+/+Z9B0=",
+        "owner": "lunik1",
+        "repo": "nix-wallpaper",
+        "rev": "f658947fdc9ab85be9003deb26632a464bd41e5d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "lunik1",
+        "repo": "nix-wallpaper",
+        "type": "github"
+      }
+    },
+    "nix-wallpaper_2": {
+      "inputs": {
+        "flake-utils": "flake-utils_2",
+        "nixpkgs": [
           "nixpkgs"
         ],
         "pre-commit-hooks": [
@@ -236,6 +313,25 @@
     },
     "nixos-hardware": {
       "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1787144466,
+        "narHash": "sha256-HHfv2/HkNSKbbSyU9iD/g8lbP6r4tl33sSw1W4rXCk0=",
+        "owner": "NixOS",
+        "repo": "nixos-hardware",
+        "rev": "0471accf8d0a8210b31d947497d179ecc99e0021",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "master",
+        "repo": "nixos-hardware",
+        "type": "github"
+      }
+    },
+    "nixos-hardware_2": {
+      "inputs": {
         "nixpkgs": [
           "nixpkgs"
         ]
@@ -257,18 +353,15 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1786313170,
-        "narHash": "sha256-9BG7OgUWdu0ONDO5X2q6+K4bsuBITkX/3W4nNJu1Ito=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "fcb8fcd6bf2d0adecae5bd491afaaaf8311b758d",
-        "type": "github"
+        "lastModified": 1767892417,
+        "narHash": "sha256-8bW3q88CEg2u4hSP66Vf4lpbLonHz7hqDNBMcCY7E9U=",
+        "rev": "3497aa5c9457a9d88d71fa93a4a8368816fbeeba",
+        "type": "tarball",
+        "url": "https://releases.nixos.org/nixos/unstable/nixos-26.05pre924538.3497aa5c9457/nixexprs.tar.xz"
       },
       "original": {
-        "owner": "NixOS",
-        "ref": "nixos-26.05",
-        "repo": "nixpkgs",
-        "type": "github"
+        "type": "tarball",
+        "url": "https://channels.nixos.org/nixos-unstable/nixexprs.tar.xz"
       }
     },
     "nixpkgs-unstable": {
@@ -289,6 +382,22 @@
     },
     "nixpkgs_2": {
       "locked": {
+        "lastModified": 1786313170,
+        "narHash": "sha256-9BG7OgUWdu0ONDO5X2q6+K4bsuBITkX/3W4nNJu1Ito=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "fcb8fcd6bf2d0adecae5bd491afaaaf8311b758d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-26.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_3": {
+      "locked": {
         "lastModified": 1784356753,
         "narHash": "sha256-12KrbMiWLcf8m7pCvAtZh1ZrgF85ZXDXvfR/fWTKy84=",
         "owner": "NixOS",
@@ -302,6 +411,23 @@
         "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
         "type": "github"
       }
+    },
+    "nushell-plugin-tramp": {
+      "inputs": {
+        "workspace": [
+          "nix-config",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "path": "./dev/nushell/plugin-tramp",
+        "type": "path"
+      },
+      "original": {
+        "path": "./dev/nushell/plugin-tramp",
+        "type": "path"
+      },
+      "parent": []
     },
     "oxidized-awk": {
       "inputs": {
@@ -780,13 +906,13 @@
         "nix-config": "nix-config",
         "nix-lib": "nix-lib",
         "nix-packages": "nix-packages",
-        "nix-wallpaper": "nix-wallpaper",
-        "nixos-hardware": "nixos-hardware",
-        "nixpkgs": "nixpkgs",
+        "nix-wallpaper": "nix-wallpaper_2",
+        "nixos-hardware": "nixos-hardware_2",
+        "nixpkgs": "nixpkgs_2",
         "publish-checks": "publish-checks",
         "rust-overlay": "rust-overlay",
         "workspace": "workspace",
-        "zen-browser": "zen-browser"
+        "zen-browser": "zen-browser_2"
       }
     },
     "rust-overlay": {
@@ -829,7 +955,7 @@
     "system-manager": {
       "inputs": {
         "flake-compat": "flake-compat_2",
-        "nixpkgs": "nixpkgs_2",
+        "nixpkgs": "nixpkgs_3",
         "userborn": "userborn"
       },
       "locked": {
@@ -877,6 +1003,38 @@
         "type": "github"
       }
     },
+    "systems_3": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    },
+    "tangled-spindle-nix-engine": {
+      "inputs": {
+        "workspace": [
+          "nix-config",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "path": "./platform/tangled/spindle-nix-engine",
+        "type": "path"
+      },
+      "original": {
+        "path": "./platform/tangled/spindle-nix-engine",
+        "type": "path"
+      },
+      "parent": []
+    },
     "userborn": {
       "inputs": {
         "flake-compat": [
@@ -894,7 +1052,7 @@
           "workspace",
           "git-hooks"
         ],
-        "systems": "systems_2"
+        "systems": "systems_3"
       },
       "locked": {
         "lastModified": 1770377964,
@@ -973,6 +1131,34 @@
       }
     },
     "zen-browser": {
+      "inputs": {
+        "home-manager": [
+          "nix-config",
+          "workspace",
+          "home-manager"
+        ],
+        "nixpkgs": [
+          "nix-config",
+          "workspace",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1786347712,
+        "narHash": "sha256-yH+jWXH2TVd5h3J5KoZiE8/4O4HqoggfB0zl9uVj39w=",
+        "owner": "0xc000022070",
+        "repo": "zen-browser-flake",
+        "rev": "945efbc704b7f8c1731a922aabbc5d95edc9eb74",
+        "type": "github"
+      },
+      "original": {
+        "owner": "0xc000022070",
+        "repo": "zen-browser-flake",
+        "rev": "945efbc704b7f8c1731a922aabbc5d95edc9eb74",
+        "type": "github"
+      }
+    },
+    "zen-browser_2": {
       "inputs": {
         "home-manager": [
           "workspace",
