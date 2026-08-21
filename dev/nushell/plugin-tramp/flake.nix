@@ -15,8 +15,6 @@
       name = "nushell-plugin-tramp";
       description = "A TRAMP-inspired remote filesystem plugin for Nushell";
       doCheck = false;
-    }
-    // {
-      workspaceModule.homeModules."nushell-plugin-tramp" = ./hm-module.nix;
+      homeModules."nushell-plugin-tramp" = ./hm-module.nix;
     };
 }

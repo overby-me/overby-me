@@ -130,16 +130,15 @@ def flake-text [
 # particular to this project is all that is left to say."
     }
 
-    # A project's own NixOS module rides beside the build, exported the way
-    # a workspace module is, so a tree that takes this repo as an input gets
-    # the module folded in with nothing further to say.
+    # A project's own NixOS module rides beside the build. It is an output of
+    # this flake and part of the module it is, so a tree taking this repo as an
+    # input gets it folded in with nothing further to say.
     let module_exports = if ($nixos_modules | is-empty) and ($home_modules | is-empty) { "" } else {
-        let lines = (
-            ($nixos_modules | items {|k, v| $"      workspaceModule.nixosModules.\"($k)\" = ./($v);" })
-            | append ($home_modules | items {|k, v| $"      workspaceModule.homeModules.\"($k)\" = ./($v);" })
-            | str join (char nl)
+        (
+            ($nixos_modules | items {|k, v| $"\n      nixosModules.\"($k)\" = ./($v);" })
+            | append ($home_modules | items {|k, v| $"\n      homeModules.\"($k)\" = ./($v);" })
+            | str join ""
         )
-        $"\n    // {\n($lines)\n    }"
     }
 
     $"($header)
@@ -151,8 +150,8 @@ def flake-text [
   outputs = inputs:
     inputs.workspace {
       name = \"($name)\";
-      description = \"($description)\";($extra)
-    }($module_exports);
+      description = \"($description)\";($extra)($module_exports)
+    };
 }
 "
 }

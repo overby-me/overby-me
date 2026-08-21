@@ -15,8 +15,6 @@
       name = "tangled-spindle-nix-engine";
       description = "Rust reimplementation of the Tangled Spindle CI runner with native Nix engine";
       nativeBuildInputs = ["git"];
-    }
-    // {
-      workspaceModule.nixosModules."tangled-spindle-nix-engine" = ./nixos-module.nix;
+      nixosModules."tangled-spindle-nix-engine" = ./nixos-module.nix;
     };
 }
