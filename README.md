@@ -829,7 +829,7 @@
 | ✅ | Ping | [Gping 🦀](https://github.com/orf/gping) | | 🆗 | [Ping 💣](https://en.wikipedia.org/wiki/Ping_(networking_utility)) |
 | ✅ | Port Scanner | [RustScan 🦀](https://github.com/rustscan/rustscan) | | 🆗 | [Nmap 💣](https://github.com/nmap/nmap) |
 | 🚧 | PGP | [GnuPG 💣](https://gnupg.org) | [Sequoia-PGP 🦀](https://gitlab.com/sequoia-pgp/sequoia) | 🆗 | |
-| 🚧 | SSH | [OpenSSH 💣](https://github.com/openssh/openssh-portable) | [Sunset 🦀](https://github.com/mkj/sunset), [Moshpit 🦀](https://github.com/rustyhorde/moshpit) | 🆗 | |
+| 🚧 | SSH | [OpenSSH 💣](https://github.com/openssh/openssh-portable) | [Sunset 🦀](https://github.com/mkj/sunset), [Moshpit 🦀](https://crates.io/crates/moshpit) | 🆗 | |
 
 #### Process Management
 
