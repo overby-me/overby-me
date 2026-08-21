@@ -22,6 +22,7 @@
       programs
       services
       claude-code
+      opencode
     ])
     # Darwin-only: make home-manager GUI apps show up in Spotlight/Launchpad.
     ++ lib.optionals pkgs.stdenv.isDarwin (
