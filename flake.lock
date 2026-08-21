@@ -1062,11 +1062,11 @@
         "system-manager": "system-manager"
       },
       "locked": {
-        "lastModified": 1787349127,
-        "narHash": "sha256-+3l5Ymi3gHTB/zwZ4xM2pQACVTrY/hjkg0wkaFS3T2w=",
+        "lastModified": 1787352899,
+        "narHash": "sha256-G4kmKG4/CdqZ3R/Kr3+TDdiagbUptDEEAyTMcBn2mqM=",
         "ref": "refs/heads/main",
-        "rev": "61ba5ae2d022c101b5fa312261e0c6ad735f4a26",
-        "revCount": 75,
+        "rev": "2365d9e9df9a487c154cbf2a2365481386e6bbdc",
+        "revCount": 76,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
