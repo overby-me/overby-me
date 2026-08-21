@@ -674,10 +674,11 @@
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | Local LLM | [Devstral 2 🇪🇺](https://mistral.ai/news/devstral-2-vibe-cli) | [Soofi S 🇪🇺](https://www.soofi.info), [EuroLLM 🇪🇺](https://eurollm.io) | 🆗 | |
-| ✅ | Hosted LLM | [Mistral Large 🇪🇺](https://mistral.ai/models/) | [Kimi K3 🇨🇳](https://platform.moonshot.ai) | 🆗 | [Claude Opus 4.8 🔒🇺🇸](https://claude.ai) |
+| ✅ | Hosted LLM | [Kimi K3 🇨🇳](https://platform.moonshot.ai), [Mistral Large 🇪🇺](https://mistral.ai/models/) | | 🆗 | [Claude Opus 4.8 🔒🇺🇸](https://claude.ai) |
 | ✅ | Local Provider | [Ollama 🐹🏡🇪🇺](https://github.com/ollama/ollama) | | 🆗 | |
-| ✅ | Hosted Provider | [Mistral 🇪🇺](https://mistral.ai) | [Lumo 🇪🇺](https://lumo.proton.me), [Nebius 🇪🇺](https://nebius.com) | 🆗 | [OpenAI 🔒🇺🇸](https://openai.com), [Anthropic Claude ⚖️🇺🇸](https://claude.ai) |
+| ✅ | Hosted Provider | [Cortecs 🇪🇺](https://cortecs.ai), [Mistral 🇪🇺](https://mistral.ai) | [Lumo 🇪🇺](https://lumo.proton.me), [Nebius 🇪🇺](https://nebius.com) | 🆗 | [OpenAI 🔒🇺🇸](https://openai.com), [Anthropic Claude ⚖️🇺🇸](https://claude.ai) |
 | ✅ | Personal AI Assistant | [IronClaw 🦀🏡](https://github.com/nearai/ironclaw) | | 🆗 | [OpenClaw 🐒🏡](https://github.com/openclaw/openclaw) |
+| ✅ | Coding Agent | [OpenCode 🐒🏡](https://opencode.ai) | | 🆗 | [Claude Code 🔒🇺🇸](https://claude.com/claude-code) |
 | 🚧 | TTS/STT | | [Vox 🦀](https://github.com/rtk-ai/vox) | 🆗 | |
 
 #### Communication & Productivity
