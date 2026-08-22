@@ -908,11 +908,11 @@
       },
       "locked": {
         "dir": "modules/rust",
-        "lastModified": 1787418828,
-        "narHash": "sha256-WgLB3kbkHlSP/0BNnq343AZ5lANeMUlwLyfi5aiVI7k=",
+        "lastModified": 1787423369,
+        "narHash": "sha256-HAK3dz7i/JYhynF1dWUvbYor+K3dWfnnzJQRGO/CpG4=",
         "ref": "refs/heads/main",
-        "rev": "c87c9e6d821dde46d673e933f09dfc3b73b287c6",
-        "revCount": 84,
+        "rev": "6f90fb6fad6bc07d2c1c4326fb83b7bc28e86f15",
+        "revCount": 85,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -952,11 +952,11 @@
       },
       "locked": {
         "dir": "modules/rust",
-        "lastModified": 1787418828,
-        "narHash": "sha256-WgLB3kbkHlSP/0BNnq343AZ5lANeMUlwLyfi5aiVI7k=",
+        "lastModified": 1787423369,
+        "narHash": "sha256-HAK3dz7i/JYhynF1dWUvbYor+K3dWfnnzJQRGO/CpG4=",
         "ref": "refs/heads/main",
-        "rev": "c87c9e6d821dde46d673e933f09dfc3b73b287c6",
-        "revCount": 84,
+        "rev": "6f90fb6fad6bc07d2c1c4326fb83b7bc28e86f15",
+        "revCount": 85,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -976,11 +976,11 @@
       },
       "locked": {
         "dir": "modules/rust",
-        "lastModified": 1787418828,
-        "narHash": "sha256-WgLB3kbkHlSP/0BNnq343AZ5lANeMUlwLyfi5aiVI7k=",
+        "lastModified": 1787423369,
+        "narHash": "sha256-HAK3dz7i/JYhynF1dWUvbYor+K3dWfnnzJQRGO/CpG4=",
         "ref": "refs/heads/main",
-        "rev": "c87c9e6d821dde46d673e933f09dfc3b73b287c6",
-        "revCount": 84,
+        "rev": "6f90fb6fad6bc07d2c1c4326fb83b7bc28e86f15",
+        "revCount": 85,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -1137,11 +1137,11 @@
         "system-manager": "system-manager"
       },
       "locked": {
-        "lastModified": 1787418828,
-        "narHash": "sha256-WgLB3kbkHlSP/0BNnq343AZ5lANeMUlwLyfi5aiVI7k=",
+        "lastModified": 1787423369,
+        "narHash": "sha256-HAK3dz7i/JYhynF1dWUvbYor+K3dWfnnzJQRGO/CpG4=",
         "ref": "refs/heads/main",
-        "rev": "c87c9e6d821dde46d673e933f09dfc3b73b287c6",
-        "revCount": 84,
+        "rev": "6f90fb6fad6bc07d2c1c4326fb83b7bc28e86f15",
+        "revCount": 85,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },

@@ -20,11 +20,8 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "oxidized-texinfo";
-        aliases = {
-          "texi2any" = "makeinfo";
-        };
+      rust.aliases = {
+        "texi2any" = "makeinfo";
       };
     };
 }

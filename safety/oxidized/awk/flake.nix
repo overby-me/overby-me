@@ -20,11 +20,8 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "oxidized-awk";
-        aliases = {
-          "gawk" = "awk";
-        };
+      rust.aliases = {
+        "gawk" = "awk";
       };
     };
 }

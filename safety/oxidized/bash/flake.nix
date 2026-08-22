@@ -20,11 +20,8 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "oxidized-bash";
-        aliases = {
-          "sh" = "bash";
-        };
+      rust.aliases = {
+        "sh" = "bash";
       };
     };
 }

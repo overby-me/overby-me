@@ -20,11 +20,8 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "oxidized-make";
-        aliases = {
-          "gmake" = "make";
-        };
+      rust.aliases = {
+        "gmake" = "make";
       };
     };
 }

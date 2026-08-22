@@ -50,6 +50,7 @@ def flake-text [
     project_url: string
     rust_url: string
     subdir: string = ""
+    pname: string = ""
     native: list<string> = []
     build: list<string> = []
     check: bool = true
@@ -65,7 +66,8 @@ def flake-text [
     let quoted = {|xs| $xs | each {|x| $"\"($x)\"" } | str join " " }
 
     # Settings of the Rust build, which the module declares under `rust`.
-    mut rust = [$"        pname = \"($name)\";"]
+    # pname only when the crate has no [package] to take its name from.
+    mut rust = if ($pname | is-empty) { [] } else { [$"        pname = \"($pname)\";"] }
     if not ($subdir | is-empty) { $rust = ($rust | append $"        subdir = \"($subdir)\";") }
     if not ($native | is-empty) {
         $rust = ($rust | append $"        nativeBuildInputs = [(do $quoted $native)];")
@@ -94,17 +96,18 @@ def flake-text [
         $rust = ($rust | append $"        env = pkgs: {\n($pairs)\n        };")
     }
 
-    # One setting reads better on one line.
-    let rust_block = if ($rust | length) == 1 {
-        $"      rust.pname = \"($name)\";"
+    # One setting reads better on one line, and a crate that needs none says
+    # nothing: the module reads its name and version from Cargo.toml.
+    let rust_block = if ($rust | is-empty) { [] } else if ($rust | length) == 1 {
+        [($rust | first | str trim | $"      rust.($in)")]
     } else {
-        $"      rust = {\n($rust | str join (char nl))\n      };"
+        [$"      rust = {\n($rust | str join (char nl))\n      };"]
     }
 
     # Every call passes its inputs: that attribute is where the root comes
     # from, since a flake cannot ask itself where it is. It also carries the
     # fine-grained opt-in, which is read out of the inputs rather than flagged.
-    mut opts = ["      inherit inputs;" $rust_block]
+    mut opts = (["      inherit inputs;"] | append $rust_block)
 
     # The module turns the toolchain on itself, from rust-toolchain.toml. What
     # it cannot supply is the overlay providing rust-bin: an overlay is its own
@@ -315,6 +318,13 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
         # import, and writes its own.
         let is_crate = ($dir | path join "Cargo.toml" | path exists)
 
+        # A crate names itself in Cargo.toml and the module reads it there. A
+        # Cargo workspace root has no [package] to read, so it is stated.
+        let manifest = if $is_crate {
+            open ($dir | path join "Cargo.toml")
+        } else { {} }
+        let pname = if ($manifest | get -o package.name | is-empty) { $p.name } else { "" }
+
         # One flake per project, written into the project's own directory and
         # published from there. It names nix-workspace by URL, which is the
         # same thing in tree and in a clone now that the framework is its own
@@ -326,6 +336,7 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
         # flake, which writes an empty file to every project at once.
         let want_flake = if not $is_crate { "" } else { (
             flake-text $p.name $description "git+https://tangled.org/overby.me/nix-workspace" "git+https://tangled.org/overby.me/nix-workspace?dir=modules/rust" $subdir
+                $pname
                 ($p | get -o nativeBuildInputs | default [])
                 ($p | get -o buildInputs | default [])
                 ($p | get -o doCheck | default true)

@@ -20,13 +20,10 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "oxidized-diffutils";
-        aliases = {
-          "cmp" = "diff";
-          "sdiff" = "diff";
-          "diff3" = "diff";
-        };
+      rust.aliases = {
+        "cmp" = "diff";
+        "sdiff" = "diff";
+        "diff3" = "diff";
       };
     };
 }

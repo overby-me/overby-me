@@ -21,7 +21,6 @@
     inputs.workspace {
       inherit inputs;
       rust = {
-        pname = "oxidized-grep";
         subdir = "grep";
         aliases = {
           "egrep" = "grep";

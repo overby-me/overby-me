@@ -20,9 +20,6 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "h26xtoav1";
-        subdir = "h26xtoav1";
-      };
+      rust.subdir = "h26xtoav1";
     };
 }

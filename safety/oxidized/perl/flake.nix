@@ -20,11 +20,8 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "oxidized-perl";
-        env = pkgs: {
-          PERL_SRC = "${pkgs.srcOnly pkgs.perl}";
-        };
+      rust.env = pkgs: {
+        PERL_SRC = "${pkgs.srcOnly pkgs.perl}";
       };
     };
 }

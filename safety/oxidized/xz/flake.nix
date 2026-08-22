@@ -20,15 +20,12 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "oxidized-xz";
-        aliases = {
-          "unxz" = "xz";
-          "xzcat" = "xz";
-          "lzma" = "xz";
-          "unlzma" = "xz";
-          "lzcat" = "xz";
-        };
+      rust.aliases = {
+        "unxz" = "xz";
+        "xzcat" = "xz";
+        "lzma" = "xz";
+        "unlzma" = "xz";
+        "lzcat" = "xz";
       };
     };
 }

@@ -20,24 +20,21 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "oxidized-binutils";
-        aliases = {
-          "ar" = "oxidized-binutils";
-          "ranlib" = "oxidized-binutils";
-          "nm" = "oxidized-binutils";
-          "objdump" = "oxidized-binutils";
-          "readelf" = "oxidized-binutils";
-          "objcopy" = "oxidized-binutils";
-          "strings" = "oxidized-binutils";
-          "size" = "oxidized-binutils";
-          "addr2line" = "oxidized-binutils";
-          "c++filt" = "oxidized-binutils";
-          "strip" = "oxidized-binutils";
-          "as" = "oxidized-binutils";
-          "ld" = "oxidized-binutils";
-          "elfedit" = "oxidized-binutils";
-        };
+      rust.aliases = {
+        "ar" = "oxidized-binutils";
+        "ranlib" = "oxidized-binutils";
+        "nm" = "oxidized-binutils";
+        "objdump" = "oxidized-binutils";
+        "readelf" = "oxidized-binutils";
+        "objcopy" = "oxidized-binutils";
+        "strings" = "oxidized-binutils";
+        "size" = "oxidized-binutils";
+        "addr2line" = "oxidized-binutils";
+        "c++filt" = "oxidized-binutils";
+        "strip" = "oxidized-binutils";
+        "as" = "oxidized-binutils";
+        "ld" = "oxidized-binutils";
+        "elfedit" = "oxidized-binutils";
       };
     };
 }

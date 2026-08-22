@@ -20,12 +20,9 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "oxidized-gzip";
-        aliases = {
-          "gunzip" = "gzip";
-          "zcat" = "gzip";
-        };
+      rust.aliases = {
+        "gunzip" = "gzip";
+        "zcat" = "gzip";
       };
     };
 }
