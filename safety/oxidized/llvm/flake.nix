@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-llvm";
+      inherit inputs;
       aliases = {
         "opt-rs" = "opt";
       };

@@ -14,6 +14,7 @@
     inputs.workspace {
       name = "oxidized-grep";
       subdir = "grep";
+      inherit inputs;
       aliases = {
         "egrep" = "grep";
         "fgrep" = "grep";

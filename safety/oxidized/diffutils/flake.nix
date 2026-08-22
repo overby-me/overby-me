@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-diffutils";
+      inherit inputs;
       aliases = {
         "cmp" = "diff";
         "sdiff" = "diff";

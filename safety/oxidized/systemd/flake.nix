@@ -14,5 +14,6 @@
     inputs.workspace {
       name = "oxidized-systemd";
       doCheck = false;
+      inherit inputs;
     };
 }

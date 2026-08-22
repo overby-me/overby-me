@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-awk";
+      inherit inputs;
       aliases = {
         "gawk" = "awk";
       };

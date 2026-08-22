@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-xz";
+      inherit inputs;
       aliases = {
         "unxz" = "xz";
         "xzcat" = "xz";

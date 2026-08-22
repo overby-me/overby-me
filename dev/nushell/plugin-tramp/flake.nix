@@ -14,6 +14,7 @@
     inputs.workspace {
       name = "nushell-plugin-tramp";
       doCheck = false;
+      inherit inputs;
       homeModules."nushell-plugin-tramp" = ./hm-module.nix;
     };
 }

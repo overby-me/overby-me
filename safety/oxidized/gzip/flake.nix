@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-gzip";
+      inherit inputs;
       aliases = {
         "gunzip" = "gzip";
         "zcat" = "gzip";

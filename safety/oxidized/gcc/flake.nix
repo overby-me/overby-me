@@ -14,5 +14,6 @@
     inputs.workspace {
       name = "oxidized-gcc";
       cargoTestFlags = ["--lib" "--bins"];
+      inherit inputs;
     };
 }

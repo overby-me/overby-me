@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "tangled-spindle-nix-engine";
+      inherit inputs;
       nixosModules."tangled-spindle-nix-engine" = ./nixos-module.nix;
     };
 }

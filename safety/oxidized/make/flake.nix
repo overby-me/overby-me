@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-make";
+      inherit inputs;
       aliases = {
         "gmake" = "make";
       };

@@ -18,6 +18,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "fe-c";
+      inherit inputs;
       withOverlays = [inputs.rust-overlay.overlays.default];
     };
 }

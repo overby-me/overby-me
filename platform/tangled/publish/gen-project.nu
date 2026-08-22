@@ -71,7 +71,10 @@ def flake-text [
         $opts = ($opts | append $"      cargoTestFlags = [(do $quoted $test_flags)];")
     }
 
-    if $fine { $opts = ($opts | append "      inherit inputs;") }
+    # Every call passes its inputs: that attribute is where the root comes
+    # from, since a flake cannot ask itself where it is. It also carries the
+    # fine-grained opt-in, which is read out of the inputs rather than flagged.
+    $opts = ($opts | append "      inherit inputs;")
     # Keys are quoted without exception: c++filt, pkg-config and opt-rs are
     # not nix identifiers, and quoting only the ones that need it means the
     # generator has to know which those are.

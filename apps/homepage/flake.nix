@@ -13,5 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "homepage";
+      inherit inputs;
     };
 }

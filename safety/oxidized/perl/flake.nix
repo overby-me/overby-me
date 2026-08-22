@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-perl";
+      inherit inputs;
       env = pkgs: {
         PERL_SRC = "${pkgs.srcOnly pkgs.perl}";
       };

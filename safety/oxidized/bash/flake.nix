@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-bash";
+      inherit inputs;
       aliases = {
         "sh" = "bash";
       };

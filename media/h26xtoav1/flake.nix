@@ -14,5 +14,6 @@
     inputs.workspace {
       name = "h26xtoav1";
       subdir = "h26xtoav1";
+      inherit inputs;
     };
 }

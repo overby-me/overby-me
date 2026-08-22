@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-pipewire";
+      inherit inputs;
       aliases = {
         "pipewire" = "rust-pipewire";
         "pipewire-pulse" = "rust-pipewire";

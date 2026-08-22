@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-texinfo";
+      inherit inputs;
       aliases = {
         "texi2any" = "makeinfo";
       };

@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-pkg-config";
+      inherit inputs;
       aliases = {
         "pkg-config" = "pkgconf";
       };

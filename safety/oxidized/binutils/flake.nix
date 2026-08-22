@@ -13,6 +13,7 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-binutils";
+      inherit inputs;
       aliases = {
         "ar" = "rust-binutils";
         "ranlib" = "rust-binutils";

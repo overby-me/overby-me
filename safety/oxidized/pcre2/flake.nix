@@ -13,5 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-pcre2";
+      inherit inputs;
     };
 }
