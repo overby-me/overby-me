@@ -268,10 +268,8 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
         # describes its runtime crate. State it in projects.nuon where it
         # differs, and scrape the project's own module otherwise.
         let stated = ($p | get -o description)
-        # workspace.nix for a project the workspace names, default.nix for one
-        # that is a module directory of its own.
         let module_nix = (
-            [($dir | path join "workspace.nix") ($dir | path join "default.nix")]
+            [($dir | path join "default.nix")]
             | where {|f| $f | path exists } | first
         )
         let description = if ($module_nix != null) {

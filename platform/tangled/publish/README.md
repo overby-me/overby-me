@@ -414,7 +414,7 @@ read-only mirror, and is the other reason mirrors must stay read-only.
 
 ```text
 :/<path>            subdirectory becomes the repo root
-:exclude[::*.nix]   drop every top-level nix file: workspace.nix is a
+:exclude[::*.nix]   drop every top-level nix file: default.nix is a
                     nix-workspace module the root flake imports, built around
                     this tree's own cargo builder, and the testsuite helpers
                     it calls are dead weight without it. A glob rather than a
