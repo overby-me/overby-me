@@ -63,7 +63,7 @@ assignment. Everything else moves to build time where reading files is free.
 The registry index metadata is not in the lock and not in the repo. Three
 supported strategies:
 
-1. **Snapshot (default here).** A committed mini-index containing only the
+1. **Snapshot.** A committed mini-index containing only the
    exact `name@version` entries appearing in the repo's lockfiles, in the
    standard index directory layout (`1/`, `2/`, `3/c/`, `ab/cd/name`), one
    JSON line per locked version. Produced by `tools/snapshot-index.nu` from
@@ -75,15 +75,16 @@ supported strategies:
    `flake = false`. Fully pure and covers any lockfile with zero per-project
    steps, at the cost of a very large input. Supported by taking the index
    path as an argument; not wired into this repo's flake by default.
-3. **IFD from the crate tarballs (`index` omitted).** The metadata *is*
+3. **IFD from the crate tarballs (`index` omitted; the default here).** The metadata *is*
    derivable from the lock after all: each crate's published `Cargo.toml` is
    what crates.io turns into its index entry, and we already fetch every
    `.crate` tarball as a fixed-output derivation (hash from the lock).
    `tools/tarball-index.nu` reads those `Cargo.toml`s inside a derivation and
    re-emits the mini-index; `lib/index.nix` reads the output at eval time.
    Pure and cacheable (content-verified tarballs, no network, no sandbox
-   relaxation) but pays one IFD on the eval path. Removes the per-project
-   snapshot chore for callers that accept IFD.
+   relaxation) but pays one IFD on the eval path, so evaluating a system needs
+   a builder for it. Removes the per-project snapshot chore, which is why the
+   tree took it and dropped the committed `index/`.
 
    Verified byte-for-byte: on the 322-crate `safety/oxidized/systemd` workspace an
    IFD-built index yields derivations identical to the committed snapshot for
@@ -128,7 +129,6 @@ platform/nix/lib/lib/cargo/
   tests/
     *.nix               eval unit tests (nix eval -f), assert-based
     fixtures/           trimmed index files, synthetic graphs
-  index/                committed snapshot for this repo's lockfiles
 ```
 
 `lib/` depends only on `builtins` so unit tests run with a bare
@@ -201,7 +201,7 @@ packages.my-tool = { lib, ... }:
   lib.buildCargoProject {
     pname = "my-tool";
     src = ./.;                       # contains Cargo.toml + Cargo.lock
-    index = ../../../../platform/nix/lib/lib/cargo/index;   # snapshot or full index checkout
+    # index = ./cargo-index;         # snapshot or full checkout; default rebuilds by IFD
     # features = [ "foo" ];          # root features, default: default set
     # noDefaultFeatures = true;
     # bins = [ "my-tool" ];          # default: all [[bin]] targets
@@ -247,7 +247,8 @@ packages.my-tool = { lib, ... }:
   breakage per crate with a crisp failure.
 - **Index snapshot drift**: a lock update without a snapshot update fails at
   eval with a clear "missing index entry" error (fail loud, easy to fix by
-  re-running the tool; enforceable later as a pre-commit hook).
+  re-running the tool). Not a risk here since the tree dropped its snapshot;
+  the IFD default derives the index from the lock it is given.
 - **Sparse index availability**: snapshots depend on `index.crates.io` at
   tool-run time only; builds never touch it.
 

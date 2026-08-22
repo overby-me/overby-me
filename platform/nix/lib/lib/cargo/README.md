@@ -72,18 +72,19 @@ project holds no path out of its own directory. The cost is one
 import-from-derivation on the eval path, which means evaluating a system this
 machine cannot build for now needs a builder for it.
 
-Pass `index` to avoid that - a committed snapshot, or a full crates.io index
-checkout - and eval stays pure:
+Pass `index` to avoid that - a full crates.io index checkout, or a snapshot
+built from the locks that need it - and eval stays pure:
 
 ```nix
-index = ../../../../platform/nix/lib/lib/cargo/index;
+index = ./cargo-index;
 ```
-
-After updating a `Cargo.lock`, refresh that snapshot:
 
 ```console
-nu platform/nix/lib/lib/cargo/tools/snapshot-index.nu platform/nix/lib/lib/cargo/index <path>/Cargo.lock
+nu platform/nix/lib/lib/cargo/tools/snapshot-index.nu <out-dir> <path>/Cargo.lock
 ```
+
+Nothing in this tree does: the snapshot it used to share was 1361 files that
+had to be recommitted whenever a lock moved.
 
 Verify resolution against cargo (any project, or a sweep):
 

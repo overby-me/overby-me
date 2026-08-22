@@ -263,7 +263,7 @@ pattern lands with an Alive2-checked `.ll` pair in `corpus/`.
 ## 5. Dependency policy
 
 Rule: never rewrite what the Rust ecosystem already does well; everything must be
-pure Rust and vendorable into `platform/nix/lib/lib/cargo/index`.
+pure Rust and buildable by `lib.buildCargoProject` from the lock alone.
 
 | Use | Crate | Notes |
 | --- | --- | --- |
@@ -435,8 +435,6 @@ forbidden repo-wide as usual.
         ];
       };
 
-      index = ../../../platform/nix/lib/lib/cargo/index;
-
       rootAttrs.postInstall = ''
         # Upstream-compatible tool names, like safety/oxidized/gcc does for gcc/cc
         ln -s $out/bin/opt $out/bin/opt-rs
@@ -465,7 +463,7 @@ forbidden repo-wide as usual.
   `./safety/oxidized/help2man` and `./safety/oxidized/make` (note: `safety/oxidized/libc` exists in-tree but is
   deliberately not in the imports list today — don't cargo-cult that; llvm
   ships packages and checks, so it belongs in the list).
-- `platform/nix/lib/lib/cargo/index`: add `regalloc2`, `object`, `gimli`, `target-lexicon`,
+- `Cargo.lock`: add `regalloc2`, `object`, `gimli`, `target-lexicon`,
   `cranelift-isle`, `iced-x86`, `filecheck`, Mollusc crates, `hashbrown`,
   `smallvec`, `indexmap`, `rayon` (+ transitive closure). Do this as its own
   commit — the index is the known landmine field.

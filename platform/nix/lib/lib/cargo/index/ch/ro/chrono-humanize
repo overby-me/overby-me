@@ -1,1 +1,0 @@
-{"name":"chrono-humanize","vers":"0.2.3","deps":[{"name":"chrono","req":"^0.4","features":["clock","std"],"optional":false,"default_features":false,"target":null,"kind":"normal"}],"cksum":"799627e6b4d27827a814e837b9d8a504832086081806d45b1afa34dc982b023b","features":{"pedantic":[],"wasmbind":["chrono/wasmbind"]},"yanked":false,"pubtime":"2023-07-22T21:23:36Z"}

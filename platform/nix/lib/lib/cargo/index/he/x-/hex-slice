@@ -1,1 +1,0 @@
-{"name":"hex-slice","vers":"0.1.4","deps":[{"name":"suppositions","req":"^0.1.2","features":[],"optional":false,"default_features":true,"target":null,"kind":"dev"}],"cksum":"5491a308e0214554f07a81d8944abe45f552871c12e3c3c6e7e5d354039a6c4c","features":{},"yanked":false,"pubtime":"2018-03-02T22:35:51Z"}

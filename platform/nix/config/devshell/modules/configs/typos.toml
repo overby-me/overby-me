@@ -14,6 +14,8 @@ extend-ignore-re = [
   "localed",
   "OIF",
   "oif",
+  # Nix's fixed-output derivation, usually written as the plural FODs.
+  "FODs?",
   "GOST",
   "Gost",
   # GNU tar upstream test names (tests/extrac*.at in tar-1.35)
@@ -249,7 +251,6 @@ extend-exclude = [
   "safety/oxidized/bash/src/builtins/help_data.rs",
   # Registry index snapshot data (JSON lines fetched from index.crates.io);
   # contains target names like target_os = "nto" that look like typos
-  "platform/nix/lib/lib/cargo/index/",
   "platform/nix/lib/lib/cargo/tests/fixtures/index/",
   # The Shadertoy programs, vendored verbatim from XScreenSaver. They are
   # shader source, and their local names are short and mathematical (ba, pa,

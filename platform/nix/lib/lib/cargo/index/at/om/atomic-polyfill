@@ -1,1 +1,0 @@
-{"name":"atomic-polyfill","vers":"1.0.3","deps":[{"name":"critical-section","req":"^1.0.0","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"8cf2bce30dfe09ef0bfaef228b9d414faaf7e563035494d7fe092dba54b300f4","features":{},"yanked":false,"pubtime":"2023-07-11T19:35:12Z"}

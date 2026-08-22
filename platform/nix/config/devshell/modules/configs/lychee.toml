@@ -3,7 +3,6 @@ accept = [200, 201, 202, 203, 204, 206, 207, 429, 403]
 exclude_path = [
   "platform/nix/config/devshell/modules/configs/lychee.toml",
   # Registry index snapshot data, not documents
-  "platform/nix/lib/lib/cargo/index",
   "platform/nix/lib/lib/cargo/tests/fixtures/index",
 ]
 exclude = [

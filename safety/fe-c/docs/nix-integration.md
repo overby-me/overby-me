@@ -116,10 +116,9 @@ Verified against `platform/nix/lib/lib/cargo` as of the `fe-c/v0` branch point.
 4. **Vendoring: solved and reusable for the corpus.** `Cargo.lock` is
    parsed in pure nix (`lib/lock.nix`), each crate fetched with `fetchurl`
    from `static.crates.io` by lockfile checksum, and registry metadata
-   comes from a committed mini-index snapshot (`platform/nix/lib/lib/cargo/index`,
-   maintained by `tools/snapshot-index.nu`). Corpus fixtures pin
-   vulnerable versions in their own lockfiles and extend the snapshot
-   index; checks stay pure/offline.
+   is rebuilt from those same tarballs by `tools/tarball-index.nu`, so a
+   lockfile is the whole input. Corpus fixtures pin vulnerable versions in
+   their own lockfiles; checks stay offline, at one IFD on the eval path.
 5. **`cc`-crate builds: yes.** `build/crate-builder.nu` runs `build.rs`
    with the full `cargo:` directive protocol; native deps arrive via
    `crateOverrides` (see `safety/oxidized/xz`'s `liblzma-sys` override). Pointing a

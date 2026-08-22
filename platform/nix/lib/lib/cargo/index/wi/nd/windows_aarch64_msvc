@@ -1,5 +1,0 @@
-{"name":"windows_aarch64_msvc","vers":"0.42.2","deps":[],"cksum":"e08e8864a60f06ef0d0ff4ba04124db8b0fb3be5776a5cd47641e942e58c4d43","features":{},"yanked":false,"pubtime":"2023-03-13T14:48:58Z"}
-{"name":"windows_aarch64_msvc","vers":"0.48.5","deps":[],"cksum":"dc35310971f3b2dbbf3f0690a219f40e2d9afcf64f9ab7cc1be722937c26b4bc","features":{},"yanked":false,"pubtime":"2023-08-18T17:46:33Z"}
-{"name":"windows_aarch64_msvc","vers":"0.52.6","deps":[],"cksum":"09ec2a7bb152e2252b53fa7803150007879548bc709c039df7627cabbd05d469","features":{},"yanked":false,"rust_version":"1.56","pubtime":"2024-07-03T19:43:40Z"}
-{"name":"windows_aarch64_msvc","vers":"0.53.0","deps":[],"cksum":"c7651a1f62a11b8cbd5e0d42526e55f2c99886c77e007179efff86c2b137e66c","features":{},"yanked":false,"rust_version":"1.60","pubtime":"2025-01-07T15:42:38Z"}
-{"name":"windows_aarch64_msvc","vers":"0.53.1","deps":[],"cksum":"b9d782e804c2f632e395708e99a94275910eb9100b2114651e04744e9b125006","features":{},"yanked":false,"rust_version":"1.60","pubtime":"2025-10-06T17:33:33Z"}
