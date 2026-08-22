@@ -1,5 +1,5 @@
 _: {
-  devShells.default = pkgs: let
+  devShell = pkgs: let
     inherit (pkgs) lib stdenv;
 
     # A rust-overlay toolchain carrying the Windows target. Kept off PATH so it

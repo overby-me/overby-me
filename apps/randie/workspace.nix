@@ -1,5 +1,5 @@
 {
-  devShells.default = pkgs: {
+  devShell = pkgs: {
     packages = with pkgs; [
       which
       just
@@ -20,7 +20,7 @@
   # The static bundle. Mirrors the homepage package: dx drives
   # cargo/wasm-bindgen/wasm-opt, deps are vendored from Cargo.lock, and the
   # toolchain comes straight from nixpkgs.
-  packages.default = {
+  package = {
     lib,
     rustPlatform,
     dioxus-cli,

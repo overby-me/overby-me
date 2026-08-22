@@ -1,11 +1,11 @@
 {
-  devShells.default = pkgs: {
+  devShell = pkgs: {
     packages = with pkgs; [
       just
     ];
   };
 
-  packages.default = {lib, ...}:
+  package = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-pkg-config";
 

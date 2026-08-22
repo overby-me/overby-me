@@ -1,5 +1,5 @@
 {
-  devShells.default = pkgs: {
+  devShell = pkgs: {
     packages = with pkgs; [
       just
       nix-tree

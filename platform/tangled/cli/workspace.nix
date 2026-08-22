@@ -1,5 +1,5 @@
 {
-  packages.default = {
+  package = {
     lib,
     rustPlatform,
     pkg-config,

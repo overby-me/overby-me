@@ -1,5 +1,5 @@
 {
-  packages.default = {
+  package = {
     lib,
     rustPlatform,
   }:
@@ -27,7 +27,7 @@
       };
     };
 
-  devShells.default = pkgs: {
+  devShell = pkgs: {
     # pkgsUnstable needed — stable nixpkgs lags behind on dev/nickel/nls versions
     packages = with pkgs.pkgsUnstable; [
       nickel

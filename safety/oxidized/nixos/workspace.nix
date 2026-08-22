@@ -6,7 +6,7 @@
 # and the project says what the entry is called, so `oxidized-nixos` appears
 # nowhere below even though every name it produces starts with it.
 {
-  devShells.default = pkgs: {
+  devShell = pkgs: {
     packages = with pkgs; [
       just
       nix-tree

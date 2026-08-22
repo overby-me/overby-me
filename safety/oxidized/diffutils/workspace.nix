@@ -1,5 +1,5 @@
 {
-  packages.default = {lib, ...}:
+  package = {lib, ...}:
     lib.buildCargoProject {
       pname = "rust-diffutils";
 

@@ -150,7 +150,7 @@
         // lib.optionalAttrs (mainProgram != null) {inherit mainProgram;};
     };
 in {
-  devShells.default = pkgs: {
+  devShell = pkgs: {
     packages = [
       (fecToolchain pkgs)
       pkgs.just

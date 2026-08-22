@@ -1,5 +1,5 @@
 {
-  packages.default = {
+  package = {
     lib,
     pkg-config,
     xz,

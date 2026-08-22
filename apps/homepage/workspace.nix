@@ -3,7 +3,7 @@
     ./backend
   ];
 
-  devShells.default = pkgs: {
+  devShell = pkgs: {
     packages = with pkgs; [
       which
       just
@@ -21,7 +21,7 @@
   # wiki-frontend package: dx drives cargo/wasm-bindgen/wasm-opt, deps
   # are vendored from Cargo.lock, and the toolchain (dioxus-cli 0.7.x,
   # wasm-bindgen-cli 0.2.x, binaryen) comes straight from nixpkgs.
-  packages.default = {
+  package = {
     lib,
     rustPlatform,
     dioxus-cli,

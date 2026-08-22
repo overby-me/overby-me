@@ -1,27 +1,25 @@
 {lib, ...}: {
-  packages = {
-    default = {lib, ...}:
-      lib.buildCargoProject {
-        pname = "rust-meson";
+  package = {lib, ...}:
+    lib.buildCargoProject {
+      pname = "rust-meson";
 
-        src = lib.fileset.toSource {
-          root = ./.;
-          fileset = lib.fileset.unions [
-            ./Cargo.toml
-            ./Cargo.lock
-            ./src
-          ];
-        };
-
-        meta = {
-          description = "A Meson build system compatible implementation in Rust";
-          homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/meson";
-          license = lib.licenses.mit;
-          mainProgram = "meson";
-          platforms = lib.platforms.linux;
-        };
+      src = lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.unions [
+          ./Cargo.toml
+          ./Cargo.lock
+          ./src
+        ];
       };
-  };
+
+      meta = {
+        description = "A Meson build system compatible implementation in Rust";
+        homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/meson";
+        license = lib.licenses.mit;
+        mainProgram = "meson";
+        platforms = lib.platforms.linux;
+      };
+    };
 
   checks = let
     # Each entry is { name = "nix-friendly-name"; testDir = "original dir name"; }

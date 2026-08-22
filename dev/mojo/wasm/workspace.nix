@@ -1,5 +1,5 @@
 _: {
-  devShells.default = pkgs: let
+  devShell = pkgs: let
     inherit (pkgs) lib stdenv;
   in {
     packages = with pkgs;

@@ -1,37 +1,35 @@
 {lib, ...}: {
-  packages = {
-    default = {lib, ...}:
-      lib.buildCargoProject {
-        pname = "rust-grep";
+  package = {lib, ...}:
+    lib.buildCargoProject {
+      pname = "rust-grep";
 
-        src = lib.fileset.toSource {
-          root = ./..;
-          fileset = lib.fileset.unions [
-            ./Cargo.toml
-            ./Cargo.lock
-            ./src
-            ./../pcre2/Cargo.toml
-            ./../pcre2/Cargo.lock
-            ./../pcre2/src
-          ];
-        };
-
-        manifestDir = "grep";
-
-        rootAttrs.postInstall = ''
-          ln -s $out/bin/grep $out/bin/egrep
-          ln -s $out/bin/grep $out/bin/fgrep
-        '';
-
-        meta = {
-          description = "A GNU grep-compatible pattern matching tool written in Rust";
-          homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/grep";
-          license = lib.licenses.mit;
-          mainProgram = "grep";
-          platforms = lib.platforms.linux;
-        };
+      src = lib.fileset.toSource {
+        root = ./..;
+        fileset = lib.fileset.unions [
+          ./Cargo.toml
+          ./Cargo.lock
+          ./src
+          ./../pcre2/Cargo.toml
+          ./../pcre2/Cargo.lock
+          ./../pcre2/src
+        ];
       };
-  };
+
+      manifestDir = "grep";
+
+      rootAttrs.postInstall = ''
+        ln -s $out/bin/grep $out/bin/egrep
+        ln -s $out/bin/grep $out/bin/fgrep
+      '';
+
+      meta = {
+        description = "A GNU grep-compatible pattern matching tool written in Rust";
+        homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/grep";
+        license = lib.licenses.mit;
+        mainProgram = "grep";
+        platforms = lib.platforms.linux;
+      };
+    };
 
   checks = let
     testNames = [

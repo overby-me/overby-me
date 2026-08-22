@@ -15,7 +15,7 @@
         '';
     });
 in {
-  devShells.default = pkgs: {
+  devShell = pkgs: {
     packages = with pkgs; [
       just
       (rust-bin.stable.latest.default.override {
