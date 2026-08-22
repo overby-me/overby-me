@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-cachix";
-      description = "A Cachix-compatible CLI for Nix binary cache hosting written in Rust";
     };
 }

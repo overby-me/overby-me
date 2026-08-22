@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-tar";
-      description = "A GNU tar-compatible archive tool written in Rust";
     };
 }

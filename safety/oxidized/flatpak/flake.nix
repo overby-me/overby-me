@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-flatpak";
-      description = "A Flatpak-compatible application sandboxing and distribution tool written in Rust";
     };
 }

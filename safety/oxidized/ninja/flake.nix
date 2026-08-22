@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-ninja";
-      description = "A Ninja-compatible build system written in Rust";
     };
 }

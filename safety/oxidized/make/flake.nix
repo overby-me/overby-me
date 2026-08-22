@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-make";
-      description = "A GNU Make-compatible build system driver written in Rust";
       aliases = {
         "gmake" = "make";
       };

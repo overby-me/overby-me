@@ -22,7 +22,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "wclip";
-      description = "An xclip-style Wayland clipboard tool written in Rust";
       inherit inputs;
     };
 }

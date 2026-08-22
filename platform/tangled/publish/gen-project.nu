@@ -29,8 +29,12 @@
 # directories instead, so that `path = "../pcre2"` still resolves, and then
 # the crate to build is one level down.
 # Everything shared between published repos lives in the nix-workspace
-# module, so this writes only what differs: the description, the name, and
+# module, so this writes only what differs: the name, the description, and
 # whichever build settings the project declares in projects.nuon.
+#
+# The description is written once, as the flake's own. The module reads it
+# back out of the file, because a flake cannot ask itself for it: forcing any
+# attribute of `self` needs the output shape the module helps decide.
 #
 # project_url is where that module comes from, and is the whole difference
 # between the two files this generates: a Tangled URL for the published repo,
@@ -149,8 +153,7 @@ def flake-text [
 
   outputs = inputs:
     inputs.workspace {
-      name = \"($name)\";
-      description = \"($description)\";($extra)($module_exports)
+      name = \"($name)\";($extra)($module_exports)
     };
 }
 "

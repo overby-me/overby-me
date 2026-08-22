@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-pkg-config";
-      description = "A pkg-config-compatible build metadata tool written in Rust";
       aliases = {
         "pkg-config" = "pkgconf";
       };

@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-awk";
-      description = "A GNU awk-compatible text processing tool written in Rust";
       aliases = {
         "gawk" = "awk";
       };

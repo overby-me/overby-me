@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-meson";
-      description = "A Meson-compatible build system written in Rust";
     };
 }

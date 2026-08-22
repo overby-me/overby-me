@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-diffutils";
-      description = "A GNU diffutils-compatible suite of file comparison tools written in Rust";
       aliases = {
         "cmp" = "diff";
         "sdiff" = "diff";

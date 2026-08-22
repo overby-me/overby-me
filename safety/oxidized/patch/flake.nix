@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-patch";
-      description = "A GNU patch-compatible diff application tool written in Rust";
     };
 }

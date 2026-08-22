@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-bison";
-      description = "A POSIX yacc/bison-compatible parser generator written in Rust";
     };
 }

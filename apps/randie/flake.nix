@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "randie";
-      description = "An indoor navigation drone's firmware and its simulator, in Rust and Dioxus";
     };
 }

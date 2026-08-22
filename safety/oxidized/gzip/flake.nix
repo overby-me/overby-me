@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-gzip";
-      description = "A GNU gzip-compatible compression tool written in Rust";
       aliases = {
         "gunzip" = "gzip";
         "zcat" = "gzip";

@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-direnv";
-      description = "A direnv-compatible environment loader written in Rust";
     };
 }

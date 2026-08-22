@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "tangled-cli";
-      description = "Rust CLI for Tangled, a decentralized git collaboration platform built on the AT Protocol";
       nativeBuildInputs = ["pkg-config"];
       buildInputs = ["openssl" "dbus"];
       doCheck = false;

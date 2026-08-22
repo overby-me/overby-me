@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "wiki";
-      description = "A political conference and discussion platform, in Rust and Dioxus";
     };
 }

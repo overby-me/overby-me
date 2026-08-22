@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-pcre2";
-      description = "A PCRE2-compatible regular expression library written in Rust";
     };
 }

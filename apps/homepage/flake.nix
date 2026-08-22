@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "homepage";
-      description = "The overby.me website, in Rust and Dioxus with WebGL screensavers";
     };
 }

@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-sed";
-      description = "A GNU sed-compatible stream editor written in Rust";
     };
 }

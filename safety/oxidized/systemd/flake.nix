@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-systemd";
-      description = "A systemd-compatible service manager written in Rust";
       doCheck = false;
     };
 }

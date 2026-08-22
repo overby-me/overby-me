@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "tangled-spindle-nix-engine";
-      description = "Rust reimplementation of the Tangled Spindle CI runner with native Nix engine";
       nativeBuildInputs = ["git"];
       nixosModules."tangled-spindle-nix-engine" = ./nixos-module.nix;
     };

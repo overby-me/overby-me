@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-pipewire";
-      description = "A PipeWire-compatible multimedia graph daemon written in Rust";
       aliases = {
         "pipewire" = "rust-pipewire";
         "pipewire-pulse" = "rust-pipewire";

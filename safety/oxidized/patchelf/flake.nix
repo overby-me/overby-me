@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-patchelf";
-      description = "A patchelf-compatible ELF binary patching tool written in Rust";
     };
 }

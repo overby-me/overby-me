@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-grep";
-      description = "A GNU grep-compatible pattern matching tool written in Rust";
       subdir = "grep";
       aliases = {
         "egrep" = "grep";

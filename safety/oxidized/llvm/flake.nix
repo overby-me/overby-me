@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-llvm";
-      description = "An LLVM-compatible compiler infrastructure written in Rust";
       aliases = {
         "opt-rs" = "opt";
       };

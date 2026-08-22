@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-perl";
-      description = "A Perl interpreter written in Rust";
       env = pkgs: {
         PERL_SRC = "${pkgs.srcOnly pkgs.perl}";
       };

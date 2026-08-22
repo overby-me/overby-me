@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-xz";
-      description = "An xz-compatible LZMA compression tool written in Rust";
       aliases = {
         "unxz" = "xz";
         "xzcat" = "xz";

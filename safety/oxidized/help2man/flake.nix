@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-help2man";
-      description = "A GNU help2man-compatible man page generator written in Rust";
     };
 }

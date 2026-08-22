@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-binutils";
-      description = "A GNU binutils-compatible suite of binary utilities written in Rust";
       aliases = {
         "ar" = "rust-binutils";
         "ranlib" = "rust-binutils";

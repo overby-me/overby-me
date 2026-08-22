@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-texinfo";
-      description = "A GNU makeinfo-compatible Texinfo processor written in Rust";
       aliases = {
         "texi2any" = "makeinfo";
       };

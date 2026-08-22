@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-bubblewrap";
-      description = "A bubblewrap-compatible unprivileged sandboxing tool written in Rust";
     };
 }

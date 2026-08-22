@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-bash";
-      description = "A Bash-compatible shell written in Rust";
       aliases = {
         "sh" = "bash";
       };

@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-gcc";
-      description = "A GCC-compatible C compiler written in Rust";
       cargoTestFlags = ["--lib" "--bins"];
     };
 }

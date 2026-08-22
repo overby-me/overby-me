@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-file";
-      description = "A GNU file-compatible file type detection tool written in Rust";
     };
 }

@@ -13,6 +13,5 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-curl";
-      description = "A curl-compatible HTTP client written in Rust";
     };
 }

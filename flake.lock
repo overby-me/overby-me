@@ -162,11 +162,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787146702,
-        "narHash": "sha256-YbRcLdU/yK4gWsQg7V8WTKZHfXL33g8+wSFUX3wyevs=",
+        "lastModified": 1787377438,
+        "narHash": "sha256-Sxu1NLTD/Ern6hFGLlZmtKCSct3YQXZI/lls8RE1XeM=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "173b7e8d40fdc8c296a9c99854314f17a3a1704c",
+        "rev": "65258d5c65a250189fde2e35f490d15e064c4c62",
         "type": "github"
       },
       "original": {
@@ -1062,11 +1062,11 @@
         "system-manager": "system-manager"
       },
       "locked": {
-        "lastModified": 1787352899,
-        "narHash": "sha256-G4kmKG4/CdqZ3R/Kr3+TDdiagbUptDEEAyTMcBn2mqM=",
+        "lastModified": 1787382940,
+        "narHash": "sha256-tbSo9AwWIPU3p0Q4LpHljsEd6tb8dPF5poJqbJFdCnk=",
         "ref": "refs/heads/main",
-        "rev": "2365d9e9df9a487c154cbf2a2365481386e6bbdc",
-        "revCount": 76,
+        "rev": "772aba2d70445ea510b01986fc08c995319ff54a",
+        "revCount": 77,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },

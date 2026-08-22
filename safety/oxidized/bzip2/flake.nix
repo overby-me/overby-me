@@ -13,7 +13,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "oxidized-bzip2";
-      description = "A bzip2-compatible compression tool written in Rust";
       aliases = {
         "bunzip2" = "bzip2";
         "bzcat" = "bzip2";
