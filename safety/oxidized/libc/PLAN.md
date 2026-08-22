@@ -43,7 +43,7 @@ Fe-C, and (c) feeds the NixOS-rs Rust-userspace trajectory.
 
 ## 4. Nix integration ❄️
 
-- Flakelight module exposing:
+- Workspace module exposing:
   - `packages.libc-hello{,-static,-static-pie}`
   - `packages.libc-sysroot` — eyra-linked std as a derivation keyed on the
     pinned nightly; the artifact other `rust/` projects (and Fe-C's

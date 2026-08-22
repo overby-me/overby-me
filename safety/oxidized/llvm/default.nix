@@ -1,4 +1,4 @@
-# LLVM-rs: flakelight module.
+# LLVM-rs: workspace module.
 #
 # One derivation per check, built individually
 # (`nix build .#checks.x86_64-linux.llvm-fmt`). `nix flake check` stays

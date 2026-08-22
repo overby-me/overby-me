@@ -106,7 +106,7 @@ just compare
 
 ```text
 safety/oxidized/nixpkgs/
-├── default.nix          # Flakelight entry: devShell, overlay, packages
+├── default.nix          # Workspace entry: devShell, overlay, packages
 ├── lib.nix              # Component registry helpers (mkComponent, mkRustStdenv)
 ├── stdenv.nix           # Rust stdenv assembler
 ├── components/

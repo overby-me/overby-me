@@ -7,7 +7,7 @@ parsing the Starlark build files at evaluation time and lowering each Buck2
 *action* to its own Nix derivation. No import-from-derivation, no `buck2`
 binary in the loop, no generated Nix committed to the tree. A sibling to
 `platform/nix/lib/lib/cargo` (per-crate derivations from `Cargo.lock`) and `platform/nix/lib/lib/deno`,
-exposed through the flakelight `perSystemLib` module.
+exposed through the `perSystemLib` workspace module.
 
 Status: in progress. See milestones at the bottom.
 
@@ -333,7 +333,7 @@ exposes `RunInfo` for `buck2 run`-style execution) as a normal derivation.
 ## Public API
 
 ```nix
-# flakelight package definition
+# workspace package definition
 packages.hello = { lib, ... }:
   lib.buildBuck2Project {
     src = ./examples/no_prelude;   # contains .buckconfig, BUCK files, sources

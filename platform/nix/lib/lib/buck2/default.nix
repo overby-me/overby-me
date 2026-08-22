@@ -1,4 +1,4 @@
-# Flakelight module: pure-eval Buck2 builds. Lowers each Buck2 action to its
+# Workspace module: pure-eval Buck2 builds. Lowers each Buck2 action to its
 # own Nix derivation, with no import-from-derivation. See PLAN.md.
 #
 # Exposes, via perSystemLib:

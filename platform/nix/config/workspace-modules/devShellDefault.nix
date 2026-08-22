@@ -13,8 +13,8 @@
 
   mkDevShell = import ../devshell/lib/mkDevShell.nix {inherit lib inputs;};
 
-  # Resolve a flakelight devShell value (pkgs: cfg) into a derivation, so it can
-  # be pulled into the default shell's inputsFrom. Mirrors flakelight's
+  # Resolve a devShell value (pkgs: cfg) into a derivation, so it can be pulled
+  # into the default shell's inputsFrom. Mirrors the framework's own
   # genDevShell: use overrideShell directly when set, otherwise unwrap the
   # optFunctionTo values by calling them with pkgs. hardeningDisable/overrideShell
   # are never forced here (laziness), so their non-functor values are fine.

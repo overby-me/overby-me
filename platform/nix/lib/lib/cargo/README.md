@@ -57,7 +57,7 @@ workspace recompile `buildRustPackage` pays; cranelift dev builds go
 
 ## Usage
 
-In a flakelight package definition:
+In a workspace package definition:
 
 ```nix
 packages.my-tool = {lib, ...}:
@@ -154,7 +154,7 @@ absolute dev-machine path).
 
 ## Files
 
-- `default.nix` flakelight module: `buildCargoProject` (wild-linked by
+- `default.nix` workspace module: `buildCargoProject` (wild-linked by
   default) and `cargoLib` via `perSystemLib`
 - `lib/` pure-eval resolution (builtins only)
 - `build/` per-crate rustc driver (`crate-builder.nu`) and derivation

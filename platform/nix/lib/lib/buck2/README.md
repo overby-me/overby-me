@@ -49,7 +49,7 @@ hermetic by mapping the command string to a nixpkgs package
 
 ## Usage
 
-In a flakelight package definition:
+In a workspace package definition:
 
 ```nix
 packages.hello = {lib, ...}:
@@ -122,7 +122,7 @@ the structural analysis, and the optimization notes are in [PLAN.md](./PLAN.md).
 
 ## Files
 
-- `default.nix` flakelight module: `buildBuck2Project` and `buck2Lib` via
+- `default.nix` workspace module: `buildBuck2Project` and `buck2Lib` via
   `perSystemLib`
 - `lib/` pure-eval phases (builtins only): `buckconfig`, `labels`, `loader`,
   `globals`, `attrs`/coercion + `analysis`, `actions`, `cmd_args`

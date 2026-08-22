@@ -52,7 +52,7 @@ zed-mojo/
 ├── extension.toml                 # Extension metadata and grammar/LSP declarations
 ├── Cargo.toml                     # Rust project configuration
 ├── Cargo.lock                     # Dependency lock file
-└── default.nix                    # Nix flakelight module (package + dev shell)
+└── default.nix                    # Nix workspace module (package + dev shell)
 ```
 
 ## Installation

@@ -24,7 +24,7 @@
 # platform/nix/config/workspace-modules/colmena.nix registers every nixosConfiguration that is
 # *not* already a built system as a deploy target, so an installer image
 # would otherwise show up as a node at armitas-installer.overby.me.
-# Flakelight's own handler detects built systems via
+# The framework's own handler detects built systems via
 # `x ? config.system.build.toplevel` and passes them through untouched, the
 # same way eva-00 is handled.
 {inputs, ...}:

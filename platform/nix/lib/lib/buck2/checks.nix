@@ -1,4 +1,4 @@
-# Flakelight module: checks for the buck2 library. Imported explicitly from
+# Workspace module: checks for the buck2 library. Imported explicitly from
 # flake.nix (the platform/nix/lib/lib autoloader only routes default.nix).
 #
 # Run one: nix build .#checks.x86_64-linux.buck2-build-cpp

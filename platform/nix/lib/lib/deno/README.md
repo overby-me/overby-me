@@ -10,9 +10,9 @@ Nix builder for Deno projects with npm dependencies. Parses `deno.lock` at evalu
 
 ## Usage
 
-`buildDenoProject` is exposed as `lib.buildDenoProject` in `pkgs` via the `perSystemLib` flakelight module.
+`buildDenoProject` is exposed as `lib.buildDenoProject` in `pkgs` via the `perSystemLib` workspace module.
 
-In a flakelight package definition:
+In a workspace package definition:
 
 ```nix
 packages.my-app = { lib, ... }:
@@ -39,6 +39,6 @@ packages.my-app = { lib, ... }:
 
 ## Files
 
-- `default.nix` — Flakelight module exposing `buildDenoProject` via `perSystemLib`
+- `default.nix` — workspace module exposing `buildDenoProject` via `perSystemLib`
 - `buildDenoProject.nix` — Project builder derivation
 - `fetchDenoDeps.nix` — npm dependency fetcher using dynamic derivations from `deno.lock`

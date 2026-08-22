@@ -45,7 +45,7 @@ buck2 libraries:
 
 ## Usage
 
-In a flakelight package or check:
+In a workspace package or check:
 
 ```nix
 lib.buildNinjaProject {

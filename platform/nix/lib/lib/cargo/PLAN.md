@@ -3,7 +3,7 @@
 Build Rust projects from `Cargo.lock` with per-crate Nix derivations, using
 neither import-from-derivation nor code generation. A reusable library in the
 style of `platform/nix/lib/lib/deno` (parse the lock at eval time, fetch with FODs, build in
-the sandbox), exposed through the flakelight `perSystemLib` module.
+the sandbox), exposed through the `perSystemLib` workspace module.
 
 Status: in progress. See milestones at the bottom.
 
@@ -111,7 +111,7 @@ Handling `v2` from day one closes nocargo's oldest open bug.
 platform/nix/lib/lib/cargo/
   PLAN.md               this file
   README.md             usage docs (mirrors platform/nix/lib/lib/deno/README.md)
-  default.nix           flakelight module: perSystemLib.{buildCargoProject,cargoLib} + checks
+  default.nix           workspace module: perSystemLib.{buildCargoProject,cargoLib} + checks
   lib/                  pure eval, builtins-only (no pkgs, no nixpkgs lib)
     default.nix         assembles the lib set
     semver.nix          cargo req parsing (caret, tilde, wildcard, comparators) + matching
@@ -196,7 +196,7 @@ a duplicated frontend pass. Not needed for correctness.
 ## Public API
 
 ```nix
-# flakelight package definition
+# workspace package definition
 packages.my-tool = { lib, ... }:
   lib.buildCargoProject {
     pname = "my-tool";
@@ -262,7 +262,7 @@ packages.my-tool = { lib, ... }:
 - [x] M4: `snapshot-index.nu` + committed `index/` covering wclip + xz.
 - [x] M5: `buildCrate.nix` + `buildCargoProject.nix`: wclip builds and runs.
 - [x] M6: xz `[[bin]]` builds and runs (native linking via overrides,
-      dev-deps excluded); flakelight module + checks wired; README.md.
+      dev-deps excluded); workspace module + checks wired; README.md.
 - [x] M7: differential oracle tool (`tools/diff-cargo.nu`, oracle is
       `cargo tree`, which is feature-pruned where cargo metadata is not);
       all 34 rust/* projects resolve identically to cargo (graph and

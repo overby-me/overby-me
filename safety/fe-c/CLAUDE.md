@@ -5,7 +5,7 @@ reference material, linked from the specific place it matters.
 
 Rename to `AGENTS.md` if you prefer tool-neutral naming; if the monorepo root
 already has a `CLAUDE.md`, this one is additive, not a replacement — follow
-root conventions (nix-first, jj, flakelight, formatter choice) over anything
+root conventions (nix-first, jj, nix-workspace, formatter choice) over anything
 inferred here.
 
 ---
@@ -113,7 +113,7 @@ detection feature; see `docs/evaluation-2026-07.md` §5 for why.
 
 **A1. [done] Workspace + toolchain + nix skeleton.** *(2026-07-21)*
 Three crates, `rust-toolchain.toml` pinned nightly (shared with `../libc`),
-flakelight module wiring through `platform/nix/lib/lib/cargo`.
+workspace module wiring through `platform/nix/lib/lib/cargo`.
 *Before writing any nix*, answer the six API questions in
 `docs/nix-integration.md` §6 — especially #2 (is the per-crate derivation key
 user-extensible? `harden` must enter the hash or mode flips silently reuse

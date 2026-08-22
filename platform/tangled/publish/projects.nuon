@@ -33,7 +33,7 @@
 #   :/<path>                   take the subdirectory as the repo root
 #   :[A,B]                     union: take A and B together
 #   :exclude[::*.nix]          drop every top-level nix file. default.nix is
-#                              a flakelight module, meaningless outside the
+#                              a workspace module, meaningless outside the
 #                              monorepo (the root flake imports it and it
 #                              reaches for ../../nix/lib), and the testsuite
 #                              helpers it calls are dead weight without it.
@@ -385,8 +385,8 @@
     description: "An xclip-style Wayland clipboard tool written in Rust"
     formerPaths: [{path: "rust/wclip" deps: []} {path: "safety/oxidized/wclip" deps: []}]
   }
-  # Not a rust/ rewrite: the flakelight module every other published repo
-  # imports. It has to be published for them to resolve it, and it is
+  # Not a rust/ rewrite: the framework every other published repo imports.
+  # It has to be published for them to resolve it, and it is
   # deliberately first in this list so a run that adds a project pushes the
   # module before anything that depends on it.
 

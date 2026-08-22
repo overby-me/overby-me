@@ -69,7 +69,7 @@ The nixpkgs standard environment (`stdenv`) is the foundation that builds every 
 - [x] Component registry: `components/*.nix` with status tracking for all 15+ tools
 - [x] `lib.nix`: `mkComponent`, `loadComponents`, `mkRustStdenv`, `mkReplacements`
 - [x] `stdenv.nix`: stdenv override assembler using available components
-- [x] `default.nix`: flakelight integration (devShell, overlay, test package)
+- [x] `default.nix`: workspace integration (devShell, overlay, test package)
 - [x] PLAN.md: this document
 - [x] README.md: project overview and usage
 
@@ -354,7 +354,7 @@ When creating a new Rust rewrite (e.g. `safety/oxidized/sed`):
    ├── Cargo.lock
    ├── src/
    │   └── main.rs
-   ├── default.nix      # Package definition (flakelight module)
+   ├── default.nix      # Package definition (workspace module)
    └── justfile
    ```
 

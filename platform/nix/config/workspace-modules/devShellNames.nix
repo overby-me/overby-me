@@ -1,7 +1,7 @@
 # Automatically names each devShell derivation to "${attr-name}-shell".
 #
-# Replaces flakelight's default outputs.devShells generation with one that
-# passes `name` directly into mkShell during creation, or applies
+# Replaces the default outputs.devShells generation with one that passes
+# `name` directly into mkShell during creation, or applies
 # overrideAttrs for pre-built shells (e.g. the module-built default shell).
 {
   config,
@@ -11,7 +11,7 @@
 }: let
   inherit (lib) mapAttrs mkForce;
 
-  # Replicate flakelight's genDevShell, injecting the shell name.
+  # Replicate the framework's genDevShell, injecting the shell name.
   genNamedDevShell = name: pkgs: cfg:
     if cfg.overrideShell != null
     then cfg.overrideShell.overrideAttrs {name = "${name}-shell";}

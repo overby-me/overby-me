@@ -195,7 +195,7 @@ optimizer entanglement.
 Detail in `docs/nix-integration.md` (including API questions to verify against
 `platform/nix/lib/lib/cargo` before wiring anything).
 
-- Flake wiring via the repo's flakelight modules; workspace built with the
+- Flake wiring via the repo's workspace modules; workspace built with the
   in-house `platform/nix/lib/lib/cargo` (per-crate derivations, gradual builds). That model
   fits Fe-C unusually well: `harden` becomes a per-crate derivation attribute,
   so flipping one crate's mode rebuilds only that crate and its dependents,

@@ -69,27 +69,35 @@ the project's own directory: they live together under
 [`generated/`](./generated) and josh maps them into place when it publishes
 (see [Generated, not stored](#generated-not-stored)).
 
-- `flake.nix`, one call into [`nix-workspace`](../../nix/workspace), which is a
-  flakelight flake made callable through flakelight's `functor` option:
+- `flake.nix`, one call into
+  [`nix-workspace`](https://tangled.org/overby.me/nix-workspace), which is
+  callable through its `functor` option. The Rust build is a second input, the
+  framework's own `modules/rust` directory:
 
   ```nix
   {
     description = "A GNU sed-compatible stream editor written in Rust";
 
-    inputs.project.url = "github:overby-me/nix-workspace";
+    inputs = {
+      workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
+      rust = {
+        url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/rust";
+        inputs.workspace.follows = "workspace";
+      };
+    };
 
     outputs = inputs:
-      inputs.project ./. {
-        name = "oxidized-sed";
-        description = "A GNU sed-compatible stream editor written in Rust";
+      inputs.workspace {
+        inherit inputs;
+        rust.pname = "oxidized-sed";
       };
   }
   ```
 
   The module behind it reads the project's own `Cargo.toml` with
-  `builtins.fromTOML`, so one template covers every project, and flakelight
-  derives packages, checks and the overlay from a single package definition,
-  so `nix flake check` builds the package and checks formatting with nothing
+  `builtins.fromTOML`, so one template covers every project, and packages,
+  checks and the overlay are derived from a single package definition, so
+  `nix flake check` builds the package and checks formatting with nothing
   further declared. A project states only what differs: `subdir`,
   `nativeBuildInputs`, `buildInputs`, `doCheck`, `cargoTestFlags`, `env`,
   `toolchain`.

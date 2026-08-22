@@ -1,4 +1,4 @@
-# Flakelight module: pure-eval Rust builds from Cargo.lock. See PLAN.md.
+# Workspace module: pure-eval Rust builds from Cargo.lock. See PLAN.md.
 #
 # Having a default.nix also makes ../../workspace-modules/lib.nix import this
 # directory as a single unit instead of recursing into tests/ and index/.

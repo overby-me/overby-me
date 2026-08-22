@@ -198,7 +198,7 @@ safety/oxidized/llvm/
 ├── Cargo.toml            # workspace
 ├── Cargo.lock
 ├── rust-toolchain.toml   # one pinned nightly (Kani/fe-c model)
-├── default.nix           # flakelight module: packages + named checks
+├── default.nix           # workspace module: packages + named checks
 ├── README.md  PLAN.md  STATUS.md  CLAUDE.md  .deslop.toml
 ├── docs/                 # surface-inventory, design records, evaluations
 ├── corpus/               # .ll conformance corpus + vendored LLVM tests
@@ -418,7 +418,7 @@ forbidden repo-wide as usual.
 
 ## 9. Nix and monorepo integration
 
-### 9.1 `safety/oxidized/llvm/default.nix` (flakelight module, safety/oxidized/gcc + fe-c pattern)
+### 9.1 `safety/oxidized/llvm/default.nix` (workspace module, safety/oxidized/gcc + fe-c pattern)
 
 ```nix
 {
@@ -529,7 +529,7 @@ forbidden repo-wide as usual.
 
 ## 13. First two weeks (concrete)
 
-1. Scaffold `safety/oxidized/llvm/` per §4.1; land the flakelight module + flake import +
+1. Scaffold `safety/oxidized/llvm/` per §4.1; land the workspace module + flake import +
    cargo-index additions as three separate commits; `llvm-fmt`/`llvm-clippy`/
    `llvm-unit` checks green in Spindle.
 2. Vendor `rustc_codegen_llvm` at the pinned nightly; make it *compile* against

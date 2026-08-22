@@ -6,9 +6,9 @@
 # evaluating system, which aborts evaluation on e.g. aarch64-darwin even though
 # those packages are Linux-only by design.
 #
-# This module regenerates the `packages` output per system from flakelight's own
-# packageOverlay, keeping only entries whose `meta.available` is true for that
-# system. It mirrors flakelight's packages.nix generation rather than reading
+# This module regenerates the `packages` output per system from the framework's
+# own packageOverlay, keeping only entries whose `meta.available` is true for
+# that system. It mirrors the packages.nix generation rather than reading
 # `config.outputs.packages` (which would recurse against this mkForce override).
 {
   lib,
@@ -32,7 +32,7 @@
   in
     r.success && r.value;
 
-  # Per system: { name = pkgs.name; } for every package flakelight added via its
+  # Per system: { name = pkgs.name; } for every package added via the
   # packageOverlay, excluding the synthetic "default" alias and unsupported ones.
   supportedPackages = genSystems (
     pkgs: let

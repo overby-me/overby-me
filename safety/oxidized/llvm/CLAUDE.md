@@ -74,7 +74,7 @@ says `[todo]` is a bug in this file.
 ### T0.1, IR core
 
 **A1. [done] Workspace, docs and nix skeleton.** *(2026-07-26)*
-Flakelight module, flake import, `llvm-fmt`, `llvm-clippy`, `llvm-unit`
+Workspace module, flake import, `llvm-fmt`, `llvm-clippy`, `llvm-unit`
 checks, all three building. The cargo-check harness needs no vendor
 directory because the workspace has no third-party dependencies; when that
 changes, copy safety/fe-c's `vendorFor`.
