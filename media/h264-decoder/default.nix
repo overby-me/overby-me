@@ -7,7 +7,7 @@
 
   package = {lib, ...}:
     lib.buildCargoProject {
-      pname = "rust-h264-decoder";
+      pname = "h264-decoder";
 
       src = lib.fileset.toSource {
         root = ./.;

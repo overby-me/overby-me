@@ -476,6 +476,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidized-flatpak"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "miniz_oxide",
+ "rustls",
+ "serde",
+ "webpki-roots 0.26.11",
+ "zbus",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -567,18 +579,6 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "rust-flatpak"
-version = "0.1.0"
-dependencies = [
- "libc",
- "miniz_oxide",
- "rustls",
- "serde",
- "webpki-roots 0.26.11",
- "zbus",
 ]
 
 [[package]]

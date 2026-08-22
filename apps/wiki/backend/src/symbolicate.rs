@@ -448,17 +448,17 @@ async fn sidecar_bytes(
 }
 
 /// The content hash of the wasm a stack refers to, from the asset URL its frames
-/// carry (`…/assets/wiki-dioxus_bg-dxhABC123.wasm`). That hash is dx's own and
+/// carry (`…/assets/wiki_bg-dxhABC123.wasm`). That hash is dx's own and
 /// names the sidecar, so no build-id section is needed.
 fn wasm_hash(stack: &str) -> Option<String> {
-    hash_between(stack, "wiki-dioxus_bg-", ".wasm")
+    hash_between(stack, "wiki_bg-", ".wasm")
 }
 
 /// The content hash of the JavaScript glue a stack mentions
-/// (`…/assets/wiki-dioxus-dxhABC.js`). Safari's route to the build: its wasm
+/// (`…/assets/wiki-dxhABC.js`). Safari's route to the build: its wasm
 /// frames carry no URL, but the frames on either side of them are in the glue.
 fn js_hash(stack: &str) -> Option<String> {
-    hash_between(stack, "wiki-dioxus-", ".js")
+    hash_between(stack, "wiki-", ".js")
 }
 
 /// The `<hash>` in `…<prefix><hash><suffix>…`, when it looks like one.
@@ -484,7 +484,7 @@ async fn wasm_hash_via_glue(
     base_url: &str,
     js_hash: &str,
 ) -> Option<String> {
-    let url = format!("{base_url}/assets/wiki-dioxus-{js_hash}.js");
+    let url = format!("{base_url}/assets/wiki-{js_hash}.js");
     let resp = client.get(&url).send().await.ok()?;
     if !resp.status().is_success() {
         tracing::warn!("glue {js_hash}: {} from {url}", resp.status());
@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn reads_the_build_hash_out_of_a_frame() {
-        let stack = "at /assets/wiki-dioxus_bg-dxhABC123.wasm:wasm-function[42]:0x1d4c0";
+        let stack = "at /assets/wiki_bg-dxhABC123.wasm:wasm-function[42]:0x1d4c0";
         assert_eq!(wasm_hash(stack).as_deref(), Some("dxhABC123"));
     }
 
@@ -575,7 +575,7 @@ mod tests {
     fn the_glue_hash_is_read_from_a_safari_stack() {
         // The only build identifier in a Safari report: its wasm frames carry no
         // URL, but the JavaScript ones do.
-        let stack = "@https://radikal.wiki/assets/wiki-dioxus-dxhe4646b805d9c756.js:1:42944\n\
+        let stack = "@https://radikal.wiki/assets/wiki-dxhe4646b805d9c756.js:1:42944\n\
                      6175@wasm-function[6175]";
         assert_eq!(js_hash(stack).as_deref(), Some("dxhe4646b805d9c756"));
         assert_eq!(wasm_hash(stack), None, "there is no wasm URL to find");
@@ -621,7 +621,7 @@ mod tests {
     /// Needs a built wasm, so it is not part of the normal run:
     ///
     /// ```text
-    /// WIKI_WASM=target/dx/wiki-dioxus/release/web/public/assets/wiki-dioxus_bg-<hash>.wasm \
+    /// WIKI_WASM=target/dx/wiki/release/web/public/assets/wiki_bg-<hash>.wasm \
     ///   cargo test --  --ignored real_module
     /// ```
     ///
@@ -631,7 +631,7 @@ mod tests {
     #[ignore = "needs a built wasm bundle; set WIKI_WASM"]
     fn real_module_offsets_match_wasm_objdump() {
         let Ok(path) = std::env::var("WIKI_WASM") else {
-            panic!("set WIKI_WASM to a built wiki-dioxus_bg-*.wasm");
+            panic!("set WIKI_WASM to a built wiki_bg-*.wasm");
         };
         let bytes = std::fs::read(&path).expect("read the wasm");
         let bodies = function_bodies(&bytes);

@@ -1,11 +1,11 @@
 let
   # The multicall binary's own name, which comes from Cargo.toml's [[bin]]
   # and not from pname. Both matter: the dev variant sets pname to
-  # rust-pipewire-dev while cargo still builds rust-pipewire, and the
+  # oxidized-pipewire-dev while cargo still builds oxidized-pipewire, and the
   # attribute is oxidized-pipewire while neither is. Linking to the
   # attribute name is what left all 34 of these dangling, which
   # noBrokenSymlinks turned into a build failure.
-  multicall = "rust-pipewire";
+  multicall = "oxidized-pipewire";
 
   # Every PipeWire tool and daemon name is a symlink to that one binary;
   # argv[0] selects the dispatcher. Written once because the two packages
@@ -57,7 +57,7 @@ in {
   packages = {
     default = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-pipewire";
+        pname = "oxidized-pipewire";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -80,7 +80,7 @@ in {
 
     dev = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-pipewire-dev";
+        pname = "oxidized-pipewire-dev";
 
         src = lib.fileset.toSource {
           root = ./.;

@@ -96,8 +96,8 @@ mod tests {
         // The handle can stand in for `git`, which is how a knot tells
         // accounts apart.
         assert_eq!(
-            owner_repo_from_url("overby.me@tangled.org:overby.me/rust-awk").as_deref(),
-            Some("overby.me/rust-awk")
+            owner_repo_from_url("overby.me@tangled.org:overby.me/oxidized-awk").as_deref(),
+            Some("overby.me/oxidized-awk")
         );
     }
 
@@ -108,8 +108,8 @@ mod tests {
             Some("aly.codes/tg")
         );
         assert_eq!(
-            owner_repo_from_url("ssh://git@tangled.org/overby.me/rust-bash.git").as_deref(),
-            Some("overby.me/rust-bash")
+            owner_repo_from_url("ssh://git@tangled.org/overby.me/oxidized-bash.git").as_deref(),
+            Some("overby.me/oxidized-bash")
         );
     }
 

@@ -16,8 +16,7 @@
 A Rust + [Dioxus](https://dioxuslabs.com) 0.7 frontend compiled to WebAssembly:
 the port that replaced the former React wiki app in this directory. It
 talks to the same NHost / Hasura backend (auth over REST, data over GraphQL via
-[cynic](https://cynic-rs.dev)). The crate and Dioxus app are still named
-`wiki-dioxus` internally.
+[cynic](https://cynic-rs.dev)).
 
 See [`PLAN.md`](./PLAN.md) for the roadmap and the list of known issues.
 
@@ -28,7 +27,7 @@ or automatically via direnv). Commands are in the `justfile`:
 
 ```bash
 just dev        # dx serve — hot-reloading dev server on http://127.0.0.1:8080
-just build      # dx build --release → target/dx/wiki-dioxus/release/web/public
+just build      # dx build --release → target/dx/wiki/release/web/public
 just check      # cargo check (wasm32 target)
 just clippy     # cargo clippy -D warnings (wasm32 target)
 just test       # cargo unit tests (host target)

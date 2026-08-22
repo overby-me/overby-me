@@ -138,7 +138,7 @@ pub(crate) fn parse_args() -> Options {
         }
 
         if arg == "--version" || arg == "-V" {
-            println!("grep (rust-grep) {}", env!("CARGO_PKG_VERSION"));
+            println!("grep (oxidized-grep) {}", env!("CARGO_PKG_VERSION"));
             std::process::exit(0);
         }
 
@@ -256,7 +256,7 @@ pub(crate) fn parse_args() -> Options {
                         .push(dir.trim_end_matches('/').to_string());
                 }
                 "version" => {
-                    println!("grep (rust-grep) 0.1.0");
+                    println!("grep (oxidized-grep) 0.1.0");
                     process::exit(0);
                 }
                 "help" => {

@@ -180,7 +180,7 @@ Two things about this are non-obvious, and both were measured:
   absolute path '/platform/nix/config/workspace' is forbidden*, because `../../../` is
   resolved against the filesystem root. Reached as an input of the root flake,
   or as `nix eval '.?dir=safety/oxidized/sed#…'`, it resolves inside the tree
-  and evaluates to `rust-sed-0.1.0`. So the flake is checkable where it sits,
+  and evaluates to `oxidized-sed-0.1.0`. So the flake is checkable where it sits,
   without the monorepo taking a path input per project.
 - **The lock stays live.** A path input is recorded with no `narHash`, and the
   sub-flake gets no lock of its own in-tree, so nothing here is pinned that

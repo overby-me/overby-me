@@ -79,7 +79,7 @@ fn handshake(mut stream: &UnixStream) -> io::Result<()> {
             // dict: count, then alternating key/value strings
             Value::Int(1),
             Value::String("application.name".into()),
-            Value::String("rust-pipewire-probe".into()),
+            Value::String("oxidized-pipewire-probe".into()),
         ])],
     );
     stream.write_all(&props.bytes)?;

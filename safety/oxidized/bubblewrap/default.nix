@@ -1,7 +1,7 @@
 {
   package = {lib, ...}:
     lib.buildCargoProject {
-      pname = "rust-bubblewrap";
+      pname = "oxidized-bubblewrap";
 
       src = lib.fileset.toSource {
         root = ./.;

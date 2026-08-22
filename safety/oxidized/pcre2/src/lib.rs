@@ -1,4 +1,4 @@
-//! rust-pcre2: A pure Rust implementation of PCRE2
+//! oxidized-pcre2: A pure Rust implementation of PCRE2
 //!
 //! This crate provides Perl Compatible Regular Expressions (PCRE2) without
 //! requiring the C PCRE2 library.

@@ -1,4 +1,4 @@
-# rust-nixpkgs/lib.nix
+# oxidized-nixpkgs/lib.nix
 #
 # Helper functions for assembling a Rust-based stdenv from individual
 # component replacements.  Each "component" is a small attribute set
@@ -30,7 +30,7 @@
   #   nixpkgs   — already packaged in nixpkgs (e.g. uutils, ripgrep)
   #   repo      — a sibling subproject at the monorepo root (e.g. ../make)
   #   upstream  — an upstream Rust project not yet in nixpkgs
-  #   internal  — will be developed inside rust-nixpkgs/crates
+  #   internal  — will be developed inside oxidized-nixpkgs/crates
   source = {
     nixpkgs = "nixpkgs";
     repo = "repo";

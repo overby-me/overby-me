@@ -1,15 +1,15 @@
 //! Entry point for the `xz` CLI. The bulk of the code lives in the
-//! `rust_xz` library crate; this binary just wires the modules
+//! `oxidized_xz` library crate; this binary just wires the modules
 //! together.
 
 use std::io;
 use std::process;
 
-use rust_xz::cli::parse_args;
-use rust_xz::codec::{compress_stream, decompress_or_passthrough, decompress_stream_opts};
-use rust_xz::list::list_files;
-use rust_xz::options::{Mode, Options};
-use rust_xz::processor::process_file;
+use oxidized_xz::cli::parse_args;
+use oxidized_xz::codec::{compress_stream, decompress_or_passthrough, decompress_stream_opts};
+use oxidized_xz::list::list_files;
+use oxidized_xz::options::{Mode, Options};
+use oxidized_xz::processor::process_file;
 
 fn run_stdio(opts: &Options) -> io::Result<()> {
     let stdin = io::stdin().lock();

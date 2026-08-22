@@ -209,7 +209,7 @@ fn parse_options() -> Options {
                 i += 1;
             }
             "--version" => {
-                println!("sed (rust-sed) {}", env!("CARGO_PKG_VERSION"));
+                println!("sed (oxidized-sed) {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
             }
             "--help" => {

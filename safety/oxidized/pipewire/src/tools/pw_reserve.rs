@@ -108,7 +108,7 @@ pub fn main(args: &[String]) -> i32 {
         eprintln!("valid name must be given");
         return u8::MAX as i32;
     }
-    eprintln!("{argv0}: not yet implemented in rust-pipewire");
+    eprintln!("{argv0}: not yet implemented in oxidized-pipewire");
     1
 }
 

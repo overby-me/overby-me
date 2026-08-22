@@ -2,7 +2,7 @@
   packages = {
     default = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-gzip";
+        pname = "oxidized-gzip";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -29,7 +29,7 @@
 
     dev = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-gzip-dev";
+        pname = "oxidized-gzip-dev";
 
         src = lib.fileset.toSource {
           root = ./.;

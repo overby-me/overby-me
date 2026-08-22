@@ -476,12 +476,12 @@ mod tests {
         // crash becomes worth counting.
         let from_build_a = "panicked at src/components/error.rs:20:5:\n\
              Triggered test panic\n\
-             @https://radikal.wiki/assets/wiki-dioxus-dxhAAA.js:1:42944\n\
+             @https://radikal.wiki/assets/wiki-dxhAAA.js:1:42944\n\
              @…_bg-dxhAAA.wasm:wasm-function[6175]:0x376d02\n    \
              at ZoomableImage (src/components/widgets/image.rs:11)\n";
         let from_build_b = "panicked at src/components/error.rs:20:5:\n\
              Triggered test panic\n\
-             @https://radikal.wiki/assets/wiki-dioxus-dxhBBB.js:1:51001\n\
+             @https://radikal.wiki/assets/wiki-dxhBBB.js:1:51001\n\
              6175@wasm-function[6175]\n    \
              at ZoomableImage (src/components/widgets/image.rs:11)\n";
         assert_eq!(crash_digest(from_build_a), crash_digest(from_build_b));

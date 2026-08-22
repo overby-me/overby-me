@@ -1,5 +1,5 @@
 //! Decoder-stability fuzz harness packaged as a standalone binary so
-//! the Nix `rust-xz-fuzz` check can run it without a vendored cargo
+//! the Nix `oxidized-xz-fuzz` check can run it without a vendored cargo
 //! registry inside the build sandbox.
 //!
 //! Behaviour:
@@ -7,7 +7,7 @@
 //!   `$RUST_XZ_FUZZ_CORPUS`.
 //! * For every `*.xz` / `*.lzma` / `*.lz` file in the directory, feeds
 //!   the file's bytes (and prefix-truncated and 1-byte-flipped
-//!   variants) into the rust-xz decoder.
+//!   variants) into the oxidized-xz decoder.
 //! * Asserts that the decoder never panics. Decode failures are fine
 //!   (most mutations should fail) — the only failure mode that
 //!   matters for this harness is an actual abort.
@@ -20,7 +20,7 @@ use std::io::sink;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use rust_xz::codec::decompress_stream;
+use oxidized_xz::codec::decompress_stream;
 
 fn collect_inputs(dir: &PathBuf) -> Vec<(String, Vec<u8>)> {
     let mut out = Vec::new();
@@ -56,7 +56,7 @@ fn main() -> ExitCode {
         .or_else(|| std::env::var("RUST_XZ_FUZZ_CORPUS").ok())
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            eprintln!("usage: rust-xz-fuzz <corpus-dir>");
+            eprintln!("usage: oxidized-xz-fuzz <corpus-dir>");
             std::process::exit(2);
         });
 

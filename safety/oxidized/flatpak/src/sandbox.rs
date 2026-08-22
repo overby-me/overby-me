@@ -981,7 +981,7 @@ fn build_flatpak_info(deployed: &DeployedRef, runtime: Option<&DeployedRef>) -> 
     }
     info.push_str(&format!("arch={}\n", deployed.ref_.arch));
     info.push_str(&format!("branch={}\n", deployed.ref_.branch));
-    info.push_str("flatpak-version=0.1.0 (rust-flatpak)\n");
+    info.push_str("flatpak-version=0.1.0 (oxidized-flatpak)\n");
 
     info
 }

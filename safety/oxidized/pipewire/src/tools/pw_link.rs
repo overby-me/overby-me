@@ -273,7 +273,7 @@ pub fn main(raw_args: &[String]) -> i32 {
             list_outputs = true;
         }
 
-        let globals = match collect_globals(remote.as_deref(), "rust-pipewire-link") {
+        let globals = match collect_globals(remote.as_deref(), "oxidized-pipewire-link") {
             Ok(g) => g,
             Err(e) => {
                 if e.contains("connect:") || e.starts_with("connect:") {

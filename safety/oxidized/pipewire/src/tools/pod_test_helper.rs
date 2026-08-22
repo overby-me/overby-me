@@ -2,7 +2,7 @@
 // from CLI arguments and writes the binary POD to stdout. The companion
 // C test harness encodes the same value via libspa and we diff the output.
 //
-// Invoked as: rust-pipewire pod-encode <case>
+// Invoked as: oxidized-pipewire pod-encode <case>
 //
 // `<case>` selects a hard-coded sample value so the C and Rust sides agree
 // on what they're encoding.

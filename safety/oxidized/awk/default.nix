@@ -2,7 +2,7 @@
   packages = {
     default = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-awk";
+        pname = "oxidized-awk";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -28,7 +28,7 @@
 
     dev = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-awk-dev";
+        pname = "oxidized-awk-dev";
 
         src = lib.fileset.toSource {
           root = ./.;

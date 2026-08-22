@@ -378,11 +378,11 @@ pub(crate) fn parse_args() -> Options {
                 process::exit(0);
             }
             "-V" | "--version" => {
-                println!("curl 8.0.0 (rust-curl) libcurl/8.0.0 rustls/0.23");
+                println!("curl 8.0.0 (oxidized-curl) libcurl/8.0.0 rustls/0.23");
                 println!("Protocols: file http https ipfs ipns");
                 // SPNEGO is claimed only to make the test-framework's `crypto`
                 // feature flag true (it is computed as NTLM || Kerberos ||
-                // SPNEGO). We don't actually implement SPNEGO — the rust-curl
+                // SPNEGO). We don't actually implement SPNEGO — the oxidized-curl
                 // tests that pass under this claim all use Digest auth.
                 println!(
                     "Features: alt-svc brotli Debug HSTS HTTPS IDN IPv6 IPFS Largefile NTLM SPNEGO SSL UnixSockets libz zstd"

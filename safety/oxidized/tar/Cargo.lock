@@ -162,6 +162,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidized-tar"
+version = "0.1.0"
+dependencies = [
+ "bzip2",
+ "flate2",
+ "libc",
+ "regex",
+ "tar",
+ "uzers",
+ "walkdir",
+ "xz2",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -210,20 +224,6 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
-
-[[package]]
-name = "rust-tar"
-version = "0.1.0"
-dependencies = [
- "bzip2",
- "flate2",
- "libc",
- "regex",
- "tar",
- "uzers",
- "walkdir",
- "xz2",
-]
 
 [[package]]
 name = "rustix"

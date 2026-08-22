@@ -1,7 +1,7 @@
 {
   package = {lib, ...}:
     lib.buildCargoProject {
-      pname = "rust-diffutils";
+      pname = "oxidized-diffutils";
 
       src = lib.fileset.toSource {
         root = ./.;

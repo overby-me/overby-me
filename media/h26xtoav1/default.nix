@@ -7,7 +7,7 @@
 
   package = {lib, ...}:
     lib.buildCargoProject {
-      pname = "rust-h26xtoav1";
+      pname = "h26xtoav1";
 
       src = lib.fileset.toSource {
         root = ./..;

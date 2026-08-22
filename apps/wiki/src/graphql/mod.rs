@@ -370,7 +370,7 @@ where
 }
 
 /// The bare query-struct name (last `::` segment) for a GraphQL log line, e.g.
-/// `NodeInsertsQuery` rather than the full `wiki_dioxus::graphql::…` path.
+/// `NodeInsertsQuery` rather than the full `wiki::graphql::…` path.
 fn short_type_name<T>() -> &'static str {
     std::any::type_name::<T>()
         .rsplit("::")

@@ -1,4 +1,4 @@
-/* stdarg.h - stub for rust-gcc (definitions provided by compiler builtins) */
+/* stdarg.h - stub for oxidized-gcc (definitions provided by compiler builtins) */
 #ifndef _STDARG_H
 #define _STDARG_H
 

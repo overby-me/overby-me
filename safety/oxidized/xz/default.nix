@@ -6,7 +6,7 @@
       xz,
     }:
       lib.buildCargoProject {
-        pname = "rust-xz";
+        pname = "oxidized-xz";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -49,7 +49,7 @@
       xz,
     }:
       lib.buildCargoProject {
-        pname = "rust-xz-dev";
+        pname = "oxidized-xz-dev";
 
         src = lib.fileset.toSource {
           root = ./.;

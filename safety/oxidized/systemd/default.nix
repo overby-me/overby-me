@@ -38,7 +38,7 @@ in {
       ...
     }:
       lib.buildCargoProject {
-        pname = "rust-systemd";
+        pname = "oxidized-systemd";
         version = "unstable";
 
         src = lib.fileset.toSource {
@@ -97,7 +97,7 @@ in {
       ...
     }:
       lib.buildCargoProject {
-        pname = "rust-systemd-dev";
+        pname = "oxidized-systemd-dev";
         version = "unstable";
 
         src = lib.fileset.toSource {
@@ -149,7 +149,7 @@ in {
     # # false on non-Linux (otherwise nix flake check forces it on darwin and the
     # # crate2nix builtins.outputOf usage fails).
     #   (drowse.crate2nix {
-    #     pname = "rust-systemd";
+    #     pname = "oxidized-systemd";
     #     version = "unstable";
 
     #     src = lib.fileset.toSource {
@@ -479,7 +479,7 @@ in {
                 # config/rules directories. Binary string substitution is NOT safe here
                 # because the store paths are different lengths (the original systemd
                 # path like "...-systemd-258.3" is shorter than our overlay path like
-                # "...-rust-systemd-systemd-unstable"), so replacing would corrupt the
+                # "...-oxidized-systemd-systemd-unstable"), so replacing would corrupt the
                 # binary layout. This means udevd will still read its built-in rules
                 # from the original systemd package — a cosmetic issue until udevd is
                 # reimplemented in Rust.

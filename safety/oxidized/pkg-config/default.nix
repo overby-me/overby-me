@@ -7,7 +7,7 @@
 
   package = {lib, ...}:
     lib.buildCargoProject {
-      pname = "rust-pkg-config";
+      pname = "oxidized-pkg-config";
 
       src = lib.fileset.toSource {
         root = ./.;

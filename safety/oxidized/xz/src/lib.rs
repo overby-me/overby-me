@@ -1,4 +1,4 @@
-//! `rust-xz` library crate.
+//! `oxidized-xz` library crate.
 //!
 //! All real logic lives in the sibling modules; the `xz` binary
 //! (`src/main.rs`) is a thin wrapper that re-exports the same

@@ -71,7 +71,7 @@ fn run_interpreter() -> i32 {
     while i < args.len() {
         match args[i].as_str() {
             "--version" | "-v" => {
-                println!("perl (rust-perl) {}", env!("CARGO_PKG_VERSION"));
+                println!("perl (oxidized-perl) {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             "-e" | "-E" => {

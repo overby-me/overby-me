@@ -44,8 +44,8 @@ build:
     #   _headers   — cache policy: /assets/* is content-hashed, so immutable
     #   sw.js      — served from the ROOT so its scope is `/` (not the hashed
     #                /assets/ path, whose scope would only be /assets/)
-    cp assets/_redirects target/dx/wiki-dioxus/release/web/public/_redirects
-    cp assets/_headers target/dx/wiki-dioxus/release/web/public/_headers
+    cp assets/_redirects target/dx/wiki/release/web/public/_redirects
+    cp assets/_headers target/dx/wiki/release/web/public/_headers
     # The HEIC decoder, as its own wasm module for the Web Worker that runs it
     # (heic-worker/src/lib.rs). Built with the default release profile rather
     # than the app's size-tuned `wasm-release`: this one is fetched only by a
@@ -57,19 +57,19 @@ build:
     # keeps them revalidated rather than immutable like /assets/*.
     cargo build --release --target wasm32-unknown-unknown -p heic-worker
     wasm-bindgen --target no-modules --no-typescript --out-name heic-decode \
-        --out-dir target/dx/wiki-dioxus/release/web/public \
+        --out-dir target/dx/wiki/release/web/public \
         target/wasm32-unknown-unknown/release/heic_worker.wasm
-    cp assets/heic-worker.js target/dx/wiki-dioxus/release/web/public/heic-worker.js
+    cp assets/heic-worker.js target/dx/wiki/release/web/public/heic-worker.js
     # sw.js carries the build it is, so a page can ask the worker serving it
     # which deploy it came from (src/logging.rs). Substituted here rather than
     # baked by `dx`, which does not process this file.
     sed 's/__WIKI_BUILD__/'"$GIT_COMMIT"'/' assets/sw.js \
-        > target/dx/wiki-dioxus/release/web/public/sw.js
+        > target/dx/wiki/release/web/public/sw.js
     # What this deploy is, for a running tab to compare itself against
     # (src/update.rs). At the root, so `_headers` keeps it revalidated rather
     # than cached like the hashed assets.
     printf '{"commit":"%s","version":"0.1.0"}\n' "$GIT_COMMIT" \
-        > target/dx/wiki-dioxus/release/web/public/version.json
+        > target/dx/wiki/release/web/public/version.json
 
 # Build and deploy the frontend to a statichost.eu site (default: production).
 #

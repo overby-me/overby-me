@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-gzip"
+name = "oxidized-gzip"
 version = "0.1.0"
 dependencies = [
  "flate2",

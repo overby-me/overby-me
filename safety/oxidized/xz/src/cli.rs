@@ -5,7 +5,7 @@ use std::process;
 
 use crate::options::{BcjArch, FilterChain, FilterKind, Format, Mode, Options};
 
-pub const VERSION: &str = concat!("xz (rust-xz) ", env!("CARGO_PKG_VERSION"));
+pub const VERSION: &str = concat!("xz (oxidized-xz) ", env!("CARGO_PKG_VERSION"));
 
 /// Parse the program's argv into `Options`. Calls `process::exit` for
 /// `--help`/`--version` and for unknown short flags.

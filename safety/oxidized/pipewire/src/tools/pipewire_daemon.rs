@@ -115,7 +115,7 @@ pub fn main(args: &[String]) -> i32 {
     if let Some(value) = config_value {
         return pipewire_load_config(argv0, &value);
     }
-    eprintln!("{argv0}: not yet implemented in rust-pipewire");
+    eprintln!("{argv0}: not yet implemented in oxidized-pipewire");
     1
 }
 

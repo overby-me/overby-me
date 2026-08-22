@@ -894,8 +894,8 @@ mod tests {
         // Firefox: name@url:line:col, including the bundler's own frames.
         let parsed = parse_stack(
             "panicked at src/x.rs:1:1: boom\n\
-             Z/__wbg_new_1f236d63ba0c4784/<@https://radikal.wiki/assets/wiki-dioxus-dxh1.js:1:42935\n\
-             dt@https://radikal.wiki/assets/wiki-dioxus-dxh1.js:1:64939",
+             Z/__wbg_new_1f236d63ba0c4784/<@https://radikal.wiki/assets/wiki-dxh1.js:1:42935\n\
+             dt@https://radikal.wiki/assets/wiki-dxh1.js:1:64939",
         );
         assert!(matches!(parsed[1], StackLine::Js(_)));
         assert!(matches!(parsed[2], StackLine::Js(_)));
@@ -938,7 +938,7 @@ mod tests {
     fn the_panic_and_unresolved_frames_are_recognised() {
         let parsed = parse_stack(
             "panicked at src/x.rs:1:1: boom\n\
-             @https://radikal.wiki/assets/wiki-dioxus_bg-dxh1.wasm:wasm-function[5300]:0x36e775",
+             @https://radikal.wiki/assets/wiki_bg-dxh1.wasm:wasm-function[5300]:0x36e775",
         );
         assert!(matches!(parsed[0], StackLine::Panic(_)));
         assert!(matches!(parsed[1], StackLine::Raw(_)));

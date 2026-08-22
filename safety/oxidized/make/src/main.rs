@@ -563,7 +563,10 @@ fn run() -> i32 {
             "-v" | "--version" => {
                 // Mimic GNU make's version format so the upstream test
                 // driver accepts us as a compatible `make`.
-                println!("GNU Make 4.4.1 (rust-make {})", env!("CARGO_PKG_VERSION"));
+                println!(
+                    "GNU Make 4.4.1 (oxidized-make {})",
+                    env!("CARGO_PKG_VERSION")
+                );
                 println!("Built for x86_64-pc-linux-gnu");
                 println!("Copyright (C) 1988-2023 Free Software Foundation, Inc.");
                 println!(
@@ -905,7 +908,7 @@ fn run() -> i32 {
     }
 
     if debug_mode {
-        eprintln!("GNU Make 4.4.1 (rust-make)");
+        eprintln!("GNU Make 4.4.1 (oxidized-make)");
     }
 
     // Change directory if requested

@@ -46,7 +46,7 @@ pub fn parse_args() -> Options {
     while i < args.len() {
         match args[i].as_str() {
             "--version" => {
-                println!("patchelf (rust-patchelf) {VERSION}");
+                println!("patchelf (oxidized-patchelf) {VERSION}");
                 process::exit(0);
             }
             "--help" | "-h" => {

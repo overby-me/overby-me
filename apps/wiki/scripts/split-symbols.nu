@@ -5,7 +5,7 @@
 # source line. Shipping those sections would add ~20 MB to every visit, so this
 # writes two files instead:
 #
-#   public/assets/wiki-dioxus_bg-<hash>.wasm   stripped — the one that ships
+#   public/assets/wiki_bg-<hash>.wasm   stripped — the one that ships
 #   public/symbols/<hash>.debug.wasm           the same module, DWARF intact
 #
 # Stripping only removes custom sections, so the code section keeps its offset
@@ -27,7 +27,7 @@
 # backend fetches /symbols/<hash>.debug.wasm when a report arrives; see
 # backend/src/symbolicate.rs.
 
-const PUBLIC = "target/dx/wiki-dioxus/release/web/public"
+const PUBLIC = "target/dx/wiki/release/web/public"
 
 # How many builds' worth of symbols to keep.
 #
@@ -74,15 +74,15 @@ def prune_symbols [symbols_dir: string, current: string] {
 def current_wasm [] {
     let entry = (
         open $"($PUBLIC)/index.html"
-        | parse --regex 'wiki-dioxus-(?<h>[0-9a-z]+)\.js'
+        | parse --regex 'wiki-(?<h>[0-9a-z]+)\.js'
         | get h.0
     )
     let name = (
-        open $"($PUBLIC)/assets/wiki-dioxus-($entry).js"
-        | parse --regex 'wiki-dioxus_bg-(?<h>[0-9a-z]+)\.wasm'
+        open $"($PUBLIC)/assets/wiki-($entry).js"
+        | parse --regex 'wiki_bg-(?<h>[0-9a-z]+)\.wasm'
         | get h.0
     )
-    { hash: $name, path: $"($PUBLIC)/assets/wiki-dioxus_bg-($name).wasm" }
+    { hash: $name, path: $"($PUBLIC)/assets/wiki_bg-($name).wasm" }
 }
 
 # The imports and code sections as objdump reports them: offsets, sizes, counts.

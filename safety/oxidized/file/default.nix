@@ -2,7 +2,7 @@
   packages = {
     default = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-file";
+        pname = "oxidized-file";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -24,7 +24,7 @@
 
     dev = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-file-dev";
+        pname = "oxidized-file-dev";
 
         src = lib.fileset.toSource {
           root = ./.;

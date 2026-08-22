@@ -5,9 +5,9 @@
 //! exactly equals the input. The shrinker is left at the proptest
 //! defaults — failures will minimise to the smallest reproducer.
 
+use oxidized_xz::codec::{compress_stream, decompress_stream, decompress_stream_opts};
+use oxidized_xz::options::{BcjArch, FilterChain, FilterKind, Format};
 use proptest::prelude::*;
-use rust_xz::codec::{compress_stream, decompress_stream, decompress_stream_opts};
-use rust_xz::options::{BcjArch, FilterChain, FilterKind, Format};
 
 /// Buffers up to ~32 KiB so each iteration finishes in well under a
 /// second even at preset 9.

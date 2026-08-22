@@ -6,7 +6,7 @@ use std::process;
 // First line ends with the upstream version so gnulib's help-version
 // test (which extracts "$(--version | sed '1s/.* //')" and compares to
 // $VERSION exported from the test harness) matches pkgs.gzip's version.
-pub const VERSION: &str = "gzip (rust-gzip) 1.14";
+pub const VERSION: &str = "gzip (oxidized-gzip) 1.14";
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Mode {

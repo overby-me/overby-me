@@ -9,7 +9,7 @@
 //! or a libFuzzer harness.
 //!
 //! The corpus directory is located via the `RUST_XZ_FUZZ_CORPUS`
-//! environment variable. The `rust-xz-fuzz` Nix check sets this to
+//! environment variable. The `oxidized-xz-fuzz` Nix check sets this to
 //! the unpacked `xz-*/tests/files/` directory; if the variable is
 //! unset (the local-`cargo test` case) the test is skipped.
 
@@ -17,7 +17,7 @@ use std::fs;
 use std::io::sink;
 use std::path::PathBuf;
 
-use rust_xz::codec::decompress_stream;
+use oxidized_xz::codec::decompress_stream;
 
 fn corpus_dir() -> Option<PathBuf> {
     std::env::var_os("RUST_XZ_FUZZ_CORPUS").map(PathBuf::from)

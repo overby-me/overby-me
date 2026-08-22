@@ -179,7 +179,7 @@ fn parse_args() -> Options {
         let arg = &args[i];
 
         if arg == "--version" || arg == "-V" {
-            println!("patch (rust-patch) {}", env!("CARGO_PKG_VERSION"));
+            println!("patch (oxidized-patch) {}", env!("CARGO_PKG_VERSION"));
             std::process::exit(0);
         }
 
@@ -309,7 +309,7 @@ fn parse_args() -> Options {
             // Emit a clear error so the upstream test suite's merge test
             // can detect the absence and skip.
             let argv0 = env::args().next().unwrap_or_else(|| "patch".to_string());
-            eprintln!("{argv0}: --merge support is not implemented in rust-patch");
+            eprintln!("{argv0}: --merge support is not implemented in oxidized-patch");
             process::exit(EXIT_TROUBLE);
         } else if arg == "-e" || arg == "--ed" {
             opts.ed = true;

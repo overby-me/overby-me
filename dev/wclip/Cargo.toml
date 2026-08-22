@@ -1,5 +1,5 @@
 [package]
-name = "rust-wclip"
+name = "wclip"
 version = "0.1.0"
 edition = "2024"
 description = "An xclip-style Wayland clipboard tool written in Rust"

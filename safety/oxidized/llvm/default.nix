@@ -183,7 +183,7 @@ in {
 
   package = {lib, ...}:
     lib.buildCargoProject {
-      pname = "rust-llvm";
+      pname = "oxidized-llvm";
       src = llvmSrc;
       roots = ["llvm-tools"];
 

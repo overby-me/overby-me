@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "rust-texinfo"
+name = "oxidized-texinfo"
 version = "0.1.0"

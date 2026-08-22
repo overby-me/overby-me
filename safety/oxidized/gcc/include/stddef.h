@@ -1,4 +1,4 @@
-/* stddef.h - stub for rust-gcc (definitions provided by compiler builtins) */
+/* stddef.h - stub for oxidized-gcc (definitions provided by compiler builtins) */
 #ifndef _STDDEF_H
 #define _STDDEF_H
 

@@ -1,5 +1,5 @@
 [package]
-name = "rust-bzip2"
+name = "oxidized-bzip2"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"

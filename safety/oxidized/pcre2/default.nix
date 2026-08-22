@@ -1,7 +1,7 @@
 {
   package = {lib, ...}:
     lib.buildCargoProject {
-      pname = "rust-pcre2";
+      pname = "oxidized-pcre2";
 
       src = lib.fileset.toSource {
         root = ./.;

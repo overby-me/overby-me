@@ -1,7 +1,7 @@
 {lib, ...}: {
   package = {lib, ...}:
     lib.buildCargoProject {
-      pname = "rust-grep";
+      pname = "oxidized-grep";
 
       src = lib.fileset.toSource {
         root = ./..;

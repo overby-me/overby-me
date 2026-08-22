@@ -1,7 +1,7 @@
-// rust-flatpak: A Flatpak-compatible application sandboxing and distribution tool.
+// oxidized-flatpak: A Flatpak-compatible application sandboxing and distribution tool.
 //
 // Implements the core Flatpak CLI for running, installing, listing, and
-// managing sandboxed applications. Uses bwrap (rust-bubblewrap) for
+// managing sandboxed applications. Uses bwrap (oxidized-bubblewrap) for
 // sandboxing.
 
 mod build;
@@ -49,7 +49,7 @@ fn main() {
                 process::exit(0);
             }
             "--version" => {
-                println!("Flatpak {FLATPAK_VERSION} (rust-flatpak)");
+                println!("Flatpak {FLATPAK_VERSION} (oxidized-flatpak)");
                 process::exit(0);
             }
             _ if !arg.starts_with('-') => {

@@ -6,7 +6,7 @@
       perl,
     }:
       lib.buildCargoProject {
-        pname = "rust-perl";
+        pname = "oxidized-perl";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -27,7 +27,7 @@
         # have is silently no-op, which is how this said oxidized-perl and
         # went back to failing on /tmp without anyone noticing.
         crateOverrides = {
-          rust-perl.PERL_SRC = "${srcOnly perl}";
+          oxidized-perl.PERL_SRC = "${srcOnly perl}";
         };
 
         meta = {
@@ -45,7 +45,7 @@
       perl,
     }:
       lib.buildCargoProject {
-        pname = "rust-perl-dev";
+        pname = "oxidized-perl-dev";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -66,7 +66,7 @@
         # have is silently no-op, which is how this said oxidized-perl and
         # went back to failing on /tmp without anyone noticing.
         crateOverrides = {
-          rust-perl.PERL_SRC = "${srcOnly perl}";
+          oxidized-perl.PERL_SRC = "${srcOnly perl}";
         };
 
         release = false;

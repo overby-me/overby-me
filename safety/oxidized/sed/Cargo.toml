@@ -1,5 +1,5 @@
 [package]
-name = "rust-sed"
+name = "oxidized-sed"
 version = "0.1.0"
 edition = "2024"
 description = "A GNU sed-compatible stream editor written in Rust"

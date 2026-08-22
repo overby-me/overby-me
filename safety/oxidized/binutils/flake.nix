@@ -23,20 +23,20 @@
       rust = {
         pname = "oxidized-binutils";
         aliases = {
-          "ar" = "rust-binutils";
-          "ranlib" = "rust-binutils";
-          "nm" = "rust-binutils";
-          "objdump" = "rust-binutils";
-          "readelf" = "rust-binutils";
-          "objcopy" = "rust-binutils";
-          "strings" = "rust-binutils";
-          "size" = "rust-binutils";
-          "addr2line" = "rust-binutils";
-          "c++filt" = "rust-binutils";
-          "strip" = "rust-binutils";
-          "as" = "rust-binutils";
-          "ld" = "rust-binutils";
-          "elfedit" = "rust-binutils";
+          "ar" = "oxidized-binutils";
+          "ranlib" = "oxidized-binutils";
+          "nm" = "oxidized-binutils";
+          "objdump" = "oxidized-binutils";
+          "readelf" = "oxidized-binutils";
+          "objcopy" = "oxidized-binutils";
+          "strings" = "oxidized-binutils";
+          "size" = "oxidized-binutils";
+          "addr2line" = "oxidized-binutils";
+          "c++filt" = "oxidized-binutils";
+          "strip" = "oxidized-binutils";
+          "as" = "oxidized-binutils";
+          "ld" = "oxidized-binutils";
+          "elfedit" = "oxidized-binutils";
         };
       };
     };

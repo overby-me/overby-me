@@ -351,6 +351,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
+name = "oxidized-curl"
+version = "0.1.0"
+dependencies = [
+ "brotli-decompressor",
+ "cipher",
+ "des",
+ "flate2",
+ "idna",
+ "md-5",
+ "md4",
+ "rustls",
+ "rustls-native-certs",
+ "rustls-pemfile",
+ "ruzstd",
+ "sha2",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
 name = "potential_utf"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -389,25 +408,6 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "rust-curl"
-version = "0.1.0"
-dependencies = [
- "brotli-decompressor",
- "cipher",
- "des",
- "flate2",
- "idna",
- "md-5",
- "md4",
- "rustls",
- "rustls-native-certs",
- "rustls-pemfile",
- "ruzstd",
- "sha2",
- "webpki-roots 0.26.11",
 ]
 
 [[package]]

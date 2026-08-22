@@ -1,11 +1,11 @@
 [package]
-name = "rust-xz"
+name = "oxidized-xz"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
 
 [lib]
-name = "rust_xz"
+name = "oxidized_xz"
 path = "src/lib.rs"
 
 [[bin]]

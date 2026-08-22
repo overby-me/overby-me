@@ -253,7 +253,7 @@ mod tests {
     fn write_temp(name: &str, bytes: &[u8]) -> String {
         let mut path = std::env::temp_dir();
         path.push(format!(
-            "rust-xz-list-test-{name}-{}.xz",
+            "oxidized-xz-list-test-{name}-{}.xz",
             std::process::id()
         ));
         let mut f = File::create(&path).unwrap();

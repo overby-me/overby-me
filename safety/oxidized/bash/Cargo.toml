@@ -1,5 +1,5 @@
 [package]
-name = "rust-bash"
+name = "oxidized-bash"
 version = "0.1.0"
 edition = "2024"
 description = "A Bash-compatible shell written in Rust"

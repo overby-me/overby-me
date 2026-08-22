@@ -92,7 +92,7 @@ closed both gaps.
   (previously only raw mode did), unlocking the BCJ half of
   `test_compress.sh`.
 
-- **`src/lib.rs`** — modules are now exposed as a `rust_xz` library
+- **`src/lib.rs`** — modules are now exposed as a `oxidized_xz` library
   crate so the binary, benches, integration tests, and the fuzz
   harness all link against the same code. `main.rs` shrank to ~70
   lines.

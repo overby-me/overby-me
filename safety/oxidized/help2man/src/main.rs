@@ -16,7 +16,7 @@ fn main() {
     while i < args.len() {
         match args[i].as_str() {
             "--version" => {
-                println!("help2man (rust-help2man) {}", env!("CARGO_PKG_VERSION"));
+                println!("help2man (oxidized-help2man) {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
             }
             "--help" => {

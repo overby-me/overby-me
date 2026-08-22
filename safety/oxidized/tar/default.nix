@@ -2,7 +2,7 @@
   packages = {
     default = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-tar";
+        pname = "oxidized-tar";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -24,7 +24,7 @@
 
     dev = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-tar-dev";
+        pname = "oxidized-tar-dev";
 
         src = lib.fileset.toSource {
           root = ./.;

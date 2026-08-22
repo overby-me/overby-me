@@ -1,5 +1,5 @@
 [package]
-name = "rust-diffutils"
+name = "oxidized-diffutils"
 version = "0.1.0"
 edition = "2024"
 description = "GNU diffutils-compatible file comparison tools written in Rust"

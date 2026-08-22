@@ -26,7 +26,7 @@ replacement for all of PCRE2. See `CHANGELOG.md` for what's implemented; `bin/pc
 ## API
 
 ```rust
-use rust_pcre2::{Regex, CompileOptions};
+use oxidized_pcre2::{Regex, CompileOptions};
 
 let re = Regex::new(r"\bword\b")?;
 assert!(re.is_match(b"a word here")?);

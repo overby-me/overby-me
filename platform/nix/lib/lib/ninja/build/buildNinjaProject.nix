@@ -51,7 +51,7 @@
     ninja = /. + (pkgs.lib.unsafeDiscardStringContext pkgs.inputs.oxidized-ninja.outPath);
   in
     pkgs.lib.buildCargoProject {
-      pname = "rust-ninja";
+      pname = "oxidized-ninja";
       src = pkgs.lib.fileset.toSource {
         root = ninja;
         fileset = pkgs.lib.fileset.unions [

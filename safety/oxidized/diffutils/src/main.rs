@@ -31,7 +31,7 @@ fn diff_main(args: &[String]) {
     while i < args.len() {
         match args[i].as_str() {
             "--version" => {
-                println!("diff (rust-diffutils) {}", env!("CARGO_PKG_VERSION"));
+                println!("diff (oxidized-diffutils) {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
             }
             "--help" => {
@@ -849,7 +849,7 @@ fn cmp_main(args: &[String]) {
     for arg in args {
         match arg.as_str() {
             "--version" => {
-                println!("cmp (rust-diffutils) {}", env!("CARGO_PKG_VERSION"));
+                println!("cmp (oxidized-diffutils) {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
             }
             "-s" | "--silent" | "--quiet" => silent = true,
@@ -920,7 +920,7 @@ fn cmp_main(args: &[String]) {
 fn sdiff_main(args: &[String]) {
     for arg in args {
         if arg == "--version" {
-            println!("sdiff (rust-diffutils) {}", env!("CARGO_PKG_VERSION"));
+            println!("sdiff (oxidized-diffutils) {}", env!("CARGO_PKG_VERSION"));
             process::exit(0);
         }
     }
@@ -937,7 +937,7 @@ fn sdiff_main(args: &[String]) {
 fn diff3_main(args: &[String]) {
     for arg in args {
         if arg == "--version" {
-            println!("diff3 (rust-diffutils) {}", env!("CARGO_PKG_VERSION"));
+            println!("diff3 (oxidized-diffutils) {}", env!("CARGO_PKG_VERSION"));
             process::exit(0);
         }
     }

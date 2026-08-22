@@ -3,7 +3,7 @@
   # this attribute or from pname. Linking to the attribute name is what left
   # all thirteen of these dangling, which noBrokenSymlinks turned into a
   # build failure; oxidized-pipewire had the same bug, from the same rename.
-  multicall = "rust-binutils";
+  multicall = "oxidized-binutils";
 
   tools = [
     "ar"
@@ -33,7 +33,7 @@ in {
   packages = {
     default = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-binutils";
+        pname = "oxidized-binutils";
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -56,7 +56,7 @@ in {
 
     dev = {lib, ...}:
       lib.buildCargoProject {
-        pname = "rust-binutils-dev";
+        pname = "oxidized-binutils-dev";
 
         src = lib.fileset.toSource {
           root = ./.;

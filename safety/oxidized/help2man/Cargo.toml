@@ -1,5 +1,5 @@
 [package]
-name = "rust-help2man"
+name = "oxidized-help2man"
 version = "0.1.0"
 edition = "2024"
 description = "A GNU help2man-compatible man page generator written in Rust"

@@ -1,3 +1,3 @@
 fn main() {
-    rust_gcc::compiler_main();
+    oxidized_gcc::compiler_main();
 }

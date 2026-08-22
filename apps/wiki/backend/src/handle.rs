@@ -1,4 +1,4 @@
-//! Scaleway serverless function backing the wiki (wiki-dioxus) frontend.
+//! Scaleway serverless function backing the wiki frontend.
 //!
 //! Its first job is the "Link Bluesky account" (atproto OAuth) flow. The browser
 //! cannot do this cleanly on its own — PAR, DPoP-bound token exchange and the

@@ -59,6 +59,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidized-grep"
+version = "0.1.0"
+dependencies = [
+ "fancy-regex",
+ "libc",
+ "memmap2",
+ "oxidized-pcre2",
+ "regex",
+ "walkdir",
+]
+
+[[package]]
+name = "oxidized-pcre2"
+version = "0.1.0"
+
+[[package]]
 name = "regex"
 version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -86,22 +102,6 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
-
-[[package]]
-name = "rust-grep"
-version = "0.1.0"
-dependencies = [
- "fancy-regex",
- "libc",
- "memmap2",
- "regex",
- "rust-pcre2",
- "walkdir",
-]
-
-[[package]]
-name = "rust-pcre2"
-version = "0.1.0"
 
 [[package]]
 name = "same-file"

@@ -26,7 +26,7 @@ fn main() {
     while i < args.len() {
         match args[i].as_str() {
             "--version" | "-V" => {
-                println!("awk (rust-awk) {}", env!("CARGO_PKG_VERSION"));
+                println!("awk (oxidized-awk) {}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
             "-F" => {

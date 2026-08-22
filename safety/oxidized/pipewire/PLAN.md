@@ -568,7 +568,7 @@ clients can connect, see the same registry, link nodes.
 ### Phase 12 — Upstream pwtest harness
 
 Goal: link the unmodified upstream `test-pw-utils` / `test-spa` / etc.
-binaries against our `librust-pipewire-0.3.so` cdylib and run them.
+binaries against our `liboxidized-pipewire-0.3.so` cdylib and run them.
 
 - [ ] `cdylib` crate-type variants exporting the C ABI surface that
       pwtest uses (a small subset of `pw_*` and `spa_*` symbols)

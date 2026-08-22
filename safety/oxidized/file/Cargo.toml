@@ -1,5 +1,5 @@
 [package]
-name = "rust-file"
+name = "oxidized-file"
 version = "0.1.0"
 edition = "2024"
 description = "A GNU file-compatible file type detection tool written in Rust"

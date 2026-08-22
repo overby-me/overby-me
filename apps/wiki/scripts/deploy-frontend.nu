@@ -30,7 +30,7 @@ def main [
     site: string = "wiki-prod" # statichost.eu site: wiki-prod = radikal.wiki, radikal-wiki = dev
 ] {
     let root = ($env.FILE_PWD | path dirname)
-    let public = ($root | path join "target/dx/wiki-dioxus/release/web/public")
+    let public = ($root | path join "target/dx/wiki/release/web/public")
 
     # A bundle without remote logging is a bundle whose crashes nobody sees, and
     # the difference is invisible once it is deployed: the site looks identical
@@ -80,11 +80,11 @@ def main [
     if not ($index | path exists) { fail $"no bundle at ($public)" }
     let wasm_name = (
         open --raw $index
-        | parse --regex 'wiki-dioxus_bg-(?<h>[a-z0-9]+)\.wasm'
+        | parse --regex 'wiki_bg-(?<h>[a-z0-9]+)\.wasm'
         | get h.0?
     )
     if ($wasm_name | is-empty) { fail "could not find the wasm referenced by index.html" }
-    let wasm = ($public | path join $"assets/wiki-dioxus_bg-($wasm_name).wasm")
+    let wasm = ($public | path join $"assets/wiki_bg-($wasm_name).wasm")
     let logged = (^grep -qa "sw_build" $wasm | complete | get exit_code)
     if $logged != 0 {
         fail "the built wasm carries no remote-logging payload, so this bundle would report nothing. Check that BETTERSTACK_SOURCE_TOKEN reached the build."

@@ -883,7 +883,7 @@ pub(super) fn emit_shared_library_32(
                         }
                         R_386_TLS_LE_32 | R_386_TLS_TPOFF32 => {
                             if has_tls {
-                                // rust-gcc emits `add` with TLS_TPOFF32, so use negative offset
+                                // oxidized-gcc emits `add` with TLS_TPOFF32, so use negative offset
                                 let value =
                                     (sym_addr as i32 - tls_addr as i32 - tls_mem_size as i32
                                         + addend) as u32;

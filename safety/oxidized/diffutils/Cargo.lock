@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "rust-diffutils"
+name = "oxidized-diffutils"
 version = "0.1.0"

@@ -312,7 +312,7 @@ mod tests {
         assert!(kept(
             "https://radikal.wiki/assets/material-icons-dxhd3c.woff2"
         ));
-        assert!(kept("https://radikal.wiki/symbols/wiki-dioxus-dxh27f.wasm"));
+        assert!(kept("https://radikal.wiki/symbols/wiki-dxh27f.wasm"));
     }
 
     /// Everything the shell is served as goes, whatever URL it was cached under.

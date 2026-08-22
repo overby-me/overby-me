@@ -43,7 +43,7 @@ use std::process;
 use std::time::SystemTime;
 
 const VERSION: &str = "0.1.0";
-const PKG: &str = "rust-binutils";
+const PKG: &str = "oxidized-binutils";
 
 // ─── Glob/wildcard matching helpers ───────────────────────────────────────────
 
@@ -160,10 +160,10 @@ fn main() {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| args[0].clone());
 
-    let (tool, tool_args) = if argv0 == "rust-binutils" {
+    let (tool, tool_args) = if argv0 == "oxidized-binutils" {
         // Direct invocation: first arg is the tool name
         if args.len() < 2 {
-            eprintln!("Usage: rust-binutils <tool> [args...]");
+            eprintln!("Usage: oxidized-binutils <tool> [args...]");
             eprintln!(
                 "Tools: ar ranlib nm strings size readelf objdump objcopy strip addr2line c++filt as ld"
             );
@@ -190,7 +190,7 @@ fn main() {
         "ld" => tool_ld(&tool_args),
         "elfedit" => tool_elfedit(&tool_args),
         _ => {
-            eprintln!("rust-binutils: unknown tool '{tool}'");
+            eprintln!("oxidized-binutils: unknown tool '{tool}'");
             1
         }
     };
@@ -12603,7 +12603,7 @@ fn tool_as(args: &[String]) -> i32 {
             && path
                 .canonicalize()
                 .ok()
-                .map(|p| !p.ends_with("rust-binutils"))
+                .map(|p| !p.ends_with("oxidized-binutils"))
                 .unwrap_or(true)
         {
             let status = process::Command::new(candidate).args(args).status();
@@ -12633,7 +12633,7 @@ fn tool_ld(args: &[String]) -> i32 {
             && path
                 .canonicalize()
                 .ok()
-                .map(|p| !p.ends_with("rust-binutils"))
+                .map(|p| !p.ends_with("oxidized-binutils"))
                 .unwrap_or(true)
         {
             let status = process::Command::new(candidate).args(args).status();

@@ -68,7 +68,7 @@ pub fn main(args: &[String]) -> i32 {
     if i >= args.len() {
         return 0;
     }
-    eprintln!("{argv0}: not yet implemented in rust-pipewire");
+    eprintln!("{argv0}: not yet implemented in oxidized-pipewire");
     1
 }
 

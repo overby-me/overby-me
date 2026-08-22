@@ -158,7 +158,7 @@ fn apply_one_reloc(
             (tpoff + addend) as u32
         }
         R_386_TLS_LE_32 | R_386_TLS_TPOFF32 => {
-            // rust-gcc emits `add` with TLS_TPOFF32, so compute negative offset
+            // oxidized-gcc emits `add` with TLS_TPOFF32, so compute negative offset
             // (same as TLS_TPOFF/TLS_LE) to match the `add` instruction.
             let tpoff = sym_addr as i32 - ctx.tls_addr as i32 - ctx.tls_mem_size as i32;
             (tpoff + addend) as u32

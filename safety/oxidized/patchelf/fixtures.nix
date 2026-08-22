@@ -12,7 +12,7 @@
   pkg-config,
 }:
 stdenv.mkDerivation {
-  pname = "rust-patchelf-fixtures";
+  pname = "oxidized-patchelf-fixtures";
   inherit (patchelf) version src;
 
   nativeBuildInputs = [autoreconfHook pkg-config];

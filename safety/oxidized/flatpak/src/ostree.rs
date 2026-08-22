@@ -618,7 +618,7 @@ pub fn fetch_url(url: &str) -> Result<Vec<u8>, String> {
     let is_tls = scheme == "https";
 
     let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: rust-flatpak/0.1.0\r\nConnection: keep-alive\r\nAccept: */*\r\n\r\n"
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: oxidized-flatpak/0.1.0\r\nConnection: keep-alive\r\nAccept: */*\r\n\r\n"
     );
 
     let mut conn = get_connection(&host, port, is_tls)?;

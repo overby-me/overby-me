@@ -186,10 +186,10 @@ mod tests {
     #[test]
     fn rkey_is_the_last_uri_segment() {
         let item: ListItem<RepoValue> = serde_json::from_str(
-            r#"{"uri":"at://did-plc-abc/sh.tangled.repo/rust-awk","value":{"name":"rust-awk"}}"#,
+            r#"{"uri":"at://did-plc-abc/sh.tangled.repo/oxidized-awk","value":{"name":"oxidized-awk"}}"#,
         )
         .unwrap();
-        assert_eq!(item.rkey(), "rust-awk");
+        assert_eq!(item.rkey(), "oxidized-awk");
     }
 
     #[test]
@@ -275,10 +275,10 @@ mod search_tests {
     #[test]
     fn labels_a_hit_by_whatever_field_it_has() {
         let repo: SearchHit = serde_json::from_str(
-            r#"{"uri":"x/y/z","nsid":"sh.tangled.repo","value":{"name":"rust-awk"}}"#,
+            r#"{"uri":"x/y/z","nsid":"sh.tangled.repo","value":{"name":"oxidized-awk"}}"#,
         )
         .unwrap();
-        assert_eq!(repo.title(), "rust-awk");
+        assert_eq!(repo.title(), "oxidized-awk");
         assert_eq!(repo.kind(), "repo");
 
         let issue: SearchHit = serde_json::from_str(

@@ -1,5 +1,5 @@
 [package]
-name = "rust-flatpak"
+name = "oxidized-flatpak"
 version = "0.1.0"
 edition = "2024"
 description = "A Flatpak-compatible application sandboxing and distribution tool written in Rust"

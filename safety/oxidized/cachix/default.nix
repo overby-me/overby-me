@@ -6,7 +6,7 @@
     ...
   }:
     lib.buildCargoProject {
-      pname = "rust-cachix";
+      pname = "oxidized-cachix";
 
       src = lib.fileset.toSource {
         root = ./.;

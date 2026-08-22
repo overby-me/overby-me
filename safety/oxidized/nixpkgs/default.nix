@@ -6,7 +6,7 @@
     ];
   };
 
-  overlays."/rust-nixpkgs" = final: prev: let
+  overlays."/oxidized-nixpkgs" = final: prev: let
     inherit (final) lib;
     components = import ./components {pkgs = final;};
 
@@ -38,7 +38,7 @@
       else prev.bash;
   in {
     # Expose the component registry for introspection
-    rust-nixpkgs-components = components;
+    oxidized-nixpkgs-components = components;
 
     # Wrap oxidized-gcc with nixpkgs cc-wrapper for proper include/lib paths
     oxidized-gcc-wrapped = prev.wrapCCWith {
@@ -91,7 +91,7 @@
       oxidized-patchelf,
     }:
       stdenv.mkDerivation {
-        pname = "rust-nixpkgs-test";
+        pname = "oxidized-nixpkgs-test";
         version = "0.1.0";
 
         dontUnpack = true;
@@ -115,7 +115,7 @@
         ];
 
         buildPhase = ''
-          echo "=== rust-nixpkgs component status ==="
+          echo "=== oxidized-nixpkgs component status ==="
           echo ""
           echo "All 15 components available:"
           echo "  Phase 1: shell (oxidized-bash), coreutils (uutils)"
@@ -145,12 +145,12 @@
 
         installPhase = ''
           mkdir -p $out
-          echo "rust-nixpkgs component test passed" > $out/result
+          echo "oxidized-nixpkgs component test passed" > $out/result
         '';
 
         meta = {
           platforms = lib.platforms.linux;
-          description = "Test derivation for rust-nixpkgs component availability";
+          description = "Test derivation for oxidized-nixpkgs component availability";
           license = lib.licenses.mit;
         };
       };
@@ -195,7 +195,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-stdenv-test";
+        pname = "oxidized-nixpkgs-stdenv-test";
         version = "0.1.0";
 
         dontUnpack = true;
@@ -221,7 +221,7 @@
 
         installPhase = ''
           mkdir -p $out
-          echo "rust-nixpkgs stdenv test passed" > $out/result
+          echo "oxidized-nixpkgs stdenv test passed" > $out/result
         '';
 
         meta = {
@@ -273,7 +273,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-hello-test";
+        pname = "oxidized-nixpkgs-hello-test";
         version = "2.12.1";
 
         nativeBuildInputs = [oxidized-texinfo oxidized-help2man];
@@ -338,7 +338,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-zlib-test";
+        pname = "oxidized-nixpkgs-zlib-test";
         version = "1.3.1";
 
         src = fetchurl {
@@ -394,7 +394,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-gnupatch-test";
+        pname = "oxidized-nixpkgs-gnupatch-test";
         version = "2.8";
 
         nativeBuildInputs = [oxidized-texinfo oxidized-help2man];
@@ -458,7 +458,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-coreutils-test";
+        pname = "oxidized-nixpkgs-coreutils-test";
         version = "9.6";
 
         nativeBuildInputs = [oxidized-texinfo oxidized-help2man];
@@ -523,7 +523,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-gnugrep-test";
+        pname = "oxidized-nixpkgs-gnugrep-test";
         version = "3.11";
 
         nativeBuildInputs = [oxidized-texinfo];
@@ -588,7 +588,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-gnused-test";
+        pname = "oxidized-nixpkgs-gnused-test";
         version = "4.9";
 
         nativeBuildInputs = [oxidized-texinfo];
@@ -654,7 +654,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-gnudiffutils-test";
+        pname = "oxidized-nixpkgs-gnudiffutils-test";
         version = "3.10";
 
         nativeBuildInputs = [oxidized-texinfo oxidized-help2man];
@@ -723,7 +723,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-gnumake-test";
+        pname = "oxidized-nixpkgs-gnumake-test";
         version = "4.4.1";
 
         nativeBuildInputs = [oxidized-texinfo];
@@ -789,7 +789,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-gnuawk-test";
+        pname = "oxidized-nixpkgs-gnuawk-test";
         version = "5.3.1";
 
         # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
@@ -870,7 +870,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-bc-test";
+        pname = "oxidized-nixpkgs-bc-test";
         version = "1.07.1";
 
         nativeBuildInputs = [oxidized-texinfo oxidized-bison flex ed];
@@ -940,7 +940,7 @@
       };
     in
       rustShellStdenv.mkDerivation {
-        pname = "rust-nixpkgs-bash-shell-test";
+        pname = "oxidized-nixpkgs-bash-shell-test";
         version = "0.1.0";
 
         # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
@@ -1031,7 +1031,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-gnutar-test";
+        pname = "oxidized-nixpkgs-gnutar-test";
         version = "1.35";
 
         nativeBuildInputs = [oxidized-texinfo];
@@ -1096,7 +1096,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-gnugzip-test";
+        pname = "oxidized-nixpkgs-gnugzip-test";
         version = "1.14";
 
         nativeBuildInputs = [oxidized-texinfo];
@@ -1181,7 +1181,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-xz-test";
+        pname = "oxidized-nixpkgs-xz-test";
         version = "5.6.4";
 
         # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
@@ -1253,7 +1253,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-gnufindutils-test";
+        pname = "oxidized-nixpkgs-gnufindutils-test";
         version = "4.10.0";
 
         # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
@@ -1329,7 +1329,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-readline-test";
+        pname = "oxidized-nixpkgs-readline-test";
         version = "8.2";
 
         nativeBuildInputs = [oxidized-texinfo];
@@ -1400,7 +1400,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-libffi-test";
+        pname = "oxidized-nixpkgs-libffi-test";
         version = "3.4.6";
 
         nativeBuildInputs = [oxidized-texinfo gnumake];
@@ -1474,7 +1474,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-pcre2-test";
+        pname = "oxidized-nixpkgs-pcre2-test";
         version = "10.44";
 
         # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
@@ -1546,7 +1546,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-m4-test";
+        pname = "oxidized-nixpkgs-m4-test";
         version = "1.4.19";
 
         # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
@@ -1622,7 +1622,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-libtool-test";
+        pname = "oxidized-nixpkgs-libtool-test";
         version = "2.5.4";
 
         # gnulib of this vintage writes `static inline [[__nodiscard__]] int`
@@ -1693,7 +1693,7 @@
       };
     in
       rustStdenv.mkDerivation {
-        pname = "rust-nixpkgs-bzip2-test";
+        pname = "oxidized-nixpkgs-bzip2-test";
         version = "1.0.8";
 
         src = fetchurl {
@@ -1747,7 +1747,7 @@
       };
     in
       gccStdenv.mkDerivation {
-        pname = "rust-nixpkgs-gcc-test";
+        pname = "oxidized-nixpkgs-gcc-test";
         version = "0.1.0";
 
         dontUnpack = true;
@@ -1798,7 +1798,7 @@
       oxidized-binutils,
     }:
       stdenv.mkDerivation {
-        pname = "rust-nixpkgs-binutils-test";
+        pname = "oxidized-nixpkgs-binutils-test";
         version = "0.1.0";
 
         dontUnpack = true;

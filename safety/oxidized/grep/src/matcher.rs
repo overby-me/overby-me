@@ -1,8 +1,8 @@
 use std::process;
 
 use fancy_regex::{Regex as FancyRegex, RegexBuilder as FancyRegexBuilder};
+use oxidized_pcre2::Regex as Pcre2Regex;
 use regex::Regex;
-use rust_pcre2::Regex as Pcre2Regex;
 
 use crate::args::Options;
 use crate::pattern::{
@@ -355,8 +355,8 @@ pub(crate) fn build_matcher(opts: &Options) -> Matcher {
     }
 
     let inner = if opts.perl_regexp {
-        // Use rust-pcre2 for -P mode (true PCRE2 semantics with backtrack limits)
-        let mut compile_opts = rust_pcre2::CompileOptions::default();
+        // Use oxidized-pcre2 for -P mode (true PCRE2 semantics with backtrack limits)
+        let mut compile_opts = oxidized_pcre2::CompileOptions::default();
         compile_opts.caseless = opts.ignore_case;
         compile_opts.multiline = false; // grep handles line-by-line
         compile_opts.dollar_endonly = opts.null_data; // -z: $ matches only at end of record

@@ -1,5 +1,5 @@
 [package]
-name = "rust-gcc"
+name = "oxidized-gcc"
 version = "0.1.0"
 edition = "2021"
 description = "A GCC-compatible C compiler written in Rust"

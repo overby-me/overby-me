@@ -40,16 +40,14 @@ in {
     default = {lib, ...}:
       lib.buildCargoProject (crate
         // {
-          # The crate keeps its own name: pname is resolved against
-          # Cargo.lock, and this names a target rather than a crate.
-          pname = "rust-wclip";
+          pname = "wclip";
           meta = crate.meta // {description = "An xclip-style Wayland clipboard tool written in Rust";};
         });
 
     dev = {lib, ...}:
       lib.buildCargoProject (crate
         // {
-          pname = "rust-wclip-dev";
+          pname = "wclip-dev";
           release = false;
           meta = crate.meta // {description = "An xclip-style Wayland clipboard tool written in Rust (dev build, fast compile)";};
         });

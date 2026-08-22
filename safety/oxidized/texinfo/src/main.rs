@@ -817,7 +817,7 @@ fn main() {
     while i < args.len() {
         match args[i].as_str() {
             "--version" => {
-                println!("makeinfo (rust-texinfo) {}", env!("CARGO_PKG_VERSION"));
+                println!("makeinfo (oxidized-texinfo) {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
             }
             "--help" => {

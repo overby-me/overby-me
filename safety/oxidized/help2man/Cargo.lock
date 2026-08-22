@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "rust-help2man"
+name = "oxidized-help2man"
 version = "0.1.0"

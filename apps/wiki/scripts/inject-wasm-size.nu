@@ -34,7 +34,7 @@ def refs [text: string, pattern: string] {
 }
 
 def main [
-    root: string = "target/dx/wiki-dioxus/release/web/public"
+    root: string = "target/dx/wiki/release/web/public"
 ] {
     let index = ($root | path join "index.html")
     if not ($index | path exists) {

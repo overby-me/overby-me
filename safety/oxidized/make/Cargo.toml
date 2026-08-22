@@ -1,5 +1,5 @@
 [package]
-name = "rust-make"
+name = "oxidized-make"
 version = "0.1.0"
 edition = "2024"
 description = "A GNU Make-compatible build system driver written in Rust"

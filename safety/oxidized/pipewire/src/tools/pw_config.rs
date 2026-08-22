@@ -248,7 +248,7 @@ pub fn main(raw_args: &[String]) -> i32 {
             }
         }
         other => {
-            eprintln!("{argv0}: command {other:?} not yet implemented in rust-pipewire");
+            eprintln!("{argv0}: command {other:?} not yet implemented in oxidized-pipewire");
             return 1;
         }
     }

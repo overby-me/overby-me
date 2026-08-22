@@ -1,5 +1,5 @@
 [package]
-name = "rust-meson"
+name = "oxidized-meson"
 version = "0.1.0"
 edition = "2024"
 description = "A Meson build system compatible implementation in Rust"

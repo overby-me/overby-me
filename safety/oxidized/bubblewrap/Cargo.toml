@@ -1,5 +1,5 @@
 [package]
-name = "rust-bubblewrap"
+name = "oxidized-bubblewrap"
 version = "0.1.0"
 edition = "2024"
 description = "A bubblewrap-compatible unprivileged sandboxing tool written in Rust"

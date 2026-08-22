@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "rust-pipewire"
+name = "oxidized-pipewire"
 version = "0.1.0"

@@ -123,7 +123,7 @@ pub fn main(raw_args: &[String]) -> i32 {
 
     let _ = positional;
 
-    let globals = match collect_globals(remote.as_deref(), "rust-pipewire-meta") {
+    let globals = match collect_globals(remote.as_deref(), "oxidized-pipewire-meta") {
         Ok(g) => g,
         Err(e) => {
             // C pw-metadata uses pw-link / pw-dump's `can't connect: %m`

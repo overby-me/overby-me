@@ -1,4 +1,4 @@
-// rust-bubblewrap: A bubblewrap-compatible unprivileged sandboxing tool.
+// oxidized-bubblewrap: A bubblewrap-compatible unprivileged sandboxing tool.
 //
 // Creates isolated container environments using Linux namespaces. Works as
 // an unprivileged user via user namespaces. Always sets PR_SET_NO_NEW_PRIVS
@@ -170,7 +170,7 @@ fn parse_args() -> Options {
                 process::exit(0);
             }
             "--version" => {
-                println!("bubblewrap 0.1.0 (rust-bubblewrap)");
+                println!("bubblewrap 0.1.0 (oxidized-bubblewrap)");
                 process::exit(0);
             }
 

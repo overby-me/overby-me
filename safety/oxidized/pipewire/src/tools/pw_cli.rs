@@ -748,7 +748,7 @@ where
         print_fn(g, &args);
     } else {
         eprintln!(
-            "rust-pipewire pw-cli: no info event received for id {}",
+            "oxidized-pipewire pw-cli: no info event received for id {}",
             g.id
         );
         print_global_only(g);
@@ -760,7 +760,7 @@ fn print_module_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value])
     let info: ModuleInfo = match decode_module_info(args) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("rust-pipewire pw-cli: decode_module_info: {e}");
+            eprintln!("oxidized-pipewire pw-cli: decode_module_info: {e}");
             return;
         }
     };
@@ -780,7 +780,7 @@ fn print_factory_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]
     let info: FactoryInfo = match decode_factory_info(args) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("rust-pipewire pw-cli: decode_factory_info: {e}");
+            eprintln!("oxidized-pipewire pw-cli: decode_factory_info: {e}");
             return;
         }
     };
@@ -799,7 +799,7 @@ fn print_client_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value])
     let info: ClientInfo = match decode_client_info(args) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("rust-pipewire pw-cli: decode_client_info: {e}");
+            eprintln!("oxidized-pipewire pw-cli: decode_client_info: {e}");
             return;
         }
     };
@@ -816,7 +816,7 @@ fn print_node_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]) {
     let info: NodeInfo = match decode_node_info(args) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("rust-pipewire pw-cli: decode_node_info: {e}");
+            eprintln!("oxidized-pipewire pw-cli: decode_node_info: {e}");
             return;
         }
     };
@@ -864,7 +864,7 @@ fn print_port_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]) {
     let info: PortInfo = match decode_port_info(args) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("rust-pipewire pw-cli: decode_port_info: {e}");
+            eprintln!("oxidized-pipewire pw-cli: decode_port_info: {e}");
             return;
         }
     };
@@ -887,7 +887,7 @@ fn print_link_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value]) {
     let info: LinkInfo = match decode_link_info(args) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("rust-pipewire pw-cli: decode_link_info: {e}");
+            eprintln!("oxidized-pipewire pw-cli: decode_link_info: {e}");
             return;
         }
     };
@@ -929,7 +929,7 @@ fn print_device_info(g: &RegistryGlobal, args: &[crate::spa::pod::types::Value])
     let info: DeviceInfo = match decode_device_info(args) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("rust-pipewire pw-cli: decode_device_info: {e}");
+            eprintln!("oxidized-pipewire pw-cli: decode_device_info: {e}");
             return;
         }
     };
@@ -997,7 +997,7 @@ fn print_core_info(g: &RegistryGlobal, info: Option<&CoreInfo>) {
 fn print_global_only(g: &RegistryGlobal) {
     print_global_header(g);
     eprintln!(
-        "rust-pipewire pw-cli: info for type {} not yet implemented; only registry-side props",
+        "oxidized-pipewire pw-cli: info for type {} not yet implemented; only registry-side props",
         g.interface
     );
     print_properties(&g.props, ' ', true);

@@ -1,5 +1,5 @@
 [application]
-name = "wiki-dioxus"
+name = "wiki"
 default_platform = "web"
 asset_dir = "assets"
 

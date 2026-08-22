@@ -151,7 +151,7 @@ fn handle_command(cmd: &str, args: &[String]) -> i32 {
             print_commands();
             0
         }
-        // Commands that succeed silently in rust-pipewire (ALSA driving
+        // Commands that succeed silently in oxidized-pipewire (ALSA driving
         // is Phase 10+ work). C's behavior with arg counts:
         "quit" => 0,
         "card" if args.is_empty() => {

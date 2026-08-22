@@ -128,7 +128,7 @@
 
       installPhase = ''
         runHook preInstall
-        cp -r target/dx/wiki-dioxus/release/web/public $out
+        cp -r target/dx/wiki/release/web/public $out
         runHook postInstall
       '';
 

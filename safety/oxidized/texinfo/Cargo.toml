@@ -1,5 +1,5 @@
 [package]
-name = "rust-texinfo"
+name = "oxidized-texinfo"
 version = "0.1.0"
 edition = "2024"
 description = "A GNU makeinfo-compatible Texinfo processor written in Rust"

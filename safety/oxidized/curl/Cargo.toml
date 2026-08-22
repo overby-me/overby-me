@@ -1,5 +1,5 @@
 [package]
-name = "rust-curl"
+name = "oxidized-curl"
 version = "0.1.0"
 edition = "2024"
 description = "A curl-compatible HTTP client written in Rust"

@@ -13,7 +13,7 @@ fn main() {
     while i < args.len() {
         match args[i].as_str() {
             "--version" | "-v" => {
-                println!("file (rust-file) {}", env!("CARGO_PKG_VERSION"));
+                println!("file (oxidized-file) {}", env!("CARGO_PKG_VERSION"));
                 process::exit(0);
             }
             "--help" => {

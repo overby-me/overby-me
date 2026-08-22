@@ -1,10 +1,10 @@
-//! Throughput benchmarks for `rust-xz`.
+//! Throughput benchmarks for `oxidized-xz`.
 //!
 //! Measures the time to compress and decompress a fixed payload at
 //! every preset level the CLI exposes. Run with:
 //!
 //! ```text
-//! cargo bench -p rust-xz
+//! cargo bench -p oxidized-xz
 //! ```
 //!
 //! The benchmarks are intentionally small (256 KiB) so they run in
@@ -13,8 +13,8 @@
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 
-use rust_xz::codec::{compress_stream, decompress_stream};
-use rust_xz::options::Format;
+use oxidized_xz::codec::{compress_stream, decompress_stream};
+use oxidized_xz::options::Format;
 
 const PAYLOAD_BYTES: usize = 256 * 1024;
 
