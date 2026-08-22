@@ -13,8 +13,6 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/lib/cargo/index;
-
         meta = {
           description = "A GNU patch-compatible diff application tool written in Rust";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/patch";
@@ -36,8 +34,6 @@
             ./src
           ];
         };
-
-        index = ../../../platform/nix/lib/lib/cargo/index;
 
         release = false;
 

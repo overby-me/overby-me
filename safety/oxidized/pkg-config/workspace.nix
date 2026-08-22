@@ -19,8 +19,6 @@
         ];
       };
 
-      index = ../../../platform/nix/lib/lib/cargo/index;
-
       # This workspace has two root crates (libpkgconf + pkgconf), so
       # buildCargoProject wraps them in a symlinkJoin, which runs no stdenv
       # phases: setupHook and postInstall are silently ignored there.

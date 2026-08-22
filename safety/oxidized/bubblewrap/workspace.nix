@@ -12,8 +12,6 @@
         ];
       };
 
-      index = ../../../platform/nix/lib/lib/cargo/index;
-
       meta = {
         description = "A bubblewrap-compatible unprivileged sandboxing tool written in Rust";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/bubblewrap";

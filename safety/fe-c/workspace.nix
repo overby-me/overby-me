@@ -137,7 +137,6 @@
       inherit pname;
 
       src = fecSrc;
-      index = ../../platform/nix/lib/lib/cargo/index;
       roots = [root];
 
       toolchain = rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;

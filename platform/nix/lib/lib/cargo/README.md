@@ -32,16 +32,16 @@ workspace recompile `buildRustPackage` pays; cranelift dev builds go
    `rustc --print cfg` set is computed once per toolchain and shared across
    every build-script sandbox rather than recomputed per crate.
 3. The registry metadata that is not in the lock (dep kinds, features,
-   optionality, cfg gates) comes from an index checkout. Passing a committed
-   mini-index snapshot (produced by `tools/snapshot-index.nu` from the sparse
-   index: small, diff-friendly, no IFD) is the pure default; a full crates.io
-   index checkout also works. When `index` is omitted, `tools/tarball-index.nu`
+   optionality, cfg gates) comes from an index checkout. By default
+   `tools/tarball-index.nu`
    rebuilds the mini-index inside a derivation by reading each crate's
    published `Cargo.toml` out of the same fixed-output `.crate` tarballs the
    build already fetches, and `lib/index.nix` reads that output at eval time.
    That is the library's one import-from-derivation, and it stays pure: the
    tarballs are content-verified by the lock checksums, so no network and no
-   sandbox relaxation are involved.
+   sandbox relaxation are involved. Passing `index` skips it: a committed
+   mini-index snapshot (produced by `tools/snapshot-index.nu` from the sparse
+   index: small, diff-friendly, no IFD), or a full crates.io index checkout.
 4. `[profile.release]`/`[profile.dev]` from the workspace root are honored
    (`lto`, `strip`, `panic`, `codegen-units`, `debug`, including
    `debug = "line-tables-only"`), plus per-package overrides:
@@ -63,16 +63,23 @@ In a flakelight package definition:
 packages.my-tool = {lib, ...}:
   lib.buildCargoProject {
     src = ./.;
-    index = ../../../../platform/nix/lib/lib/cargo/index;
   };
 ```
 
-Drop `index` entirely to let the builder reconstruct the mini-index from the
-crate tarballs by IFD: no committed snapshot to maintain, at the cost of one
-import-from-derivation on the eval path (and losing pure-eval strictness).
-Passing a snapshot stays the recommended default for checked-in projects.
+This is what the tree does: the builder reconstructs the mini-index from the
+crate tarballs by IFD, so a `Cargo.lock` change needs no second commit and a
+project holds no path out of its own directory. The cost is one
+import-from-derivation on the eval path, which means evaluating a system this
+machine cannot build for now needs a builder for it.
 
-After updating a `Cargo.lock`, refresh the snapshot:
+Pass `index` to avoid that - a committed snapshot, or a full crates.io index
+checkout - and eval stays pure:
+
+```nix
+index = ../../../../platform/nix/lib/lib/cargo/index;
+```
+
+After updating a `Cargo.lock`, refresh that snapshot:
 
 ```console
 nu platform/nix/lib/lib/cargo/tools/snapshot-index.nu platform/nix/lib/lib/cargo/index <path>/Cargo.lock

@@ -13,8 +13,6 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/lib/cargo/index;
-
         meta = {
           description = "A patchelf-compatible ELF binary patching tool written in Rust";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/patchelf";
@@ -36,8 +34,6 @@
             ./src
           ];
         };
-
-        index = ../../../platform/nix/lib/lib/cargo/index;
 
         release = false;
 

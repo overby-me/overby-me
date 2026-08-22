@@ -18,8 +18,6 @@
         ];
       };
 
-      index = ../../platform/nix/lib/lib/cargo/index;
-
       meta = {
         description = "A pure Rust H.264 decoder library";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/h264-decoder";

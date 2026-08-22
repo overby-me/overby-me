@@ -13,8 +13,6 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/lib/cargo/index;
-
         rootAttrs.postInstall = ''
           ln -s $out/bin/make $out/bin/gmake
         '';
@@ -40,8 +38,6 @@
             ./src
           ];
         };
-
-        index = ../../../platform/nix/lib/lib/cargo/index;
 
         release = false;
 

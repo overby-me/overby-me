@@ -13,8 +13,6 @@
         ];
       };
 
-      index = ../../../platform/nix/lib/lib/cargo/index;
-
       rootAttrs.postInstall = ''
         # Create standard GCC symlinks
         ln -s $out/bin/gcc $out/bin/cc

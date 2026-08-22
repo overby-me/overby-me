@@ -19,8 +19,6 @@
       ];
     };
 
-    index = ../../platform/nix/lib/lib/cargo/index;
-
     meta = {
       homepage = "https://tangled.org/overby.me/overby.me/tree/main/${workspace.path}";
       license = lib.licenses.mit;

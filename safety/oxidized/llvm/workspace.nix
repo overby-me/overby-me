@@ -185,7 +185,6 @@ in {
     lib.buildCargoProject {
       pname = "rust-llvm";
       src = llvmSrc;
-      index = ../../../platform/nix/lib/lib/cargo/index;
       roots = ["llvm-tools"];
 
       rootAttrs.postInstall = ''

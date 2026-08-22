@@ -50,8 +50,6 @@ in {
           ];
         };
 
-        index = ../../../platform/nix/lib/lib/cargo/index;
-
         features = ["dbus_support"];
 
         # libsystemd dlopens libpam at runtime for PAMName= session setup; bake
@@ -110,8 +108,6 @@ in {
             ./crates
           ];
         };
-
-        index = ../../../platform/nix/lib/lib/cargo/index;
 
         features = ["dbus_support"];
         release = false;

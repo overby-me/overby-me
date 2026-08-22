@@ -12,8 +12,6 @@
         ];
       };
 
-      index = ../../../platform/nix/lib/lib/cargo/index;
-
       # Provide texi2any as an alias (some build systems use it)
       rootAttrs.postInstall = ''
         ln -s $out/bin/makeinfo $out/bin/texi2any

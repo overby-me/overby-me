@@ -44,8 +44,6 @@ in {
           ];
         };
 
-        index = ../../../platform/nix/lib/lib/cargo/index;
-
         rootAttrs.postInstall = multicallLinks;
 
         meta = {
@@ -68,8 +66,6 @@ in {
             ./src
           ];
         };
-
-        index = ../../../platform/nix/lib/lib/cargo/index;
 
         release = false;
 

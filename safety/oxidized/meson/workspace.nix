@@ -13,8 +13,6 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/lib/cargo/index;
-
         meta = {
           description = "A Meson build system compatible implementation in Rust";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/meson";

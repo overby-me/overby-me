@@ -12,8 +12,6 @@
         ];
       };
 
-      index = ../../../platform/nix/lib/lib/cargo/index;
-
       meta = {
         description = "A POSIX yacc/bison-compatible parser generator written in Rust";
         license = lib.licenses.mit;

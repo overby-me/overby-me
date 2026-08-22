@@ -12,8 +12,6 @@
         ];
       };
 
-      index = ../../../platform/nix/lib/lib/cargo/index;
-
       rootAttrs.postInstall = ''
         ln -s $out/bin/diff $out/bin/cmp
         ln -s $out/bin/diff $out/bin/sdiff

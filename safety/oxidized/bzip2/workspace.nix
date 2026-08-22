@@ -13,8 +13,6 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/lib/cargo/index;
-
         rootAttrs.postInstall = ''
           ln -s $out/bin/bzip2 $out/bin/bunzip2
           ln -s $out/bin/bzip2 $out/bin/bzcat
@@ -41,8 +39,6 @@
             ./src
           ];
         };
-
-        index = ../../../platform/nix/lib/lib/cargo/index;
 
         release = false;
 

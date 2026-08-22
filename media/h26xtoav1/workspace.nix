@@ -26,8 +26,6 @@
 
       manifestDir = "h26xtoav1";
 
-      index = ../../platform/nix/lib/lib/cargo/index;
-
       meta = {
         description = "A CLI tool to transcode H.264/H.265 video to AV1 using h264-decode, h265-decode, and rav1e";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/h26xtoav1";

@@ -60,7 +60,6 @@
           (ninja + "/src")
         ];
       };
-      index = ../../cargo/index;
       release = false;
     },
 }: let

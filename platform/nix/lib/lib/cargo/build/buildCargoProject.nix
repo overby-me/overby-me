@@ -15,10 +15,10 @@
 in
   {
     src,
-    # Registry index checkout, a snapshot mini-index or a full index. Null
-    # generates the mini-index by IFD for exactly the crates this lock pins: the
-    # one opt-in exception to the library's IFD-free rule, avoided by passing a
-    # committed snapshot.
+    # Registry index checkout, a snapshot mini-index or a full index. Null -
+    # what the tree uses - generates the mini-index by IFD for exactly the
+    # crates this lock pins: the library's one exception to being IFD-free,
+    # avoided by passing a committed snapshot.
     index ? null,
     # Set when the workspace manifest is not at the root of src (projects
     # with path dependencies on sibling directories).

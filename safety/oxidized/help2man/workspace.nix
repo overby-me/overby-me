@@ -12,8 +12,6 @@
         ];
       };
 
-      index = ../../../platform/nix/lib/lib/cargo/index;
-
       meta = {
         description = "A GNU help2man-compatible man page generator written in Rust";
         homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/help2man";

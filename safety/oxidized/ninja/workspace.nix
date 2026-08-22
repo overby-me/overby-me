@@ -13,8 +13,6 @@
           ];
         };
 
-        index = ../../../platform/nix/lib/lib/cargo/index;
-
         meta = {
           description = "A Ninja-compatible build system written in Rust";
           homepage = "https://tangled.org/overby.me/overby.me/tree/main/rust/ninja";
@@ -36,8 +34,6 @@
             ./src
           ];
         };
-
-        index = ../../../platform/nix/lib/lib/cargo/index;
 
         release = false;
 
