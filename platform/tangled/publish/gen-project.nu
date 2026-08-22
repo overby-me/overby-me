@@ -260,13 +260,18 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
         # A repo's description is a fact about the project, and for a
         # workspace no single package's meta states it: fe-c's first entry
         # describes its runtime crate. State it in projects.nuon where it
-        # differs, and scrape default.nix otherwise.
+        # differs, and scrape the project's own module otherwise.
         let stated = ($p | get -o description)
-        let default_nix = ($dir | path join "default.nix")
-        let description = if ($default_nix | path exists) {
-            let hits = (open $default_nix | lines | where {|l| $l =~ 'description = "' })
+        # workspace.nix for a project the workspace names, default.nix for one
+        # that is a module directory of its own.
+        let module_nix = (
+            [($dir | path join "workspace.nix") ($dir | path join "default.nix")]
+            | where {|f| $f | path exists } | first
+        )
+        let description = if ($module_nix != null) {
+            let hits = (open $module_nix | lines | where {|l| $l =~ 'description = "' })
             if ($hits | is-empty) { $"A Rust rewrite, published from a monorepo" } else {
-                # Unescape what default.nix escaped, then re-escape for the
+                # Unescape what the module escaped, then re-escape for the
                 # generated string: one description contains quotes.
                 $hits | first
                 | str replace -r '.*description = "' ''
