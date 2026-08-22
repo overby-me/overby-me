@@ -412,6 +412,7 @@
     },
     "nushell-plugin-tramp": {
       "inputs": {
+        "rust": "rust",
         "workspace": [
           "nix-config",
           "workspace"
@@ -676,6 +677,7 @@
     },
     "oxidized-ninja": {
       "inputs": {
+        "rust": "rust_3",
         "workspace": [
           "nix-lib",
           "workspace"
@@ -896,6 +898,30 @@
         "zen-browser": "zen-browser_2"
       }
     },
+    "rust": {
+      "inputs": {
+        "workspace": [
+          "nix-config",
+          "nushell-plugin-tramp",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "dir": "modules/rust",
+        "lastModified": 1787413120,
+        "narHash": "sha256-3D9jFbE1N34YvfB/D2V5Fs2sVKOKFqnPBEuSX5I/nuc=",
+        "ref": "refs/heads/main",
+        "rev": "7d7b9662cb7c2b594dc02e9be1378e9ea540e175",
+        "revCount": 82,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
+      },
+      "original": {
+        "dir": "modules/rust",
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
+      }
+    },
     "rust-overlay": {
       "inputs": {
         "nixpkgs": [
@@ -914,6 +940,54 @@
         "owner": "oxalica",
         "repo": "rust-overlay",
         "type": "github"
+      }
+    },
+    "rust_2": {
+      "inputs": {
+        "workspace": [
+          "nix-config",
+          "tangled-spindle-nix-engine",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "dir": "modules/rust",
+        "lastModified": 1787413120,
+        "narHash": "sha256-3D9jFbE1N34YvfB/D2V5Fs2sVKOKFqnPBEuSX5I/nuc=",
+        "ref": "refs/heads/main",
+        "rev": "7d7b9662cb7c2b594dc02e9be1378e9ea540e175",
+        "revCount": 82,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
+      },
+      "original": {
+        "dir": "modules/rust",
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
+      }
+    },
+    "rust_3": {
+      "inputs": {
+        "workspace": [
+          "nix-lib",
+          "oxidized-ninja",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "dir": "modules/rust",
+        "lastModified": 1787413120,
+        "narHash": "sha256-3D9jFbE1N34YvfB/D2V5Fs2sVKOKFqnPBEuSX5I/nuc=",
+        "ref": "refs/heads/main",
+        "rev": "7d7b9662cb7c2b594dc02e9be1378e9ea540e175",
+        "revCount": 82,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
+      },
+      "original": {
+        "dir": "modules/rust",
+        "type": "git",
+        "url": "https://tangled.org/overby.me/nix-workspace"
       }
     },
     "system-manager": {
@@ -983,6 +1057,7 @@
     },
     "tangled-spindle-nix-engine": {
       "inputs": {
+        "rust": "rust_2",
         "workspace": [
           "nix-config",
           "workspace"
@@ -1062,11 +1137,11 @@
         "system-manager": "system-manager"
       },
       "locked": {
-        "lastModified": 1787403332,
-        "narHash": "sha256-q1t9iy2JgTNMxPMrY7NzUwebsrMi9HvJlr3+FA7w4+4=",
+        "lastModified": 1787413120,
+        "narHash": "sha256-3D9jFbE1N34YvfB/D2V5Fs2sVKOKFqnPBEuSX5I/nuc=",
         "ref": "refs/heads/main",
-        "rev": "d3898057ba05bcc4cf2214bb432900de7da4d3ee",
-        "revCount": 81,
+        "rev": "7d7b9662cb7c2b594dc02e9be1378e9ea540e175",
+        "revCount": 82,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },

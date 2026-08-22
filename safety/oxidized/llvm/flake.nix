@@ -3,19 +3,28 @@
 #
 # The build, the devshell and its hooks, the formatter and the nixpkgs this
 # resolves against are shared with every other repo published from the
-# monorepo, and live in the nix-workspace flake. It is callable, so what is
-# particular to this project is all that is left to say.
+# monorepo: the framework is nix-workspace, the Rust build is its modules/rust
+# directory. Both are callable through one call, so what is particular to this
+# project is all that is left to say.
 {
   description = "An LLVM-compatible compiler infrastructure written in Rust";
 
-  inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
+  inputs = {
+    workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
+    rust = {
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/rust";
+      inputs.workspace.follows = "workspace";
+    };
+  };
 
   outputs = inputs:
     inputs.workspace {
-      name = "oxidized-llvm";
       inherit inputs;
-      aliases = {
-        "opt-rs" = "opt";
+      rust = {
+        pname = "oxidized-llvm";
+        aliases = {
+          "opt-rs" = "opt";
+        };
       };
     };
 }

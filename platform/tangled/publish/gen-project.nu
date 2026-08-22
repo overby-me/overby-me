@@ -28,21 +28,27 @@
 # repo root. A project with a sibling path dependency is published as several
 # directories instead, so that `path = "../pcre2"` still resolves, and then
 # the crate to build is one level down.
-# Everything shared between published repos lives in the nix-workspace
-# module, so this writes only what differs: the name, the description, and
-# whichever build settings the project declares in projects.nuon.
+# Everything shared between published repos lives in the Rust module, so this
+# writes only what differs: the name, the description, and whichever build
+# settings the project declares in projects.nuon.
+#
+# Two inputs, not one. nix-workspace is the framework and knows no language;
+# its modules/rust directory carries the Rust build, and declaring that input
+# is the whole of taking it. Its settings go under `rust`, the option
+# namespace that module declares.
 #
 # The description is written once, as the flake's own. The module reads it
 # back out of the file, because a flake cannot ask itself for it: forcing any
 # attribute of `self` needs the output shape the module helps decide.
 #
-# project_url is where that module comes from, and is the whole difference
+# project_url is where the framework comes from, and is the whole difference
 # between the two files this generates: a Tangled URL for the published repo,
 # a relative path for the copy the monorepo evaluates.
 def flake-text [
     name: string
     description: string
     project_url: string
+    rust_url: string
     subdir: string = ""
     native: list<string> = []
     build: list<string> = []
@@ -58,48 +64,56 @@ def flake-text [
 ]: nothing -> string {
     let quoted = {|xs| $xs | each {|x| $"\"($x)\"" } | str join " " }
 
-    mut opts = []
-    if not ($subdir | is-empty) { $opts = ($opts | append $"      subdir = \"($subdir)\";") }
+    # Settings of the Rust build, which the module declares under `rust`.
+    mut rust = [$"        pname = \"($name)\";"]
+    if not ($subdir | is-empty) { $rust = ($rust | append $"        subdir = \"($subdir)\";") }
     if not ($native | is-empty) {
-        $opts = ($opts | append $"      nativeBuildInputs = [(do $quoted $native)];")
+        $rust = ($rust | append $"        nativeBuildInputs = [(do $quoted $native)];")
     }
     if not ($build | is-empty) {
-        $opts = ($opts | append $"      buildInputs = [(do $quoted $build)];")
+        $rust = ($rust | append $"        buildInputs = [(do $quoted $build)];")
     }
-    if not $check { $opts = ($opts | append "      doCheck = false;") }
+    if not $check { $rust = ($rust | append "        doCheck = false;") }
     if not ($test_flags | is-empty) {
-        $opts = ($opts | append $"      cargoTestFlags = [(do $quoted $test_flags)];")
+        $rust = ($rust | append $"        cargoTestFlags = [(do $quoted $test_flags)];")
+    }
+    # Keys are quoted without exception: c++filt, pkg-config and opt-rs are
+    # not nix identifiers, and quoting only the ones that need it means the
+    # generator has to know which those are.
+    if not ($aliases | is-empty) {
+        let pairs = ($aliases | items {|k, v| $"          \"($k)\" = \"($v)\";" } | str join "\n")
+        $rust = ($rust | append $"        aliases = {\n($pairs)\n        };")
+    }
+    # A tool that replaces part of stdenv needs its hook installed, or a
+    # build that lists it gets a binary that finds nothing.
+    if not ($setup_hook | is-empty) {
+        $rust = ($rust | append $"        setupHook = \"($setup_hook)\";")
+    }
+    if not ($build_env | is-empty) {
+        let pairs = ($build_env | items {|k, v| $"          ($k) = \"($v)\";" } | str join "\n")
+        $rust = ($rust | append $"        env = pkgs: {\n($pairs)\n        };")
+    }
+
+    # One setting reads better on one line.
+    let rust_block = if ($rust | length) == 1 {
+        $"      rust.pname = \"($name)\";"
+    } else {
+        $"      rust = {\n($rust | str join (char nl))\n      };"
     }
 
     # Every call passes its inputs: that attribute is where the root comes
     # from, since a flake cannot ask itself where it is. It also carries the
     # fine-grained opt-in, which is read out of the inputs rather than flagged.
-    $opts = ($opts | append "      inherit inputs;")
-    # Keys are quoted without exception: c++filt, pkg-config and opt-rs are
-    # not nix identifiers, and quoting only the ones that need it means the
-    # generator has to know which those are.
-    if not ($aliases | is-empty) {
-        let pairs = ($aliases | items {|k, v| $"        \"($k)\" = \"($v)\";" } | str join "\n")
-        $opts = ($opts | append $"      aliases = {\n($pairs)\n      };")
-    }
-    # A tool that replaces part of stdenv needs its hook installed, or a
-    # build that lists it gets a binary that finds nothing.
-    if not ($setup_hook | is-empty) {
-        $opts = ($opts | append $"      setupHook = \"($setup_hook)\";")
-    }
-    if not ($build_env | is-empty) {
-        let pairs = ($build_env | items {|k, v| $"        ($k) = \"($v)\";" } | str join "\n")
-        $opts = ($opts | append $"      env = pkgs: {\n($pairs)\n      };")
-    }
+    mut opts = ["      inherit inputs;" $rust_block]
 
-    # The workspace turns the toolchain on itself, from rust-toolchain.toml.
-    # What it cannot supply is the overlay providing rust-bin: an overlay is
-    # its own flake, so carrying it in nix-workspace would make every
-    # published repo fetch it. Only the project asking for one pays.
+    # The module turns the toolchain on itself, from rust-toolchain.toml. What
+    # it cannot supply is the overlay providing rust-bin: an overlay is its own
+    # flake, so carrying it there would make every published repo fetch it.
+    # Only the project asking for one pays.
     if $toolchain {
         $opts = ($opts | append "      withOverlays = [inputs.rust-overlay.overlays.default];")
     }
-    let extra = if ($opts | is-empty) { "" } else { "\n" + ($opts | str join "\n") }
+    let extra = ($opts | str join "\n")
 
     # One input reads better on one line; a project with a second gets the
     # block, so the extras land inside `inputs` rather than beside it.
@@ -107,11 +121,15 @@ def flake-text [
         (if $toolchain { "\n    # This project pins rustc through its own rust-toolchain.toml.\n    rust-overlay.url = \"github:oxalica/rust-overlay\";" } else { "" })
         (if $fine { "\n    # Declaring nix-lib is the whole of opting into the fine-grained\n    # per-crate build; the input carries the builder and its index.\n    nix-lib = {\n      url = \"git+https://tangled.org/overby.me/nix-lib\";\n      inputs.workspace.follows = \"workspace\";\n    };" } else { "" })
     ] | where {|s| $s != "" })
-    let inputs_block = if ($extra_inputs | is-empty) {
-        $"  inputs.workspace.url = \"($project_url)\";"
-    } else {
-        $"  inputs = {\n    workspace.url = \"($project_url)\";\n($extra_inputs | str join (char nl))\n  };"
-    }
+    # The Rust build, as an input. Its own workspace follows this one, so the
+    # framework and the module that extends it are one flake in the lock.
+    let rust_input = $"\n    rust = {\n      url = \"($rust_url)\";\n      inputs.workspace.follows = \"workspace\";\n    };"
+    let inputs_block = (
+        $"  inputs = {\n    workspace.url = \"($project_url)\";($rust_input)\n"
+        + ($extra_inputs | str join (char nl))
+        + (if ($extra_inputs | is-empty) { "" } else { (char nl) })
+        + "  };"
+    )
 
     # The two variants differ in that one line and in what they say about
     # themselves. Both are generated from here so they cannot drift: josh maps
@@ -133,8 +151,9 @@ def flake-text [
 #
 # The build, the devshell and its hooks, the formatter and the nixpkgs this
 # resolves against are shared with every other repo published from the
-# monorepo, and live in the nix-workspace flake. It is callable, so what is
-# particular to this project is all that is left to say."
+# monorepo: the framework is nix-workspace, the Rust build is its modules/rust
+# directory. Both are callable through one call, so what is particular to this
+# project is all that is left to say."
     }
 
     # A project's own NixOS module rides beside the build. It is an output of
@@ -156,7 +175,7 @@ def flake-text [
 
   outputs = inputs:
     inputs.workspace {
-      name = \"($name)\";($extra)($module_exports)
+($extra)($module_exports)
     };
 }
 "
@@ -306,7 +325,7 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
         # newline and the call returns its last argument rather than the
         # flake, which writes an empty file to every project at once.
         let want_flake = if not $is_crate { "" } else { (
-            flake-text $p.name $description "git+https://tangled.org/overby.me/nix-workspace" $subdir
+            flake-text $p.name $description "git+https://tangled.org/overby.me/nix-workspace" "git+https://tangled.org/overby.me/nix-workspace?dir=modules/rust" $subdir
                 ($p | get -o nativeBuildInputs | default [])
                 ($p | get -o buildInputs | default [])
                 ($p | get -o doCheck | default true)

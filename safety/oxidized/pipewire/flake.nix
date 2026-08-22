@@ -3,52 +3,61 @@
 #
 # The build, the devshell and its hooks, the formatter and the nixpkgs this
 # resolves against are shared with every other repo published from the
-# monorepo, and live in the nix-workspace flake. It is callable, so what is
-# particular to this project is all that is left to say.
+# monorepo: the framework is nix-workspace, the Rust build is its modules/rust
+# directory. Both are callable through one call, so what is particular to this
+# project is all that is left to say.
 {
   description = "A PipeWire-compatible multimedia graph daemon written in Rust";
 
-  inputs.workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
+  inputs = {
+    workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
+    rust = {
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/rust";
+      inputs.workspace.follows = "workspace";
+    };
+  };
 
   outputs = inputs:
     inputs.workspace {
-      name = "oxidized-pipewire";
       inherit inputs;
-      aliases = {
-        "pipewire" = "rust-pipewire";
-        "pipewire-pulse" = "rust-pipewire";
-        "pipewire-aes67" = "rust-pipewire";
-        "pipewire-avb" = "rust-pipewire";
-        "pipewire-vulkan" = "rust-pipewire";
-        "pw-cli" = "rust-pipewire";
-        "pw-mon" = "rust-pipewire";
-        "pw-dump" = "rust-pipewire";
-        "pw-link" = "rust-pipewire";
-        "pw-metadata" = "rust-pipewire";
-        "pw-loopback" = "rust-pipewire";
-        "pw-config" = "rust-pipewire";
-        "pw-cat" = "rust-pipewire";
-        "pw-play" = "rust-pipewire";
-        "pw-record" = "rust-pipewire";
-        "pw-dot" = "rust-pipewire";
-        "pw-top" = "rust-pipewire";
-        "pw-profiler" = "rust-pipewire";
-        "pw-reserve" = "rust-pipewire";
-        "pw-container" = "rust-pipewire";
-        "pw-mididump" = "rust-pipewire";
-        "pw-midiplay" = "rust-pipewire";
-        "pw-midirecord" = "rust-pipewire";
-        "pw-midi2play" = "rust-pipewire";
-        "pw-midi2record" = "rust-pipewire";
-        "pw-sysex" = "rust-pipewire";
-        "pw-dsdplay" = "rust-pipewire";
-        "pw-encplay" = "rust-pipewire";
-        "pw-v4l2" = "rust-pipewire";
-        "spa-json-dump" = "rust-pipewire";
-        "spa-inspect" = "rust-pipewire";
-        "spa-monitor" = "rust-pipewire";
-        "spa-acp-tool" = "rust-pipewire";
-        "spa-resample" = "rust-pipewire";
+      rust = {
+        pname = "oxidized-pipewire";
+        aliases = {
+          "pipewire" = "rust-pipewire";
+          "pipewire-pulse" = "rust-pipewire";
+          "pipewire-aes67" = "rust-pipewire";
+          "pipewire-avb" = "rust-pipewire";
+          "pipewire-vulkan" = "rust-pipewire";
+          "pw-cli" = "rust-pipewire";
+          "pw-mon" = "rust-pipewire";
+          "pw-dump" = "rust-pipewire";
+          "pw-link" = "rust-pipewire";
+          "pw-metadata" = "rust-pipewire";
+          "pw-loopback" = "rust-pipewire";
+          "pw-config" = "rust-pipewire";
+          "pw-cat" = "rust-pipewire";
+          "pw-play" = "rust-pipewire";
+          "pw-record" = "rust-pipewire";
+          "pw-dot" = "rust-pipewire";
+          "pw-top" = "rust-pipewire";
+          "pw-profiler" = "rust-pipewire";
+          "pw-reserve" = "rust-pipewire";
+          "pw-container" = "rust-pipewire";
+          "pw-mididump" = "rust-pipewire";
+          "pw-midiplay" = "rust-pipewire";
+          "pw-midirecord" = "rust-pipewire";
+          "pw-midi2play" = "rust-pipewire";
+          "pw-midi2record" = "rust-pipewire";
+          "pw-sysex" = "rust-pipewire";
+          "pw-dsdplay" = "rust-pipewire";
+          "pw-encplay" = "rust-pipewire";
+          "pw-v4l2" = "rust-pipewire";
+          "spa-json-dump" = "rust-pipewire";
+          "spa-inspect" = "rust-pipewire";
+          "spa-monitor" = "rust-pipewire";
+          "spa-acp-tool" = "rust-pipewire";
+          "spa-resample" = "rust-pipewire";
+        };
       };
     };
 }
