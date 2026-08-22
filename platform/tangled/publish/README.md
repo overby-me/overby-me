@@ -420,6 +420,15 @@ read-only mirror, and is the other reason mirrors must stay read-only.
                     it calls are dead weight without it. A glob rather than a
                     list, because several projects carry more than two
                     (safety/oxidized/pipewire has six) and new ones appear.
+:exclude[::**/default.nix]
+                    the same, one directory down and deeper. `*` matches a
+                    single path segment, so the line above leaves nested ones
+                    behind, and in a repo whose root IS the project those are
+                    directories nix-workspace discovers - importing a module
+                    written to be found by the monorepo. Only this name
+                    recurses: another .nix deeper in the tree is the
+                    project's own, and safety/oxidized/systemd's 510 NixOS VM
+                    tests are exactly that.
 ::<dest>=<source>   publish a file at a path other than the one it is
                     stored at. Names a source that need not exist: a term
                     whose source is absent from a commit contributes
@@ -428,7 +437,10 @@ read-only mirror, and is the other reason mirrors must stay read-only.
 ```
 
 Switching the pilots from two explicit excludes to the glob produced byte
-identical output, so it rewrote no published history.
+identical output, so it rewrote no published history. Adding the recursive
+form changed two of the 44: `wiki` loses `backend/default.nix` and
+`crates/appview/default.nix`, `homepage` loses `backend/default.nix`. Every
+other filtered tree stayed byte identical.
 
 Verified against josh r26.05.08. Note that josh's other file-creating filter,
 insertion (`:$path="content"`), is refused unless

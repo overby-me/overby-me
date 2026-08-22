@@ -119,6 +119,15 @@ def derive-filter [p: record, --current]: nothing -> string {
   # ships its directory as it stands, which is the only kind that can hold
   # one: a crate's .nix files are dropped wholesale already.
   let dropped = ($p | get -o exclude | default [] | each {|e| $":exclude[::($e)]"} | str join "")
+  # The monorepo's build of a crate: every nix file of the project's own
+  # directory, and the default.nix of any directory below it. `*.nix` matches
+  # one path segment, so alone it leaves the nested ones behind - and a
+  # nested default.nix is a project nix-workspace discovers once the repo
+  # root IS this directory, importing a module written to be found by the
+  # monorepo. Only that name recurses: a .nix file deeper in the tree that is
+  # not a default.nix is the project's own (systemd-rs carries 510 NixOS VM
+  # tests), and dropping those would publish a repo missing its testsuite.
+  let nix_dropped = ":exclude[::*.nix]:exclude[::**/default.nix]"
   let terms = ($eras | each {|era|
     let path = $era.path
     let deps = ($era | get -o deps | default [])
@@ -135,13 +144,13 @@ def derive-filter [p: record, --current]: nothing -> string {
     if $kind == "nix" {
       [$":/($path):exclude[::.tangled/]($dropped)($era_dropped)"]
     } else if ($deps | is-empty) {
-      # `exclude[::*.nix]` drops the monorepo's build of the project, then
+      # `nix_dropped` drops the monorepo's build of the project, then
       # flake.nix is let back through: it is the published repo's own build,
       # and since the framework left this tree it is the same file here and
       # there rather than one mapped over the other.
       # Module files named in `nixosModules` are the project's own
       # interface, so they ship the way flake.nix does.
-      ([$":/($path):exclude[::*.nix]($generated)" $":/($path)::flake.nix"]
+      ([$":/($path)($nix_dropped)($generated)" $":/($path)::flake.nix"]
         | append (($p | get -o nixosModules | default {} | values)
           | append ($p | get -o homeModules | default {} | values)
           | each {|f| $":/($path)::($f)"}))
@@ -149,8 +158,8 @@ def derive-filter [p: record, --current]: nothing -> string {
       # Each directory keeps its own name at the root, so a Cargo.toml's
       # `path = "../pcre2"` still resolves once they are side by side. The
       # project's own flake and README are lifted back to the repo root.
-      [$":/($path):exclude[::*.nix]($generated):exclude[::README.md]:prefix=($base)"]
-      | append ($deps | each {|d| $":/($d):exclude[::*.nix]:prefix=($d | path basename)" })
+      [$":/($path)($nix_dropped)($generated):exclude[::README.md]:prefix=($base)"]
+      | append ($deps | each {|d| $":/($d)($nix_dropped):prefix=($d | path basename)" })
       | append [$":/($path)::flake.nix" $":/($path)::README.md"]
     }
   } | flatten)
