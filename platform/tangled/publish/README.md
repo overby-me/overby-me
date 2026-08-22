@@ -233,13 +233,14 @@ inputs = {
 outputs = inputs:
   inputs.project ./. {
     name = "fe-c";
-    toolchain = true;
     withOverlays = [inputs.rust-overlay.overlays.default];
   };
 ```
 
-Carrying `rust-overlay` in `nix-workspace` would make all thirty-eight repos
-fetch it for the one that pins a toolchain.
+The toolchain itself needs no flag: `rust-toolchain.toml` being there is the
+request. Only the overlay has to be named, because carrying `rust-overlay` in
+`nix-workspace` would make all thirty-eight repos fetch it for the one that
+pins a toolchain.
 
 ### Projects that are not pure Rust
 

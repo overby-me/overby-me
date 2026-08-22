@@ -18,7 +18,6 @@
   outputs = inputs:
     inputs.workspace {
       name = "fe-c";
-      toolchain = true;
       withOverlays = [inputs.rust-overlay.overlays.default];
     };
 }

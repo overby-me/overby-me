@@ -70,7 +70,7 @@ def flake-text [
     if not ($test_flags | is-empty) {
         $opts = ($opts | append $"      cargoTestFlags = [(do $quoted $test_flags)];")
     }
-    if $toolchain { $opts = ($opts | append "      toolchain = true;") }
+
     if $fine { $opts = ($opts | append "      inherit inputs;") }
     # Keys are quoted without exception: c++filt, pkg-config and opt-rs are
     # not nix identifiers, and quoting only the ones that need it means the
@@ -89,10 +89,10 @@ def flake-text [
         $opts = ($opts | append $"      env = pkgs: {\n($pairs)\n      };")
     }
 
-    # A pinned toolchain needs the overlay that provides rust-bin, and only
-    # the project that asks for one pays for the extra input: an overlay is
-    # its own flake, so carrying it in nix-workspace would make every published
-    # repo fetch it.
+    # The workspace turns the toolchain on itself, from rust-toolchain.toml.
+    # What it cannot supply is the overlay providing rust-bin: an overlay is
+    # its own flake, so carrying it in nix-workspace would make every
+    # published repo fetch it. Only the project asking for one pays.
     if $toolchain {
         $opts = ($opts | append "      withOverlays = [inputs.rust-overlay.overlays.default];")
     }
