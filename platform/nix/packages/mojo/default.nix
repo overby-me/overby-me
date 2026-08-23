@@ -7,39 +7,30 @@
 #
 # Shape of the build:
 #
-#   - Upstream builds with Bazel (`./bazelw build --config=build-mojo
-#     //KGEN:mojo`). We drive nixpkgs' bazel_9 in three derivations: a
-#     fixed-output `deps` derivation runs `bazel build --nobuild` with
-#     `--repository_cache` and keeps only that cache, i.e. the pristine
-#     content-addressed downloads; a heavy `build` derivation replays the
-#     same build offline against it and exports the raw products (the
-#     binaries plus every shared library bazel produced, so no library can
-#     turn out to be missing later); the cheap top-level derivation does
-#     all the packaging - layout, patchelf, wrappers, config, smoke tests -
-#     so packaging mistakes cost seconds to fix instead of a multi-hour
-#     bazel rebuild.
+#   - Three derivations: a fixed-output `deps` derivation runs
+#     `bazel build --nobuild` with `--repository_cache` and keeps the
+#     pristine content-addressed downloads plus MODULE.bazel.lock; a heavy
+#     `build` derivation replays the analysis offline, makes the three
+#     downloaded tool archives runnable (see prepareExternal), builds, and
+#     exports the raw products; the cheap top-level derivation does the
+#     packaging - layout, patchelf, wrappers, config, smoke tests - so
+#     packaging fixes do not rebuild LLVM.
 #
-#   - Bazel executes downloaded tools while it fetches repositories
-#     (rules_python runs its hermetic CPython, the build itself runs
-#     Modular's prebuilt clang 22), and none of them start inside the
-#     sandbox with their /lib64 interpreters. Both bazel derivations
-#     therefore run bazel in a retry loop: on failure, every ELF in bazel's
-#     external/ tree is patchelfed to the nix dynamic linker and the build
-#     resumes. The FOD's output stays byte-pristine because the cache
-#     holds unextracted archives; the patched files live only in the
-#     discarded output base.
+#   - rules_python probes its host interpreter by running it during the
+#     repository fetch, which no downloaded binary can survive inside the
+#     sandbox; that repository is overridden with nix's own interpreter of
+#     the same minor version, which is host compatible by construction.
 #
 #   - LLVM cannot come from nixpkgs: the compiler pins llvm-project at a
 #     trunk commit (see bazel/public-patches/llvm_source.bzl) and applies
 #     six Modular patches on top, including a 16K lldb-exports patch that
 #     mojo-lldb needs. No released LLVM has that API surface, so Bazel
-#     builds the patched snapshot from source as upstream intends. nixpkgs
-#     does supply bazel, the Python for mblack, and the runtime libraries
-#     (zlib, ncurses, libedit) that used to come from conda. The patch
-#     also adds the WebAssembly backend, which upstream leaves out but
-#     dev/mojo/gui's wasm builds need; the conda compiler carried every
-#     backend. llc and lld (as wasm-ld) ship with the SDK for the same
-#     reason: they must parse the IR this exact LLVM emits.
+#     builds the patched snapshot from source as upstream intends. The
+#     nix-build.patch adds the WebAssembly backend and accepts wasm
+#     triples in the driver (proposed upstream as modular/modular#6968),
+#     which dev/mojo/gui's wasm builds use; llc and lld (as wasm-ld) ship
+#     with the SDK so the wasm pipelines parse the IR this exact LLVM
+#     emits.
 #
 #   - `--//:modular_config=production -c opt` matches the shipped release
 #     binaries (-O3, -DNDEBUG); the repo's developer default is a debug
@@ -47,7 +38,7 @@
 #
 # The installed layout keeps the contract of the old package (bin/mojo,
 # bin/mojo-lsp-server, bin/mojo-lldb, bin/mblack, lib/mojo import path,
-# etc/modular/modular.cfg + MODULAR_HOME wrappers): the driver resolves every
+# modular.cfg reachable through MODULAR_HOME): the driver resolves every
 # tool through `mojo-max.package_root` relative defaults, so the cfg only
 # names the few keys without one. `mojo build` links executables with the
 # `cc` found on PATH, which is why consumers keep working by adding their
@@ -57,12 +48,13 @@
   stdenv,
   fetchFromGitHub,
   bazel_9,
+  bash,
   python3,
+  python312,
   autoPatchelfHook,
   makeWrapper,
   patchelf,
   coreutils,
-  util-linux,
   lndir,
   zlib,
   ncurses,
@@ -83,18 +75,6 @@
     hash = "sha256-ieecVlQ6nyFyb3LebwhMTtCP6y9FCbVEkTIrNj63hbM=";
   };
 
-  # The FHS dynamic-linker path this platform's ELF binaries hardcode in
-  # PT_INTERP; the build namespace recreates exactly this path so the
-  # prebuilt tools bazel downloads can start inside the sandbox.
-  fhsInterp =
-    {
-      x86_64-linux = "/lib64/ld-linux-x86-64.so.2";
-      aarch64-linux = "/lib/ld-linux-aarch64.so.1";
-    }
-    .${
-      stdenv.hostPlatform.system
-    };
-
   mblackPythonEnv = python3.withPackages (ps:
     with ps; [
       click
@@ -112,11 +92,16 @@
     "--compilation_mode=opt"
     "--//:modular_version_sha=${rev}"
     # The nix sandbox is the isolation boundary; bazel's own sandbox cannot
-    # use user namespaces in here and would fall back anyway, slowly. Output
-    # path mapping (a remote-cache-key optimization from the repo's bazelrc)
-    # requires a sandboxed strategy, so switch it off alongside.
+    # nest inside it. Output path mapping (a remote-cache-key optimization
+    # from the repo's bazelrc) requires a sandboxed strategy, so switch it
+    # off alongside.
     "--spawn_strategy=local"
     "--experimental_output_paths=off"
+    # rules_python's default bootstrap launches py_binary stubs through
+    # `/usr/bin/env python3`; the script bootstrap references the hermetic
+    # interpreter by its runfiles path instead, which prepareExternal has
+    # made runnable. Together they keep the sandbox free of FHS paths.
+    "--@@rules_python+//python/config_settings:bootstrap_impl=script"
     # Freshly built tools (tblgen, then mojo itself compiling the stdlib)
     # run as later build actions, so they must be executable inside the
     # sandbox from the moment they are linked: give every link the nix
@@ -126,11 +111,6 @@
     "--host_linkopt=-Wl,--dynamic-linker=${stdenv.cc.bintools.dynamicLinker}"
     "--linkopt=-Wl,-rpath,${lib.makeLibraryPath runtimeDeps}"
     "--host_linkopt=-Wl,-rpath,${lib.makeLibraryPath runtimeDeps}"
-    # Prebuilt tools (clang's ld.lld wants libxml2.so.2 and libz) resolve
-    # their libraries through the action environment; the namespace only
-    # restores the loader, not a populated /usr/lib.
-    "--action_env=LD_LIBRARY_PATH=${lib.makeLibraryPath runtimeDeps}"
-    "--host_action_env=LD_LIBRARY_PATH=${lib.makeLibraryPath runtimeDeps}"
     # Large MLIR translation units: leave headroom so parallel clang + lld
     # invocations do not OOM the builder.
     "--local_resources=memory=HOST_RAM*.67"
@@ -156,9 +136,9 @@
   # fetch set, so `deps` stays valid.
   buildTargets = sdkTargets + " @llvm-project//llvm:llc";
 
-  # Runtime libraries the patched tools and the installed SDK link against.
-  # libxml2_13: Modular's prebuilt ld.lld wants the pre-2.14 libxml2.so.2
-  # SONAME, which current libxml2 (.so.16) no longer provides.
+  # Runtime libraries the downloaded tools and the installed SDK link
+  # against. libxml2_13: Modular's prebuilt ld.lld wants the pre-2.14
+  # libxml2.so.2 SONAME, which current libxml2 (.so.16) no longer provides.
   runtimeDeps = [
     stdenv.cc.cc.lib
     zlib
@@ -168,116 +148,73 @@
     expat
   ];
 
-  # Run bazel until it sticks: after every failure, make the ELF tools that
-  # repository rules downloaded this round runnable in the sandbox (nix
-  # dynamic linker, rpath into nixpkgs and back into their own repo), then
-  # retry. Completed repositories and actions are reused, so each round
-  # only redoes the step that failed.
-  bazelWithRetries = command: ''
+  # The hermetic interpreter repository name tracks rules_python's pinned
+  # version and the host architecture; a bump fails visibly in the
+  # explicit fetch below.
+  hermeticPythonRepo = "rules_python++python+python_3_12_${stdenv.hostPlatform.parsed.cpu.name}-unknown-linux-gnu";
+
+  bazelEnv = ''
     export HOME="$NIX_BUILD_TOP/bazel-home"
     mkdir -p "$HOME"
     export USE_BAZEL_VERSION=${bazel_9.version}
 
-    # The sandbox has no /usr/bin/env and no /lib64 loader, but generated
-    # tool stubs and freshly linked binaries expect both. User namespaces
-    # are available in the nix sandbox, so run bazel inside an
-    # overlayfs-chrooted view of / that adds the two paths. Falls back to
-    # a plain invocation (leaving the patchelf sweeps to cope) if the
-    # namespace setup fails.
-    runBazel() {
-      export BAZEL_NS_CMD="$*"
-      if unshare -rm /bin/sh -e -c '
-        m="$NIX_BUILD_TOP/nsroot"
-        mkdir -p "$m"
-        mount -t tmpfs none "$m" || exit 97
-        for p in /* ; do
-          d="''${p#/}"
-          [ "$d" = "proc" ] && continue
-          if [ -d "$p" ]; then
-            mkdir -p "$m/$d"
-            mount --rbind "$p" "$m/$d" || exit 97
-          elif [ -e "$p" ]; then
-            touch "$m/$d"
-            mount --bind "$p" "$m/$d" || exit 97
-          fi
-        done
-        mkdir -p "$m/proc"
-        mount -t proc proc "$m/proc" || mount --rbind /proc "$m/proc" || exit 97
-        mkdir -p "$m/usr/bin" "$m${lib.dirOf fhsInterp}"
-        ln -sf ${coreutils}/bin/env "$m/usr/bin/env"
-        # Stage-1 bootstrap interpreter for rules_python tool stubs; they
-        # re-exec the hermetic toolchain interpreter themselves.
-        ln -sf ${python3}/bin/python3 "$m/usr/bin/python3"
-        ln -sf ${stdenv.cc.bintools.dynamicLinker} "$m${fhsInterp}"
-        exec chroot "$m" /bin/sh -c "cd \"$PWD\" && exec $BAZEL_NS_CMD"
-      '; then
-        return 0
-      else
-        rc=$?
-        if [ "$rc" -eq 97 ]; then
-          echo "namespace setup failed; running bazel without it" >&2
-          eval "$BAZEL_NS_CMD"
-        else
-          return "$rc"
-        fi
-      fi
-    }
+    # rules_python's host-interpreter repository probes its interpreter by
+    # running it during the repository fetch, before anything can make the
+    # hermetic download executable in the sandbox. Override the repository
+    # with the nix interpreter of the same minor version, which is host
+    # compatible by construction; rules_pycross evaluates its environment
+    # markers against it.
+    hostPythonRepo="$NIX_BUILD_TOP/host-python-repo"
+    mkdir -p "$hostPythonRepo"
+    touch "$hostPythonRepo/REPO.bazel"
+    {
+      echo '# Replaces rules_python generated host repo; see bazelEnv.'
+      echo 'exports_files(["python"], visibility = ["//visibility:public"])'
+    } > "$hostPythonRepo/BUILD.bazel"
+    ln -sfn ${python312}/bin/python3 "$hostPythonRepo/python"
+    ln -sfn ${python312}/bin "$hostPythonRepo/bin"
+    ln -sfn ${python312}/include "$hostPythonRepo/include"
+    ln -sfn ${python312}/lib "$hostPythonRepo/lib"
+    hostPythonOverride="--override_repository=rules_python++python+python_3_12_host=$hostPythonRepo"
+  '';
 
-    sweepExternal() {
-      local root f patched=0 failed=0
-      for root in "$HOME"/.cache/bazel/_bazel_*/*; do
-        [ -d "$root/external" ] || continue
-        # Archives extract with read-only directories; patchelf rewrites
-        # need writable parents. -L: repositories can be symlink forests
-        # into bazel's caches.
-        chmod -R u+w "$root/external" 2>/dev/null || true
-        # Downloaded tools: point their ELF interpreter and rpath at nix.
-        while IFS= read -r -d "" f; do
-          [ "$(head -c4 "$f" 2>/dev/null)" = "$(printf '\x7fELF')" ] || continue
-          if patchelf --print-interpreter "$f" >/dev/null 2>&1; then
-            if patchelf --set-interpreter "$(cat $NIX_CC/nix-support/dynamic-linker)" "$f"; then
-              patched=$((patched + 1))
-            else
-              failed=$((failed + 1))
-              echo "sweep: failed to set interpreter on $f" >&2
-            fi
-          fi
-          patchelf --set-rpath '$ORIGIN:$ORIGIN/../lib:${lib.makeLibraryPath runtimeDeps}' "$f" 2>/dev/null || true
-        done < <(find -L "$root/external" -type f \( -perm -0100 -o -name '*.so' -o -name '*.so.*' \) -print0 2>/dev/null)
-        # Generated wrapper scripts (py_binary stubs and the like) point at
-        # /usr/bin/env, which the sandbox does not have.
-        while IFS= read -r -d "" f; do
-          chmod u+w "$f" 2>/dev/null || true
-          sed -i '1s|^#!/usr/bin/env |#!${coreutils}/bin/env |' "$f" 2>/dev/null || true
-        done < <(grep -rlZ '^#!/usr/bin/env ' "$root/external" "$root/execroot" 2>/dev/null || true)
-      done
-      echo "sweep: $patched interpreters set, $failed failures" >&2
-      # Self-test the tools the build spawns next, so a still-broken one is
-      # named in the log instead of surfacing as a bare exec failure.
-      local tool
-      for tool in \
-        "$HOME"/.cache/bazel/_bazel_*/*/external/+http_archive+clang-linux-*/bin/clang++ \
-        "$HOME"/.cache/bazel/_bazel_*/*/external/+http_archive+clang-linux-*/bin/ld.lld \
-        "$HOME"/.cache/bazel/_bazel_*/*/external/+http_archive+clang-linux-*/bin/llvm-ar \
-        "$HOME"/.cache/bazel/_bazel_*/*/external/rules_python++python+python_3_12_*-unknown-linux-gnu/bin/python3; do
-        [ -e "$tool" ] || continue
-        if "$tool" --version >/dev/null 2>&1; then
-          echo "sweep: ok $tool" >&2
-        else
-          echo "sweep: STILL BROKEN $tool" >&2
-        fi
-      done
-    }
-
-    tries=0
-    until runBazel bazel --batch ${command}; do
-      tries=$((tries + 1))
-      if [ "$tries" -gt 8 ]; then
-        echo "bazel still failing after $tries attempts" >&2
-        exit 1
-      fi
-      echo "bazel attempt $tries failed; patching fetched tools and retrying" >&2
-      sweepExternal
+  # Exactly three downloaded tool archives execute during the build and
+  # need the nix dynamic linker: Modular's prebuilt clang (which compiles
+  # everything), rules_python's hermetic CPython (which runs the pycross
+  # wheel installer and py_binary tools), and llvm-ifs (which the linker
+  # driver runs on every shared object). rules_python's stage-1 launcher
+  # template additionally hardcodes a bare `env` and an /usr/bin/env
+  # shebang, neither of which resolves in the sandbox; point the template
+  # at the store instead.
+  prepareExternal = ''
+    for repo in "$HOME"/.cache/bazel/_bazel_*/*/external/+http_archive+clang-linux-* \
+      "$HOME"/.cache/bazel/_bazel_*/*/external/rules_python++python+python_3_*; do
+      [ -d "$repo/bin" ] || continue
+      chmod -R u+w "$repo"
+      while IFS= read -r -d "" f; do
+        # Store paths (the overridden host-python repository links into
+        # nix's own interpreter) are correct as they are and read-only.
+        case "$(readlink -f "$f")" in /nix/store/*) continue ;; esac
+        [ "$(head -c4 "$f")" = "$(printf '\x7fELF')" ] || continue
+        patchelf --print-interpreter "$f" > /dev/null 2>&1 || continue
+        patchelf --set-interpreter ${stdenv.cc.bintools.dynamicLinker} \
+          --set-rpath '$ORIGIN/../lib:${lib.makeLibraryPath runtimeDeps}' "$f"
+      done < <(find -L "$repo/bin" "$repo" -maxdepth 1 -type f -print0 2>/dev/null)
+    done
+    for f in "$HOME"/.cache/bazel/_bazel_*/*/external/+http_archive+llvm-ifs/tools/*/*.stripped; do
+      [ -f "$f" ] || continue
+      # The archive also carries darwin Mach-O tools; only ELF is ours.
+      [ "$(head -c4 "$f")" = "$(printf '\x7fELF')" ] || continue
+      chmod u+w "$f"
+      patchelf --set-interpreter ${stdenv.cc.bintools.dynamicLinker} \
+        --set-rpath '${lib.makeLibraryPath runtimeDeps}' "$f"
+    done
+    for template in "$HOME"/.cache/bazel/_bazel_*/*/external/rules_python+/python/private/stage1_bootstrap_template.sh; do
+      chmod u+w "$template"
+      sed -i \
+        -e '1s|^#!/usr/bin/env bash|#!${lib.getExe bash}|' \
+        -e 's|^  env$|  ${coreutils}/bin/env|' \
+        "$template"
     done
   '';
 
@@ -286,18 +223,23 @@
     inherit version src;
     patches = [./nix-build.patch];
 
-    # Actions exec these scripts directly; their #!/bin/bash does not
-    # resolve inside the sandbox.
     postPatch = ''
-      patchShebangs --build bazel tools utils
+      # The developer bazel wrapper regenerates build/wrapper.bazelrc and
+      # probes the host toolchain, none of which works in the sandbox;
+      # bazel runs fine without it. .bazelrc hard-imports the generated
+      # rc, so satisfy the import with an empty file.
+      rm tools/bazel
+      mkdir -p build
+      touch build/wrapper.bazelrc
     '';
 
-    nativeBuildInputs = [bazel_9 patchelf util-linux];
+    nativeBuildInputs = [bazel_9];
 
     buildPhase = ''
       runHook preBuild
+      ${bazelEnv}
       mkdir -p "$NIX_BUILD_TOP/repo-cache"
-      ${bazelWithRetries ''build --nobuild --repository_cache="$NIX_BUILD_TOP/repo-cache" --repo_contents_cache= ${bazelFlags} ${sdkTargets}''}
+      bazel --batch build --nobuild --repository_cache="$NIX_BUILD_TOP/repo-cache" --repo_contents_cache= "$hostPythonOverride" ${bazelFlags} ${sdkTargets}
       runHook postBuild
     '';
 
@@ -319,7 +261,7 @@
     outputHash =
       {
         x86_64-linux = "sha256-Kgmvo2pyelMsC4SjsxPJjZUS4xE57LOpG/NtOLTSvdc=";
-        aarch64-linux = "sha256-Z9/+252LTDm4zaAW6DFphxjcdGP5XmSNRuejSDOKQ40=";
+        aarch64-linux = lib.fakeHash;
       }
       .${
         stdenv.hostPlatform.system
@@ -328,27 +270,46 @@
 
   # The multi-hour bazel run, exporting raw products only. Nothing in here
   # may fail after bazel succeeds, and nothing that belongs to packaging
-  # (patchelf, wrappers, checks) happens here: those live in the cheap
-  # top-level derivation so they can be iterated without rebuilding LLVM.
+  # (patchelf of the outputs, wrappers, checks) happens here: those live
+  # in the cheap top-level derivation so they can be iterated without
+  # rebuilding LLVM.
   build = stdenv.mkDerivation {
     pname = "mojo-bazel-build";
     inherit version src;
     patches = [./nix-build.patch];
 
     postPatch = ''
+      rm tools/bazel
+      mkdir -p build
+      touch build/wrapper.bazelrc
+      # Toolchain helper scripts are executed directly by build actions;
+      # their #!/bin/bash does not resolve inside the sandbox.
       patchShebangs --build bazel tools utils
     '';
 
-    nativeBuildInputs = [bazel_9 patchelf util-linux lndir];
+    nativeBuildInputs = [
+      bazel_9
+      patchelf
+      lndir
+    ];
 
     buildPhase = ''
       runHook preBuild
+      ${bazelEnv}
       # The cache must be writable even though every entry is already
       # present.
       mkdir -p repo-cache
       lndir -silent ${deps}/repo-cache repo-cache
       install -m644 ${deps}/MODULE.bazel.lock MODULE.bazel.lock
-      ${bazelWithRetries ''build --repository_cache="$PWD/repo-cache" --repo_contents_cache= ${bazelFlags} ${buildTargets}''}
+      # Extract the repositories (offline, analysis only), fetch the
+      # lazily-materialized tool archives explicitly, make them runnable,
+      # then build.
+      bazel --batch build --nobuild --repository_cache="$PWD/repo-cache" --repo_contents_cache= "$hostPythonOverride" ${bazelFlags} ${buildTargets}
+      bazel --batch fetch --repository_cache="$PWD/repo-cache" --repo_contents_cache= "$hostPythonOverride" ${bazelFlags} \
+        "@@${hermeticPythonRepo}//..." \
+        "@@+http_archive+llvm-ifs//..."
+      ${prepareExternal}
+      bazel --batch build --repository_cache="$PWD/repo-cache" --repo_contents_cache= "$hostPythonOverride" ${bazelFlags} ${buildTargets}
       runHook postBuild
     '';
 
@@ -368,10 +329,9 @@
       install -m644 bazel-bin/mojo/stdlib/std/std.mojoc $out/lib/mojo/std.mojoc
 
       # Every shared library bazel produced in the target configuration,
-      # deduplicated by basename. The binaries above resolve their NEEDED
-      # entries against this pool in the packaging derivation, so a
-      # library it turns out to need is already here instead of being a
-      # multi-hour rebuild away (libMSupportGlobals.so taught us that).
+      # deduplicated by basename: the raw pool the packaging derivation
+      # selects from, so a library it turns out to need is not a
+      # multi-hour rebuild away.
       while IFS= read -r -d "" so; do
         cp -Ln "$so" $out/lib/ 2>/dev/null || true
       done < <(find -L bazel-bin/ -type f \( -name '*.so' -o -name '*.so.*' \) \
@@ -385,7 +345,7 @@
       runHook postInstall
     '';
 
-    # Raw export: no strip (std.mojoc and the .so pool must stay
+    # Raw export: no strip (std.mojoc and the libraries must stay
     # byte-exact), no patchelf, no shebang rewrites.
     dontFixup = true;
   };
@@ -418,7 +378,18 @@ in
       install -m755 ${build}/bin/lldb $out/bin/mojo-lldb-unwrapped
       install -m755 ${build}/bin/lldb-server ${build}/bin/lld \
         ${build}/bin/llvm-symbolizer ${build}/bin/llc $out/bin/
-      for so in ${build}/lib/*.so*; do
+      # The libraries the driver and its tools load at runtime: the JIT
+      # runtime (dlopened via modular.cfg defaults), the lldb plugin and
+      # its liblldb, the jupyter kernel library, the Modular runtime
+      # globals, and lldb's python scripting support.
+      for so in \
+        ${build}/lib/libKGENCompilerRTShared.so \
+        ${build}/lib/libMojoLLDB.so \
+        ${build}/lib/libMojoJupyter.so \
+        ${build}/lib/libMSupportGlobals.so \
+        ${build}/lib/libAsyncRTRuntimeGlobals.so \
+        ${build}/lib/liblldb*.so* \
+        ${build}/lib/libpython3*.so*; do
         install -m644 "$so" $out/lib/
       done
       install -m644 ${build}/lib/mojo/std.mojoc $out/lib/mojo/std.mojoc
@@ -435,9 +406,8 @@ in
       ln -s lld $out/bin/ld.lld
       ln -s lld $out/bin/wasm-ld
 
-      # lldb links the Jammy sysroot's libedit (SONAME libedit.so.2);
-      # nixpkgs ships the ABI-compatible library as libedit.so.0, same
-      # bridge the old binary package used.
+      # lldb links the sysroot's libedit (SONAME libedit.so.2); nixpkgs
+      # ships the ABI-compatible library as libedit.so.0.
       ln -s ${libedit}/lib/libedit.so.0 $out/lib/libedit.so.2
 
       # mblack is plain Python in-tree; run it off a nixpkgs interpreter
@@ -470,21 +440,22 @@ in
       EOF
 
       # The driver derives its cache and crash directories from
-      # MODULAR_HOME, which lives in the read-only store; point both at
-      # /tmp like the previous binary package did.
-      ln -s /tmp $out/etc/modular/cache
-      ln -s /tmp $out/etc/modular/crashdb
-
-      makeWrapper $out/bin/mojo-unwrapped $out/bin/mojo \
-        --set MODULAR_HOME $out/etc/modular \
-        --set-default MODULAR_CRASH_REPORTING_ENABLED 0 \
-        --set-default MODULAR_TELEMETRY_ENABLED 0 \
-        --set-default TERMINFO_DIRS ${ncurses}/share/terminfo
-      makeWrapper $out/bin/mojo-lldb-unwrapped $out/bin/mojo-lldb \
-        --set MODULAR_HOME $out/etc/modular \
-        --set-default TERMINFO_DIRS ${ncurses}/share/terminfo
+      # MODULAR_HOME, which must therefore be writable; give each user
+      # their own under XDG and seed it with the store config.
+      modularHome='"''${MODULAR_HOME:-''${XDG_CACHE_HOME:-$HOME/.cache}/mojo}"'
+      for tool in mojo mojo-lldb; do
+        makeWrapper $out/bin/$tool-unwrapped $out/bin/$tool \
+          --run "export MODULAR_HOME=$modularHome" \
+          --run 'mkdir -p "$MODULAR_HOME"' \
+          --run "ln -sfn $out/etc/modular/modular.cfg \"\$MODULAR_HOME/modular.cfg\"" \
+          --set-default MODULAR_CRASH_REPORTING_ENABLED 0 \
+          --set-default MODULAR_TELEMETRY_ENABLED 0 \
+          --set-default TERMINFO_DIRS ${ncurses}/share/terminfo
+      done
       makeWrapper $out/bin/mojo-lsp-server-unwrapped $out/bin/mojo-lsp-server \
-        --set MODULAR_HOME $out/etc/modular \
+        --run "export MODULAR_HOME=$modularHome" \
+        --run 'mkdir -p "$MODULAR_HOME"' \
+        --run "ln -sfn $out/etc/modular/modular.cfg \"\$MODULAR_HOME/modular.cfg\"" \
         --add-flags "-I $out/lib/mojo"
 
       runHook postInstall
@@ -493,6 +464,8 @@ in
     doInstallCheck = true;
     installCheckPhase = ''
       runHook preInstallCheck
+
+      export HOME="$(mktemp -d)"
 
       $out/bin/mojo --version
       $out/bin/mojo-lsp-server --version
