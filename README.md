@@ -616,7 +616,7 @@
 | ✅ | Language Server | [Rust-analyzer 🦀](https://github.com/rust-lang/rust-analyzer) | | [LSP 📖](https://github.com/microsoft/language-server-protocol) | |
 | ✅ | Test Framework | [cargo-nextest 🦀](https://github.com/nextest-rs/nextest) | | 🆗 | [cargo test 🦀](https://doc.rust-lang.org/cargo/commands/cargo-test.html) |
 | 🚧 | Fuzzing | [cargo-fuzz 🦀](https://github.com/rust-fuzz/cargo-fuzz) | [LibAFL 🦀](https://github.com/AFLplusplus/LibAFL) | 🆗 | |
-| ✅ | Dynamic Analysis | [Miri 🦀](https://github.com/rust-lang/miri) | | 🆗 | [Valgrind 💣](https://valgrind.org) |
+| ✅ | Memory Checking | [Valgrind 💣](https://valgrind.org) | [Krabcake 🦀](https://github.com/pnkfelix/krabcake) | 🆗 | |
 | ✅ | Coverage | [cargo-llvm-cov 🦀](https://github.com/taiki-e/cargo-llvm-cov) | | 🆗 | |
 | 🚧 | Property Testing | [proptest 🦀](https://github.com/proptest-rs/proptest) | | 🆗 | [quickcheck 🦀](https://github.com/BurntSushi/quickcheck) |
 | 🚧 | Debugger | [LLDB 💣](https://lldb.llvm.org) | [probe-rs 🦀](https://github.com/probe-rs/probe-rs) | [DAP 📖](https://microsoft.github.io/debug-adapter-protocol/) | [GDB 💣](https://sourceware.org/gdb/) |
