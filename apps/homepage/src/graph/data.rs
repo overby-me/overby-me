@@ -198,15 +198,6 @@ impl GraphData {
                 false,
             ),
             node(
-                "Codeberg",
-                "Codeberg\nProfile",
-                "codeberg.avif",
-                None,
-                None,
-                Some("https://codeberg.org/overby-me"),
-                false,
-            ),
-            node(
                 "Tangled",
                 "Tangled\nProfile",
                 "tangled.avif",
@@ -342,11 +333,9 @@ impl GraphData {
             link("Immerse", "HappyCow"),
             link("Immerse", "Lemmy"),
             link("Give", "Wikipedia"),
-            link("Give", "Codeberg"),
             link("Give", "Tangled"),
             link("Give", "Radikale Venstre"),
             link("Give", "HappyCow"),
-            link("Improve", "Codeberg"),
             link("Improve", "Tangled"),
             link("Improve", "PopFeed"),
         ];

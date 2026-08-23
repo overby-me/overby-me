@@ -517,7 +517,6 @@ fn is_atproto_host(host: &str) -> bool {
 fn external_icon(host: &str) -> Option<&'static str> {
     Some(match host {
         "github.com" => "github.avif",
-        "codeberg.org" => "codeberg.avif",
         "linkedin.com" => "linkedin.avif",
         "wikipedia.org" | "en.wikipedia.org" => "wikipedia.avif",
         "matrix.to" => "matrix.avif",
