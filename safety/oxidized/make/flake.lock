@@ -93,11 +93,11 @@
       },
       "locked": {
         "dir": "modules/rust",
-        "lastModified": 1787423369,
-        "narHash": "sha256-HAK3dz7i/JYhynF1dWUvbYor+K3dWfnnzJQRGO/CpG4=",
+        "lastModified": 1787485165,
+        "narHash": "sha256-KNhNDgAFkA/xAZM58l5vZbdWLMy72vCLKbOb38iGRXM=",
         "ref": "refs/heads/main",
-        "rev": "6f90fb6fad6bc07d2c1c4326fb83b7bc28e86f15",
-        "revCount": 85,
+        "rev": "428f11d2fe54ef7c79da5323d4fcbe4525290854",
+        "revCount": 86,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -129,11 +129,11 @@
         "system-manager": "system-manager"
       },
       "locked": {
-        "lastModified": 1787423369,
-        "narHash": "sha256-HAK3dz7i/JYhynF1dWUvbYor+K3dWfnnzJQRGO/CpG4=",
+        "lastModified": 1787485165,
+        "narHash": "sha256-KNhNDgAFkA/xAZM58l5vZbdWLMy72vCLKbOb38iGRXM=",
         "ref": "refs/heads/main",
-        "rev": "6f90fb6fad6bc07d2c1c4326fb83b7bc28e86f15",
-        "revCount": 85,
+        "rev": "428f11d2fe54ef7c79da5323d4fcbe4525290854",
+        "revCount": 86,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
