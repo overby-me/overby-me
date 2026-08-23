@@ -33,29 +33,6 @@
     };
   };
 
-  inputs.disko = {
-    url = "github:nix-community/disko";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
-  # Direct upstream, not an integration: hosts import its nixosModules by name.
-  inputs.nixos-hardware = {
-    url = "github:NixOS/nixos-hardware/master";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
-  # Direct upstreams, not integrations: their default package lands in pkgs.
-  inputs.nix-wallpaper = {
-    url = "github:lunik1/nix-wallpaper";
-    inputs.nixpkgs.follows = "nixpkgs";
-    inputs.pre-commit-hooks.follows = "workspace/git-hooks";
-  };
-  inputs.zen-browser = {
-    # Not the default branch: zen tracks nixpkgs-unstable, and its HEAD package
-    # calls for ffmpeg_9, which 26.05 does not carry. Unpin when 26.05 does.
-    url = "github:0xc000022070/zen-browser-flake/945efbc704b7f8c1731a922aabbc5d95edc9eb74";
-    inputs.nixpkgs.follows = "nixpkgs";
-    inputs.home-manager.follows = "workspace/home-manager";
-  };
-
   # This tree's nix configuration.
   inputs.nix-config = {
     url = "path:./platform/nix/config";
