@@ -1,0 +1,38 @@
+From: Surface Pro 11 audio bring-up
+Subject: [PATCH] arm64: dts: qcom: x1-microsoft-denali: Halve the DMIC clock
+
+Mainline clocks the two far-field digital microphones at 4.8 MHz, and at
+that rate capture carries a continuous broadband static that sits under
+everything.  It is not a gain-staging artefact: it survives dropping the VA
+decoder gain from +16 dB to unity, survives an 80 Hz to 8 kHz band-pass, and
+is present in raw arecord output with no sound server running.  Halving the
+clock to 2.4 MHz removes it and makes speech markedly clearer.
+
+The property feeds only the VA macro's DMIC divider, so playback is
+untouched.  Capture is still thin, which is a separate problem.
+
+Taken from ooaklee/linux-surface-pro-11-oe,
+patches/sp11-qcom-x1e-7.2-rc5-v2/0001-arm64-dts-qcom-x1-denali-use-2.4-MHz-DMIC-clock.patch,
+where the two rates were compared on the machine.  Rebased onto 7.1.7, which
+needed nothing beyond a line-number shift: the &lpass_vamacro node is
+identical in both trees.
+
+Nothing about this is Denali-specific in principle, so it may well be
+superseded by a wider fix; check whether qcom,dmic-sample-rate still reads
+4800000 upstream before carrying it forward.
+---
+ arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi b/arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi
+--- a/arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi
++++ b/arch/arm64/boot/dts/qcom/x1-microsoft-denali.dtsi
+@@ -867,7 +867,7 @@
+ 	pinctrl-names = "default";
+ 
+ 	vdd-micb-supply = <&vreg_l1b_1p8>;
+-	qcom,dmic-sample-rate = <4800000>;
++	qcom,dmic-sample-rate = <2400000>;
+ };
+ 
+ &mdss {

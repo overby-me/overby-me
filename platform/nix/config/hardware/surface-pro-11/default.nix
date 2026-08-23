@@ -25,12 +25,15 @@
     ./hardware.nix
     ./firmware.nix
     ./networking.nix
+    ./audio.nix
   ];
 
-  # Through an overlay so the sub-modules can take it as a plain `pkgs.<name>`.
+  # Through an overlay so the sub-modules can take them as plain `pkgs.<name>`.
   nixpkgs.overlays = [
     (final: _prev: {
       firmware-surface-pro-11 = final.callPackage ./pkgs/firmware-surface-pro-11.nix {};
+      audio-topology-surface-pro-11 = final.callPackage ./pkgs/audio-topology-surface-pro-11.nix {};
+      alsa-ucm-conf-surface-pro-11 = final.callPackage ./pkgs/alsa-ucm-conf-surface-pro-11.nix {};
     })
   ];
 }

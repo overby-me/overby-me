@@ -178,6 +178,7 @@
         # Bluetooth pairings stable across the two operating systems.
         surfacePro11 = {
           firmware.enable = true;
+          audio.enable = true;
           wireless.enable = true;
           # wireless.macAddress = "XX:XX:XX:XX:XX:XX";
           bluetooth.enable = true;

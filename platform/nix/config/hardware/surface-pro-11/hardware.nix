@@ -66,6 +66,15 @@ in {
         patch = ./patches/ssam-sp11-suspend-resume.patch;
       }
 
+      # Also free, and one devicetree property: at the DMIC clock mainline sets,
+      # the microphones record continuous static.  Kept out of audio.nix so that
+      # turning audio off does not mean a second kernel; it changes nothing on a
+      # machine that never opens the capture device.
+      {
+        name = "denali-dmic-2400khz";
+        patch = ./patches/denali-dmic-2400khz.patch;
+      }
+
       # The touchscreen, which mainline cannot see at all: the digitizer is a
       # quad-SPI MSHW0485 on QUP1 SE2 and every QUP SPI node in the denali
       # devicetree is disabled, so there is no device to bind a driver to. The
