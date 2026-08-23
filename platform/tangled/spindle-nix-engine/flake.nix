@@ -20,7 +20,6 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust.pname = "tangled-spindle-nix-engine";
       nixosModules."tangled-spindle-nix-engine" = ./nixos-module.nix;
     };
 }

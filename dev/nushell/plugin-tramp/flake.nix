@@ -20,10 +20,7 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "nushell-plugin-tramp";
-        doCheck = false;
-      };
+      rust.doCheck = false;
       homeModules."nushell-plugin-tramp" = ./hm-module.nix;
     };
 }

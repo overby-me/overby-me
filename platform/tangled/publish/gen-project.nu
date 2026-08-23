@@ -50,7 +50,6 @@ def flake-text [
     project_url: string
     rust_url: string
     subdir: string = ""
-    pname: string = ""
     native: list<string> = []
     build: list<string> = []
     check: bool = true
@@ -66,8 +65,7 @@ def flake-text [
     let quoted = {|xs| $xs | each {|x| $"\"($x)\"" } | str join " " }
 
     # Settings of the Rust build, which the module declares under `rust`.
-    # pname only when the crate has no [package] to take its name from.
-    mut rust = if ($pname | is-empty) { [] } else { [$"        pname = \"($pname)\";"] }
+    mut rust = []
     if not ($subdir | is-empty) { $rust = ($rust | append $"        subdir = \"($subdir)\";") }
     if not ($native | is-empty) {
         $rust = ($rust | append $"        nativeBuildInputs = [(do $quoted $native)];")
@@ -319,12 +317,6 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
         let is_crate = ($dir | path join "Cargo.toml" | path exists)
 
         # A crate names itself in Cargo.toml and the module reads it there. A
-        # Cargo workspace root has no [package] to read, so it is stated.
-        let manifest = if $is_crate {
-            open ($dir | path join "Cargo.toml")
-        } else { {} }
-        let pname = if ($manifest | get -o package.name | is-empty) { $p.name } else { "" }
-
         # One flake per project, written into the project's own directory and
         # published from there. It names nix-workspace by URL, which is the
         # same thing in tree and in a clone now that the framework is its own
@@ -336,7 +328,6 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
         # flake, which writes an empty file to every project at once.
         let want_flake = if not $is_crate { "" } else { (
             flake-text $p.name $description "git+https://tangled.org/overby.me/nix-workspace" "git+https://tangled.org/overby.me/nix-workspace?dir=modules/rust" $subdir
-                $pname
                 ($p | get -o nativeBuildInputs | default [])
                 ($p | get -o buildInputs | default [])
                 ($p | get -o doCheck | default true)

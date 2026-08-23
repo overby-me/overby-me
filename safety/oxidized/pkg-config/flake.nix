@@ -21,7 +21,6 @@
     inputs.workspace {
       inherit inputs;
       rust = {
-        pname = "oxidized-pkg-config";
         aliases = {
           "pkg-config" = "pkgconf";
         };

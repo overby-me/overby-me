@@ -20,11 +20,8 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "oxidized-llvm";
-        aliases = {
-          "opt-rs" = "opt";
-        };
+      rust.aliases = {
+        "opt-rs" = "opt";
       };
     };
 }

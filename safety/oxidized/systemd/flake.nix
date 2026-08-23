@@ -20,9 +20,6 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust = {
-        pname = "oxidized-systemd";
-        doCheck = false;
-      };
+      rust.doCheck = false;
     };
 }

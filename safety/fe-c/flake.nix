@@ -23,7 +23,6 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust.pname = "fe-c";
       withOverlays = [inputs.rust-overlay.overlays.default];
     };
 }

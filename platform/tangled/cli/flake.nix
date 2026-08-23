@@ -21,7 +21,6 @@
     inputs.workspace {
       inherit inputs;
       rust = {
-        pname = "tangled-cli";
         nativeBuildInputs = ["pkg-config"];
         buildInputs = ["openssl" "dbus"];
         doCheck = false;
