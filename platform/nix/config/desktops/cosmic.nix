@@ -15,6 +15,7 @@ in {
         #cosmic-ext-applet-external-monitor-brightness
         cosmic-ext-applet-caffeine
         cosmic-ext-calculator
+        cosmic-monitor
         wezterm
         examine
         forecast

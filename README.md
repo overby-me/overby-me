@@ -885,6 +885,7 @@
 | ✅ | Terminal | [Cosmic Term 🦀](https://github.com/pop-os/cosmic-term) | | 🆗 | [Wezterm 🦀](https://github.com/wez/wezterm), [GNOME Console 💣](https://gitlab.gnome.org/GNOME/console) |
 | ✅ | Web Browser | [Zen Browser 💣🦀](https://zen-browser.app) | [Verso 🦀](https://github.com/versotile-org/verso) | [Chrome Extension API 🔒](https://developer.chrome.com/docs/extensions/reference) | [Firefox 💣🦀](https://github.com/mozilla/gecko-dev), [Unbraved Brave 💣🦀](https://github.com/MulesGaming/brave-debullshitinator) |
 | ✅ | Application Store Frontend | [Cosmic Store 🦀](https://github.com/pop-os/cosmic-store) | | 🆗 | [GNOME Software 💣](https://gitlab.gnome.org/GNOME/gnome-software) |
+| ✅ | System Monitor | [Cosmic Monitor 🦀](https://github.com/pop-os/cosmic-monitor) | | 🆗 | [GNOME System Monitor 💣](https://gitlab.gnome.org/GNOME/gnome-system-monitor) |
 | 🚫 | Application Store Backend | [Flatpak 💣](https://github.com/flatpak/flatpak) | [Oxidized Flatpak 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/flatpak) | ⬅️ | [Snap 🔒](https://github.com/canonical/snapd), [AppImage 💣](https://github.com/AppImage) |
 | ✅ | Office Suite | [Euro-Office 🐒🇪🇺](https://github.com/Euro-Office) | | [OpenDocument Format 📖](https://en.wikipedia.org/wiki/OpenDocument) | [OnlyOffice 🐒🇷🇺](https://www.onlyoffice.com), [LibreOffice 💣🐷](https://www.libreoffice.org) |
 | ✅ | Remote Desktop | [Rustdesk 🦀](https://github.com/rustdesk/rustdesk) | | [VNC](https://en.wikipedia.org/wiki/VNC) | [GNOME Remote Desktop 💣](https://gitlab.gnome.org/GNOME/gnome-remote-desktop) |
