@@ -144,13 +144,6 @@ let nixFeatures = "nix-command flakes ca-derivations dynamic-derivations recursi
           git push --force github HEAD:refs/heads/main
         "%%,
       },
-      {
-        name = "Mirror to Codeberg",
-        command = m%%"
-          git remote add codeberg https://x-access-token:${CODEBERG_MIRROR_TOKEN}@codeberg.org/overby-me/overby-me.git 2>/dev/null || true
-          git push --force codeberg HEAD:refs/heads/main
-        "%%,
-      },
     ],
   },
 }
