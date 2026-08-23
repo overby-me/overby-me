@@ -452,8 +452,8 @@ def "main setup-github" [
       } else {
         # The homepage carries the link home; the description then only has
         # to say what this is.
-        let desc = $"Read-only mirror of ($p.path)"
-        let home = $"https://tangled.org/overby.me/overby.me/tree/main/($p.path)"
+        let desc = $"Read-only Tangled mirror of overby.me/($p.name)"
+        let home = $"https://tangled.org/overby.me/($p.name)"
         let vis = if $private { "--private" } else { "--public" }
         let made = (^gh repo create $slug $vis --description $desc --homepage $home | complete)
         if $made.exit_code == 0 {
