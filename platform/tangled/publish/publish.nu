@@ -450,11 +450,12 @@ def "main setup-github" [
       } else if $dry_run {
         {repo: $slug, action: "would create"}
       } else {
-        # The description points home, so the repo says what it is from the
-        # search results, before anyone opens the README.
-        let desc = $"Read-only mirror of overby.me/overby.me ($p.path), published with josh"
+        # The homepage carries the link home; the description then only has
+        # to say what this is.
+        let desc = $"Read-only mirror of ($p.path)"
+        let home = $"https://tangled.org/overby.me/overby.me/tree/main/($p.path)"
         let vis = if $private { "--private" } else { "--public" }
-        let made = (^gh repo create $slug $vis --description $desc | complete)
+        let made = (^gh repo create $slug $vis --description $desc --homepage $home | complete)
         if $made.exit_code == 0 {
           {repo: $slug, action: "created"}
         } else {
