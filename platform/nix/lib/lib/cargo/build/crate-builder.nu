@@ -13,7 +13,7 @@ def snake [s: string] {
 }
 
 def upperize [s: string] {
-  $s | str upcase | str replace -a "-" "_"
+  $s | str uppercase | str replace -a "-" "_"
 }
 
 # Build-time manifest planning for registry crates (published, normalized
@@ -617,21 +617,25 @@ def main [config_path: string] {
     }
   }
   let metadata_only = ($want_meta and $eligible)
-  mut base_env = (pkg-env $plan $cfg.features)
+  let pkg_env = (pkg-env $plan $cfg.features)
 
   mkdir ($out | path join "nix-support")
 
-  mut bs = null
-  mut bs_out_dir = null
-  if ($plan | get -o build) != null {
-    let r = (run-build-script $cfg $plan $rustc $base_env)
-    $bs = $r.directives
-    $bs_out_dir = $r.out_dir
-    $base_env = ($base_env | upsert OUT_DIR $r.out_dir)
-    for e in $r.directives.envs {
-      $base_env = ($base_env | upsert $e.name $e.value)
-    }
+  # One expression rather than null-initialised muts: nushell 0.115 types a
+  # mut from its initialiser, so assigning a record over null is an error.
+  let bsr = if ($plan | get -o build) != null {
+    let r = (run-build-script $cfg $plan $rustc $pkg_env)
+    let merged = (
+      $r.directives.envs
+      | reduce -f ($pkg_env | upsert OUT_DIR $r.out_dir) {|e, acc| $acc | upsert $e.name $e.value }
+    )
+    {bs: $r.directives, out_dir: $r.out_dir, env: $merged}
+  } else {
+    {bs: null, out_dir: null, env: $pkg_env}
   }
+  let bs = $bsr.bs
+  let bs_out_dir = $bsr.out_dir
+  let base_env = $bsr.env
 
   let is_proc_macro = (
     ($plan | get -o lib) != null and ($plan.lib | get -o procMacro | default false)
