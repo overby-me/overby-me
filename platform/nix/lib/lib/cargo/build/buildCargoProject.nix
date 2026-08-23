@@ -568,24 +568,46 @@ in
 
     rootId = head resolved.rootIds;
   in
-    if singleRoot
-    then drvs.${rootId}
-    else
-      symlinkJoin ({
-          name =
-            if pname != null
-            then pname
-            else throw "buildCargoProject: set pname when building several workspace members";
-          version =
-            if version != null
-            then version
-            else "0.0.0";
-          paths = map (i: drvs.${i}) resolved.rootIds;
-          passthru = {
-            crates = drvs;
-            inherit nodes;
-            tests = testRunners;
-          };
-          inherit meta;
-        }
-        // rootAttrs)
+    # Constructing the real derivation resolves the lock against the index,
+    # which is the one eval-time IFD. meta is what platform filters and
+    # `nix flake show` force to decide availability, and it must not pay for
+    # that: an x86 evaluation probing an aarch64 package's meta was building
+    # the aarch64 index, which a builder without that platform cannot.
+    # lazyDerivation hands meta and passthru out cheaply and defers the rest.
+    # passthru merged beside rather than through lazyDerivation, whose
+    # signature here ignores it; these attrs must exist without forcing the
+    # derivation, or the tests check would read an empty set and go green
+    # having built nothing.
+    lib.lazyDerivation {
+      inherit meta;
+      derivation =
+        if singleRoot
+        then drvs.${rootId}
+        else
+          symlinkJoin ({
+              name =
+                if pname != null
+                then pname
+                else throw "buildCargoProject: set pname when building several workspace members";
+              version =
+                if version != null
+                then version
+                else "0.0.0";
+              paths = map (i: drvs.${i}) resolved.rootIds;
+              passthru = {
+                crates = drvs;
+                inherit nodes;
+                tests = testRunners;
+              };
+              inherit meta;
+            }
+            // rootAttrs);
+    }
+    // rec {
+      passthru = {
+        crates = drvs;
+        inherit nodes;
+        tests = testRunners;
+      };
+      inherit (passthru) crates nodes tests;
+    }
