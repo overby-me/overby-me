@@ -7,8 +7,10 @@
 use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant};
 
-use smithay::input::keyboard::XkbConfig;
-use smithay::input::{SeatHandler, SeatState};
+use smithay::backend::input::{ButtonState, KeyState};
+use smithay::input::keyboard::{FilterResult, Keycode, XkbConfig};
+use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
+use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
 use smithay::reexports::calloop::channel::{Channel, Event};
 use smithay::reexports::calloop::generic::Generic;
@@ -21,7 +23,7 @@ use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, Display, DisplayHandle};
-use smithay::utils::{Serial, Transform};
+use smithay::utils::{SERIAL_COUNTER, Serial, Transform};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
@@ -59,6 +61,7 @@ pub struct State {
     xdg_shell_state: XdgShellState,
     seat_state: SeatState<Self>,
     data_device_state: DataDeviceState,
+    seat: Seat<Self>,
     hub: Arc<Hub>,
     windows: Vec<Window>,
     next_window_id: protocol::WindowId,
@@ -118,6 +121,7 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
         xdg_shell_state,
         seat_state,
         data_device_state,
+        seat,
         hub,
         windows: Vec::new(),
         next_window_id: 1,
@@ -214,10 +218,128 @@ impl State {
         match event {
             HubEvent::Joined(client) => self.resync(client),
             HubEvent::Left(client) => tracing::debug!(client, "browser left"),
-            HubEvent::Input(client, msg) => {
-                // Stands in for input routing until the seat is wired up.
-                tracing::debug!(client, ?msg, "browser event");
-            }
+            HubEvent::Input(_client, msg) => self.on_input(msg),
+        }
+    }
+
+    fn on_input(&mut self, msg: protocol::ClientToHost) {
+        match msg {
+            protocol::ClientToHost::Hello { .. } => {}
+            protocol::ClientToHost::Focus { id } => self.focus_window(id),
+            protocol::ClientToHost::Key { code, pressed } => self.key(code, pressed),
+            protocol::ClientToHost::PointerMotion { id, x, y } => self.pointer_motion(id, x, y),
+            protocol::ClientToHost::PointerButton {
+                id: _,
+                button,
+                pressed,
+            } => self.pointer_button(button, pressed),
+            protocol::ClientToHost::PointerAxis { id: _, dx, dy } => self.pointer_axis(dx, dy),
+            protocol::ClientToHost::Close { id } => self.close_window(id),
+            protocol::ClientToHost::Resize { .. } => {}
+        }
+    }
+
+    fn surface_of(&self, id: protocol::WindowId) -> Option<WlSurface> {
+        self.windows
+            .iter()
+            .find(|w| w.id == id)
+            .map(|w| w.toplevel.wl_surface().clone())
+    }
+
+    fn timestamp(&self) -> u32 {
+        u32::try_from(self.started.elapsed().as_millis()).unwrap_or(u32::MAX)
+    }
+
+    fn focus_window(&mut self, id: Option<protocol::WindowId>) {
+        let surface = id.and_then(|id| self.surface_of(id));
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
+    }
+
+    fn key(&mut self, code: u32, pressed: bool) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        // The wire carries evdev codes; xkb keycodes sit 8 above them.
+        let keycode = Keycode::new(code.saturating_add(8));
+        let state = if pressed {
+            KeyState::Pressed
+        } else {
+            KeyState::Released
+        };
+        let time = self.timestamp();
+        keyboard.input::<(), _>(
+            self,
+            keycode,
+            state,
+            SERIAL_COUNTER.next_serial(),
+            time,
+            |_, _, _| FilterResult::Forward,
+        );
+    }
+
+    /// The browser sends surface-local coordinates; every surface sits at
+    /// the global origin, so they pass through unchanged.
+    fn pointer_motion(&mut self, id: protocol::WindowId, x: f64, y: f64) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let focus = self.surface_of(id).map(|s| (s, (0.0, 0.0).into()));
+        let time = self.timestamp();
+        pointer.motion(
+            self,
+            focus,
+            &MotionEvent {
+                location: (x, y).into(),
+                serial: SERIAL_COUNTER.next_serial(),
+                time,
+            },
+        );
+        pointer.frame(self);
+    }
+
+    fn pointer_button(&mut self, button: u32, pressed: bool) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let state = if pressed {
+            ButtonState::Pressed
+        } else {
+            ButtonState::Released
+        };
+        let time = self.timestamp();
+        pointer.button(
+            self,
+            &ButtonEvent {
+                serial: SERIAL_COUNTER.next_serial(),
+                time,
+                button,
+                state,
+            },
+        );
+        pointer.frame(self);
+    }
+
+    fn pointer_axis(&mut self, dx: f64, dy: f64) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let mut frame = AxisFrame::new(self.timestamp());
+        if dx.abs() > f64::EPSILON {
+            frame = frame.value(smithay::backend::input::Axis::Horizontal, dx);
+        }
+        if dy.abs() > f64::EPSILON {
+            frame = frame.value(smithay::backend::input::Axis::Vertical, dy);
+        }
+        pointer.axis(self, frame);
+        pointer.frame(self);
+    }
+
+    fn close_window(&mut self, id: protocol::WindowId) {
+        if let Some(window) = self.windows.iter().find(|w| w.id == id) {
+            window.toplevel.send_close();
         }
     }
 

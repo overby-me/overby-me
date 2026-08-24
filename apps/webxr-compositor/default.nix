@@ -116,6 +116,8 @@ in {
       libxkbcommon
       # test-wayland.nu asks wayland-info what the host advertises.
       wayland-utils
+      # test-input.nu types into a real terminal client.
+      foot
     ];
   };
 

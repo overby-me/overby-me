@@ -31,9 +31,12 @@ wl_output + xdg-output, xdg_wm_base and wl_data_device_manager
 every connected page and painted onto a per-window canvas, with frame
 callbacks acked at 60 Hz and late-joining browsers resynced (`just surface`
 proves pixel-exact colours and animation with the bundled `checker` client;
-`just browser` proves the hello). No input yet. Roadmap: input, window
-management, damage optimization, clipboard and cursors, GTK-class apps, GPU
-clients (Zed), WebXR mode.
+`just browser` proves the hello). Pointer and keyboard input flow back:
+clicking a window focuses it, canvas events become seat pointer events, and
+a W3C-code-to-evdev keymap feeds the xkb keyboard, so typing into a real
+terminal works (`just input` clicks and types into foot and asserts the
+echo). Roadmap: window management, damage optimization, clipboard and
+cursors, GTK-class apps, GPU clients (Zed), WebXR mode.
 
 ## Run
 

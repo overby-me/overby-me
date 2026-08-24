@@ -38,6 +38,12 @@ surface *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-surface.nu {{args}}
 
+# Type into a real terminal (foot) through the page and check the echo.
+# Needs `just build` first.
+input *args:
+    cargo build --manifest-path host/Cargo.toml
+    nu test-input.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings
