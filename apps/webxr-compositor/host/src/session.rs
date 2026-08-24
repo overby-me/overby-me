@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 
-use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::response::Response;
+use axum::extract::{Query, State};
+use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use smithay::reexports::calloop;
@@ -44,6 +44,8 @@ pub struct Hub {
     next_id: AtomicU64,
     /// Total payload bytes ever broadcast, for throughput logging.
     bytes_sent: AtomicU64,
+    /// When set, /ws requires this bearer in its query string.
+    token: Mutex<Option<String>>,
     events: calloop::channel::Sender<HubEvent>,
 }
 
@@ -53,8 +55,37 @@ impl Hub {
             clients: Mutex::new(BTreeMap::new()),
             next_id: AtomicU64::new(1),
             bytes_sent: AtomicU64::new(0),
+            token: Mutex::new(None),
             events,
         }
+    }
+
+    pub fn set_token(&self, token: String) {
+        *self.token.lock().unwrap_or_else(PoisonError::into_inner) = Some(token);
+    }
+
+    pub fn token(&self) -> Option<String> {
+        self.token
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Constant-time enough: every byte is folded regardless of mismatches.
+    fn token_matches(&self, presented: Option<&str>) -> bool {
+        let Some(expected) = self.token() else {
+            return true;
+        };
+        let Some(presented) = presented else {
+            return false;
+        };
+        let expected = expected.as_bytes();
+        let presented = presented.as_bytes();
+        let mut diff = u8::from(expected.len() != presented.len());
+        for (index, byte) in expected.iter().enumerate() {
+            diff |= byte ^ presented.get(index).copied().unwrap_or(0);
+        }
+        diff == 0
     }
 
     /// Encode once, clone the refcounted bytes per client.
@@ -130,7 +161,15 @@ impl Hub {
     }
 }
 
-pub async fn ws_handler(State(hub): State<Arc<Hub>>, ws: WebSocketUpgrade) -> Response {
+pub async fn ws_handler(
+    State(hub): State<Arc<Hub>>,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    if !hub.token_matches(query.get("token").map(String::as_str)) {
+        tracing::warn!("rejected a WebSocket connect with a bad token");
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
     ws.on_upgrade(move |socket| session(hub, socket))
 }
 

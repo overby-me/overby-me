@@ -133,3 +133,13 @@ both halves hermetically (the flake exposes this app's packages under the
 
 The host reads `WEBXR_COMPOSITOR_LISTEN` (default `127.0.0.1:8370`) and
 `WEBXR_COMPOSITOR_WEB_ROOT` (default: the dx release output path).
+
+Frames travel lz4-compressed whenever that shrinks them (solid UI content
+collapses by two orders of magnitude), so the link is usable beyond
+loopback. Security follows exposure: on loopback the default stays plain
+HTTP, but any other bind address switches to TLS (self-signed unless
+`WEBXR_COMPOSITOR_CERT`/`_KEY` name real ones) plus an access token
+(`WEBXR_COMPOSITOR_TOKEN`, else generated) that the printed URL carries
+and every WebSocket connect must present; `WEBXR_COMPOSITOR_TLS=1` forces
+secure mode on loopback too, and `WEBXR_COMPOSITOR_INSECURE=1` is the
+explicit opt-out (`just tls` proves wss works and wrong tokens bounce).

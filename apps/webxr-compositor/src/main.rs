@@ -660,7 +660,10 @@ fn open_socket() -> Option<WebSocket> {
         "ws"
     };
     let host = location.host().ok()?;
-    WebSocket::open(&format!("{scheme}://{host}/ws")).ok()
+    // The page query carries the access token; forward it wholesale so the
+    // socket presents the same bearer.
+    let query = location.search().unwrap_or_default();
+    WebSocket::open(&format!("{scheme}://{host}/ws{query}")).ok()
 }
 
 /// Returns None only for a protocol mismatch, which ends the session loop.

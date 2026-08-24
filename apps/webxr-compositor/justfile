@@ -82,6 +82,12 @@ xr *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-xr.nu {{args}}
 
+# The secure transport: wss with a token, wrong tokens refused. Needs
+# `just build` first.
+tls *args:
+    cargo build --manifest-path host/Cargo.toml
+    nu test-tls.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings
