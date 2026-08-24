@@ -39,6 +39,8 @@ pub struct Scene {
     u_mvp: Option<WebGlUniformLocation>,
     u_size: Option<WebGlUniformLocation>,
     textures: BTreeMap<protocol::WindowId, WebGlTexture>,
+    /// 1x1 solid texture backing the controller ray and reticle quads.
+    marker: Option<WebGlTexture>,
     pub quads: Vec<Quad>,
     /// Preview camera orientation; the XR session replaces it wholesale.
     pub yaw: f32,
@@ -102,12 +104,32 @@ impl Scene {
         gl.enable(Gl::DEPTH_TEST);
         gl.clear_color(0.04, 0.04, 0.06, 1.0);
 
+        let marker = gl.create_texture();
+        if let Some(marker) = &marker {
+            gl.bind_texture(Gl::TEXTURE_2D, Some(marker));
+            let cyan = [0_u8, 229, 255, 255];
+            let _ = gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+                Gl::TEXTURE_2D,
+                0,
+                Gl::RGBA as i32,
+                1,
+                1,
+                0,
+                Gl::RGBA,
+                Gl::UNSIGNED_BYTE,
+                Some(&cyan),
+            );
+            gl.tex_parameteri(Gl::TEXTURE_2D, Gl::TEXTURE_MIN_FILTER, Gl::NEAREST as i32);
+            gl.tex_parameteri(Gl::TEXTURE_2D, Gl::TEXTURE_MAG_FILTER, Gl::NEAREST as i32);
+        }
+
         Some(Scene {
             gl,
             program,
             u_mvp,
             u_size,
             textures: BTreeMap::new(),
+            marker,
             quads: Vec::new(),
             yaw: 0.0,
             pitch: 0.0,
@@ -258,15 +280,17 @@ impl Scene {
         let (sy, cyw) = self.yaw.sin_cos();
         let dir = [cx * cyw + rz * sy, ry, -cx * sy + rz * cyw];
         let origin = [0.0, EYE_HEIGHT, 0.0];
-        self.pick_ray(origin, dir)
+        self.pick_ray(origin, dir).map(|(id, x, y, _)| (id, x, y))
     }
 
     /// The nearest quad a world-space ray hits, as surface pixels.
+    /// The nearest quad the ray hits: window id, surface pixel, and the
+    /// distance along the ray in metres.
     pub fn pick_ray(
         &self,
         origin: [f32; 3],
         dir: [f32; 3],
-    ) -> Option<(protocol::WindowId, f64, f64)> {
+    ) -> Option<(protocol::WindowId, f64, f64, f32)> {
         let mut best: Option<(f32, protocol::WindowId, f64, f64)> = None;
         for quad in &self.quads {
             let (sin, cos) = quad.yaw.sin_cos();
@@ -309,7 +333,85 @@ impl Scene {
                 ));
             }
         }
-        best.map(|(_, id, x, y)| (id, x, y))
+        best.map(|(t, id, x, y)| (id, x, y, t))
+    }
+
+    /// One solid quad with an arbitrary orientation: `basis` holds the
+    /// local X/Y/Z axes as world vectors, `center` the world position.
+    fn draw_marker(&self, view_projection: &[f32; 16], basis: [[f32; 3]; 3], center: [f32; 3], w: f32, h: f32) {
+        let Some(marker) = &self.marker else {
+            return;
+        };
+        let gl = &self.gl;
+        let [x, y, z] = basis;
+        #[rustfmt::skip]
+        let model: [f32; 16] = [
+            x[0], x[1], x[2], 0.0,
+            y[0], y[1], y[2], 0.0,
+            z[0], z[1], z[2], 0.0,
+            center[0], center[1], center[2], 1.0,
+        ];
+        gl.bind_texture(Gl::TEXTURE_2D, Some(marker));
+        let mvp = multiply(view_projection, &model);
+        gl.uniform_matrix4fv_with_f32_array(self.u_mvp.as_ref(), false, &mvp);
+        gl.uniform2f(self.u_size.as_ref(), w, h);
+        gl.draw_arrays(Gl::TRIANGLES, 0, 6);
+    }
+
+    /// The controller's visible ray, stopping just short of what it hits,
+    /// plus a reticle on the hit surface. Two crossed slats keep the ray
+    /// visible from every angle.
+    pub fn draw_pointer(
+        &self,
+        view_projection: &[f32; 16],
+        origin: [f32; 3],
+        dir: [f32; 3],
+        hit_distance: Option<f32>,
+    ) {
+        let length = dir[0].hypot(dir[1]).hypot(dir[2]);
+        if length < 1e-6 {
+            return;
+        }
+        let ny = [dir[0] / length, dir[1] / length, dir[2] / length];
+        let up = if ny[1].abs() > 0.99 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+        let nx = normalize(cross(up, ny));
+        let nz = cross(nx, ny);
+
+        let reach = hit_distance.unwrap_or(4.0).max(0.05) - 0.01;
+        let center = [
+            origin[0] + ny[0] * reach / 2.0,
+            origin[1] + ny[1] * reach / 2.0,
+            origin[2] + ny[2] * reach / 2.0,
+        ];
+        self.draw_marker(view_projection, [nx, ny, nz], center, 0.004, reach);
+        self.draw_marker(view_projection, [nz, ny, nx], center, 0.004, reach);
+
+        if let Some(t) = hit_distance {
+            let front = t - 0.01;
+            let at = [
+                origin[0] + ny[0] * front,
+                origin[1] + ny[1] * front,
+                origin[2] + ny[2] * front,
+            ];
+            self.draw_marker(view_projection, [nx, nz, ny], at, 0.03, 0.03);
+        }
+    }
+}
+
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn normalize(v: [f32; 3]) -> [f32; 3] {
+    let length = v[0].hypot(v[1]).hypot(v[2]);
+    if length < 1e-6 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [v[0] / length, v[1] / length, v[2] / length]
     }
 }
 
@@ -653,6 +755,30 @@ fn xr_frame_loop(
                 );
                 scene.gl.clear(Gl::COLOR_BUFFER_BIT | Gl::DEPTH_BUFFER_BIT);
 
+                // The first controller with a pose steers the pointer; its
+                // ray is the -Z axis of the target-ray transform. Read it
+                // before drawing so every eye also sees the ray.
+                let mut pointer: Option<([f32; 3], [f32; 3])> = None;
+                if let Ok(sources) = Reflect::get(&session_for_loop, &"inputSources".into()) {
+                    let sources = js_sys::Array::from(&sources);
+                    if let Some(source) = sources.iter().next() {
+                        let ray_space = Reflect::get(&source, &"targetRaySpace".into())?;
+                        let get_pose: Function =
+                            Reflect::get(&frame, &"getPose".into())?.dyn_into()?;
+                        let ray_pose = get_pose.call2(&frame, &ray_space, &space)?;
+                        if !ray_pose.is_undefined() && !ray_pose.is_null() {
+                            let transform = Reflect::get(&ray_pose, &"transform".into())?;
+                            let matrix: js_sys::Float32Array =
+                                Reflect::get(&transform, &"matrix".into())?.dyn_into()?;
+                            let mut m = [0.0_f32; 16];
+                            matrix.copy_to(&mut m);
+                            pointer = Some(([m[12], m[13], m[14]], [-m[8], -m[9], -m[10]]));
+                        }
+                    }
+                }
+                let picked = pointer
+                    .and_then(|(origin, dir)| scene.pick_ray(origin, dir));
+
                 let views: js_sys::Array = Reflect::get(&pose, &"views".into())?.dyn_into()?;
                 let get_viewport: Function =
                     Reflect::get(&layer, &"getViewport".into())?.dyn_into()?;
@@ -684,40 +810,25 @@ fn xr_frame_loop(
                             number(&viewport, "height") as i32,
                         )),
                     );
+                    if let Some((origin, dir)) = pointer {
+                        scene.draw_pointer(
+                            &view_projection,
+                            origin,
+                            dir,
+                            picked.map(|(_, _, _, t)| t),
+                        );
+                    }
                 }
 
-                // The first controller with a pose steers the pointer; its
-                // ray is the -Z axis of the target-ray transform.
                 let previous = XR_HIT.get();
-                XR_HIT.set(None);
-                if let Ok(sources) = Reflect::get(&session_for_loop, &"inputSources".into()) {
-                    let sources = js_sys::Array::from(&sources);
-                    if let Some(source) = sources.iter().next() {
-                        let ray_space = Reflect::get(&source, &"targetRaySpace".into())?;
-                        let get_pose: Function =
-                            Reflect::get(&frame, &"getPose".into())?.dyn_into()?;
-                        let pose = get_pose.call2(&frame, &ray_space, &space)?;
-                        if !pose.is_undefined() && !pose.is_null() {
-                            let transform = Reflect::get(&pose, &"transform".into())?;
-                            let matrix: js_sys::Float32Array =
-                                Reflect::get(&transform, &"matrix".into())?.dyn_into()?;
-                            let mut m = [0.0_f32; 16];
-                            matrix.copy_to(&mut m);
-                            let hit = scene.pick_ray([m[12], m[13], m[14]], [-m[8], -m[9], -m[10]]);
-                            XR_HIT.set(hit);
-                            if let Some((id, x, y)) = hit {
-                                let moved = previous.is_none_or(|(pid, px, py)| {
-                                    pid != id || (px - x).abs() >= 1.0 || (py - y).abs() >= 1.0
-                                });
-                                if moved {
-                                    session_handle.send(protocol::ClientToHost::PointerMotion {
-                                        id,
-                                        x,
-                                        y,
-                                    });
-                                }
-                            }
-                        }
+                let hit = picked.map(|(id, x, y, _)| (id, x, y));
+                XR_HIT.set(hit);
+                if let Some((id, x, y)) = hit {
+                    let moved = previous.is_none_or(|(pid, px, py)| {
+                        pid != id || (px - x).abs() >= 1.0 || (py - y).abs() >= 1.0
+                    });
+                    if moved {
+                        session_handle.send(protocol::ClientToHost::PointerMotion { id, x, y });
                     }
                 }
                 Ok(())

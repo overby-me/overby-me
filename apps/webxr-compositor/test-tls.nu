@@ -215,8 +215,45 @@ def main [--out: string = "/tmp/webxr-compositor-tls.png"]: nothing -> nothing {
     print $"  steps     ($steps | to json --raw)"
     print $"  picture   ($out)"
 
+    # A wildcard bind must print a URL another device can actually dial:
+    # secure mode on, the LAN IP substituted for 0.0.0.0.
+    let lan_socket = "wayland-webxr-lan"
+    let lan_log = (mktemp --suffix .webxr-lan.log)
+    let lan = (job spawn {
+        with-env {
+            WEBXR_COMPOSITOR_LISTEN: $"0.0.0.0:($HOST_PORT + 1)"
+            WEBXR_COMPOSITOR_WAYLAND_DISPLAY: $lan_socket
+        } { ^$host_bin out+err> $lan_log }
+    })
+    mut lan_url = ""
+    for _ in 0..40 {
+        let hit = (open $lan_log | ansi strip | parse --regex `url=(?<url>\S+)`)
+        if ($hit | is-not-empty) { $lan_url = $hit.0.url; break }
+        sleep 250ms
+    }
+    try { job kill $lan }
+    ^pkill -f $host_bin | complete | ignore
+    rm -f $lan_log
+    let lan_socket_path = ($env.XDG_RUNTIME_DIR | path join $lan_socket)
+    if ($lan_socket_path | path exists) { rm $lan_socket_path }
+    if ($lan_url | is-empty) {
+        $failures = ($failures | append "a wildcard bind never printed its URL")
+    } else {
+        if not ($lan_url | str starts-with "https://") {
+            $failures = ($failures | append $"the wildcard bind printed ($lan_url), not an https URL")
+        }
+        if not ($lan_url =~ 'token=[0-9a-f]+') {
+            $failures = ($failures | append $"the wildcard URL ($lan_url) carries no generated token")
+        }
+        let routable = (^ip route get 8.8.8.8 | complete | get exit_code) == 0
+        if $routable and ($lan_url | str contains "//0.0.0.0") {
+            $failures = ($failures | append "the printed URL still names 0.0.0.0; no device can dial that")
+        }
+        print $"  lan url   ($lan_url)"
+    }
+
     if ($failures | is-empty) {
-        log-ok "wss with the right token works and wrong tokens bounce"
+        log-ok "wss with the right token works, wrong tokens bounce, and a wildcard bind prints a dialable URL"
     } else {
         for f in $failures { log-fail $f }
         exit 1

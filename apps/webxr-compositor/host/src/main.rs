@@ -74,11 +74,12 @@ async fn serve_http(hub: Arc<Hub>) -> Result<(), Box<dyn std::error::Error>> {
         .fallback_service(spa)
         .with_state(Arc::clone(&hub));
 
+    let shown = reachable(&listen);
     if secure {
         let config = tls_config().await?;
         let token = hub.token().unwrap_or_default();
         tracing::info!(
-            url = %format!("https://{listen}/?token={token}"),
+            url = %format!("https://{shown}/?token={token}"),
             protocol = webxr_compositor_protocol::VERSION,
             "serving the frontend over TLS"
         );
@@ -88,13 +89,28 @@ async fn serve_http(hub: Arc<Hub>) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         let listener = tokio::net::TcpListener::bind(listen).await?;
         tracing::info!(
-            addr = %listen,
+            url = %format!("http://{shown}/"),
             protocol = webxr_compositor_protocol::VERSION,
             "serving the frontend"
         );
         axum::serve(listener, app).await?;
     }
     Ok(())
+}
+
+/// The address another device should dial: a wildcard bind is useless in a
+/// URL, so borrow the outbound interface's IP from a connected UDP socket
+/// (no packet is ever sent).
+fn reachable(listen: &SocketAddr) -> SocketAddr {
+    if !listen.ip().is_unspecified() {
+        return *listen;
+    }
+    let probe = std::net::UdpSocket::bind(("0.0.0.0", 0))
+        .and_then(|socket| socket.connect(("8.8.8.8", 80)).and_then(|()| socket.local_addr()));
+    match probe {
+        Ok(local) => SocketAddr::new(local.ip(), listen.port()),
+        Err(_) => *listen,
+    }
 }
 
 /// The bearer every WebSocket connect must present in secure mode.

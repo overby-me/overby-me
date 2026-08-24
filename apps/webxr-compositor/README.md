@@ -91,10 +91,30 @@ immersive session, rendering targets the XRWebGLLayer framebuffer, the
 preview loop yields the context while the session runs and takes it back
 on end, and the first controller steers the pointer: its target ray is
 picked against the quads every frame and select press/release become
-pointer buttons on the hit window. The session path follows the WebXR
-spec but remains unverified: this chromium is built without the XR
-device service (`navigator.xr` is absent even with the blink features
-forced), so proving it needs a WebXR-enabled browser and a headset.
+pointer buttons on the hit window. The ray itself is visible, two crossed
+cyan slats from the controller that stop just short of whatever they hit,
+with a small reticle floating on the hit surface. The session path
+follows the WebXR spec but remains unverified: this chromium is built
+without the XR device service (`navigator.xr` is absent even with the
+blink features forced), so proving it needs a WebXR-enabled browser and a
+headset.
+
+## Quest quickstart
+
+On the machine with the Wayland apps:
+
+```sh
+WEBXR_COMPOSITOR_LISTEN=0.0.0.0:8370 just run
+```
+
+Binding beyond loopback switches on TLS and an access token automatically,
+and the log prints the URL to dial with the LAN address filled in, like
+`https://192.168.1.20:8370/?token=...`. Open exactly that URL in the
+headset's browser (same network), accept the self-signed certificate
+warning (or provision real ones via `WEBXR_COMPOSITOR_CERT`/`_KEY`),
+connect apps to the Wayland socket the host logged, then press
+"enter VR". Windows hang along an arc, the controller ray points, hover
+moves the pointer, and the trigger clicks.
 
 ## Run
 
@@ -143,7 +163,10 @@ HTTP, but any other bind address switches to TLS (self-signed unless
 (`WEBXR_COMPOSITOR_TOKEN`, else generated) that the printed URL carries
 and every WebSocket connect must present; `WEBXR_COMPOSITOR_TLS=1` forces
 secure mode on loopback too, and `WEBXR_COMPOSITOR_INSECURE=1` is the
-explicit opt-out (`just tls` proves wss works and wrong tokens bounce).
+explicit opt-out. A wildcard bind prints the outbound interface's address
+instead of a useless `0.0.0.0`, so the URL in the log is the one to type
+into another device (`just tls` proves wss works, wrong tokens bounce,
+and the wildcard URL is dialable).
 
 Sustained motion streams as video: fifteen full-surface commits inside a
 second flip that surface to H.264 (openh264 host-side, WebCodecs
