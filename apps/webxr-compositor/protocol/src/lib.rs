@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any wire-incompatible change; both ends refuse a mismatch.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 pub type WindowId = u32;
 
@@ -53,6 +53,15 @@ pub enum HostToClient {
         damage: Rect,
         #[serde(with = "serde_bytes")]
         pixels: Vec<u8>,
+    },
+    /// A menu, popover or tooltip: rendered as an overlay anchored at
+    /// (x, y) in the parent surface's coordinates. Closed via WindowClosed
+    /// and painted via Frame, like any window.
+    PopupCreated {
+        id: WindowId,
+        parent: WindowId,
+        x: i32,
+        y: i32,
     },
     /// A client put text in the clipboard selection.
     Clipboard {

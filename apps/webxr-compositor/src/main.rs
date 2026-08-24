@@ -54,6 +54,16 @@ struct WindowInfo {
 
 type Windows = BTreeMap<protocol::WindowId, WindowInfo>;
 
+/// A menu, popover or tooltip overlay, anchored in its parent's surface.
+#[derive(Clone, Copy, PartialEq)]
+struct PopupInfo {
+    parent: protocol::WindowId,
+    x: i32,
+    y: i32,
+}
+
+type Popups = BTreeMap<protocol::WindowId, PopupInfo>;
+
 /// A drag in progress, anchored to where the pointer grabbed.
 #[derive(Clone, Copy, PartialEq)]
 enum DragOp {
@@ -81,11 +91,12 @@ fn main() {
 fn App() -> Element {
     let link = use_signal(|| Link::Connecting);
     let mut windows = use_signal(Windows::new);
+    let popups = use_signal(Popups::new);
     let focused: Signal<Option<protocol::WindowId>> = use_signal(|| None);
     let mut drag: Signal<Option<DragOp>> = use_signal(|| None);
     let cursor: Signal<String> = use_signal(|| "default".to_owned());
 
-    let session = use_coroutine(move |rx| session_loop(rx, link, windows, cursor));
+    let session = use_coroutine(move |rx| session_loop(rx, link, windows, popups, cursor));
     use_hook(move || install_key_listeners(session, focused));
 
     let status = match link() {
@@ -134,7 +145,7 @@ fn App() -> Element {
             },
             onmouseup: move |_| drag.set(None),
             for (id, info) in windows() {
-                WindowView { key: "{id}", id, info, focused, windows, drag, cursor }
+                WindowView { key: "{id}", id, info, focused, windows, popups, drag, cursor }
             }
         }
     }
@@ -168,6 +179,7 @@ fn WindowView(
     info: WindowInfo,
     focused: Signal<Option<protocol::WindowId>>,
     windows: Signal<Windows>,
+    popups: Signal<Popups>,
     drag: Signal<Option<DragOp>>,
     cursor: Signal<String>,
 ) -> Element {
@@ -235,6 +247,61 @@ fn WindowView(
                     }));
                 },
             }
+            div {
+                class: "canvas-holder",
+                canvas {
+                    class: "surface",
+                    id: "win-{id}",
+                    style: "cursor: {cursor};",
+                    onmousemove: move |e| {
+                        let p = e.data().element_coordinates();
+                        session.send(protocol::ClientToHost::PointerMotion { id, x: p.x, y: p.y });
+                    },
+                    onmousedown: move |e| {
+                        if let Some(button) = wire_button(&e) {
+                            session.send(protocol::ClientToHost::PointerButton {
+                                id,
+                                button,
+                                pressed: true,
+                            });
+                        }
+                    },
+                    onmouseup: move |e| {
+                        if let Some(button) = wire_button(&e) {
+                            session.send(protocol::ClientToHost::PointerButton {
+                                id,
+                                button,
+                                pressed: false,
+                            });
+                        }
+                    },
+                    onwheel: move |e| {
+                        e.prevent_default();
+                        let (dx, dy) = wheel_delta(&e);
+                        session.send(protocol::ClientToHost::PointerAxis { id, dx, dy });
+                    },
+                    oncontextmenu: move |e| e.prevent_default(),
+                }
+                for (popup_id, popup) in popups().into_iter().filter(|(_, p)| p.parent == id) {
+                    PopupView { key: "{popup_id}", id: popup_id, info: popup, popups, cursor }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn PopupView(
+    id: protocol::WindowId,
+    info: PopupInfo,
+    popups: Signal<Popups>,
+    cursor: Signal<String>,
+) -> Element {
+    let session = use_coroutine_handle::<protocol::ClientToHost>();
+    rsx! {
+        div {
+            class: "popup",
+            style: "left: {info.x}px; top: {info.y}px;",
             canvas {
                 class: "surface",
                 id: "win-{id}",
@@ -244,6 +311,7 @@ fn WindowView(
                     session.send(protocol::ClientToHost::PointerMotion { id, x: p.x, y: p.y });
                 },
                 onmousedown: move |e| {
+                    e.stop_propagation();
                     if let Some(button) = wire_button(&e) {
                         session.send(protocol::ClientToHost::PointerButton {
                             id,
@@ -267,6 +335,9 @@ fn WindowView(
                     session.send(protocol::ClientToHost::PointerAxis { id, dx, dy });
                 },
                 oncontextmenu: move |e| e.prevent_default(),
+            }
+            for (child_id, child) in popups().into_iter().filter(|(_, p)| p.parent == id) {
+                PopupView { key: "{child_id}", id: child_id, info: child, popups, cursor }
             }
         }
     }
@@ -329,6 +400,7 @@ async fn session_loop(
     mut rx: UnboundedReceiver<protocol::ClientToHost>,
     mut link: Signal<Link>,
     mut windows: Signal<Windows>,
+    mut popups: Signal<Popups>,
     mut cursor: Signal<String>,
 ) {
     loop {
@@ -336,9 +408,18 @@ async fn session_loop(
         // Input queued while disconnected aims at a dead session; drop it.
         while rx.try_recv().is_ok() {}
         if let Some(ws) = open_socket() {
-            run_session(ws, &mut rx, &mut link, &mut windows, &mut cursor).await;
+            run_session(
+                ws,
+                &mut rx,
+                &mut link,
+                &mut windows,
+                &mut popups,
+                &mut cursor,
+            )
+            .await;
         }
         windows.write().clear();
+        popups.write().clear();
         if matches!(link(), Link::Mismatch { .. }) {
             return;
         }
@@ -352,6 +433,7 @@ async fn run_session(
     rx: &mut UnboundedReceiver<protocol::ClientToHost>,
     link: &mut Signal<Link>,
     windows: &mut Signal<Windows>,
+    popups: &mut Signal<Popups>,
     cursor: &mut Signal<String>,
 ) {
     let (mut sink, mut stream) = ws.split();
@@ -372,7 +454,7 @@ async fn run_session(
             Either::Left((Some(Ok(Message::Bytes(bytes))), _)) => {
                 match protocol::HostToClient::decode(&bytes) {
                     Ok(msg) => {
-                        if apply(msg, link, windows, cursor).await.is_none() {
+                        if apply(msg, link, windows, popups, cursor).await.is_none() {
                             return;
                         }
                     }
@@ -415,6 +497,7 @@ async fn apply(
     msg: protocol::HostToClient,
     link: &mut Signal<Link>,
     windows: &mut Signal<Windows>,
+    popups: &mut Signal<Popups>,
     cursor: &mut Signal<String>,
 ) -> Option<()> {
     match msg {
@@ -451,7 +534,12 @@ async fn apply(
             }
         }
         protocol::HostToClient::WindowClosed { id } => {
-            windows.write().remove(&id);
+            if windows.write().remove(&id).is_none() {
+                popups.write().remove(&id);
+            }
+        }
+        protocol::HostToClient::PopupCreated { id, parent, x, y } => {
+            popups.write().insert(id, PopupInfo { parent, x, y });
         }
         protocol::HostToClient::Frame {
             id,

@@ -55,6 +55,8 @@ header h1 {
 }
 
 .titlebar {
+  position: relative;
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -94,8 +96,20 @@ header h1 {
   width: 14px;
   height: 14px;
   cursor: nwse-resize;
+  /* Above the positioned canvas-holder, below popup overlays. */
+  z-index: 10;
 }
 
 .surface {
   display: block;
+}
+
+.canvas-holder {
+  position: relative;
+}
+
+.popup {
+  position: absolute;
+  z-index: 100;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.6);
 }

@@ -63,6 +63,12 @@ clipboard *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-clipboard.nu {{args}}
 
+# A real GTK4 app (gnome-calculator): window, menus, dismissal. Needs
+# `just build` first.
+gtk *args:
+    cargo build --manifest-path host/Cargo.toml
+    nu test-gtk.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings

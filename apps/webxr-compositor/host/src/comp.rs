@@ -46,8 +46,8 @@ use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_to
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::wayland::shell::xdg::decoration::{XdgDecorationHandler, XdgDecorationState};
 use smithay::wayland::shell::xdg::{
-    PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
-    XdgShellState, XdgToplevelSurfaceData,
+    PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgPopupSurfaceData,
+    XdgShellHandler, XdgShellState, XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{BufferData, ShmHandler, ShmState, with_buffer_contents};
 use smithay::wayland::socket::ListeningSocketSource;
@@ -97,6 +97,7 @@ pub struct State {
     loop_handle: LoopHandle<'static, State>,
     /// The latest text selection, whichever side set it.
     clipboard: Option<String>,
+    popups: Vec<Popup>,
     windows: Vec<Window>,
     next_window_id: protocol::WindowId,
     pending_callbacks: Vec<WlCallback>,
@@ -113,6 +114,17 @@ struct Window {
     announced: bool,
     title: String,
     app_id: String,
+    last_frame: Option<(protocol::Size, Vec<u8>)>,
+}
+
+/// One xdg popup: a menu, popover or tooltip overlaying its parent.
+struct Popup {
+    id: protocol::WindowId,
+    popup: PopupSurface,
+    parent: protocol::WindowId,
+    /// Placement in parent surface coordinates, from the positioner.
+    offset: (i32, i32),
+    announced: bool,
     last_frame: Option<(protocol::Size, Vec<u8>)>,
 }
 
@@ -167,6 +179,7 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
         hub,
         loop_handle: event_loop.handle(),
         clipboard: None,
+        popups: Vec::new(),
         windows: Vec::new(),
         next_window_id: 1,
         pending_callbacks: Vec::new(),
@@ -285,10 +298,10 @@ impl State {
             protocol::ClientToHost::Key { code, pressed } => self.key(code, pressed),
             protocol::ClientToHost::PointerMotion { id, x, y } => self.pointer_motion(id, x, y),
             protocol::ClientToHost::PointerButton {
-                id: _,
+                id,
                 button,
                 pressed,
-            } => self.pointer_button(button, pressed),
+            } => self.pointer_button(id, button, pressed),
             protocol::ClientToHost::PointerAxis { id: _, dx, dy } => self.pointer_axis(dx, dy),
             protocol::ClientToHost::Close { id } => self.close_window(id),
             protocol::ClientToHost::Resize { id, size } => self.resize_window(id, size),
@@ -301,6 +314,25 @@ impl State {
             .iter()
             .find(|w| w.id == id)
             .map(|w| w.toplevel.wl_surface().clone())
+            .or_else(|| {
+                self.popups
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map(|p| p.popup.wl_surface().clone())
+            })
+    }
+
+    fn id_of_surface(&self, surface: &WlSurface) -> Option<protocol::WindowId> {
+        self.windows
+            .iter()
+            .find(|w| w.toplevel.wl_surface() == surface)
+            .map(|w| w.id)
+            .or_else(|| {
+                self.popups
+                    .iter()
+                    .find(|p| p.popup.wl_surface() == surface)
+                    .map(|p| p.id)
+            })
     }
 
     fn timestamp(&self) -> u32 {
@@ -402,7 +434,12 @@ impl State {
         pointer.frame(self);
     }
 
-    fn pointer_button(&mut self, button: u32, pressed: bool) {
+    fn pointer_button(&mut self, id: protocol::WindowId, button: u32, pressed: bool) {
+        // Clicking outside every popup breaks the menu chain, like on any
+        // desktop.
+        if pressed && !self.popups.is_empty() && !self.popups.iter().any(|p| p.id == id) {
+            self.dismiss_popups();
+        }
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -559,6 +596,28 @@ impl State {
                 );
             }
         }
+        for popup in self.popups.iter().filter(|p| p.announced) {
+            self.hub.send_to(
+                client,
+                &protocol::HostToClient::PopupCreated {
+                    id: popup.id,
+                    parent: popup.parent,
+                    x: popup.offset.0,
+                    y: popup.offset.1,
+                },
+            );
+            if let Some((size, pixels)) = &popup.last_frame {
+                self.hub.send_to(
+                    client,
+                    &protocol::HostToClient::Frame {
+                        id: popup.id,
+                        size: *size,
+                        damage: full_damage(*size),
+                        pixels: pixels.clone(),
+                    },
+                );
+            }
+        }
     }
 
     fn fire_frame_callbacks(&mut self) {
@@ -584,23 +643,15 @@ impl State {
             return;
         }
 
-        let (assignment, callbacks, damage, scale) = with_states(surface, |states| {
-            let mut guard = states.cached_state.get::<SurfaceAttributes>();
-            let attributes = guard.current();
-            (
-                attributes.buffer.take(),
-                std::mem::take(&mut attributes.frame_callbacks),
-                std::mem::take(&mut attributes.damage),
-                attributes.buffer_scale,
-            )
-        });
+        let (assignment, callbacks, damage, scale) = take_commit_state(surface);
         self.pending_callbacks.extend(callbacks);
 
         self.sync_meta(index, surface);
 
         match assignment {
             Some(BufferAssignment::NewBuffer(buffer)) => {
-                match self.read_frame(index, &buffer, &damage, scale) {
+                match Self::read_frame(self.windows[index].last_frame.as_ref(), &buffer, &damage, scale)
+                {
                     Ok((size, rect, pixels)) => self.publish_frame(index, size, rect, pixels),
                     Err(error) => {
                         tracing::warn!(window = self.windows[index].id, error, "unreadable buffer");
@@ -612,11 +663,85 @@ impl State {
         }
     }
 
+    /// The commit of a surface that is an xdg popup: the same configure
+    /// dance and buffer pipeline as toplevels, announced as an overlay.
+    fn popup_commit(&mut self, index: usize, surface: &WlSurface) {
+        if !popup_initial_configure_sent(surface) {
+            if let Err(error) = self.popups[index].popup.send_configure() {
+                tracing::warn!(?error, "popup configure failed");
+            }
+            return;
+        }
+
+        let (assignment, callbacks, damage, scale) = take_commit_state(surface);
+        self.pending_callbacks.extend(callbacks);
+
+        match assignment {
+            Some(BufferAssignment::NewBuffer(buffer)) => {
+                match Self::read_frame(self.popups[index].last_frame.as_ref(), &buffer, &damage, scale)
+                {
+                    Ok((size, rect, pixels)) => self.publish_popup_frame(index, size, rect, pixels),
+                    Err(error) => {
+                        tracing::warn!(popup = self.popups[index].id, error, "unreadable buffer");
+                    }
+                }
+                buffer.release();
+            }
+            // GTK pops popovers down by unmapping, not destroying; a removed
+            // buffer means the overlay is gone until the next map.
+            Some(BufferAssignment::Removed) => {
+                let popup = &mut self.popups[index];
+                popup.last_frame = None;
+                if popup.announced {
+                    popup.announced = false;
+                    let id = popup.id;
+                    self.hub
+                        .broadcast(&protocol::HostToClient::WindowClosed { id });
+                }
+            }
+            None => {}
+        }
+    }
+
+    fn publish_popup_frame(
+        &mut self,
+        index: usize,
+        size: protocol::Size,
+        rect: protocol::Rect,
+        pixels: Vec<u8>,
+    ) {
+        let popup = &mut self.popups[index];
+        if !popup.announced {
+            popup.announced = true;
+            self.hub.broadcast(&protocol::HostToClient::PopupCreated {
+                id: popup.id,
+                parent: popup.parent,
+                x: popup.offset.0,
+                y: popup.offset.1,
+            });
+        }
+        self.hub.broadcast(&protocol::HostToClient::Frame {
+            id: popup.id,
+            size,
+            damage: rect,
+            pixels: pixels.clone(),
+        });
+        store_frame(&mut self.popups[index].last_frame, size, rect, pixels);
+    }
+
+    /// A press on anything that is not a popup breaks the popup grab chain,
+    /// like clicking outside a menu does on a desktop.
+    fn dismiss_popups(&mut self) {
+        for popup in &self.popups {
+            tracing::debug!(popup = popup.id, "dismissing popup");
+            popup.popup.send_popup_done();
+        }
+    }
+
     /// Decide how much of the committed buffer to copy: the damage bounding
     /// box when the previous frame is patchable, the whole buffer otherwise.
     fn read_frame(
-        &self,
-        index: usize,
+        last_frame: Option<&(protocol::Size, Vec<u8>)>,
         buffer: &WlBuffer,
         damage: &[Damage],
         scale: i32,
@@ -629,7 +754,7 @@ impl State {
                 width: data.width.unsigned_abs(),
                 height: data.height.unsigned_abs(),
             };
-            let rect = self.wanted_rect(index, size, damage, scale);
+            let rect = Self::wanted_rect(last_frame, size, damage, scale);
             let pixels = convert_rect(bytes, data, rect)?;
             Ok((size, rect, pixels))
         })
@@ -640,14 +765,13 @@ impl State {
     /// stored frame must match the new size, the scale must be 1, and the
     /// client must have reported usable damage that is worth cropping.
     fn wanted_rect(
-        &self,
-        index: usize,
+        last_frame: Option<&(protocol::Size, Vec<u8>)>,
         size: protocol::Size,
         damage: &[Damage],
         scale: i32,
     ) -> protocol::Rect {
         let full = full_damage(size);
-        let patchable = matches!(&self.windows[index].last_frame, Some((s, _)) if *s == size);
+        let patchable = matches!(last_frame, Some((s, _)) if *s == size);
         if !patchable || scale != 1 || damage.is_empty() {
             return full;
         }
@@ -743,21 +867,7 @@ impl State {
             pixels: pixels.clone(),
         });
 
-        // Keep the stored frame current so a joining browser gets the whole
-        // picture, not just the last patch.
-        let window = &mut self.windows[index];
-        if rect == full_damage(size) {
-            window.last_frame = Some((size, pixels));
-        } else if let Some((_, stored)) = &mut window.last_frame {
-            let stride = size.width as usize * 4;
-            let patch_stride = rect.width as usize * 4;
-            for row in 0..rect.height as usize {
-                let to = (rect.y as usize + row) * stride + rect.x as usize * 4;
-                let from = row * patch_stride;
-                stored[to..to + patch_stride]
-                    .copy_from_slice(&pixels[from..from + patch_stride]);
-            }
-        }
+        store_frame(&mut self.windows[index].last_frame, size, rect, pixels);
     }
 }
 
@@ -768,6 +878,62 @@ fn full_damage(size: protocol::Size) -> protocol::Rect {
         width: size.width,
         height: size.height,
     }
+}
+
+/// Pull the double-buffered commit payload out of the surface.
+fn take_commit_state(
+    surface: &WlSurface,
+) -> (
+    Option<BufferAssignment>,
+    Vec<WlCallback>,
+    Vec<Damage>,
+    i32,
+) {
+    with_states(surface, |states| {
+        let mut guard = states.cached_state.get::<SurfaceAttributes>();
+        let attributes = guard.current();
+        (
+            attributes.buffer.take(),
+            std::mem::take(&mut attributes.frame_callbacks),
+            std::mem::take(&mut attributes.damage),
+            attributes.buffer_scale,
+        )
+    })
+}
+
+/// Keep the stored frame current so a joining browser gets the whole
+/// picture, not just the last patch.
+fn store_frame(
+    slot: &mut Option<(protocol::Size, Vec<u8>)>,
+    size: protocol::Size,
+    rect: protocol::Rect,
+    pixels: Vec<u8>,
+) {
+    if rect == full_damage(size) {
+        *slot = Some((size, pixels));
+    } else if let Some((_, stored)) = slot {
+        let stride = size.width as usize * 4;
+        let patch_stride = rect.width as usize * 4;
+        for row in 0..rect.height as usize {
+            let to = (rect.y as usize + row) * stride + rect.x as usize * 4;
+            let from = row * patch_stride;
+            stored[to..to + patch_stride].copy_from_slice(&pixels[from..from + patch_stride]);
+        }
+    }
+}
+
+fn popup_initial_configure_sent(surface: &WlSurface) -> bool {
+    with_states(surface, |states| {
+        states
+            .data_map
+            .get::<XdgPopupSurfaceData>()
+            .map(|data| {
+                data.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .initial_configure_sent
+            })
+            .unwrap_or(true)
+    })
 }
 
 fn initial_configure_sent(surface: &WlSurface) -> bool {
@@ -843,6 +1009,12 @@ impl CompositorHandler for State {
             .position(|w| w.toplevel.wl_surface() == surface)
         {
             self.toplevel_commit(index, surface);
+        } else if let Some(index) = self
+            .popups
+            .iter()
+            .position(|p| p.popup.wl_surface() == surface)
+        {
+            self.popup_commit(index, surface);
         }
     }
 }
@@ -907,9 +1079,43 @@ impl XdgShellHandler for State {
         });
     }
 
-    fn new_popup(&mut self, _surface: PopupSurface, _positioner: PositionerState) {}
+    fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
+        let Some(parent) = surface
+            .get_parent_surface()
+            .and_then(|parent| self.id_of_surface(&parent))
+        else {
+            tracing::warn!("popup for an unknown parent surface");
+            return;
+        };
+        let geometry = positioner.get_geometry();
+        surface.with_pending_state(|state| state.geometry = geometry);
+        let id = self.next_window_id;
+        self.next_window_id += 1;
+        tracing::info!(popup = id, parent, x = geometry.loc.x, y = geometry.loc.y, "new popup");
+        self.popups.push(Popup {
+            id,
+            popup: surface,
+            parent,
+            offset: (geometry.loc.x, geometry.loc.y),
+            announced: false,
+            last_frame: None,
+        });
+    }
 
+    // The browser side enforces the grab: a press outside any popup
+    // dismisses the chain (see dismiss_popups).
     fn grab(&mut self, _surface: PopupSurface, _seat: WlSeat, _serial: Serial) {}
+
+    fn popup_destroyed(&mut self, surface: PopupSurface) {
+        if let Some(index) = self.popups.iter().position(|p| p.popup == surface) {
+            let popup = self.popups.remove(index);
+            tracing::info!(popup = popup.id, "popup destroyed");
+            if popup.announced {
+                self.hub
+                    .broadcast(&protocol::HostToClient::WindowClosed { id: popup.id });
+            }
+        }
+    }
 
     fn reposition_request(
         &mut self,

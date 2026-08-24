@@ -56,9 +56,18 @@ clipboard-read permission; headless chromium denies it, so `just clipboard`
 proves the client-to-host-to-page-to-other-client circuit instead).
 cursor-shape-v1 maps named cursors straight to CSS cursors; surface-drawn
 cursors fall back to the arrow. Primary selection passes between clients
-through smithay. Roadmap: GTK-class apps (viewporter, single-pixel-buffer
-and presentation-time land there, where they can be honoured rather than
-merely advertised), GPU clients (Zed), WebXR mode.
+through smithay.
+
+GTK4 apps run: xdg popups (menus, popovers, tooltips) render as overlays
+anchored in their parent surface, nested popups nest, GTK's
+unmap-not-destroy popdown is handled, and a press outside the popup chain
+dismisses it (`just gtk` drives gnome-calculator's hamburger menu open and
+closed). Not there yet: wp_viewporter and fractional-scale are deliberately
+not advertised (clients render correctly at scale 1 instead of being lied
+to), subsurfaces are not composited (GTK4 does not need them for normal
+windows), popups never receive keyboard focus (menu arrow-key navigation
+stays with the mouse), and xdg_activation is absent. Roadmap: GPU clients
+(Zed), WebXR mode.
 
 ## Run
 

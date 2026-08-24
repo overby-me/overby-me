@@ -118,6 +118,8 @@ in {
       wayland-utils
       # test-input.nu types into a real terminal client.
       foot
+      # test-gtk.nu drives a real GTK4 app's menus and popovers.
+      gnome-calculator
     ];
   };
 
