@@ -5,6 +5,7 @@
 //! pointer and keyboard input back through the wire protocol.
 
 mod keymap;
+mod video;
 mod xr;
 
 use std::collections::BTreeMap;
@@ -240,6 +241,33 @@ fn canvas_by_id(id: &str) -> Option<HtmlCanvasElement> {
         .get_element_by_id(id)?
         .dyn_into()
         .ok()
+}
+
+/// Video counters on `window.__wxr`: encoded wire bytes against the raw
+/// equivalent, so the tests can see the codec engage and pay off.
+fn record_video_stats(wire: usize, size: protocol::Size) {
+    let Some(obj) = wxr_object() else {
+        return;
+    };
+    let get = |name: &str| {
+        js_sys::Reflect::get(&obj, &name.into())
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+    };
+    let wire = f64::from(u32::try_from(wire).unwrap_or(u32::MAX));
+    let raw = f64::from(size.width) * f64::from(size.height) * 4.0;
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"videoFrames".into(),
+        &(get("videoFrames") + 1.0).into(),
+    );
+    let _ = js_sys::Reflect::set(
+        &obj,
+        &"videoBytes".into(),
+        &(get("videoBytes") + wire).into(),
+    );
+    let _ = js_sys::Reflect::set(&obj, &"videoRaw".into(), &(get("videoRaw") + raw).into());
 }
 
 #[component]
@@ -591,6 +619,7 @@ async fn session_loop(
         }
         windows.write().clear();
         popups.write().clear();
+        video::close_all();
         if matches!(link(), Link::Mismatch { .. }) {
             return;
         }
@@ -612,6 +641,7 @@ async fn run_session(
         &mut sink,
         &protocol::ClientToHost::Hello {
             version: protocol::VERSION,
+            video: video::supported(),
         },
     )
     .await
@@ -708,8 +738,26 @@ async fn apply(
             }
         }
         protocol::HostToClient::WindowClosed { id } => {
+            video::close(id);
             if windows.write().remove(&id).is_none() {
                 popups.write().remove(&id);
+            }
+        }
+        protocol::HostToClient::VideoFrame {
+            id,
+            size,
+            keyframe,
+            data,
+        } => {
+            record_video_stats(data.len(), size);
+            video::frame(id, keyframe, &data);
+            let stale = windows
+                .read()
+                .get(&id)
+                .is_some_and(|w| w.width != size.width || w.height != size.height);
+            if stale && let Some(info) = windows.write().get_mut(&id) {
+                info.width = size.width;
+                info.height = size.height;
             }
         }
         protocol::HostToClient::PopupCreated { id, parent, x, y } => {
@@ -722,6 +770,8 @@ async fn apply(
             compressed,
             pixels,
         } => {
+            // A rect frame ends any video stream on this surface.
+            video::close(id);
             let wire_len = pixels.len();
             let Some(pixels) = protocol::unwire_pixels(compressed, pixels) else {
                 tracing::warn!("dropping an undecompressable frame for window {id}");

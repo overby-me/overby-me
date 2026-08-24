@@ -38,6 +38,13 @@ fn main() {
 
     let mut app = App {
         running: true,
+        // CHECKER_FAST rotates every frame: constant full-surface motion,
+        // which is what pushes the host into video mode.
+        ticks_per_step: if std::env::var("CHECKER_FAST").is_ok() {
+            1
+        } else {
+            TICKS_PER_STEP
+        },
         ..App::default()
     };
     while app.running {
@@ -48,6 +55,7 @@ fn main() {
 #[derive(Default)]
 struct App {
     running: bool,
+    ticks_per_step: u32,
     compositor: Option<wl_compositor::WlCompositor>,
     shm: Option<wl_shm::WlShm>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
@@ -223,7 +231,7 @@ impl Dispatch<wl_callback::WlCallback, ()> for App {
     ) {
         if let wl_callback::Event::Done { .. } = event {
             app.ticks += 1;
-            if app.ticks.is_multiple_of(TICKS_PER_STEP) {
+            if app.ticks.is_multiple_of(app.ticks_per_step) {
                 app.phase = app.phase.wrapping_add(1);
                 app.present(qh);
             } else {

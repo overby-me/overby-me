@@ -143,3 +143,13 @@ HTTP, but any other bind address switches to TLS (self-signed unless
 and every WebSocket connect must present; `WEBXR_COMPOSITOR_TLS=1` forces
 secure mode on loopback too, and `WEBXR_COMPOSITOR_INSECURE=1` is the
 explicit opt-out (`just tls` proves wss works and wrong tokens bounce).
+
+Sustained motion streams as video: fifteen full-surface commits inside a
+second flip that surface to H.264 (openh264 host-side, WebCodecs
+VideoDecoder in the page painting onto the same canvas), and thirty quiet
+commits, a resize or an encode error flip it back to damage rects from a
+clean full repaint. Pages advertise decode support in their hello, one
+holdout keeps everything on rects, and joiners force the next frame to a
+keyframe. `just video` measures the fast checker at around 600x under raw
+(52 KB wire for 32 MB of frames) with the decoded quadrants still
+palette-correct within codec tolerance.

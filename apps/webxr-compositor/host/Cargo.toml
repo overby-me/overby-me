@@ -17,6 +17,7 @@ axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 bytes = "1"
 futures-util = "0.3"
+openh264 = "0.9.8"
 rcgen = "0.14.9"
 smithay = { version = "0.7.0", default-features = false, features = [
   "wayland_frontend"

@@ -88,6 +88,13 @@ tls *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-tls.nu {{args}}
 
+# Sustained motion must stream as H.264 through WebCodecs. Needs
+# `just build` first.
+video *args:
+    cargo build --manifest-path host/Cargo.toml --example checker
+    cargo build --manifest-path host/Cargo.toml
+    nu test-video.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings

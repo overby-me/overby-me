@@ -137,6 +137,13 @@ impl Hub {
         self.bytes_sent.load(Ordering::Relaxed)
     }
 
+    pub fn client_count(&self) -> usize {
+        self.clients
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
+    }
+
     fn register(&self, tx: mpsc::UnboundedSender<Bytes>) -> (ClientId, Arc<AtomicU64>) {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let inflight = Arc::new(AtomicU64::new(0));

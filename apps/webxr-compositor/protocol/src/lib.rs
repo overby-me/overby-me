@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any wire-incompatible change; both ends refuse a mismatch.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 pub type WindowId = u32;
 
@@ -56,6 +56,15 @@ pub enum HostToClient {
         #[serde(with = "serde_bytes")]
         pixels: Vec<u8>,
     },
+    /// One encoded H.264 frame (Annex B) of a surface in video mode. A
+    /// keyframe starts or restarts the stream; a plain Frame ends it.
+    VideoFrame {
+        id: WindowId,
+        size: Size,
+        keyframe: bool,
+        #[serde(with = "serde_bytes")]
+        data: Vec<u8>,
+    },
     /// A menu, popover or tooltip: rendered as an overlay anchored at
     /// (x, y) in the parent surface's coordinates. Closed via WindowClosed
     /// and painted via Frame, like any window.
@@ -79,6 +88,9 @@ pub enum HostToClient {
 pub enum ClientToHost {
     Hello {
         version: u32,
+        /// Whether this page decodes H.264 through WebCodecs; one client
+        /// without it keeps every surface on the rect path.
+        video: bool,
     },
     /// Surface-local coordinates.
     PointerMotion {
@@ -205,7 +217,10 @@ mod tests {
 
     #[test]
     fn hello_roundtrips() -> Result<(), postcard::Error> {
-        let msg = ClientToHost::Hello { version: VERSION };
+        let msg = ClientToHost::Hello {
+            version: VERSION,
+            video: true,
+        };
         assert_eq!(
             ClientToHost::decode(&msg.encode()?)?,
             msg,

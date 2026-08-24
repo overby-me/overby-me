@@ -50,6 +50,9 @@ use smithay::wayland::shell::xdg::{
     XdgShellHandler, XdgShellState, XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{BufferData, ShmHandler, ShmState, with_buffer_contents};
+use openh264::OpenH264API;
+use openh264::encoder::{Encoder, EncoderConfig, FrameType};
+use openh264::formats::{RgbaSliceU8, YUVBuffer};
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::{
     delegate_compositor, delegate_cursor_shape, delegate_data_device, delegate_output,
@@ -75,6 +78,11 @@ const INFLIGHT_BUDGET: u64 = 32 * 1024 * 1024;
 const FULL_FRAME_NUMERATOR: u64 = 4;
 const FULL_FRAME_DENOMINATOR: u64 = 5;
 
+/// Full-surface commits in a row before a surface flips to video mode,
+/// and small-damage commits in a row before it flips back.
+const VIDEO_ENTER_STREAK: u32 = 15;
+const VIDEO_EXIT_STREAK: u32 = 30;
+
 /// The text flavours offered for and accepted from selections.
 const TEXT_MIMES: [&str; 5] = [
     "text/plain;charset=utf-8",
@@ -98,6 +106,8 @@ pub struct State {
     /// The latest text selection, whichever side set it.
     clipboard: Option<String>,
     popups: Vec<Popup>,
+    /// Browsers that cannot decode H.264; any member keeps video off.
+    non_video_clients: std::collections::BTreeSet<crate::session::ClientId>,
     windows: Vec<Window>,
     next_window_id: protocol::WindowId,
     pending_callbacks: Vec<WlCallback>,
@@ -115,6 +125,18 @@ struct Window {
     title: String,
     app_id: String,
     last_frame: Option<(protocol::Size, Vec<u8>)>,
+    video: Option<Video>,
+    large_streak: u32,
+    small_streak: u32,
+    /// When the current run of full-surface commits began; video mode wants
+    /// motion that is fast, not merely persistent.
+    streak_started: Option<Instant>,
+}
+
+/// An active H.264 stream for one surface; dropped on idle or resize.
+struct Video {
+    encoder: Encoder,
+    size: protocol::Size,
 }
 
 /// One xdg popup: a menu, popover or tooltip overlaying its parent.
@@ -180,6 +202,7 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
         loop_handle: event_loop.handle(),
         clipboard: None,
         popups: Vec::new(),
+        non_video_clients: std::collections::BTreeSet::new(),
         windows: Vec::new(),
         next_window_id: 1,
         pending_callbacks: Vec::new(),
@@ -286,14 +309,21 @@ impl State {
     fn on_hub_event(&mut self, event: HubEvent) {
         match event {
             HubEvent::Joined(client) => self.resync(client),
-            HubEvent::Left(client) => tracing::debug!(client, "browser left"),
-            HubEvent::Input(_client, msg) => self.on_input(msg),
+            HubEvent::Left(client) => {
+                self.non_video_clients.remove(&client);
+                tracing::debug!(client, "browser left");
+            }
+            HubEvent::Input(client, msg) => self.on_input(client, msg),
         }
     }
 
-    fn on_input(&mut self, msg: protocol::ClientToHost) {
+    fn on_input(&mut self, client: crate::session::ClientId, msg: protocol::ClientToHost) {
         match msg {
-            protocol::ClientToHost::Hello { .. } => {}
+            protocol::ClientToHost::Hello { video, .. } => {
+                if !video {
+                    self.non_video_clients.insert(client);
+                }
+            }
             protocol::ClientToHost::Focus { id } => self.focus_window(id),
             protocol::ClientToHost::Key { code, pressed } => self.key(code, pressed),
             protocol::ClientToHost::PointerMotion { id, x, y } => self.pointer_motion(id, x, y),
@@ -571,7 +601,14 @@ impl State {
     }
 
     /// Bring a newly joined browser up to date with every mapped window.
-    fn resync(&self, client: crate::session::ClientId) {
+    fn resync(&mut self, client: crate::session::ClientId) {
+        // Joiners cannot pick up a video stream mid-GOP; restart each one at
+        // a keyframe.
+        for window in &mut self.windows {
+            if let Some(video) = &mut window.video {
+                video.encoder.force_intra_frame();
+            }
+        }
         for window in self.windows.iter().filter(|w| w.announced) {
             self.hub.send_to(
                 client,
@@ -637,9 +674,15 @@ impl State {
 
         match assignment {
             Some(BufferAssignment::NewBuffer(buffer)) => {
-                match Self::read_frame(self.windows[index].last_frame.as_ref(), &buffer, &damage, scale)
-                {
-                    Ok((size, rect, pixels)) => self.publish_frame(index, size, rect, pixels),
+                // Video mode always reads the full surface: the encoder and
+                // the stored resync frame both need whole pictures.
+                let last = if self.windows[index].video.is_some() {
+                    None
+                } else {
+                    self.windows[index].last_frame.as_ref()
+                };
+                match Self::read_frame(last, &buffer, &damage, scale) {
+                    Ok((size, rect, pixels)) => self.route_frame(index, size, rect, pixels),
                     Err(error) => {
                         tracing::warn!(window = self.windows[index].id, error, "unreadable buffer");
                     }
@@ -647,6 +690,121 @@ impl State {
                 buffer.release();
             }
             Some(BufferAssignment::Removed) | None => {}
+        }
+    }
+
+    /// Send this commit down the rect path or the video path, moving the
+    /// surface between them on sustained motion or sustained quiet.
+    fn route_frame(
+        &mut self,
+        index: usize,
+        size: protocol::Size,
+        rect: protocol::Rect,
+        pixels: Vec<u8>,
+    ) {
+        self.update_motion(index, size, rect);
+        if self.windows[index].video.is_none() {
+            self.maybe_enter_video(index, size);
+        }
+        if self.windows[index].video.is_some() {
+            self.publish_video_frame(index, size, pixels);
+        } else {
+            self.publish_frame(index, size, rect, pixels);
+        }
+    }
+
+    fn update_motion(&mut self, index: usize, size: protocol::Size, rect: protocol::Rect) {
+        let full = rect == full_damage(size);
+        let window = &mut self.windows[index];
+        if full {
+            if window.large_streak == 0 {
+                window.streak_started = Some(Instant::now());
+            }
+            window.large_streak += 1;
+            window.small_streak = 0;
+        } else {
+            window.small_streak += 1;
+            window.large_streak = 0;
+            window.streak_started = None;
+        }
+        let stale_stream = window
+            .video
+            .as_ref()
+            .is_some_and(|v| v.size != size || window.small_streak >= VIDEO_EXIT_STREAK);
+        if stale_stream {
+            window.video = None;
+            // The canvas holds lossy decoded pixels; force the next rect
+            // frame to repaint everything from a clean base.
+            window.last_frame = None;
+            tracing::debug!(window = window.id, "leaving video mode");
+        }
+    }
+
+    fn maybe_enter_video(&mut self, index: usize, size: protocol::Size) {
+        let window = &self.windows[index];
+        let even = size.width.is_multiple_of(2) && size.height.is_multiple_of(2);
+        let fast = window
+            .streak_started
+            .is_some_and(|start| start.elapsed() < Duration::from_secs(1));
+        if window.large_streak < VIDEO_ENTER_STREAK
+            || !fast
+            || !even
+            || !self.non_video_clients.is_empty()
+            || self.hub.client_count() == 0
+        {
+            return;
+        }
+        match Encoder::with_api_config(OpenH264API::from_source(), EncoderConfig::new()) {
+            Ok(encoder) => {
+                tracing::debug!(window = window.id, "entering video mode");
+                self.windows[index].video = Some(Video { encoder, size });
+            }
+            Err(error) => tracing::warn!(%error, "no H.264 encoder; staying on rects"),
+        }
+    }
+
+    fn publish_video_frame(&mut self, index: usize, size: protocol::Size, pixels: Vec<u8>) {
+        if !self.windows[index].announced {
+            self.announce_window(index);
+        }
+        let id = self.windows[index].id;
+        let hub = Arc::clone(&self.hub);
+        let encoded = {
+            let Some(video) = &mut self.windows[index].video else {
+                return;
+            };
+            let yuv = YUVBuffer::from_rgb_source(RgbaSliceU8::new(
+                &pixels,
+                (size.width as usize, size.height as usize),
+            ));
+            video.encoder.encode(&yuv).map(|stream| {
+                (
+                    matches!(stream.frame_type(), FrameType::IDR | FrameType::I),
+                    stream.to_vec(),
+                )
+            })
+        };
+        match encoded {
+            Ok((keyframe, data)) => {
+                hub.broadcast(&protocol::HostToClient::VideoFrame {
+                    id,
+                    size,
+                    keyframe,
+                    data,
+                });
+                store_frame(
+                    &mut self.windows[index].last_frame,
+                    size,
+                    full_damage(size),
+                    pixels,
+                );
+            }
+            Err(error) => {
+                tracing::warn!(%error, window = id, "encode failed; back to rects");
+                self.windows[index].video = None;
+                self.windows[index].last_frame = None;
+                self.publish_frame(index, size, full_damage(size), pixels);
+            }
         }
     }
 
@@ -827,6 +985,16 @@ impl State {
         }
     }
 
+    fn announce_window(&mut self, index: usize) {
+        let window = &mut self.windows[index];
+        window.announced = true;
+        self.hub.broadcast(&protocol::HostToClient::WindowCreated {
+            id: window.id,
+            app_id: window.app_id.clone(),
+            title: window.title.clone(),
+        });
+    }
+
     fn publish_frame(
         &mut self,
         index: usize,
@@ -834,17 +1002,11 @@ impl State {
         rect: protocol::Rect,
         pixels: Vec<u8>,
     ) {
-        let window = &mut self.windows[index];
-        if !window.announced {
-            window.announced = true;
-            self.hub.broadcast(&protocol::HostToClient::WindowCreated {
-                id: window.id,
-                app_id: window.app_id.clone(),
-                title: window.title.clone(),
-            });
+        if !self.windows[index].announced {
+            self.announce_window(index);
         }
         self.hub
-            .broadcast(&frame_message(window.id, size, rect, &pixels));
+            .broadcast(&frame_message(self.windows[index].id, size, rect, &pixels));
 
         store_frame(&mut self.windows[index].last_frame, size, rect, pixels);
     }
@@ -1072,6 +1234,10 @@ impl XdgShellHandler for State {
             title: String::new(),
             app_id: String::new(),
             last_frame: None,
+            video: None,
+            large_streak: 0,
+            small_streak: 0,
+            streak_started: None,
         });
     }
 
