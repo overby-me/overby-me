@@ -151,7 +151,7 @@ fn App() -> Element {
                     id: "enter-vr",
                     onclick: move |_| {
                         view3d.set(true);
-                        xr::enter_xr();
+                        xr::enter_xr(session);
                     },
                     "enter VR"
                 }

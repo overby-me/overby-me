@@ -85,9 +85,16 @@ quad routes real pointer input to that window; "enter VR" (shown when
 navigator.xr exists) starts an immersive-vr session over the same scene,
 with per-eye view and projection taken from the XR pose through dynamic
 JS calls. `just xr` proves the pipeline by sampling the checker palette
-off the WebGL canvas and toggling back to the flat desk. Untested for
-lack of hardware: the immersive session itself and controller input,
-which does not exist yet (in-headset pointing needs controller rays).
+off the WebGL canvas and toggling back to the flat desk, and `just zed`
+now also types into Zed through the 3D view's ray picking. In the
+immersive session, rendering targets the XRWebGLLayer framebuffer, the
+preview loop yields the context while the session runs and takes it back
+on end, and the first controller steers the pointer: its target ray is
+picked against the quads every frame and select press/release become
+pointer buttons on the hit window. The session path follows the WebXR
+spec but remains unverified: this chromium is built without the XR
+device service (`navigator.xr` is absent even with the blink features
+forced), so proving it needs a WebXR-enabled browser and a headset.
 
 ## Run
 

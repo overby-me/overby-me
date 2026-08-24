@@ -143,6 +143,53 @@ await pause(2000);
 const after = await read(snapshot);
 result.steps.typed = { before, after };
 
+// Phase two: the same editor through the 3D scene. The Zed quad sits dead
+// centre of the arc, so a centre click picks it and routes the pointer.
+const toggle = await read(`(() => {
+  const b = document.getElementById("toggle-3d");
+  const r = b.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+})()`);
+await click(toggle.x, toggle.y);
+let scene = null;
+for (let i = 0; i < 40; i++) {
+  await pause(250);
+  scene = await read(`(() => {
+    const xr = document.getElementById("xr-canvas");
+    if (!xr || xr.width === 0) return null;
+    const t = document.createElement("canvas");
+    t.width = xr.width; t.height = xr.height;
+    const ctx = t.getContext("2d");
+    ctx.drawImage(xr, 0, 0);
+    const d = ctx.getImageData(0, 0, t.width, t.height).data;
+    let lit = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i] + d[i + 1] + d[i + 2] > 90) lit++;
+    }
+    return { w: xr.width, h: xr.height, lit };
+  })()`);
+  if (scene && scene.lit > 2000) break;
+}
+result.steps.scene3d = scene;
+
+if (scene) {
+  const xrGeo = await read(`(() => {
+    const r = document.getElementById("xr-canvas").getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`);
+  const before3d = await read(snapshot);
+  await click(xrGeo.x, xrGeo.y);
+  await pause(500);
+  const keys3d = [
+    ["Space", " "], ["KeyI", "i"], ["KeyN", "n"], ["Space", " "],
+    ["Digit3", "3"], ["KeyD", "d"],
+  ];
+  for (const [code, key] of keys3d) await tap(code, key);
+  await pause(2000);
+  const after3d = await read(snapshot);
+  result.steps.typed3d = { before: before3d, after: after3d };
+}
+
 const shot = await send("Page.captureScreenshot", { format: "png" });
 await Deno.writeFile(out, Uint8Array.from(atob(shot.data), (c) => c.charCodeAt(0)));
 
@@ -292,6 +339,15 @@ def main [--out: string = "/tmp/webxr-compositor-zed.png"]: nothing -> nothing {
         let delta = (($typed.after | default 0) - ($typed.before | default 0))
         if $delta < 40 {
             $failures = ($failures | append $"typing lit only ($delta) extra pixels; keystrokes did not reach the editor")
+        }
+        let scene = ($steps.scene3d? | default null)
+        if $scene == null or ($scene.lit | default 0) < 2000 {
+            $failures = ($failures | append "the 3D scene never showed the editor")
+        }
+        let typed3d = ($steps.typed3d? | default {before: 0, after: 0})
+        let delta3d = (($typed3d.after | default 0) - ($typed3d.before | default 0))
+        if $delta3d < 20 {
+            $failures = ($failures | append $"typing through the 3D view lit only ($delta3d) extra pixels; the picked pointer or keys did not reach Zed")
         }
     }
     let complaints = ($report.console? | default [] | where {|l| $l =~ "EXCEPTION" })

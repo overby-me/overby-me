@@ -6,9 +6,11 @@
 //! matrices through dynamic JS calls so no unstable web-sys APIs are
 //! needed, and everything else is shared.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 
 use dioxus::logger::tracing;
+use dioxus::prelude::Coroutine;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{
     HtmlCanvasElement, WebGlProgram, WebGlRenderingContext as Gl, WebGlTexture,
@@ -256,7 +258,15 @@ impl Scene {
         let (sy, cyw) = self.yaw.sin_cos();
         let dir = [cx * cyw + rz * sy, ry, -cx * sy + rz * cyw];
         let origin = [0.0, EYE_HEIGHT, 0.0];
+        self.pick_ray(origin, dir)
+    }
 
+    /// The nearest quad a world-space ray hits, as surface pixels.
+    pub fn pick_ray(
+        &self,
+        origin: [f32; 3],
+        dir: [f32; 3],
+    ) -> Option<(protocol::WindowId, f64, f64)> {
         let mut best: Option<(f32, protocol::WindowId, f64, f64)> = None;
         for quad in &self.quads {
             let (sin, cos) = quad.yaw.sin_cos();
@@ -422,6 +432,12 @@ fn multiply(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
 thread_local! {
     /// The one live scene; tied to the mounted #xr-canvas.
     static SCENE: std::cell::RefCell<Option<Scene>> = const { std::cell::RefCell::new(None) };
+    /// While an immersive session runs it owns the GL context; the preview
+    /// loop must not draw over its frames.
+    static XR_ACTIVE: Cell<bool> = const { Cell::new(false) };
+    /// What the controller ray currently points at, so select events know
+    /// their target without re-deriving the pose.
+    static XR_HIT: Cell<Option<(protocol::WindowId, f64, f64)>> = const { Cell::new(None) };
 }
 
 /// Create the scene on this canvas unless one exists; true when usable.
@@ -449,7 +465,9 @@ pub fn render_frame(
     SCENE.with(|cell| {
         if let Some(scene) = &mut *cell.borrow_mut() {
             scene.layout(windows, popups);
-            scene.render_preview(width, height);
+            if !XR_ACTIVE.get() {
+                scene.render_preview(width, height);
+            }
         }
     });
 }
@@ -482,15 +500,16 @@ pub fn xr_available() -> bool {
 /// Start an immersive-vr session driving the shared scene. Everything goes
 /// through dynamic JS: web-sys keeps WebXR behind unstable cfg, and none of
 /// this is reachable without a headset anyway. Failures log and give up.
-pub fn enter_xr() {
+pub fn enter_xr(session_handle: Coroutine<protocol::ClientToHost>) {
     wasm_bindgen_futures::spawn_local(async move {
-        if let Err(error) = try_enter_xr().await {
+        if let Err(error) = try_enter_xr(session_handle).await {
+            XR_ACTIVE.set(false);
             tracing::warn!(?error, "entering XR failed");
         }
     });
 }
 
-async fn try_enter_xr() -> Result<(), JsValue> {
+async fn try_enter_xr(session_handle: Coroutine<protocol::ClientToHost>) -> Result<(), JsValue> {
     use js_sys::{Array, Function, Object, Reflect};
     use wasm_bindgen_futures::JsFuture;
 
@@ -532,13 +551,77 @@ async fn try_enter_xr() -> Result<(), JsValue> {
         }
     };
 
-    xr_frame_loop(&session, layer, space);
+    XR_ACTIVE.set(true);
+    install_session_listeners(&session, session_handle)?;
+    xr_frame_loop(&session, layer, space, session_handle);
+    Ok(())
+}
+
+/// End hands the context back to the preview; select is the controller
+/// trigger, clicking whatever the ray last pointed at.
+fn install_session_listeners(
+    session: &JsValue,
+    session_handle: Coroutine<protocol::ClientToHost>,
+) -> Result<(), JsValue> {
+    use js_sys::{Function, Reflect};
+    use wasm_bindgen::closure::Closure;
+
+    let add: Function = Reflect::get(session, &"addEventListener".into())?.dyn_into()?;
+
+    let on_end = Closure::<dyn FnMut(JsValue)>::new(move |_event: JsValue| {
+        XR_ACTIVE.set(false);
+        XR_HIT.set(None);
+    });
+    add.call2(session, &"end".into(), on_end.as_ref().unchecked_ref())?;
+    on_end.forget();
+
+    let press = session_handle;
+    let on_select_start = Closure::<dyn FnMut(JsValue)>::new(move |_event: JsValue| {
+        if let Some((id, x, y)) = XR_HIT.get() {
+            press.send(protocol::ClientToHost::Focus { id: Some(id) });
+            press.send(protocol::ClientToHost::PointerMotion { id, x, y });
+            press.send(protocol::ClientToHost::PointerButton {
+                id,
+                button: 0x110,
+                pressed: true,
+            });
+        }
+    });
+    add.call2(
+        session,
+        &"selectstart".into(),
+        on_select_start.as_ref().unchecked_ref(),
+    )?;
+    on_select_start.forget();
+
+    let release = session_handle;
+    let on_select_end = Closure::<dyn FnMut(JsValue)>::new(move |_event: JsValue| {
+        if let Some((id, _, _)) = XR_HIT.get() {
+            release.send(protocol::ClientToHost::PointerButton {
+                id,
+                button: 0x110,
+                pressed: false,
+            });
+        }
+    });
+    add.call2(
+        session,
+        &"selectend".into(),
+        on_select_end.as_ref().unchecked_ref(),
+    )?;
+    on_select_end.forget();
+
     Ok(())
 }
 
 /// Self-rescheduling XR frame callback: one draw per view, matrices straight
 /// from the pose.
-fn xr_frame_loop(session: &JsValue, layer: JsValue, space: JsValue) {
+fn xr_frame_loop(
+    session: &JsValue,
+    layer: JsValue,
+    space: JsValue,
+    session_handle: Coroutine<protocol::ClientToHost>,
+) {
     use js_sys::{Function, Reflect};
     use wasm_bindgen::closure::Closure;
 
@@ -561,6 +644,13 @@ fn xr_frame_loop(session: &JsValue, layer: JsValue, space: JsValue) {
                     return Ok(());
                 };
                 scene.upload_textures();
+                // The session presents from the layer's framebuffer, not the
+                // canvas default; a null framebuffer means it shares default.
+                let framebuffer = Reflect::get(&layer, &"framebuffer".into())?;
+                scene.gl.bind_framebuffer(
+                    Gl::FRAMEBUFFER,
+                    framebuffer.dyn_ref::<web_sys::WebGlFramebuffer>(),
+                );
                 scene.gl.clear(Gl::COLOR_BUFFER_BIT | Gl::DEPTH_BUFFER_BIT);
 
                 let views: js_sys::Array = Reflect::get(&pose, &"views".into())?.dyn_into()?;
@@ -594,6 +684,41 @@ fn xr_frame_loop(session: &JsValue, layer: JsValue, space: JsValue) {
                             number(&viewport, "height") as i32,
                         )),
                     );
+                }
+
+                // The first controller with a pose steers the pointer; its
+                // ray is the -Z axis of the target-ray transform.
+                let previous = XR_HIT.get();
+                XR_HIT.set(None);
+                if let Ok(sources) = Reflect::get(&session_for_loop, &"inputSources".into()) {
+                    let sources = js_sys::Array::from(&sources);
+                    if let Some(source) = sources.iter().next() {
+                        let ray_space = Reflect::get(&source, &"targetRaySpace".into())?;
+                        let get_pose: Function =
+                            Reflect::get(&frame, &"getPose".into())?.dyn_into()?;
+                        let pose = get_pose.call2(&frame, &ray_space, &space)?;
+                        if !pose.is_undefined() && !pose.is_null() {
+                            let transform = Reflect::get(&pose, &"transform".into())?;
+                            let matrix: js_sys::Float32Array =
+                                Reflect::get(&transform, &"matrix".into())?.dyn_into()?;
+                            let mut m = [0.0_f32; 16];
+                            matrix.copy_to(&mut m);
+                            let hit = scene.pick_ray([m[12], m[13], m[14]], [-m[8], -m[9], -m[10]]);
+                            XR_HIT.set(hit);
+                            if let Some((id, x, y)) = hit {
+                                let moved = previous.is_none_or(|(pid, px, py)| {
+                                    pid != id || (px - x).abs() >= 1.0 || (py - y).abs() >= 1.0
+                                });
+                                if moved {
+                                    session_handle.send(protocol::ClientToHost::PointerMotion {
+                                        id,
+                                        x,
+                                        y,
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
                 Ok(())
             })
