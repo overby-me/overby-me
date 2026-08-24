@@ -47,9 +47,31 @@ struct WindowInfo {
     app_id: String,
     x: i32,
     y: i32,
+    z: i32,
+    width: u32,
+    height: u32,
 }
 
 type Windows = BTreeMap<protocol::WindowId, WindowInfo>;
+
+/// A drag in progress, anchored to where the pointer grabbed.
+#[derive(Clone, Copy, PartialEq)]
+enum DragOp {
+    Move {
+        id: protocol::WindowId,
+        start_x: i32,
+        start_y: i32,
+        from_x: f64,
+        from_y: f64,
+    },
+    Resize {
+        id: protocol::WindowId,
+        start_w: u32,
+        start_h: u32,
+        from_x: f64,
+        from_y: f64,
+    },
+}
 
 fn main() {
     dioxus::launch(App);
@@ -58,8 +80,9 @@ fn main() {
 #[component]
 fn App() -> Element {
     let link = use_signal(|| Link::Connecting);
-    let windows = use_signal(Windows::new);
+    let mut windows = use_signal(Windows::new);
     let focused: Signal<Option<protocol::WindowId>> = use_signal(|| None);
+    let mut drag: Signal<Option<DragOp>> = use_signal(|| None);
 
     let session = use_coroutine(move |rx| session_loop(rx, link, windows));
     use_hook(move || install_key_listeners(session, focused));
@@ -88,10 +111,43 @@ fn App() -> Element {
         main {
             id: "desk",
             onmousedown: move |_| defocus(session, focused),
+            onmousemove: move |e| {
+                let Some(op) = drag() else { return };
+                let p = e.client_coordinates();
+                match op {
+                    DragOp::Move { id, start_x, start_y, from_x, from_y } => {
+                        if let Some(info) = windows.write().get_mut(&id) {
+                            info.x = start_x + (p.x - from_x) as i32;
+                            info.y = start_y + (p.y - from_y) as i32;
+                        }
+                    }
+                    DragOp::Resize { id, start_w, start_h, from_x, from_y } => {
+                        let width = (f64::from(start_w) + (p.x - from_x)).max(48.0) as u32;
+                        let height = (f64::from(start_h) + (p.y - from_y)).max(48.0) as u32;
+                        session.send(protocol::ClientToHost::Resize {
+                            id,
+                            size: protocol::Size { width, height },
+                        });
+                    }
+                }
+            },
+            onmouseup: move |_| drag.set(None),
             for (id, info) in windows() {
-                WindowView { key: "{id}", id, info, focused }
+                WindowView { key: "{id}", id, info, focused, windows, drag }
             }
         }
+    }
+}
+
+/// Put the window on top of the stack, if it is not already there.
+fn raise(mut windows: Signal<Windows>, id: protocol::WindowId) {
+    let top = windows.read().values().map(|w| w.z).max().unwrap_or(0);
+    let already_top = windows.read().get(&id).map(|w| w.z) == Some(top);
+    if already_top {
+        return;
+    }
+    if let Some(info) = windows.write().get_mut(&id) {
+        info.z = top + 1;
     }
 }
 
@@ -110,9 +166,12 @@ fn WindowView(
     id: protocol::WindowId,
     info: WindowInfo,
     focused: Signal<Option<protocol::WindowId>>,
+    windows: Signal<Windows>,
+    drag: Signal<Option<DragOp>>,
 ) -> Element {
     let session = use_coroutine_handle::<protocol::ClientToHost>();
     let mut focused = focused;
+    let mut drag = drag;
     let label = if info.title.is_empty() {
         info.app_id.clone()
     } else {
@@ -123,18 +182,54 @@ fn WindowView(
     } else {
         "window"
     };
+    let (start_x, start_y) = (info.x, info.y);
+    let (start_w, start_h) = (info.width, info.height);
     rsx! {
         div {
             class: "{class}",
-            style: "left: {info.x}px; top: {info.y}px;",
+            style: "left: {info.x}px; top: {info.y}px; z-index: {info.z};",
             onmousedown: move |e| {
                 e.stop_propagation();
+                raise(windows, id);
                 if *focused.peek() != Some(id) {
                     focused.set(Some(id));
                     session.send(protocol::ClientToHost::Focus { id: Some(id) });
                 }
             },
-            div { class: "titlebar", span { class: "title", "{label}" } }
+            div {
+                class: "titlebar",
+                onmousedown: move |e| {
+                    let p = e.client_coordinates();
+                    drag.set(Some(DragOp::Move {
+                        id,
+                        start_x,
+                        start_y,
+                        from_x: p.x,
+                        from_y: p.y,
+                    }));
+                },
+                span { class: "title", "{label}" }
+                button {
+                    class: "close",
+                    onmousedown: move |e| e.stop_propagation(),
+                    onclick: move |_| session.send(protocol::ClientToHost::Close { id }),
+                    "x"
+                }
+            }
+            div {
+                class: "resize-handle",
+                onmousedown: move |e| {
+                    e.stop_propagation();
+                    let p = e.client_coordinates();
+                    drag.set(Some(DragOp::Resize {
+                        id,
+                        start_w,
+                        start_h,
+                        from_x: p.x,
+                        from_y: p.y,
+                    }));
+                },
+            }
             canvas {
                 class: "surface",
                 id: "win-{id}",
@@ -327,6 +422,7 @@ async fn apply(
         }
         protocol::HostToClient::WindowCreated { id, app_id, title } => {
             let count = i32::try_from(windows.read().len()).unwrap_or(0);
+            let top = windows.read().values().map(|w| w.z).max().unwrap_or(0);
             windows.write().insert(
                 id,
                 WindowInfo {
@@ -334,6 +430,9 @@ async fn apply(
                     app_id,
                     x: 24 + (count % 8) * 48,
                     y: 24 + (count % 8) * 40,
+                    z: top + 1,
+                    width: 0,
+                    height: 0,
                 },
             );
         }
@@ -351,6 +450,14 @@ async fn apply(
             damage,
             pixels,
         } => {
+            let stale = windows
+                .read()
+                .get(&id)
+                .is_some_and(|w| w.width != size.width || w.height != size.height);
+            if stale && let Some(info) = windows.write().get_mut(&id) {
+                info.width = size.width;
+                info.height = size.height;
+            }
             draw_frame(id, size, damage, &pixels).await;
         }
     }

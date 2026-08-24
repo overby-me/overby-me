@@ -34,15 +34,18 @@ use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
 };
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
+use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
+use smithay::wayland::shell::xdg::decoration::{XdgDecorationHandler, XdgDecorationState};
 use smithay::wayland::shell::xdg::{
-    PopupSurface, PositionerState, ToplevelSurface, XdgShellHandler, XdgShellState,
-    XdgToplevelSurfaceData,
+    PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgShellHandler,
+    XdgShellState, XdgToplevelSurfaceData,
 };
 use smithay::wayland::shm::{BufferData, ShmHandler, ShmState, with_buffer_contents};
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::{
     delegate_compositor, delegate_data_device, delegate_output, delegate_seat, delegate_shm,
-    delegate_xdg_shell,
+    delegate_xdg_decoration, delegate_xdg_shell,
 };
 use webxr_compositor_protocol as protocol;
 
@@ -106,6 +109,8 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
     let data_device_state = DataDeviceState::new::<State>(&display_handle);
     // Kept alive by the display; the binding exists to advertise xdg-output.
     let _output_manager_state = OutputManagerState::new_with_xdg_output::<State>(&display_handle);
+    // The browser draws every frame, so decorations are always server-side.
+    let _decoration_state = XdgDecorationState::new::<State>(&display_handle);
 
     let mut seat = seat_state.new_wl_seat(&display_handle, "seat0");
     seat.add_keyboard(XkbConfig::default(), 200, 25)?;
@@ -235,7 +240,7 @@ impl State {
             } => self.pointer_button(button, pressed),
             protocol::ClientToHost::PointerAxis { id: _, dx, dy } => self.pointer_axis(dx, dy),
             protocol::ClientToHost::Close { id } => self.close_window(id),
-            protocol::ClientToHost::Resize { .. } => {}
+            protocol::ClientToHost::Resize { id, size } => self.resize_window(id, size),
         }
     }
 
@@ -252,10 +257,55 @@ impl State {
 
     fn focus_window(&mut self, id: Option<protocol::WindowId>) {
         let surface = id.and_then(|id| self.surface_of(id));
+        // Clients render themselves focused or not from the activated state.
+        for window in &self.windows {
+            let activated = Some(window.id) == id;
+            let changed = window.toplevel.with_pending_state(|state| {
+                if activated {
+                    state.states.set(xdg_toplevel::State::Activated)
+                } else {
+                    state.states.unset(xdg_toplevel::State::Activated)
+                }
+            });
+            if changed {
+                window.toplevel.send_configure();
+            }
+        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
         };
         keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
+    }
+
+    /// Ask the client to lay itself out at the browser-chosen size, clamped
+    /// to the limits the client itself declared.
+    fn resize_window(&mut self, id: protocol::WindowId, size: protocol::Size) {
+        let Some(window) = self.windows.iter().find(|w| w.id == id) else {
+            return;
+        };
+        let (min, max) = with_states(window.toplevel.wl_surface(), |states| {
+            let mut guard = states.cached_state.get::<SurfaceCachedState>();
+            let cached = guard.current();
+            (cached.min_size, cached.max_size)
+        });
+        let mut width = i32::try_from(size.width).unwrap_or(i32::MAX).max(1);
+        let mut height = i32::try_from(size.height).unwrap_or(i32::MAX).max(1);
+        if min.w > 0 {
+            width = width.max(min.w);
+        }
+        if max.w > 0 {
+            width = width.min(max.w);
+        }
+        if min.h > 0 {
+            height = height.max(min.h);
+        }
+        if max.h > 0 {
+            height = height.min(max.h);
+        }
+        window
+            .toplevel
+            .with_pending_state(|state| state.size = Some((width, height).into()));
+        window.toplevel.send_configure();
     }
 
     fn key(&mut self, code: u32, pressed: bool) {
@@ -632,6 +682,33 @@ impl DataDeviceHandler for State {
     }
 }
 
+impl XdgDecorationHandler for State {
+    fn new_decoration(&mut self, toplevel: ToplevelSurface) {
+        self.force_server_side(&toplevel);
+    }
+
+    fn request_mode(&mut self, toplevel: ToplevelSurface, _mode: DecorationMode) {
+        self.force_server_side(&toplevel);
+    }
+
+    fn unset_mode(&mut self, toplevel: ToplevelSurface) {
+        self.force_server_side(&toplevel);
+    }
+}
+
+impl State {
+    /// The browser draws every frame, so client-side decorations are never
+    /// wanted no matter what the client prefers.
+    fn force_server_side(&self, toplevel: &ToplevelSurface) {
+        toplevel.with_pending_state(|state| {
+            state.decoration_mode = Some(DecorationMode::ServerSide);
+        });
+        if initial_configure_sent(toplevel.wl_surface()) {
+            toplevel.send_configure();
+        }
+    }
+}
+
 impl ClientDndGrabHandler for State {}
 impl ServerDndGrabHandler for State {}
 
@@ -640,4 +717,5 @@ delegate_shm!(State);
 delegate_seat!(State);
 delegate_output!(State);
 delegate_xdg_shell!(State);
+delegate_xdg_decoration!(State);
 delegate_data_device!(State);

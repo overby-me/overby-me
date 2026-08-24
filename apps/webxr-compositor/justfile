@@ -44,6 +44,13 @@ input *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-input.nu {{args}}
 
+# Drive drag, focus, raise, resize, close and reload-resync with two
+# clients side by side. Needs `just build` first.
+windows *args:
+    cargo build --manifest-path host/Cargo.toml --example checker
+    cargo build --manifest-path host/Cargo.toml
+    nu test-windows.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings

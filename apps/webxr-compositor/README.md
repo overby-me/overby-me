@@ -35,8 +35,12 @@ proves pixel-exact colours and animation with the bundled `checker` client;
 clicking a window focuses it, canvas events become seat pointer events, and
 a W3C-code-to-evdev keymap feeds the xkb keyboard, so typing into a real
 terminal works (`just input` clicks and types into foot and asserts the
-echo). Roadmap: window management, damage optimization, clipboard and
-cursors, GTK-class apps, GPU clients (Zed), WebXR mode.
+echo). Windows behave like windows: titlebar drag, click to focus and raise
+(with xdg activated state), a close button, a resize handle that becomes an
+xdg configure clamped to the client's min/max, server-side decorations
+forced via zxdg-decoration, and reload resync (`just windows` drives all of
+it with checker and foot side by side). Roadmap: damage optimization,
+clipboard and cursors, GTK-class apps, GPU clients (Zed), WebXR mode.
 
 ## Run
 

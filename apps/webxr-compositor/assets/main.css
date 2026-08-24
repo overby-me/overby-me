@@ -36,6 +36,7 @@ header h1 {
 #desk {
   position: relative;
   height: calc(100vh - 2.6rem);
+  user-select: none;
 }
 
 .window {
@@ -49,13 +50,50 @@ header h1 {
   overflow: hidden;
 }
 
+.window.focused {
+  border-color: #6ee7a0;
+}
+
 .titlebar {
   display: flex;
   align-items: center;
+  gap: 0.6rem;
   padding: 0.3rem 0.7rem;
   background: #26262e;
   font-size: 0.8rem;
   user-select: none;
+  cursor: move;
+}
+
+.titlebar .title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar .close {
+  border: 0;
+  border-radius: 4px;
+  padding: 0 0.45rem;
+  background: #34343e;
+  color: #e6e6ea;
+  font-size: 0.75rem;
+  line-height: 1.3rem;
+  cursor: pointer;
+}
+
+.titlebar .close:hover {
+  background: #c0392b;
+}
+
+.resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
 }
 
 .surface {
