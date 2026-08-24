@@ -1,0 +1,33 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  margin: 0;
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #101014;
+  color: #e6e6ea;
+  font-family: system-ui, sans-serif;
+}
+
+main {
+  text-align: center;
+}
+
+.tagline {
+  margin-top: 0.5rem;
+  color: #9a9aa4;
+}
+
+.status {
+  margin-top: 2rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: #6ee7a0;
+}

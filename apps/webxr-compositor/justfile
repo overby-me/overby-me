@@ -1,0 +1,29 @@
+dx := `which -a dx | grep dioxus | head -1`
+
+# DWARF is not worth its weight in a shipped web bundle.
+release := "--release --debug-symbols false"
+
+# Frontend-only hot reload; use `just run` for the full stack.
+dev:
+    {{dx}} serve
+
+build:
+    {{dx}} build {{release}}
+
+# Build the bundle, then serve it from the native host.
+run: build
+    WEBXR_COMPOSITOR_WEB_ROOT=target/dx/webxr-compositor/release/web/public \
+        cargo run --release --manifest-path host/Cargo.toml
+
+# Both workspaces: the frontend one and the host's own.
+test:
+    cargo test --workspace
+    cargo test --workspace --manifest-path host/Cargo.toml
+
+lint:
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings
+
+clean:
+    {{dx}} clean
+    cargo clean --manifest-path host/Cargo.toml

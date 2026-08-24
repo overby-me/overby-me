@@ -1,0 +1,21 @@
+[package]
+name = "webxr-compositor-host"
+version = "0.1.0"
+edition = "2024"
+description = "Native host of the WebXR compositor: owns the Wayland socket, serves and feeds the browser frontend"
+
+# Its own workspace: smithay and the server stack stay out of the wasm
+# dependency graph of the frontend workspace one level up.
+[workspace]
+
+[[bin]]
+name = "webxr-compositor"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
+tower-http = { version = "0.6", features = ["fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+webxr-compositor-protocol = { path = "../protocol" }

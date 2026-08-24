@@ -1,0 +1,22 @@
+[package]
+name = "webxr-compositor"
+version = "0.1.0"
+edition = "2024"
+description = "Browser frontend of the WebXR Wayland compositor, in Dioxus"
+
+# One workspace over the frontend and the wire protocol; the native host is
+# its own workspace (host/) so smithay never enters the wasm dependency graph.
+[workspace]
+resolver = "3"
+members = ["protocol"]
+
+[dependencies]
+dioxus = { version = "0.7.9", features = ["web"] }
+# Pinned to the devshell's wasm-bindgen-cli: dx runs that binary over this
+# crate's output and the two must agree.
+wasm-bindgen = "=0.2.121"
+webxr-compositor-protocol = { path = "protocol" }
+
+[profile.release]
+opt-level = "z"
+lto = true

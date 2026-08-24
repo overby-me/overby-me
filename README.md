@@ -166,7 +166,8 @@
 | Project | Description |
 |-|-|
 | [Homepage 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/homepage) | Personal website and portfolio |
-| [Randie 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/randie) | Indoor navigation drone firmware and its simulator |
+| [Randie 🦀](https://tangled.org/@overby.me/overby.me/tree/main/apps/randie) | Indoor navigation drone firmware and its simulator |
+| [WebXR Compositor 🦀](https://tangled.org/@overby.me/overby.me/tree/main/apps/webxr-compositor) | Wayland compositor for the browser: run Wayland apps flat or in WebXR |
 | [Wiki 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki) | Political conference and discussion platform |
 
 </details>
