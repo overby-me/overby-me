@@ -80,8 +80,75 @@ const SLICK_RANGE: f64 = 62.0;
 /// In a race, how far apart the two cars may drift before the trailing one is
 /// dragged along. Under a screen width, so neither player is ever off-camera.
 const RACE_SPREAD: f64 = 880.0;
-const FINISH_X: f64 = 15200.0;
-const WORLD_RIGHT: f64 = 16400.0;
+/// Levels in a campaign. Each is generated from the campaign seed and its own
+/// index, so the same seed always replays the same five courses.
+const LEVELS: usize = 5;
+/// Road left beyond the finish for Christiansborg to stand on.
+const RUN_OFF: f64 = 1200.0;
+
+/// A small deterministic generator. A seed must replay the same course on
+/// every machine, so nothing here may reach for the clock or a platform RNG.
+#[derive(Clone)]
+struct Rng(u64);
+
+impl Rng {
+    fn new(seed: u64) -> Self {
+        Rng(seed ^ 0x9E37_79B9_7F4A_7C15)
+    }
+
+    fn next(&mut self) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        self.0 >> 33
+    }
+
+    fn unit(&mut self) -> f64 {
+        (self.next() as f64) / f64::from(1u32 << 31)
+    }
+
+    fn range(&mut self, lo: f64, hi: f64) -> f64 {
+        lo + (hi - lo) * self.unit()
+    }
+
+    fn chance(&mut self, p: f64) -> bool {
+        self.unit() < p
+    }
+
+    /// Index into a slice of `len` items; `len` must not be zero.
+    fn idx(&mut self, len: usize) -> usize {
+        (self.next() as usize) % len
+    }
+}
+
+/// What a level is allowed to contain. Each index adds one kind of trouble, so
+/// the campaign teaches the course rather than dropping everything at once.
+struct Recipe {
+    len: f64,
+    poles: bool,
+    oil: bool,
+    buses: bool,
+    toll: bool,
+    winds: usize,
+    suns: usize,
+    rainbows: usize,
+}
+
+fn recipe(level: usize) -> Recipe {
+    let l = level.min(LEVELS - 1);
+    let lf = l as f64;
+    Recipe {
+        len: 8200.0 + 2100.0 * lf,
+        poles: l >= 1,
+        oil: l >= 2,
+        buses: l >= 3,
+        toll: l >= 3,
+        winds: if l >= 2 { l - 1 } else { 0 },
+        suns: 1 + l / 3,
+        rainbows: 2 + l / 2,
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Tier {
@@ -101,13 +168,36 @@ enum Phase {
 /// race is measured against the other car.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Outcome {
-    Elected(Tier),
+    /// A level cleared with more to come; the campaign carries on.
+    LevelCleared {
+        level: usize,
+        hung: usize,
+        total: usize,
+    },
+    /// The last level cleared, judged on every board of every level.
+    Campaign {
+        tier: Tier,
+        hung: usize,
+        total: usize,
+    },
     Stranded,
     Race {
         /// None is a draw on posters.
         winner: Option<usize>,
         hung: (usize, usize),
     },
+}
+
+/// A share rather than a count, so the thresholds survive a change to the
+/// course length, which the generator changes every level.
+fn tier_of(hung: usize, total: usize) -> Tier {
+    if hung * 100 >= total * 85 {
+        Tier::Landslide
+    } else if hung * 100 >= total * 50 {
+        Tier::Elected
+    } else {
+        Tier::BelowThreshold
+    }
 }
 
 /// One tick's worth of things the UI should react to (toasts, particles),
@@ -314,17 +404,25 @@ struct World {
     phase: Phase,
     outcome: Option<Outcome>,
     time_s: f64,
+    /// Campaign seed and which of its levels this is.
+    seed: u64,
+    level: usize,
+    players: usize,
+    /// Finish line; Christiansborg stands just beyond it.
+    len: f64,
+    /// Posters hung and boards offered in the levels already cleared.
+    banked: (usize, usize),
     cars: Vec<Car>,
     batteries: Vec<Pickup>,
     books: Vec<Pickup>,
     flags: Vec<Pickup>,
     barriers: Vec<Barrier>,
-    toll: Toll,
+    toll: Option<Toll>,
     spots: Vec<Spot>,
     platforms: Vec<Platform>,
     rainbows: Vec<Strip>,
     winds: Vec<Wind>,
-    truck: Truck,
+    truck: Option<Truck>,
     slicks: Vec<Slick>,
     sun: Vec<(f64, f64)>,
 }
@@ -336,179 +434,338 @@ fn spot_in_reach(s: &Spot, car: &Car) -> bool {
     (s.x - car.x).abs() < rh && (s.alt - car.alt).abs() < rv
 }
 
+/// One stretch of course. The generator lays these left to right, each
+/// reporting where the next may start, which is what keeps a random course
+/// spaced rather than piled up.
+#[derive(Clone, Copy)]
+enum Seg {
+    Boards,
+    Barrier,
+    Poles,
+    Deck,
+    Bus,
+    Oil,
+}
+
 impl World {
-    /// The course, left to right, in five stretches that each add one demand:
-    /// suburbs teach the jump, town adds light poles, the city adds platforms
-    /// and the fossil lobby's truck, the harbour adds moving decks and wind,
-    /// and the approach stacks a pole above a deck and gates the bridge.
-    /// Every deck top is under the standing-jump apex so the road can reach it,
-    /// and the one pole above that height sits over a deck to jump from.
-    fn new(players: usize) -> Self {
-        let ground = |x: f64| Pickup {
-            x,
-            alt: 0.0,
-            taken: false,
-        };
-        let up = |(x, alt): (f64, f64)| Pickup {
-            x,
-            alt,
-            taken: false,
-        };
-        let barrier = |x: f64| Barrier {
-            x,
-            lift: 0.0,
-            opening: false,
-            hit_cool: 0.0,
-        };
-        let spot = |(x, alt, kind): (f64, f64, SpotKind)| Spot {
-            x,
-            alt,
-            kind,
-            hung: false,
-        };
-        let fixed = |(x0, x1, top): (f64, f64, f64)| Platform {
-            x0,
-            x1,
-            top,
-            motion: None,
-            offset: 0.0,
-        };
-        let moving = |(x0, x1, top, span, speed, phase): (f64, f64, f64, f64, f64, f64)| {
-            let motion = Motion { span, speed, phase };
-            // Seeded at its t=0 place, or the first tick would teleport the
-            // deck (and anything riding it) by a whole phase offset.
-            let offset = motion.offset_at(0.0);
-            Platform {
-                x0,
-                x1,
-                top,
-                motion: Some(motion),
-                offset,
-            }
-        };
-        let strip = |(x0, x1): (f64, f64)| Strip { x0, x1, cool: 0.0 };
-        let wind = |(x0, x1, force): (f64, f64, f64)| Wind { x0, x1, force };
+    fn blank(level: usize, seed: u64, players: usize, len: f64) -> Self {
         World {
             phase: Phase::Intro,
             outcome: None,
             time_s: 0.0,
+            seed,
+            level,
+            players,
+            len,
+            banked: (0, 0),
             // Two cars start a length apart so neither hides the other.
             cars: (0..players.max(1))
                 .map(|i| Car::new(140.0 + 170.0 * i as f64))
                 .collect(),
-            batteries: [1900.0, 3450.0, 8200.0, 10900.0, 12000.0, 14450.0]
-                .map(ground)
-                .into_iter()
-                .chain(
-                    [
-                        (5050.0, 130.0),
-                        (6750.0, 145.0),
-                        (9700.0, 135.0),
-                        (13250.0, 160.0),
-                    ]
-                    .map(up),
-                )
-                .collect(),
-            books: [2650.0, 7150.0, 11000.0].map(ground).into(),
-            // The last flag has no barrier after it, so it can reach the toll.
-            flags: [3800.0, 9100.0, 11750.0, 14200.0].map(ground).into(),
-            // The first barrier has no flag before it, so it teaches the jump.
-            barriers: [2150.0, 4400.0, 7000.0, 10100.0, 12200.0]
-                .map(barrier)
-                .into(),
-            toll: Toll {
-                x: 14750.0,
-                open: false,
-                hit_cool: 0.0,
-            },
-            spots: [
-                (700.0, 0.0, SpotKind::Board),
-                (1500.0, 0.0, SpotKind::Board),
-                (2900.0, 160.0, SpotKind::Lamp),
-                (3300.0, 0.0, SpotKind::Board),
-                (4900.0, 130.0, SpotKind::Ledge),
-                (5900.0, 0.0, SpotKind::Board),
-                (6550.0, 145.0, SpotKind::Ledge),
-                (7400.0, 165.0, SpotKind::Lamp),
-                (8600.0, 0.0, SpotKind::Board),
-                (9550.0, 135.0, SpotKind::Ledge),
-                // Over the bus route: only reachable while riding it.
-                (8950.0, 140.0, SpotKind::Ledge),
-                (10600.0, 160.0, SpotKind::Lamp),
-                (11450.0, 150.0, SpotKind::Ledge),
-                // Over the delivery van's route.
-                (13850.0, 145.0, SpotKind::Ledge),
-                (12600.0, 0.0, SpotKind::Board),
-                // Out of reach from the road: jump from the deck below it.
-                (13350.0, 285.0, SpotKind::Lamp),
-            ]
-            .map(spot)
-            .into(),
-            platforms: [
-                (4650.0, 5150.0, 130.0),
-                (6350.0, 6800.0, 145.0),
-                (9300.0, 9800.0, 135.0),
-                (11200.0, 11650.0, 150.0),
-                (13100.0, 13520.0, 160.0),
-            ]
-            .map(fixed)
-            .into_iter()
-            .chain(
-                [
-                    (8500.0, 8800.0, 140.0, 620.0, 0.62, 0.0),
-                    (13600.0, 13860.0, 145.0, 480.0, 0.78, 1.7),
-                ]
-                .map(moving),
-            )
-            .collect(),
-            rainbows: [
-                (1150.0, 1400.0),
-                (5350.0, 5600.0),
-                (9950.0, 10050.0),
-                (14000.0, 14400.0),
-            ]
-            .map(strip)
-            .into(),
-            winds: [
-                (3050.0, 3900.0, -1.0),
-                (5900.0, 6900.0, 1.0),
-                (10750.0, 11800.0, -1.0),
-                (13650.0, 14600.0, 1.0),
-            ]
-            .map(wind)
-            .into(),
-            truck: Truck {
-                x: 5850.0,
-                end: 6980.0,
-                rolling: false,
-                woke: false,
-                drop_cd: 0.0,
-            },
+            batteries: Vec::new(),
+            books: Vec::new(),
+            flags: Vec::new(),
+            barriers: Vec::new(),
+            toll: None,
+            spots: Vec::new(),
+            platforms: Vec::new(),
+            rainbows: Vec::new(),
+            winds: Vec::new(),
+            truck: None,
             slicks: Vec::new(),
-            sun: [(5750.0, 6650.0), (12550.0, 13050.0)].into(),
+            sun: Vec::new(),
         }
     }
 
-    fn start(&mut self, players: usize) {
-        *self = World::new(players);
+    /// Build one level: a spine of segments laid left to right, then resources
+    /// and weather laid over it. Deck tops stay under the standing-jump apex
+    /// and no stretch outruns `GROUND_REACH`, so the course is always
+    /// drivable, which the generator tests assert over many seeds.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one table of segment shapes; splitting it would scatter the course's proportions across helpers"
+    )]
+    fn generate(level: usize, seed: u64, players: usize) -> Self {
+        /// Furthest a car may go without passing a battery it can reach from
+        /// the road, so skipping every rooftop still finishes the level.
+        const GROUND_REACH: f64 = 2000.0;
+
+        let r = recipe(level);
+        let mut rng = Rng::new(seed ^ (level as u64).wrapping_mul(0x2545_F491_4F6C_DD1D));
+        let mut w = World::blank(level, seed, players, r.len);
+
+        // The tail is left clear so the bridge (and the flag that waives it)
+        // has room after the last barrier.
+        let walk_end = r.len - if r.toll { 2400.0 } else { 1500.0 };
+        let mut x = 950.0;
+        let mut last_barrier = -9000.0;
+        let (mut buses, mut oils) = (0, 0);
+        while x < walk_end {
+            let mut bag = vec![Seg::Boards, Seg::Boards, Seg::Deck];
+            if x - last_barrier > 1600.0 {
+                bag.push(Seg::Barrier);
+            }
+            if r.poles {
+                bag.push(Seg::Poles);
+            }
+            if r.buses && buses < 2 {
+                bag.push(Seg::Bus);
+            }
+            // Never in the opening stretch: the oil is a complication, not an
+            // introduction.
+            if r.oil && oils < 1 && x > r.len * 0.4 {
+                bag.push(Seg::Oil);
+            }
+            // Once the dice have had most of the course to roll a feature the
+            // recipe promises, place it outright: no seed may hand out a level
+            // indistinguishable from the one before it.
+            let forced = if w.barriers.is_empty() && x > r.len * 0.4 {
+                Some(Seg::Barrier)
+            } else if r.oil && oils == 0 && x > r.len * 0.55 {
+                Some(Seg::Oil)
+            } else if r.buses && buses == 0 && x > r.len * 0.65 {
+                Some(Seg::Bus)
+            } else {
+                None
+            };
+            x = match forced.unwrap_or(bag[rng.idx(bag.len())]) {
+                Seg::Boards => {
+                    let mut c = x;
+                    for _ in 0..=rng.idx(3) {
+                        w.spots.push(Spot {
+                            x: c,
+                            alt: 0.0,
+                            kind: SpotKind::Board,
+                            hung: false,
+                        });
+                        c += rng.range(520.0, 880.0);
+                    }
+                    c + 200.0
+                }
+                Seg::Barrier => {
+                    // A flag before some of them, so free movement is an option
+                    // as well as the jump. Never before the first, which is
+                    // where the jump is learned.
+                    if last_barrier > 0.0 && rng.chance(0.55) {
+                        w.flags.push(Pickup {
+                            x: x + 90.0,
+                            alt: 0.0,
+                            taken: false,
+                        });
+                    }
+                    let bx = x + 340.0;
+                    w.barriers.push(Barrier {
+                        x: bx,
+                        lift: 0.0,
+                        opening: false,
+                        hit_cool: 0.0,
+                    });
+                    last_barrier = bx;
+                    bx + 640.0
+                }
+                Seg::Poles => {
+                    let mut c = x;
+                    for _ in 0..=rng.idx(2) {
+                        w.spots.push(Spot {
+                            x: c,
+                            alt: rng.range(145.0, 175.0),
+                            kind: SpotKind::Lamp,
+                            hung: false,
+                        });
+                        c += rng.range(620.0, 820.0);
+                    }
+                    c + 200.0
+                }
+                Seg::Deck => {
+                    let wide = rng.range(380.0, 540.0);
+                    let top = rng.range(118.0, 162.0);
+                    w.platforms.push(Platform {
+                        x0: x,
+                        x1: x + wide,
+                        top,
+                        motion: None,
+                        offset: 0.0,
+                    });
+                    w.spots.push(Spot {
+                        x: x + wide * 0.5,
+                        alt: top,
+                        kind: SpotKind::Ledge,
+                        hung: false,
+                    });
+                    // Now and then a pole above the deck, out of reach from the
+                    // road: the only way to it is a jump from up there.
+                    if r.poles && rng.chance(0.35) {
+                        w.spots.push(Spot {
+                            x: x + wide * 0.5 + rng.range(-90.0, 90.0),
+                            alt: top + rng.range(115.0, 138.0),
+                            kind: SpotKind::Lamp,
+                            hung: false,
+                        });
+                    }
+                    x + wide + rng.range(420.0, 700.0)
+                }
+                Seg::Bus => {
+                    buses += 1;
+                    let wide = rng.range(260.0, 340.0);
+                    let span = rng.range(420.0, 700.0);
+                    let top = rng.range(125.0, 150.0);
+                    let motion = Motion {
+                        span,
+                        speed: rng.range(0.5, 0.85),
+                        phase: rng.range(0.0, std::f64::consts::TAU),
+                    };
+                    let offset = motion.offset_at(0.0);
+                    w.platforms.push(Platform {
+                        x0: x,
+                        x1: x + wide,
+                        top,
+                        motion: Some(motion),
+                        offset,
+                    });
+                    // Fixed over the middle of the route, so it is only in
+                    // reach while the bus happens to be passing under it.
+                    w.spots.push(Spot {
+                        x: x + wide * 0.5 + span * 0.5,
+                        alt: top,
+                        kind: SpotKind::Ledge,
+                        hung: false,
+                    });
+                    x + wide + span + rng.range(400.0, 650.0)
+                }
+                Seg::Oil => {
+                    oils += 1;
+                    let run = rng.range(900.0, 1500.0);
+                    w.truck = Some(Truck {
+                        x: x + 240.0,
+                        end: x + 240.0 + run,
+                        rolling: false,
+                        woke: false,
+                        drop_cd: 0.0,
+                    });
+                    // Room to stop skidding before whatever comes next.
+                    x + 240.0 + run + 750.0
+                }
+            };
+        }
+
+        if r.toll {
+            let tx = r.len - 950.0;
+            // Placed after every barrier, so the flag meant for the bridge
+            // cannot be spent lifting one on the way to it.
+            w.flags.push(Pickup {
+                x: tx - 700.0,
+                alt: 0.0,
+                taken: false,
+            });
+            w.toll = Some(Toll {
+                x: tx,
+                open: false,
+                hit_cool: 0.0,
+            });
+        }
+
+        let mut bx = 1150.0;
+        let mut last_ground = 0.0;
+        while bx < r.len - 300.0 {
+            let deck = w
+                .platforms
+                .iter()
+                .find(|p| p.motion.is_none() && bx > p.x0 + 40.0 && bx < p.x1 - 40.0);
+            let alt = match deck {
+                Some(p) if bx - last_ground < GROUND_REACH && rng.chance(0.6) => p.top,
+                _ => {
+                    last_ground = bx;
+                    0.0
+                }
+            };
+            w.batteries.push(Pickup {
+                x: bx,
+                alt,
+                taken: false,
+            });
+            bx += rng.range(950.0, 1400.0);
+        }
+
+        let mut kx = rng.range(1800.0, 2600.0);
+        while kx < r.len - 800.0 {
+            w.books.push(Pickup {
+                x: kx,
+                alt: 0.0,
+                taken: false,
+            });
+            kx += rng.range(2800.0, 4200.0);
+        }
+
+        // Weather in bands across the course, starting with a tailwind so the
+        // first one met is a gift rather than a tax.
+        for i in 0..r.winds {
+            let band = (r.len - 2600.0) / r.winds as f64;
+            let x0 = 1500.0 + band * i as f64 + rng.range(0.0, band * 0.3);
+            w.winds.push(Wind {
+                x0,
+                x1: x0 + rng.range(700.0, 1100.0),
+                force: if i % 2 == 0 { 1.0 } else { -1.0 },
+            });
+        }
+        for i in 0..r.suns {
+            let band = (r.len - 2600.0) / r.suns as f64;
+            let a = 1500.0 + band * i as f64 + rng.range(0.0, band * 0.4);
+            w.sun.push((a, a + rng.range(600.0, 1000.0)));
+        }
+
+        let mut placed = 0;
+        for _ in 0..80 {
+            if placed == r.rainbows {
+                break;
+            }
+            let x0 = rng.range(900.0, r.len - 1200.0);
+            let x1 = x0 + rng.range(200.0, 330.0);
+            // A boost into a closed barrier is a crash, not a reward.
+            let clear = !w
+                .barriers
+                .iter()
+                .any(|b| b.x > x0 - 200.0 && b.x < x1 + 900.0)
+                && !w
+                    .rainbows
+                    .iter()
+                    .any(|s| x0 < s.x1 + 400.0 && x1 > s.x0 - 400.0);
+            if clear {
+                w.rainbows.push(Strip { x0, x1, cool: 0.0 });
+                placed += 1;
+            }
+        }
+        w
+    }
+
+    /// A fresh campaign at level one.
+    fn campaign(seed: u64, players: usize) -> Self {
+        let mut w = World::generate(0, seed, players);
+        w.phase = Phase::Playing;
+        w
+    }
+
+    /// Bank this level's boards and generate the next of the same campaign.
+    fn next_level(&mut self) {
+        let banked = (
+            self.banked.0 + self.cars[0].hung,
+            self.banked.1 + self.spots.len(),
+        );
+        *self = World::generate(self.level + 1, self.seed, self.players);
+        self.banked = banked;
+        self.phase = Phase::Playing;
+    }
+
+    /// The same level again, from the same seed, keeping what earlier levels
+    /// earned: a flat battery costs the level, not the campaign.
+    fn retry_level(&mut self) {
+        let banked = self.banked;
+        *self = World::generate(self.level, self.seed, self.players);
+        self.banked = banked;
         self.phase = Phase::Playing;
     }
 
     fn racing(&self) -> bool {
         self.cars.len() > 1
-    }
-
-    /// A share rather than a count, so the thresholds survive a change to the
-    /// course length.
-    fn tier(&self, hung: usize) -> Tier {
-        let total = self.spots.len();
-        if hung * 100 >= total * 85 {
-            Tier::Landslide
-        } else if hung * 100 >= total * 50 {
-            Tier::Elected
-        } else {
-            Tier::BelowThreshold
-        }
     }
 
     /// Highest surface a car at `x` can settle on, and which deck it is, given
@@ -577,25 +834,26 @@ impl World {
             .iter()
             .enumerate()
             .max_by(|a, b| a.1.x.total_cmp(&b.1.x));
-        let Some((who, lead)) = lead else { return };
-        if !self.truck.woke && lead.x > self.truck.x - TRUCK_WAKE {
-            self.truck.woke = true;
-            self.truck.rolling = true;
+        let (Some((who, lead)), Some(truck)) = (lead, self.truck.as_mut()) else {
+            return;
+        };
+        if !truck.woke && lead.x > truck.x - TRUCK_WAKE {
+            truck.woke = true;
+            truck.rolling = true;
             evs.push((who, Ev::TruckBolts));
         }
-        if !self.truck.rolling {
+        if !truck.rolling {
             return;
         }
-        self.truck.x += TRUCK_SPEED * dt;
-        self.truck.drop_cd -= dt;
-        if self.truck.drop_cd <= 0.0 {
-            self.truck.drop_cd = SLICK_EVERY_S;
-            self.slicks.push(Slick {
-                x: self.truck.x - 95.0,
-            });
+        truck.x += TRUCK_SPEED * dt;
+        truck.drop_cd -= dt;
+        if truck.drop_cd <= 0.0 {
+            truck.drop_cd = SLICK_EVERY_S;
+            let drop = truck.x - 95.0;
+            self.slicks.push(Slick { x: drop });
         }
-        if self.truck.x >= self.truck.end {
-            self.truck.rolling = false;
+        if truck.x >= truck.end {
+            truck.rolling = false;
         }
     }
 
@@ -685,7 +943,7 @@ impl World {
         }
 
         let old_x = car.x;
-        car.x = (car.x + car.vx * dt).clamp(CAR_W / 2.0, FINISH_X + 60.0);
+        car.x = (car.x + car.vx * dt).clamp(CAR_W / 2.0, self.len + 60.0);
 
         for b in &mut self.barriers {
             b.hit_cool = (b.hit_cool - dt).max(0.0);
@@ -715,22 +973,24 @@ impl World {
             }
         }
 
-        self.toll.hit_cool = (self.toll.hit_cool - dt).max(0.0);
-        if !self.toll.open && car.x > self.toll.x - 150.0 && old_x <= car.x {
-            if car.flag_held {
-                car.flag_held = false;
-                self.toll.open = true;
-                evs.push((who, Ev::TollWaived));
-            } else if car.battery > TOLL_COST {
-                car.battery -= TOLL_COST;
-                self.toll.open = true;
-                evs.push((who, Ev::TollPaid));
-            } else if car.x > self.toll.x - BARRIER_OVERLAP {
-                car.x = self.toll.x - BARRIER_OVERLAP;
-                car.vx = -120.0;
-                if self.toll.hit_cool <= 0.0 {
-                    self.toll.hit_cool = 1.5;
-                    evs.push((who, Ev::TollBlocked));
+        if let Some(toll) = self.toll.as_mut() {
+            toll.hit_cool = (toll.hit_cool - dt).max(0.0);
+            if !toll.open && car.x > toll.x - 150.0 && old_x <= car.x {
+                if car.flag_held {
+                    car.flag_held = false;
+                    toll.open = true;
+                    evs.push((who, Ev::TollWaived));
+                } else if car.battery > TOLL_COST {
+                    car.battery -= TOLL_COST;
+                    toll.open = true;
+                    evs.push((who, Ev::TollPaid));
+                } else if car.x > toll.x - BARRIER_OVERLAP {
+                    car.x = toll.x - BARRIER_OVERLAP;
+                    car.vx = -120.0;
+                    if toll.hit_cool <= 0.0 {
+                        toll.hit_cool = 1.5;
+                        evs.push((who, Ev::TollBlocked));
+                    }
                 }
             }
         }
@@ -815,7 +1075,7 @@ impl World {
         }
         car.battery = car.battery.clamp(0.0, 100.0);
 
-        if car.x + CAR_W / 2.0 >= FINISH_X {
+        if car.x + CAR_W / 2.0 >= self.len {
             car.finished = true;
             car.vx = 0.0;
         }
@@ -829,6 +1089,7 @@ impl World {
         if !done && !stuck {
             return;
         }
+        let (hung, total) = (self.cars[0].hung, self.spots.len());
         self.outcome = Some(if self.racing() {
             let (a, b) = (self.cars[0].hung, self.cars[1].hung);
             Outcome::Race {
@@ -839,10 +1100,21 @@ impl World {
                 },
                 hung: (a, b),
             }
-        } else if done {
-            Outcome::Elected(self.tier(self.cars[0].hung))
-        } else {
+        } else if !done {
             Outcome::Stranded
+        } else if self.level + 1 < LEVELS {
+            Outcome::LevelCleared {
+                level: self.level,
+                hung,
+                total,
+            }
+        } else {
+            let (hung, total) = (self.banked.0 + hung, self.banked.1 + total);
+            Outcome::Campaign {
+                tier: tier_of(hung, total),
+                hung,
+                total,
+            }
         });
         self.phase = Phase::Over;
         evs.push((0, Ev::Over));
@@ -858,16 +1130,125 @@ mod tests {
     /// height in the course is chosen against.
     const JUMP_APEX: f64 = JUMP_VY * JUMP_VY / (2.0 * GRAVITY);
 
-    fn playing() -> World {
-        let mut w = World::new(1);
-        w.start(1);
+    /// A hand-built course with one of everything at known places. The
+    /// mechanics are tested against this rather than a generated level, so a
+    /// mechanic test cannot start failing because a seed stopped rolling the
+    /// feature it needed. The generator gets its own tests below.
+    fn fixture(players: usize) -> World {
+        let mut w = World::blank(0, 7, players, 12000.0);
+        let ground = |x: f64| Pickup {
+            x,
+            alt: 0.0,
+            taken: false,
+        };
+        w.spots = vec![
+            Spot {
+                x: 700.0,
+                alt: 0.0,
+                kind: SpotKind::Board,
+                hung: false,
+            },
+            Spot {
+                x: 2900.0,
+                alt: 160.0,
+                kind: SpotKind::Lamp,
+                hung: false,
+            },
+            Spot {
+                x: 4900.0,
+                alt: 130.0,
+                kind: SpotKind::Ledge,
+                hung: false,
+            },
+            Spot {
+                x: 8950.0,
+                alt: 140.0,
+                kind: SpotKind::Ledge,
+                hung: false,
+            },
+        ];
+        w.platforms = vec![
+            Platform {
+                x0: 4650.0,
+                x1: 5150.0,
+                top: 130.0,
+                motion: None,
+                offset: 0.0,
+            },
+            {
+                let motion = Motion {
+                    span: 620.0,
+                    speed: 0.62,
+                    phase: 0.0,
+                };
+                let offset = motion.offset_at(0.0);
+                Platform {
+                    x0: 8500.0,
+                    x1: 8800.0,
+                    top: 140.0,
+                    motion: Some(motion),
+                    offset,
+                }
+            },
+        ];
+        w.barriers = [2150.0, 4400.0]
+            .map(|x| Barrier {
+                x,
+                lift: 0.0,
+                opening: false,
+                hit_cool: 0.0,
+            })
+            .into();
+        w.batteries = [1900.0, 3450.0, 6500.0, 8000.0, 9400.0, 10700.0]
+            .map(ground)
+            .into();
+        w.batteries.push(Pickup {
+            x: 5050.0,
+            alt: 130.0,
+            taken: false,
+        });
+        w.books = vec![ground(2650.0)];
+        w.flags = vec![ground(3800.0)];
+        w.rainbows = vec![Strip {
+            x0: 1150.0,
+            x1: 1400.0,
+            cool: 0.0,
+        }];
+        w.winds = vec![
+            Wind {
+                x0: 5900.0,
+                x1: 6900.0,
+                force: 1.0,
+            },
+            Wind {
+                x0: 7100.0,
+                x1: 8100.0,
+                force: -1.0,
+            },
+        ];
+        w.sun = vec![(6000.0, 6900.0)];
+        w.truck = Some(Truck {
+            x: 5850.0,
+            end: 6980.0,
+            rolling: false,
+            woke: false,
+            drop_cd: 0.0,
+        });
+        w.toll = Some(Toll {
+            x: 11050.0,
+            open: false,
+            hit_cool: 0.0,
+        });
+        w.phase = Phase::Playing;
         w
     }
 
+    fn playing() -> World {
+        fixture(1)
+    }
+
     fn racing() -> World {
-        let mut w = World::new(2);
-        w.start(2);
-        w
+        fixture(2)
     }
 
     fn run(w: &mut World, secs: f64, inp: Input) -> Vec<(usize, Ev)> {
@@ -899,6 +1280,14 @@ mod tests {
     /// The car, in a one-player world.
     fn car(w: &World) -> &Car {
         &w.cars[0]
+    }
+
+    fn toll_x(w: &World) -> f64 {
+        w.toll.as_ref().expect("fixture has a bridge").x
+    }
+
+    fn truck_x(w: &World) -> f64 {
+        w.truck.as_ref().expect("fixture has a truck").x
     }
 
     #[test]
@@ -1148,12 +1537,13 @@ mod tests {
     #[test]
     fn the_fossil_truck_bolts_and_oils_the_road() {
         let mut w = playing();
-        w.cars[0].x = w.truck.x - TRUCK_WAKE - 50.0;
+        let parked = truck_x(&w);
+        w.cars[0].x = parked - TRUCK_WAKE - 50.0;
         w.cars[0].vx = MAX_SPEED;
         let evs = run(&mut w, 1.0, right());
         assert!(saw(&evs, Ev::TruckBolts), "it noticed the car behind it");
         assert!(!w.slicks.is_empty(), "dropping oil");
-        assert!(w.truck.x > 5850.0, "and running");
+        assert!(truck_x(&w) > parked, "and running");
     }
 
     #[test]
@@ -1225,7 +1615,7 @@ mod tests {
         for p in &mut w.batteries {
             p.taken = true;
         }
-        w.cars[0].x = w.toll.x - 260.0;
+        w.cars[0].x = toll_x(&w) - 260.0;
         w.cars[0].vx = MAX_SPEED;
         w.cars[0].battery = battery;
         w
@@ -1239,7 +1629,7 @@ mod tests {
         assert!(saw(&evs, Ev::TollWaived));
         assert!(!car(&w).flag_held, "the flag paid for it");
         assert!(car(&w).battery > 80.0 - TOLL_COST, "and the charge did not");
-        assert!(car(&w).x > w.toll.x, "let through");
+        assert!(car(&w).x > toll_x(&w), "let through");
     }
 
     #[test]
@@ -1248,7 +1638,7 @@ mod tests {
         let evs = run(&mut w, 1.0, right());
         assert!(saw(&evs, Ev::TollPaid));
         assert!(car(&w).battery < 80.0 - TOLL_COST, "it was charged");
-        assert!(car(&w).x > w.toll.x, "and let through");
+        assert!(car(&w).x > toll_x(&w), "and let through");
     }
 
     #[test]
@@ -1256,7 +1646,7 @@ mod tests {
         let mut w = at_the_gate(TOLL_COST - 5.0);
         let evs = run(&mut w, 1.0, right());
         assert!(saw(&evs, Ev::TollBlocked));
-        assert!(car(&w).x < w.toll.x, "held at the gate: {}", car(&w).x);
+        assert!(car(&w).x < toll_x(&w), "held at the gate: {}", car(&w).x);
     }
 
     #[test]
@@ -1269,23 +1659,58 @@ mod tests {
         assert_eq!(w.outcome, Some(Outcome::Stranded));
     }
 
+    /// Put the car on the finish line with the gate already open, so only the
+    /// arrival is under test.
+    fn at_the_line(w: &mut World, back: f64) {
+        if let Some(toll) = w.toll.as_mut() {
+            toll.open = true;
+        }
+        let len = w.len;
+        for (i, c) in w.cars.iter_mut().enumerate() {
+            c.x = len - back - 700.0 * i as f64;
+            c.vx = MAX_SPEED;
+        }
+    }
+
     #[test]
-    fn finishing_tiers_follow_the_poster_count() {
-        for (hung, tier) in [
-            (15, Tier::Landslide),
-            (9, Tier::Elected),
-            (3, Tier::BelowThreshold),
+    fn clearing_a_level_offers_the_next_one() {
+        let mut w = playing();
+        w.cars[0].hung = 3;
+        at_the_line(&mut w, 120.0);
+        run(&mut w, 1.0, right());
+        assert_eq!(
+            w.outcome,
+            Some(Outcome::LevelCleared {
+                level: 0,
+                hung: 3,
+                total: w.spots.len()
+            }),
+            "level one of five is not the end of the campaign"
+        );
+    }
+
+    #[test]
+    fn the_last_level_scores_every_level_together() {
+        for (banked, hung, tier) in [
+            ((18, 20), 3, Tier::Landslide),
+            ((10, 20), 2, Tier::Elected),
+            ((2, 20), 1, Tier::BelowThreshold),
         ] {
             let mut w = playing();
+            w.level = LEVELS - 1;
+            w.banked = banked;
             w.cars[0].hung = hung;
-            w.cars[0].x = FINISH_X - 120.0;
-            w.cars[0].vx = MAX_SPEED;
-            w.toll.open = true;
+            at_the_line(&mut w, 120.0);
             run(&mut w, 1.0, right());
+            let total = banked.1 + w.spots.len();
             assert_eq!(
                 w.outcome,
-                Some(Outcome::Elected(tier)),
-                "{hung} posters -> {tier:?}"
+                Some(Outcome::Campaign {
+                    tier,
+                    hung: banked.0 + hung,
+                    total
+                }),
+                "{banked:?} banked + {hung} -> {tier:?}"
             );
         }
     }
@@ -1293,11 +1718,8 @@ mod tests {
     #[test]
     fn a_race_ends_when_the_first_car_arrives_and_posters_decide_it() {
         let mut w = racing();
-        w.toll.open = true;
-        w.cars[0].x = FINISH_X - 200.0;
-        w.cars[0].vx = MAX_SPEED;
+        at_the_line(&mut w, 200.0);
         w.cars[0].hung = 2;
-        w.cars[1].x = FINISH_X - 900.0;
         w.cars[1].hung = 5;
         run(&mut w, 1.5, right());
         assert_eq!(w.phase, Phase::Over, "the arrival ended it");
@@ -1330,14 +1752,13 @@ mod tests {
         assert_eq!(w.cars[0].hung + w.cars[1].hung, 1, "one poster, one board");
     }
 
-    #[test]
-    fn course_is_beatable_on_collected_power() {
-        // Tuning invariant: a full-speed run that jumps the barriers, steers
-        // out of the oil and pays the toll must arrive, not strand.
-        let mut w = playing();
+    /// A competent driver that ignores every poster: flat out, jumping the
+    /// barriers and steering out of the oil. It is the floor a course has to
+    /// clear, since a level nobody can even drive is not a level.
+    fn autopilot(w: &mut World, budget_s: f64) -> bool {
         let barriers: Vec<f64> = w.barriers.iter().map(|b| b.x).collect();
-        for _ in 0..(140.0 / DT) as usize {
-            let c = car(&w);
+        for _ in 0..(budget_s / DT) as usize {
+            let c = car(w);
             let near_barrier = barriers
                 .iter()
                 .any(|&bx| bx - c.x > 0.0 && bx - c.x < 210.0);
@@ -1350,15 +1771,140 @@ mod tests {
             };
             w.tick(DT, &[inp]);
             if w.phase != Phase::Playing {
-                break;
+                return w.cars[0].finished;
             }
         }
+        false
+    }
+
+    #[test]
+    fn the_fixture_course_is_beatable_on_collected_power() {
+        let mut w = playing();
+        assert!(autopilot(&mut w, 140.0), "arrived at x {}", car(&w).x);
+    }
+
+    #[test]
+    fn every_generated_level_can_be_driven_to_the_end() {
+        // The generator's one hard promise. Twelve campaigns across all five
+        // levels, each driven by the autopilot on the charge it can pick up
+        // from the road alone.
+        for seed in 0..12u64 {
+            for level in 0..LEVELS {
+                let mut w = World::generate(level, seed.wrapping_mul(0x9E37_79B9), 1);
+                w.phase = Phase::Playing;
+                let budget = w.len / 200.0 + 40.0;
+                assert!(
+                    autopilot(&mut w, budget),
+                    "seed {seed} level {level} (len {}) stalled at x {} on {}%",
+                    w.len,
+                    car(&w).x,
+                    car(&w).battery.round()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_generated_level_is_reproducible_and_seed_specific() {
+        let shape = |w: &World| {
+            (
+                w.spots.iter().map(|s| s.x as i64).collect::<Vec<_>>(),
+                w.barriers.iter().map(|b| b.x as i64).collect::<Vec<_>>(),
+            )
+        };
         assert_eq!(
-            w.outcome.map(|o| matches!(o, Outcome::Elected(_))),
-            Some(true),
-            "reached the end: {:?} at x {}",
-            w.outcome,
-            car(&w).x
+            shape(&World::generate(2, 99, 1)),
+            shape(&World::generate(2, 99, 1)),
+            "the same seed replays the same course"
+        );
+        assert_ne!(
+            shape(&World::generate(2, 99, 1)),
+            shape(&World::generate(2, 100, 1)),
+            "a different seed is a different course"
+        );
+        assert_ne!(
+            shape(&World::generate(2, 99, 1)),
+            shape(&World::generate(3, 99, 1)),
+            "so is a different level of the same campaign"
+        );
+    }
+
+    #[test]
+    fn generated_levels_grow_and_add_their_features_in_order() {
+        let mut last_len = 0.0;
+        for level in 0..LEVELS {
+            let w = World::generate(level, 4242, 1);
+            assert!(w.len > last_len, "level {level} is longer than the last");
+            last_len = w.len;
+            assert!(!w.spots.is_empty(), "level {level} has boards");
+            assert!(!w.barriers.is_empty(), "level {level} has barriers");
+
+            let has = |k: SpotKind| w.spots.iter().any(|s| s.kind == k);
+            assert_eq!(has(SpotKind::Lamp), level >= 1, "poles from level two");
+            assert_eq!(w.truck.is_some(), level >= 2, "the lorry from level three");
+            assert_eq!(w.toll.is_some(), level >= 3, "the bridge from level four");
+            assert_eq!(
+                w.platforms.iter().any(|p| p.motion.is_some()),
+                level >= 3,
+                "moving decks from level four"
+            );
+        }
+    }
+
+    #[test]
+    fn generated_courses_stay_within_reach() {
+        for seed in 0..24u64 {
+            let level = (seed as usize) % LEVELS;
+            let w = World::generate(level, seed.wrapping_mul(31), 1);
+
+            for p in &w.platforms {
+                assert!(
+                    p.top < JUMP_APEX,
+                    "seed {seed}: a deck at {} is above the jump",
+                    p.top
+                );
+            }
+            // A pole is either reachable from the road, or from a deck under it.
+            for s in w.spots.iter().filter(|s| s.kind == SpotKind::Lamp) {
+                let from_road = s.alt < JUMP_APEX + POSTER_REACH_V;
+                let from_deck = w.platforms.iter().any(|p| {
+                    s.x >= p.x0 - 120.0
+                        && s.x <= p.x1 + 120.0
+                        && s.alt < p.top + JUMP_APEX + POSTER_REACH_V
+                });
+                assert!(from_road || from_deck, "seed {seed}: a pole at {}", s.alt);
+            }
+            // Every ledge over a moving deck must sit inside its travel.
+            for s in w.spots.iter().filter(|s| s.kind == SpotKind::Ledge) {
+                let landed_on = w.platforms.iter().any(|p| {
+                    (p.top - s.alt).abs() < 1.0
+                        && s.x >= p.x0
+                        && s.x <= p.x1 + p.motion.as_ref().map_or(0.0, |m| m.span)
+                });
+                assert!(landed_on, "seed {seed}: a ledge at {} has no deck", s.x);
+            }
+        }
+    }
+
+    #[test]
+    fn a_campaign_banks_each_level_and_a_retry_keeps_it() {
+        let mut w = World::campaign(5, 1);
+        w.cars[0].hung = 4;
+        let first_total = w.spots.len();
+        w.next_level();
+        assert_eq!(w.level, 1, "moved on");
+        assert_eq!(w.banked, (4, first_total), "the cleared level is banked");
+        assert_eq!(car(&w).hung, 0, "the new level starts empty");
+
+        let shape: Vec<i64> = w.spots.iter().map(|s| s.x as i64).collect();
+        w.cars[0].hung = 2;
+        w.retry_level();
+        assert_eq!(w.banked, (4, first_total), "a retry costs only this level");
+        assert_eq!(car(&w).hung, 0);
+        assert_eq!(
+            w.spots.iter().map(|s| s.x as i64).collect::<Vec<_>>(),
+            shape,
+            "and replays the same course"
         );
     }
 }
@@ -1373,15 +1919,13 @@ const CANVAS_ID: &str = "radikal-game-canvas";
 enum UiPhase {
     Intro,
     Playing,
-    /// The result, plus the leading car's posters and the course total, which
-    /// the ending text reads back.
-    Over(Outcome, usize, usize),
+    Over(Outcome),
 }
 
 fn ui_phase(w: &World) -> UiPhase {
     match (w.phase, w.outcome) {
         (Phase::Intro, _) => UiPhase::Intro,
-        (Phase::Over, Some(o)) => UiPhase::Over(o, w.cars[0].hung, w.spots.len()),
+        (Phase::Over, Some(o)) => UiPhase::Over(o),
         _ => UiPhase::Playing,
     }
 }
@@ -1523,8 +2067,8 @@ impl Fx {
                 }
             }
         }
-        if w.truck.rolling {
-            let (x, y) = (w.truck.x + 96.0, BASE_Y - 118.0);
+        if let Some(truck) = w.truck.as_ref().filter(|t| t.rolling) {
+            let (x, y) = (truck.x + 96.0, BASE_Y - 118.0);
             self.parts.push(Particle {
                 x,
                 y,
@@ -1539,13 +2083,19 @@ impl Fx {
         }
         let celebrating = matches!(
             w.outcome,
-            Some(Outcome::Elected(Tier::Landslide | Tier::Elected)) | Some(Outcome::Race { .. })
+            Some(
+                Outcome::Campaign {
+                    tier: Tier::Landslide | Tier::Elected,
+                    ..
+                } | Outcome::LevelCleared { .. }
+                    | Outcome::Race { .. }
+            )
         );
         if w.phase == Phase::Over && celebrating {
             self.firework_s -= dt;
             if self.firework_s <= 0.0 {
                 self.firework_s = 0.5;
-                let x = FINISH_X + 150.0 + self.rand() * 800.0;
+                let x = w.len + 150.0 + self.rand() * 800.0;
                 let y = 60.0 + self.rand() * 180.0;
                 self.burst(x, y, 36, 260.0, &RAINBOW);
             }
@@ -1697,7 +2247,7 @@ fn draw_frame(
     } else {
         (w.cars[0].x, 0.38)
     };
-    let cam = (focus - view_w * lead).clamp(0.0, (WORLD_RIGHT - view_w).max(0.0));
+    let cam = (focus - view_w * lead).clamp(0.0, (w.len + RUN_OFF - view_w).max(0.0));
 
     let _ = ctx.reset_transform();
     let _ = ctx.scale(scale, scale);
@@ -1730,7 +2280,10 @@ fn draw_frame(
 
     // Election-night mood: a grey wash when the result disappoints.
     match w.outcome {
-        Some(Outcome::Elected(Tier::BelowThreshold)) => {
+        Some(Outcome::Campaign {
+            tier: Tier::BelowThreshold,
+            ..
+        }) => {
             ctx.set_fill_style_str("rgba(90, 90, 100, 0.45)");
             ctx.fill_rect(0.0, 0.0, view_w, WORLD_H);
         }
@@ -1780,8 +2333,9 @@ fn draw_parallax(ctx: &web_sys::CanvasRenderingContext2d, spr: &Sprites, cam: f6
 }
 
 /// Where the water starts and stops, around the toll booth that gates it.
-fn bridge_span(w: &World) -> (f64, f64) {
-    (w.toll.x - 230.0, w.toll.x + 250.0)
+/// Empty on a level with no bridge.
+fn bridge_span(w: &World) -> Option<(f64, f64)> {
+    w.toll.as_ref().map(|t| (t.x - 230.0, t.x + 250.0))
 }
 
 fn draw_ground(ctx: &web_sys::CanvasRenderingContext2d, w: &World, cam: f64, view_w: f64) {
@@ -1792,18 +2346,20 @@ fn draw_ground(ctx: &web_sys::CanvasRenderingContext2d, w: &World, cam: f64, vie
 
     // The water the bridge crosses, drawn over the road it replaces. It has to
     // stop short of the finish, or Christiansborg stands in the sea.
-    let (w0, w1) = bridge_span(w);
-    ctx.set_fill_style_str("#4E86B8");
-    ctx.fill_rect(w0 - cam, HORIZON, w1 - w0, WORLD_H - HORIZON);
-    ctx.set_fill_style_str("#6FA3CD");
-    let mut wx = w0 + 40.0;
-    while wx < w1 - 70.0 {
-        ctx.fill_rect(wx - cam, 486.0, 70.0, 5.0);
-        wx += 120.0;
+    let bridge = bridge_span(w);
+    if let Some((w0, w1)) = bridge {
+        ctx.set_fill_style_str("#4E86B8");
+        ctx.fill_rect(w0 - cam, HORIZON, w1 - w0, WORLD_H - HORIZON);
+        ctx.set_fill_style_str("#6FA3CD");
+        let mut wx = w0 + 40.0;
+        while wx < w1 - 70.0 {
+            ctx.fill_rect(wx - cam, 486.0, 70.0, 5.0);
+            wx += 120.0;
+        }
+        ctx.set_fill_style_str("#6E767E");
+        ctx.fill_rect(w0 - cam, ROAD_TOP, w1 - w0, 14.0);
+        ctx.fill_rect(w0 - cam, 502.0, w1 - w0, 9.0);
     }
-    ctx.set_fill_style_str("#6E767E");
-    ctx.fill_rect(w0 - cam, ROAD_TOP, w1 - w0, 14.0);
-    ctx.fill_rect(w0 - cam, 502.0, w1 - w0, 9.0);
 
     ctx.set_fill_style_str("#F4F4F4");
     let dash = 150.0;
@@ -1811,7 +2367,8 @@ fn draw_ground(ctx: &web_sys::CanvasRenderingContext2d, w: &World, cam: f64, vie
     let mut x = first;
     while x < cam + view_w + dash {
         // No lane markings on the bridge deck: it has its own kerb lines.
-        if x < w0 - dash || x > w1 {
+        let on_bridge = bridge.is_some_and(|(w0, w1)| x >= w0 - dash && x <= w1);
+        if !on_bridge {
             ctx.fill_rect(x - cam, 502.0, 62.0, 7.0);
         }
         x += dash;
@@ -1878,7 +2435,7 @@ fn draw_entities(
     blit(
         ctx,
         &spr.christiansborg,
-        FINISH_X + 50.0 - cam,
+        w.len + 50.0 - cam,
         ROAD_TOP - 450.0,
         1060.0,
         450.0,
@@ -1886,7 +2443,7 @@ fn draw_entities(
     blit(
         ctx,
         &spr.flag_dk,
-        FINISH_X - 120.0 - cam,
+        w.len - 120.0 - cam,
         ROAD_TOP - 135.0,
         66.0,
         135.0,
@@ -1894,7 +2451,7 @@ fn draw_entities(
     blit(
         ctx,
         &spr.flag_eu,
-        FINISH_X - 45.0 - cam,
+        w.len - 45.0 - cam,
         ROAD_TOP - 135.0,
         66.0,
         135.0,
@@ -2050,7 +2607,8 @@ fn draw_entities(
 }
 
 fn draw_toll(ctx: &web_sys::CanvasRenderingContext2d, w: &World, cam: f64) {
-    let x = w.toll.x - cam;
+    let Some(toll) = w.toll.as_ref() else { return };
+    let x = toll.x - cam;
     ctx.set_fill_style_str("#EDEDED");
     ctx.fill_rect(x - 96.0, BASE_Y - 128.0, 56.0, 128.0);
     ctx.set_fill_style_str("#8FC4E8");
@@ -2062,7 +2620,7 @@ fn draw_toll(ctx: &web_sys::CanvasRenderingContext2d, w: &World, cam: f64) {
 
     ctx.save();
     let _ = ctx.translate(x - 40.0, BASE_Y - 96.0);
-    let _ = ctx.rotate(if w.toll.open { -1.25 } else { 0.0 });
+    let _ = ctx.rotate(if toll.open { -1.25 } else { 0.0 });
     ctx.set_fill_style_str("#D8D8D8");
     ctx.fill_rect(0.0, 0.0, 150.0, 12.0);
     ctx.set_fill_style_str("#C9463C");
@@ -2073,7 +2631,10 @@ fn draw_toll(ctx: &web_sys::CanvasRenderingContext2d, w: &World, cam: f64) {
 }
 
 fn draw_truck(ctx: &web_sys::CanvasRenderingContext2d, w: &World, cam: f64) {
-    let x = w.truck.x - cam;
+    let Some(truck) = w.truck.as_ref() else {
+        return;
+    };
+    let x = truck.x - cam;
     ctx.set_fill_style_str("#3B3F46");
     ctx.fill_rect(x - 110.0, BASE_Y - 112.0, 150.0, 84.0);
     ctx.set_fill_style_str("#5A6068");
@@ -2220,7 +2781,7 @@ fn draw_hud(
         let label = if w.racing() {
             format!("P{} {}/{}", i + 1, c.hung, total)
         } else {
-            format!("{}/{}", c.hung, total)
+            format!("{}/{}  ·  L{}/{}", c.hung, total, w.level + 1, LEVELS)
         };
         let _ = ctx.fill_text(&label, 58.0, y + 32.0);
 
@@ -2277,20 +2838,40 @@ fn toast_for(ev: Ev) -> Option<String> {
 #[component]
 pub fn GameApp() -> Element {
     let mut phase = use_signal(|| UiPhase::Intro);
-    let world = use_hook(|| Rc::new(RefCell::new(World::new(1))));
+    let world = use_hook(|| Rc::new(RefCell::new(World::generate(0, 1, 1))));
     let held = use_hook(|| Rc::new(RefCell::new(Held::default())));
     let fx = use_hook(|| Rc::new(RefCell::new(Fx::new())));
     let sprites = use_hook(|| Rc::new(Sprites::load()));
     // Read by the input loop, which has no access to the signal's reader.
     let players = use_hook(|| Rc::new(Cell::new(1usize)));
 
+    // A fresh campaign of freshly generated levels: the clock is the only
+    // entropy a wasm page has, and it only has to differ between playthroughs.
     let start = {
         let world = world.clone();
         let fx = fx.clone();
         let players = players.clone();
         move |n: usize| {
             players.set(n);
-            world.borrow_mut().start(n);
+            let seed = js_sys::Date::now() as u64;
+            *world.borrow_mut() = World::campaign(seed, n);
+            *fx.borrow_mut() = Fx::new();
+            phase.set(UiPhase::Playing);
+        }
+    };
+
+    // Carry on inside the campaign already running, rather than reseeding it.
+    let advance = {
+        let world = world.clone();
+        let fx = fx.clone();
+        move |next: bool| {
+            let mut w = world.borrow_mut();
+            if next {
+                w.next_level();
+            } else {
+                w.retry_level();
+            }
+            drop(w);
             *fx.borrow_mut() = Fx::new();
             phase.set(UiPhase::Playing);
         }
@@ -2470,20 +3051,31 @@ pub fn GameApp() -> Element {
                 },
             }
         },
-        UiPhase::Over(outcome, hung, total) => {
-            let (title, body) = outcome_text(outcome, hung, total);
+        UiPhase::Over(outcome) => {
+            let (title, body) = outcome_text(outcome);
+            // What the run offers next depends on where it stopped: another
+            // level, the same one again, or a whole new campaign.
+            let (primary, onward) = match outcome {
+                Outcome::LevelCleared { .. } => (t("game.nextLevel"), Some(true)),
+                Outcome::Stranded => (t("game.retryLevel"), Some(false)),
+                _ => (t("game.again"), None),
+            };
             rsx! {
                 GameOverlay {
                     title,
                     body,
                     extra: None,
-                    button: t("game.again"),
+                    button: primary,
                     on_click: {
                         let mut start = start.clone();
+                        let mut advance = advance.clone();
                         let n = players.get();
-                        move |_| start(n)
+                        move |_| match onward {
+                            Some(next) => advance(next),
+                            None => start(n),
+                        }
                     },
-                    alt_button: Some(t("game.backToOne")),
+                    alt_button: Some(t("game.newCampaign")),
                     on_alt: {
                         let mut start = start.clone();
                         move |_| start(1)
@@ -2523,10 +3115,26 @@ pub fn GameApp() -> Element {
     }
 }
 
-fn outcome_text(outcome: Outcome, hung: usize, total: usize) -> (String, String) {
-    let (n, total) = (hung.to_string(), total.to_string());
+fn outcome_text(outcome: Outcome) -> (String, String) {
     match outcome {
-        Outcome::Elected(tier) => {
+        Outcome::LevelCleared { level, hung, total } => {
+            let (n, total) = (hung.to_string(), total.to_string());
+            let (done, all) = ((level + 1).to_string(), LEVELS.to_string());
+            (
+                t_with("game.levelCleared", &[("level", done.as_str())]),
+                t_with(
+                    "game.levelScore",
+                    &[
+                        ("n", n.as_str()),
+                        ("total", total.as_str()),
+                        ("next", (level + 2).to_string().as_str()),
+                        ("all", all.as_str()),
+                    ],
+                ),
+            )
+        }
+        Outcome::Campaign { tier, hung, total } => {
+            let (n, total) = (hung.to_string(), total.to_string());
             let args = [("n", n.as_str()), ("total", total.as_str())];
             let (title, body) = match tier {
                 Tier::Landslide => ("game.wonTitleLandslide", "game.wonLandslide"),
@@ -2538,11 +3146,7 @@ fn outcome_text(outcome: Outcome, hung: usize, total: usize) -> (String, String)
         Outcome::Stranded => (t("game.lostTitle"), t("game.lost")),
         Outcome::Race { winner, hung } => {
             let (a, b) = (hung.0.to_string(), hung.1.to_string());
-            let args = [
-                ("a", a.as_str()),
-                ("b", b.as_str()),
-                ("total", total.as_str()),
-            ];
+            let args = [("a", a.as_str()), ("b", b.as_str())];
             let title = match winner {
                 Some(0) => t_with("game.raceWon", &[("p", "1")]),
                 Some(_) => t_with("game.raceWon", &[("p", "2")]),

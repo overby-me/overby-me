@@ -704,12 +704,16 @@ const EN_JSON: &str = r#"{
     },
     "game": {
         "title": "Radikal Rally",
-        "intro": "Drive the campaign's electric car across the country to Christiansborg and hang every poster on the way. Some boards are up on city platforms you have to land on, and some are panels up a light pole you can only reach at the top of a jump. Mind the battery: grab green power and sunshine, ride the rainbows, and jump the border barriers, or let an EU flag lift them for you.",
+        "intro": "Five levels of road to Christiansborg, each one built fresh when you start, so no two campaigns drive the same. Hang every poster you can: some boards are up on city platforms you have to land on, some ride past on a bus, and some are panels up a light pole you can only reach at the top of a jump. Mind the battery, and watch for border barriers, the fossil lobby's oil, the wind and the bridge toll.",
         "controls": "One player: drive with ← → or A/D, jump with ↑, W or Space, hang a poster with ↓, S or Enter once the board lights up pink. In a race, player one takes the arrow keys and player two takes A/D to drive, W to jump and S for posters.",
         "start": "Start the campaign",
         "race": "Two-player race",
         "again": "Run again",
-        "backToOne": "One player",
+        "nextLevel": "Next level",
+        "retryLevel": "Try this level again",
+        "newCampaign": "New campaign",
+        "levelCleared": "Level {{level}} cleared!",
+        "levelScore": "{{n}} of {{total}} posters up. On to level {{next}} of {{all}}, on a road you have not driven before.",
         "btnJump": "Jump",
         "btnPoster": "Poster",
         "toastBattery": "Green power! +35%",
@@ -737,7 +741,7 @@ const EN_JSON: &str = r#"{
         "wonElected": "{{n}} of {{total}} posters up. A solid campaign.",
         "wonBelow": "Only {{n}} of {{total}} posters made it. Copenhagen stays grey tonight.",
         "lostTitle": "Out of power",
-        "lost": "The battery ran dry. The green transition takes a charging plan: batteries and sunshine next run."
+        "lost": "The battery ran dry. The green transition takes a charging plan: batteries and sunshine next run. The level starts over; the ones you cleared still count."
     },
     "mime": {
         "group": "Group",
@@ -1364,12 +1368,16 @@ const DA_JSON: &str = r#"{
     },
     "game": {
         "title": "Radikal Rally",
-        "intro": "Kør kampagnens elbil gennem landet til Christiansborg og hæng alle valgplakaterne op undervejs. Nogle tavler står oppe på byens platforme, som du skal lande på, og nogle sidder på en lygtepæl, du kun kan nå på toppen af et hop. Hold øje med batteriet: Saml grøn strøm og solskin, kør på regnbuerne, og hop over grænsebommene, eller lad et EU-flag løfte dem for dig.",
+        "intro": "Fem baner ad vejen til Christiansborg, og hver bane bygges forfra, når du starter, så ingen valgkampe kører ens. Hæng alle de plakater op, du kan: Nogle tavler står oppe på byens platforme, som du skal lande på, nogle kører forbi på en bus, og nogle sidder på en lygtepæl, du kun kan nå på toppen af et hop. Hold øje med batteriet, og pas på grænsebomme, fossillobbyens olie, vinden og brotolden.",
         "controls": "Én spiller: Kør med ← → eller A/D, hop med ↑, W eller mellemrum, og hæng en plakat op med ↓, S eller Enter, når tavlen lyser pink. I et løb har spiller 1 piletasterne, og spiller 2 kører med A/D, hopper med W og hænger plakater op med S.",
         "start": "Start valgkampen",
         "race": "To spillere",
         "again": "Kør igen",
-        "backToOne": "Én spiller",
+        "nextLevel": "Næste bane",
+        "retryLevel": "Prøv banen igen",
+        "newCampaign": "Ny valgkamp",
+        "levelCleared": "Bane {{level}} klaret!",
+        "levelScore": "{{n}} af {{total}} plakater oppe. Videre til bane {{next}} af {{all}} ad en vej, du ikke har kørt før.",
         "btnJump": "Hop",
         "btnPoster": "Plakat",
         "toastBattery": "Grøn strøm! +35 %",
@@ -1397,7 +1405,7 @@ const DA_JSON: &str = r#"{
         "wonElected": "{{n}} af {{total}} plakater oppe. En solid kampagne.",
         "wonBelow": "Kun {{n}} af {{total}} plakater kom op. København er grå i aften.",
         "lostTitle": "Strømmen slap op",
-        "lost": "Batteriet løb tørt. Grøn omstilling kræver en ladeplan: Tag batterier og solskin med på næste tur."
+        "lost": "Batteriet løb tørt. Grøn omstilling kræver en ladeplan: Tag batterier og solskin med på næste tur. Banen starter forfra; de baner, du har klaret, tæller stadig."
     },
     "mime": {
         "group": "Gruppe",
