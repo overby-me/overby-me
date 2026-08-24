@@ -28,7 +28,8 @@ use smithay::utils::{SERIAL_COUNTER, Serial, Transform};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, Damage,
-    SurfaceAttributes, with_states,
+    SubsurfaceCachedState, SurfaceAttributes, get_children, get_parent, is_sync_subsurface,
+    with_states,
 };
 use smithay::input::pointer::{CursorIcon, CursorImageStatus};
 use smithay::reexports::rustix;
@@ -121,6 +122,7 @@ pub struct State {
     /// The single virtual output; its mode tracks the browser viewport.
     output: Output,
     windows: Vec<Window>,
+    subs: Vec<Sub>,
     next_window_id: protocol::WindowId,
     pending_callbacks: Vec<WlCallback>,
     started: Instant,
@@ -162,6 +164,18 @@ struct Popup {
     /// The client asked for an explicit grab: keyboard focus moved here and
     /// returns to the parent chain when the popup goes away.
     grabbed: bool,
+}
+
+/// One wl_subsurface, composited exactly like a popup: an overlay anchored
+/// in its parent's coordinate space, except it can also move.
+struct Sub {
+    id: protocol::WindowId,
+    surface: WlSurface,
+    parent: protocol::WindowId,
+    announced: bool,
+    last_frame: Option<(protocol::Size, Vec<u8>)>,
+    /// Top-left corner in parent coordinates, from the last commit.
+    location: (i32, i32),
 }
 
 /// Per-wayland-client data; smithay keeps surface state here.
@@ -237,6 +251,7 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
         gpu,
         output,
         windows: Vec::new(),
+        subs: Vec::new(),
         next_window_id: 1,
         pending_callbacks: Vec::new(),
         started: Instant::now(),
@@ -385,6 +400,12 @@ impl State {
                     .find(|p| p.id == id)
                     .map(|p| p.popup.wl_surface().clone())
             })
+            .or_else(|| {
+                self.subs
+                    .iter()
+                    .find(|s| s.id == id)
+                    .map(|s| s.surface.clone())
+            })
     }
 
     fn id_of_surface(&self, surface: &WlSurface) -> Option<protocol::WindowId> {
@@ -397,6 +418,12 @@ impl State {
                     .iter()
                     .find(|p| p.popup.wl_surface() == surface)
                     .map(|p| p.id)
+            })
+            .or_else(|| {
+                self.subs
+                    .iter()
+                    .find(|s| &s.surface == surface)
+                    .map(|s| s.id)
             })
     }
 
@@ -735,6 +762,23 @@ impl State {
                 );
             }
         }
+        for sub in self.subs.iter().filter(|s| s.announced) {
+            self.hub.send_to(
+                client,
+                &protocol::HostToClient::PopupCreated {
+                    id: sub.id,
+                    parent: sub.parent,
+                    x: sub.location.0,
+                    y: sub.location.1,
+                },
+            );
+            if let Some((size, pixels)) = &sub.last_frame {
+                self.hub.send_to(
+                    client,
+                    &frame_message(sub.id, *size, full_damage(*size), pixels),
+                );
+            }
+        }
     }
 
     fn fire_frame_callbacks(&mut self) {
@@ -1034,6 +1078,123 @@ impl State {
         }
     }
 
+    /// Every subsurface child of a just-committed surface gets its state
+    /// applied here; nesting recurses.
+    fn sync_children(&mut self, parent: &WlSurface) {
+        let Some(parent_id) = self.id_of_surface(parent) else {
+            return;
+        };
+        for child in get_children(parent) {
+            self.sub_commit(&child, parent_id);
+            self.sync_children(&child);
+        }
+    }
+
+    /// A subsurface commit: like a popup, but it can also move, which is
+    /// re-announced as a PopupCreated with fresh coordinates.
+    fn sub_commit(&mut self, surface: &WlSurface, parent: protocol::WindowId) {
+        let index = match self.subs.iter().position(|s| &s.surface == surface) {
+            Some(index) => index,
+            None => {
+                let id = self.next_window_id;
+                self.next_window_id += 1;
+                tracing::info!(sub = id, parent, "new subsurface");
+                self.subs.push(Sub {
+                    id,
+                    surface: surface.clone(),
+                    parent,
+                    announced: false,
+                    last_frame: None,
+                    location: (0, 0),
+                });
+                self.subs.len() - 1
+            }
+        };
+        let location = with_states(surface, |states| {
+            states
+                .cached_state
+                .get::<SubsurfaceCachedState>()
+                .current()
+                .location
+        });
+        let moved = {
+            let sub = &mut self.subs[index];
+            let next = (location.x, location.y);
+            let moved = sub.announced && sub.location != next;
+            sub.location = next;
+            moved
+        };
+        if moved {
+            let sub = &self.subs[index];
+            self.hub.broadcast(&protocol::HostToClient::PopupCreated {
+                id: sub.id,
+                parent: sub.parent,
+                x: sub.location.0,
+                y: sub.location.1,
+            });
+        }
+
+        let (assignment, callbacks, damage, scale) = take_commit_state(surface);
+        self.pending_callbacks.extend(callbacks);
+        match assignment {
+            Some(BufferAssignment::NewBuffer(buffer)) => {
+                if get_dmabuf(&buffer).is_ok() {
+                    match self.read_gpu(&buffer) {
+                        Ok((size, pixels)) => {
+                            self.publish_sub_frame(index, size, full_damage(size), pixels);
+                        }
+                        Err(error) => {
+                            tracing::warn!(sub = self.subs[index].id, error, "gpu readback");
+                        }
+                    }
+                    buffer.release();
+                    return;
+                }
+                match Self::read_frame(self.subs[index].last_frame.as_ref(), &buffer, &damage, scale)
+                {
+                    Ok((size, rect, pixels)) => self.publish_sub_frame(index, size, rect, pixels),
+                    Err(error) => {
+                        tracing::warn!(sub = self.subs[index].id, error, "unreadable buffer");
+                    }
+                }
+                buffer.release();
+            }
+            Some(BufferAssignment::Removed) => {
+                let sub = &mut self.subs[index];
+                sub.last_frame = None;
+                if sub.announced {
+                    sub.announced = false;
+                    let id = sub.id;
+                    self.hub
+                        .broadcast(&protocol::HostToClient::WindowClosed { id });
+                }
+            }
+            None => {}
+        }
+    }
+
+    fn publish_sub_frame(
+        &mut self,
+        index: usize,
+        size: protocol::Size,
+        rect: protocol::Rect,
+        pixels: Vec<u8>,
+    ) {
+        let sub = &mut self.subs[index];
+        if !sub.announced {
+            sub.announced = true;
+            self.hub.broadcast(&protocol::HostToClient::PopupCreated {
+                id: sub.id,
+                parent: sub.parent,
+                x: sub.location.0,
+                y: sub.location.1,
+            });
+        }
+        self.hub
+            .broadcast(&frame_message(sub.id, size, rect, &pixels));
+        store_frame(&mut self.subs[index].last_frame, size, rect, pixels);
+    }
+
     /// A press on anything that is not a popup breaks the popup grab chain,
     /// like clicking outside a menu does on a desktop.
     fn dismiss_popups(&mut self) {
@@ -1331,12 +1492,33 @@ impl CompositorHandler for State {
             .position(|w| w.toplevel.wl_surface() == surface)
         {
             self.toplevel_commit(index, surface);
+            self.sync_children(surface);
         } else if let Some(index) = self
             .popups
             .iter()
             .position(|p| p.popup.wl_surface() == surface)
         {
             self.popup_commit(index, surface);
+            self.sync_children(surface);
+        } else if !is_sync_subsurface(surface)
+            && let Some(parent) = get_parent(surface)
+            && let Some(parent_id) = self.id_of_surface(&parent)
+        {
+            // A desync subsurface commits on its own clock; sync ones are
+            // walked when their parent commits.
+            self.sub_commit(surface, parent_id);
+            self.sync_children(surface);
+        }
+    }
+
+    fn destroyed(&mut self, surface: &WlSurface) {
+        if let Some(index) = self.subs.iter().position(|s| &s.surface == surface) {
+            let sub = self.subs.remove(index);
+            tracing::info!(sub = sub.id, "subsurface destroyed");
+            if sub.announced {
+                self.hub
+                    .broadcast(&protocol::HostToClient::WindowClosed { id: sub.id });
+            }
         }
     }
 }

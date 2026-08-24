@@ -82,6 +82,13 @@ xr *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-xr.nu {{args}}
 
+# Subsurface content composites as overlays that move and animate.
+# Needs `just build` first.
+subsurface *args:
+    cargo build --manifest-path host/Cargo.toml --example subchecker
+    cargo build --manifest-path host/Cargo.toml
+    nu test-subsurface.nu {{args}}
+
 # The output mode must follow the browser viewport, resizes included.
 # Needs `just build` first.
 output *args:

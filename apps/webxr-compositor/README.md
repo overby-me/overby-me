@@ -66,19 +66,24 @@ moves keyboard focus into the popup, dismissal hands it back down the
 chain to the spawning toplevel, so arrow keys walk the menu and Escape
 closes it (`just gtk` drives gnome-calculator's hamburger menu with the
 mouse and the keyboard, Escape-close, reopen and click-away dismissal).
-Not there yet: wp_viewporter and fractional-scale are deliberately not
-advertised (clients render correctly at scale 1 instead of being lied
-to), subsurfaces are not composited (GTK4 does not need them for normal
-windows), and xdg_activation is absent.
+Subsurfaces composite too: every wl_subsurface in a committed tree is
+walked (sync children on the parent commit, desync ones on their own),
+announced through the same overlay mechanism as popups, and follows
+wl_subsurface.set_position moves; nested trees recurse, and pointer
+events on a subsurface overlay reach the right surface (`just subsurface`
+drives the bundled subchecker: an animated child that jumps between two
+anchor points over a solid parent). Not there yet: wp_viewporter and
+fractional-scale are deliberately not advertised (clients render
+correctly at scale 1 instead of being lied to), subsurface z-order
+(place_above/below) is ignored, and xdg_activation is absent.
 
 Zed runs. With Mesa's software Vulkan (lavapipe presents through wl_shm),
 Zed opens, renders its full UI and accepts mouse and keyboard input in the
 browser (`just zed` boots an isolated stateless Zed, accepts the trust
 dialog and types into the buffer; it wants `zeditor` on PATH and resolves
-the lavapipe ICD from nixpkgs#mesa). Hardware GPU clients are not
-supported: zwp_linux_dmabuf is not advertised, so Vulkan and GL clients
-fall back to software rendering, which is the honest limit of a
-pixel-streaming compositor until host-side readback exists.
+the lavapipe ICD from nixpkgs#mesa). On a machine with a usable render
+node Zed's real Vulkan driver works as well, through the dmabuf readback
+described under Checks.
 
 The 3D mode is live: the hidden flat desk keeps painting the per-window
 canvases, and a raw-WebGL scene draws them as textures on quads along an
@@ -149,6 +154,7 @@ just gtk        # gnome-calculator's popover menu opens and dismisses
 just zed        # Zed (software Vulkan) renders and accepts typing
 just xr         # the 3D scene shows live window content
 just output     # the output mode follows the browser viewport
+just subsurface # a wl_subsurface composites, moves and animates
 ```
 
 `nix build .#webxr-compositor-frontend` and `.#webxr-compositor-app` build
