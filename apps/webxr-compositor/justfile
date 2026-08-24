@@ -31,6 +31,13 @@ wayland *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-wayland.nu {{args}}
 
+# Run the checker client against the host and check its pixels reach and
+# animate on the browser canvas. Needs `just build` first.
+surface *args:
+    cargo build --manifest-path host/Cargo.toml --example checker
+    cargo build --manifest-path host/Cargo.toml
+    nu test-surface.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings

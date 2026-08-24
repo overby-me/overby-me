@@ -21,21 +21,54 @@ const OUTPUT: protocol::Size = protocol::Size {
 
 pub type ClientId = u64;
 
+/// What the compositor loop hears about browsers.
+pub enum HubEvent {
+    /// The client completed the hello exchange and wants the current state.
+    Joined(ClientId),
+    Left(ClientId),
+    Input(ClientId, protocol::ClientToHost),
+}
+
 /// Fan-out point between one compositor and any number of browser sessions:
 /// encoded frames go out to every client, input events come back tagged with
 /// the client that sent them.
 pub struct Hub {
     clients: Mutex<BTreeMap<ClientId, mpsc::UnboundedSender<Bytes>>>,
     next_id: AtomicU64,
-    events: calloop::channel::Sender<(ClientId, protocol::ClientToHost)>,
+    events: calloop::channel::Sender<HubEvent>,
 }
 
 impl Hub {
-    pub fn new(events: calloop::channel::Sender<(ClientId, protocol::ClientToHost)>) -> Self {
+    pub fn new(events: calloop::channel::Sender<HubEvent>) -> Self {
         Self {
             clients: Mutex::new(BTreeMap::new()),
             next_id: AtomicU64::new(1),
             events,
+        }
+    }
+
+    /// Encode once, clone the refcounted bytes per client.
+    pub fn broadcast(&self, msg: &protocol::HostToClient) {
+        let Ok(bytes) = msg.encode() else {
+            tracing::error!("dropped a message postcard could not encode");
+            return;
+        };
+        let bytes = Bytes::from(bytes);
+        let clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
+        for tx in clients.values() {
+            // A closed queue only means that client is gone; session() cleans up.
+            let _ = tx.send(bytes.clone());
+        }
+    }
+
+    pub fn send_to(&self, id: ClientId, msg: &protocol::HostToClient) {
+        let Ok(bytes) = msg.encode() else {
+            tracing::error!("dropped a message postcard could not encode");
+            return;
+        };
+        let clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(tx) = clients.get(&id) {
+            let _ = tx.send(Bytes::from(bytes));
         }
     }
 
@@ -82,6 +115,8 @@ async fn session(hub: Arc<Hub>, socket: WebSocket) {
     };
 
     if greeted {
+        // The compositor answers with the current window set and frames.
+        let _ = hub.events.send(HubEvent::Joined(id));
         loop {
             tokio::select! {
                 queued = rx.recv() => {
@@ -95,7 +130,7 @@ async fn session(hub: Arc<Hub>, socket: WebSocket) {
                         Some(Ok(Message::Binary(bytes))) => {
                             match protocol::ClientToHost::decode(&bytes) {
                                 Ok(event) => {
-                                    let _ = hub.events.send((id, event));
+                                    let _ = hub.events.send(HubEvent::Input(id, event));
                                 }
                                 Err(error) => tracing::warn!(
                                     client = id, %error, "undecodable message"
@@ -112,6 +147,7 @@ async fn session(hub: Arc<Hub>, socket: WebSocket) {
                 }
             }
         }
+        let _ = hub.events.send(HubEvent::Left(id));
     }
 
     hub.unregister(id);

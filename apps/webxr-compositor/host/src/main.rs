@@ -33,9 +33,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (events_tx, events_rx) = calloop::channel::channel();
     let hub = Arc::new(Hub::new(events_tx));
 
+    let comp_hub = Arc::clone(&hub);
     std::thread::Builder::new()
         .name("wayland".into())
-        .spawn(move || comp::run(events_rx))?;
+        .spawn(move || comp::run(comp_hub, events_rx))?;
 
     tokio::runtime::Runtime::new()?.block_on(serve_http(hub))
 }

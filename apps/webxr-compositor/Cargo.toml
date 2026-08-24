@@ -18,7 +18,15 @@ gloo-timers = { version = "0.3", features = ["futures"] }
 # Pinned to the devshell's wasm-bindgen-cli: dx runs that binary over this
 # crate's output and the two must agree.
 wasm-bindgen = "=0.2.121"
-web-sys = { version = "0.3", features = ["Location", "Window"] }
+web-sys = { version = "0.3", features = [
+  "CanvasRenderingContext2d",
+  "Document",
+  "Element",
+  "HtmlCanvasElement",
+  "ImageData",
+  "Location",
+  "Window",
+] }
 webxr-compositor-protocol = { path = "protocol" }
 
 [profile.release]

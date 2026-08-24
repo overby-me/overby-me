@@ -9,25 +9,55 @@
 
 body {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
   background: #101014;
   color: #e6e6ea;
   font-family: system-ui, sans-serif;
+  overflow: hidden;
 }
 
-main {
-  text-align: center;
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #26262e;
 }
 
-.tagline {
-  margin-top: 0.5rem;
-  color: #9a9aa4;
+header h1 {
+  font-size: 1rem;
 }
 
 .status {
-  margin-top: 2rem;
   font-family: ui-monospace, monospace;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: #6ee7a0;
+}
+
+#desk {
+  position: relative;
+  height: calc(100vh - 2.6rem);
+}
+
+.window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: #1a1a20;
+  border: 1px solid #34343e;
+  border-radius: 8px 8px 4px 4px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
+  overflow: hidden;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  padding: 0.3rem 0.7rem;
+  background: #26262e;
+  font-size: 0.8rem;
+  user-select: none;
+}
+
+.surface {
+  display: block;
 }

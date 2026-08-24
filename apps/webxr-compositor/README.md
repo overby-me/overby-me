@@ -23,14 +23,17 @@ server stack never enter the wasm dependency graph.
 
 ## Status
 
-The host runs a smithay compositor on its own thread with a real Wayland
-socket (`WEBXR_COMPOSITOR_WAYLAND_DISPLAY`, else auto-named) advertising
-wl_compositor, wl_subcompositor, wl_shm, wl_seat, wl_output + xdg-output,
-xdg_wm_base and wl_data_device_manager (`just wayland` proves it with
-wayland-info), and completes the wire-protocol hello with the page over /ws
-(`just browser`). Clients can connect but nothing is drawn yet. Roadmap: shm
-surface pipeline, input, window management, damage optimization, clipboard
-and cursors, GTK-class apps, GPU clients (Zed), WebXR mode.
+Wayland apps draw in the browser. The host runs a smithay compositor on its
+own thread with a real socket (`WEBXR_COMPOSITOR_WAYLAND_DISPLAY`, else
+auto-named) advertising wl_compositor, wl_subcompositor, wl_shm, wl_seat,
+wl_output + xdg-output, xdg_wm_base and wl_data_device_manager
+(`just wayland`). Committed shm buffers are converted to RGBA, broadcast to
+every connected page and painted onto a per-window canvas, with frame
+callbacks acked at 60 Hz and late-joining browsers resynced (`just surface`
+proves pixel-exact colours and animation with the bundled `checker` client;
+`just browser` proves the hello). No input yet. Roadmap: input, window
+management, damage optimization, clipboard and cursors, GTK-class apps, GPU
+clients (Zed), WebXR mode.
 
 ## Run
 

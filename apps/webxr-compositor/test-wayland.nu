@@ -34,6 +34,10 @@ def main []: nothing -> nothing {
         exit 2
     }
 
+    # Reap leftovers of an aborted earlier run; a survivor keeps the port and
+    # the fresh host dies at bind.
+    ^pkill -f $host_bin | complete | ignore
+
     let socket_path = ($env.XDG_RUNTIME_DIR | path join $SOCKET)
     if ($socket_path | path exists) { rm $socket_path }
 
@@ -50,14 +54,16 @@ def main []: nothing -> nothing {
         sleep 250ms
     }
     if not $up {
-        job kill $host
+        try { job kill $host }
+        ^pkill -f $host_bin | complete | ignore
         log-fail "the wayland socket never appeared"
         exit 2
     }
     log-info $"socket at ($socket_path)"
 
     let info = (with-env { WAYLAND_DISPLAY: $SOCKET } { ^wayland-info | complete })
-    job kill $host
+    try { job kill $host }
+    ^pkill -f $host_bin | complete | ignore
 
     if $info.exit_code != 0 {
         log-fail $"wayland-info failed:\n($info.stdout)\n($info.stderr)"
