@@ -75,8 +75,19 @@ dialog and types into the buffer; it wants `zeditor` on PATH and resolves
 the lavapipe ICD from nixpkgs#mesa). Hardware GPU clients are not
 supported: zwp_linux_dmabuf is not advertised, so Vulkan and GL clients
 fall back to software rendering, which is the honest limit of a
-pixel-streaming compositor until host-side readback exists. Roadmap:
-WebXR mode.
+pixel-streaming compositor until host-side readback exists.
+
+The 3D mode is live: the hidden flat desk keeps painting the per-window
+canvases, and a raw-WebGL scene draws them as textures on quads along an
+arc (1000 px to the metre, popups floating in front of their parent).
+The "3D view" button flips into a mouse-look preview where clicking a
+quad routes real pointer input to that window; "enter VR" (shown when
+navigator.xr exists) starts an immersive-vr session over the same scene,
+with per-eye view and projection taken from the XR pose through dynamic
+JS calls. `just xr` proves the pipeline by sampling the checker palette
+off the WebGL canvas and toggling back to the flat desk. Untested for
+lack of hardware: the immersive session itself and controller input,
+which does not exist yet (in-headset pointing needs controller rays).
 
 ## Run
 

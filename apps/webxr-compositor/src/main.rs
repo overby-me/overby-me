@@ -5,6 +5,7 @@
 //! pointer and keyboard input back through the wire protocol.
 
 mod keymap;
+mod xr;
 
 use std::collections::BTreeMap;
 
@@ -96,8 +97,21 @@ fn App() -> Element {
     let mut drag: Signal<Option<DragOp>> = use_signal(|| None);
     let cursor: Signal<String> = use_signal(|| "default".to_owned());
 
+    let mut view3d = use_signal(|| false);
+
     let session = use_coroutine(move |rx| session_loop(rx, link, windows, popups, cursor));
     use_hook(move || install_key_listeners(session, focused));
+
+    // The 3D render loop lives here so it survives XrView mounting and
+    // unmounting; it idles cheaply while the flat view is active.
+    use_future(move || async move {
+        loop {
+            gloo_timers::future::TimeoutFuture::new(33).await;
+            if view3d() {
+                render_3d(&windows, &popups);
+            }
+        }
+    });
 
     let status = match link() {
         Link::Connecting => "connecting to the host...".to_string(),
@@ -119,9 +133,36 @@ fn App() -> Element {
         header {
             h1 { "webxr-compositor" }
             p { class: "status", id: "link-status", "{status}" }
+            button {
+                class: "mode",
+                id: "toggle-3d",
+                onclick: move |_| {
+                    let now = !view3d();
+                    view3d.set(now);
+                    if !now {
+                        xr::drop_scene();
+                    }
+                },
+                if view3d() { "flat view" } else { "3D view" }
+            }
+            if xr::xr_available() {
+                button {
+                    class: "mode",
+                    id: "enter-vr",
+                    onclick: move |_| {
+                        view3d.set(true);
+                        xr::enter_xr();
+                    },
+                    "enter VR"
+                }
+            }
+        }
+        if view3d() {
+            XrView { windows, popups, focused }
         }
         main {
             id: "desk",
+            class: if view3d() { "backstage" } else { "" },
             onmousedown: move |_| defocus(session, focused),
             onmousemove: move |e| {
                 let Some(op) = drag() else { return };
@@ -147,6 +188,137 @@ fn App() -> Element {
             for (id, info) in windows() {
                 WindowView { key: "{id}", id, info, focused, windows, popups, drag, cursor }
             }
+        }
+    }
+}
+
+/// Feed the scene the current window and popup sets and draw one frame.
+fn render_3d(windows: &Signal<Windows>, popups: &Signal<Popups>) {
+    let Some(canvas) = canvas_by_id("xr-canvas") else {
+        return;
+    };
+    if !xr::init(&canvas) {
+        return;
+    }
+    let width = canvas.client_width().unsigned_abs().max(1);
+    let height = canvas.client_height().unsigned_abs().max(1);
+    if canvas.width() != width || canvas.height() != height {
+        canvas.set_width(width);
+        canvas.set_height(height);
+    }
+
+    let window_quads: Vec<(protocol::WindowId, u32, u32)> = windows
+        .peek()
+        .iter()
+        .filter(|(_, info)| info.width > 0)
+        .map(|(id, info)| (*id, info.width, info.height))
+        .collect();
+    let popup_quads: Vec<(protocol::WindowId, protocol::WindowId, i32, i32, u32, u32)> = popups
+        .peek()
+        .iter()
+        .filter_map(|(id, info)| {
+            let canvas = canvas_by_id(&format!("win-{id}"))?;
+            if canvas.width() == 0 {
+                return None;
+            }
+            Some((
+                *id,
+                info.parent,
+                info.x,
+                info.y,
+                canvas.width(),
+                canvas.height(),
+            ))
+        })
+        .collect();
+    xr::render_frame(width, height, &window_quads, &popup_quads);
+}
+
+fn canvas_by_id(id: &str) -> Option<HtmlCanvasElement> {
+    web_sys::window()?
+        .document()?
+        .get_element_by_id(id)?
+        .dyn_into()
+        .ok()
+}
+
+#[component]
+fn XrView(
+    windows: Signal<Windows>,
+    popups: Signal<Popups>,
+    focused: Signal<Option<protocol::WindowId>>,
+) -> Element {
+    let session = use_coroutine_handle::<protocol::ClientToHost>();
+    let mut focused = focused;
+    let mut grabbed: Signal<Option<protocol::WindowId>> = use_signal(|| None);
+    let mut orbiting: Signal<Option<(f64, f64)>> = use_signal(|| None);
+
+    let pick_from = move |x: f64, y: f64| -> Option<(protocol::WindowId, f64, f64)> {
+        let canvas = canvas_by_id("xr-canvas")?;
+        let w = f64::from(canvas.client_width().unsigned_abs().max(1));
+        let h = f64::from(canvas.client_height().unsigned_abs().max(1));
+        let ndc_x = (x / w * 2.0 - 1.0) as f32;
+        let ndc_y = (1.0 - y / h * 2.0) as f32;
+        xr::pick_at(ndc_x, ndc_y, (w / h) as f32)
+    };
+
+    rsx! {
+        canvas {
+            id: "xr-canvas",
+            onmousedown: move |e| {
+                let p = e.data().element_coordinates();
+                if let Some((id, x, y)) = pick_from(p.x, p.y) {
+                    grabbed.set(Some(id));
+                    if *focused.peek() != Some(id) {
+                        focused.set(Some(id));
+                        session.send(protocol::ClientToHost::Focus { id: Some(id) });
+                    }
+                    session.send(protocol::ClientToHost::PointerMotion { id, x, y });
+                    if let Some(button) = wire_button(&e) {
+                        session.send(protocol::ClientToHost::PointerButton {
+                            id,
+                            button,
+                            pressed: true,
+                        });
+                    }
+                } else {
+                    let p = e.client_coordinates();
+                    orbiting.set(Some((p.x, p.y)));
+                }
+            },
+            onmousemove: move |e| {
+                if let Some((from_x, from_y)) = orbiting() {
+                    let p = e.client_coordinates();
+                    xr::orbit((p.x - from_x) as f32, (p.y - from_y) as f32);
+                    orbiting.set(Some((p.x, p.y)));
+                } else {
+                    let p = e.data().element_coordinates();
+                    if let Some((id, x, y)) = pick_from(p.x, p.y) {
+                        session.send(protocol::ClientToHost::PointerMotion { id, x, y });
+                    }
+                }
+            },
+            onmouseup: move |e| {
+                if let Some(id) = grabbed()
+                    && let Some(button) = wire_button(&e)
+                {
+                    session.send(protocol::ClientToHost::PointerButton {
+                        id,
+                        button,
+                        pressed: false,
+                    });
+                }
+                grabbed.set(None);
+                orbiting.set(None);
+            },
+            onwheel: move |e| {
+                e.prevent_default();
+                let p = e.data().element_coordinates();
+                if let Some((id, _, _)) = pick_from(p.x, p.y) {
+                    let (dx, dy) = wheel_delta(&e);
+                    session.send(protocol::ClientToHost::PointerAxis { id, dx, dy });
+                }
+            },
         }
     }
 }

@@ -75,6 +75,13 @@ zed *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-zed.nu {{args}}
 
+# The 3D scene: window textures on the arc, sampled off the WebGL canvas.
+# Needs `just build` first.
+xr *args:
+    cargo build --manifest-path host/Cargo.toml --example checker
+    cargo build --manifest-path host/Cargo.toml
+    nu test-xr.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings

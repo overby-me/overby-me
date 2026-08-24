@@ -113,3 +113,37 @@ header h1 {
   z-index: 100;
   box-shadow: 0 8px 30px rgb(0 0 0 / 0.6);
 }
+
+header .mode {
+  margin-left: auto;
+  border: 1px solid #34343e;
+  border-radius: 6px;
+  padding: 0.15rem 0.7rem;
+  background: #1a1a20;
+  color: #e6e6ea;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+header .mode + .mode {
+  margin-left: 0.5rem;
+}
+
+header .mode:hover {
+  border-color: #6ee7a0;
+}
+
+#xr-canvas {
+  position: fixed;
+  inset: 2.6rem 0 0 0;
+  width: 100%;
+  height: calc(100vh - 2.6rem);
+  z-index: 200;
+  background: #0a0a0f;
+}
+
+/* The flat desk keeps living underneath: its canvases feed the 3D
+   textures, so they must stay rendered, just not visible. */
+#desk.backstage {
+  visibility: hidden;
+}
