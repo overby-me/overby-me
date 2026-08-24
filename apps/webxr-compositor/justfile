@@ -95,6 +95,12 @@ video *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-video.nu {{args}}
 
+# Hardware GL clients through dmabuf readback (skips without a GPU).
+# Needs `just build` first.
+gpu *args:
+    cargo build --manifest-path host/Cargo.toml
+    nu test-gpu.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings

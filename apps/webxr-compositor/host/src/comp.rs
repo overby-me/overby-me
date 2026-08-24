@@ -33,6 +33,9 @@ use smithay::wayland::compositor::{
 use smithay::input::pointer::{CursorIcon, CursorImageStatus};
 use smithay::reexports::rustix;
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
+use smithay::wayland::dmabuf::{
+    DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier, get_dmabuf,
+};
 use smithay::wayland::output::{OutputHandler, OutputManagerState};
 use smithay::wayland::selection::data_device::{
     ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
@@ -55,9 +58,9 @@ use openh264::encoder::{Encoder, EncoderConfig, FrameType};
 use openh264::formats::{RgbaSliceU8, YUVBuffer};
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::{
-    delegate_compositor, delegate_cursor_shape, delegate_data_device, delegate_output,
-    delegate_primary_selection, delegate_seat, delegate_shm, delegate_xdg_decoration,
-    delegate_xdg_shell,
+    delegate_compositor, delegate_cursor_shape, delegate_data_device, delegate_dmabuf,
+    delegate_output, delegate_primary_selection, delegate_seat, delegate_shm,
+    delegate_xdg_decoration, delegate_xdg_shell,
 };
 use webxr_compositor_protocol as protocol;
 
@@ -108,6 +111,8 @@ pub struct State {
     popups: Vec<Popup>,
     /// Browsers that cannot decode H.264; any member keeps video off.
     non_video_clients: std::collections::BTreeSet<crate::session::ClientId>,
+    dmabuf_state: DmabufState,
+    gpu: Option<crate::gpu::Gpu>,
     windows: Vec<Window>,
     next_window_id: protocol::WindowId,
     pending_callbacks: Vec<WlCallback>,
@@ -126,11 +131,10 @@ struct Window {
     app_id: String,
     last_frame: Option<(protocol::Size, Vec<u8>)>,
     video: Option<Video>,
-    large_streak: u32,
     small_streak: u32,
-    /// When the current run of full-surface commits began; video mode wants
-    /// motion that is fast, not merely persistent.
-    streak_started: Option<Instant>,
+    /// Arrival times of the last full-surface commits; video mode wants a
+    /// burst of them inside a second, not merely a long-lived streak.
+    recent_full: std::collections::VecDeque<Instant>,
 }
 
 /// An active H.264 stream for one surface; dropped on idle or resize.
@@ -182,6 +186,22 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
     // Modern clients name their cursor instead of attaching a surface.
     let _cursor_shape_state = CursorShapeManagerState::new::<State>(&display_handle);
 
+    // dmabuf only exists when a render node gives us readback; otherwise
+    // GPU clients quietly fall back to software rendering over shm.
+    let gpu = crate::gpu::Gpu::new();
+    let mut dmabuf_state = DmabufState::new();
+    if let Some(gpu) = &gpu {
+        // v4 with default feedback: without a main device clients cannot
+        // pick a GPU and quietly fall back to software rendering.
+        match DmabufFeedbackBuilder::new(gpu.device_id(), gpu.formats()).build() {
+            Ok(feedback) => {
+                let _dmabuf_global = dmabuf_state
+                    .create_global_with_default_feedback::<State>(&display_handle, &feedback);
+            }
+            Err(error) => tracing::warn!(%error, "no dmabuf feedback; dmabuf stays off"),
+        }
+    }
+
     let mut seat = seat_state.new_wl_seat(&display_handle, "seat0");
     seat.add_keyboard(XkbConfig::default(), 200, 25)?;
     seat.add_pointer();
@@ -203,6 +223,8 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
         clipboard: None,
         popups: Vec::new(),
         non_video_clients: std::collections::BTreeSet::new(),
+        dmabuf_state,
+        gpu,
         windows: Vec::new(),
         next_window_id: 1,
         pending_callbacks: Vec::new(),
@@ -674,6 +696,19 @@ impl State {
 
         match assignment {
             Some(BufferAssignment::NewBuffer(buffer)) => {
+                // GPU clients attach dmabufs; everything else is shm.
+                if get_dmabuf(&buffer).is_ok() {
+                    match self.read_gpu(&buffer) {
+                        Ok((size, pixels)) => {
+                            self.route_frame(index, size, full_damage(size), pixels);
+                        }
+                        Err(error) => {
+                            tracing::warn!(window = self.windows[index].id, error, "gpu readback");
+                        }
+                    }
+                    buffer.release();
+                    return;
+                }
                 // Video mode always reads the full surface: the encoder and
                 // the stored resync frame both need whole pictures.
                 let last = if self.windows[index].video.is_some() {
@@ -691,6 +726,19 @@ impl State {
             }
             Some(BufferAssignment::Removed) | None => {}
         }
+    }
+
+    /// Full-frame RGBA out of a dmabuf via the GLES readback path.
+    fn read_gpu(&mut self, buffer: &WlBuffer) -> Result<(protocol::Size, Vec<u8>), String> {
+        let dmabuf = get_dmabuf(buffer)
+            .map_err(|_| "not a dmabuf".to_owned())?
+            .clone();
+        let gpu = self
+            .gpu
+            .as_mut()
+            .ok_or_else(|| "dmabuf committed without a gpu".to_owned())?;
+        tracing::trace!("dmabuf readback");
+        gpu.read_rgba(&dmabuf)
     }
 
     /// Send this commit down the rect path or the video path, moving the
@@ -717,15 +765,14 @@ impl State {
         let full = rect == full_damage(size);
         let window = &mut self.windows[index];
         if full {
-            if window.large_streak == 0 {
-                window.streak_started = Some(Instant::now());
+            window.recent_full.push_back(Instant::now());
+            if window.recent_full.len() > VIDEO_ENTER_STREAK as usize {
+                window.recent_full.pop_front();
             }
-            window.large_streak += 1;
             window.small_streak = 0;
         } else {
             window.small_streak += 1;
-            window.large_streak = 0;
-            window.streak_started = None;
+            window.recent_full.clear();
         }
         let stale_stream = window
             .video
@@ -743,11 +790,12 @@ impl State {
     fn maybe_enter_video(&mut self, index: usize, size: protocol::Size) {
         let window = &self.windows[index];
         let even = size.width.is_multiple_of(2) && size.height.is_multiple_of(2);
-        let fast = window
-            .streak_started
-            .is_some_and(|start| start.elapsed() < Duration::from_secs(1));
-        if window.large_streak < VIDEO_ENTER_STREAK
-            || !fast
+        let fast = window.recent_full.len() == VIDEO_ENTER_STREAK as usize
+            && window
+                .recent_full
+                .front()
+                .is_some_and(|first| first.elapsed() < Duration::from_secs(1));
+        if !fast
             || !even
             || !self.non_video_clients.is_empty()
             || self.hub.client_count() == 0
@@ -823,6 +871,18 @@ impl State {
 
         match assignment {
             Some(BufferAssignment::NewBuffer(buffer)) => {
+                if get_dmabuf(&buffer).is_ok() {
+                    match self.read_gpu(&buffer) {
+                        Ok((size, pixels)) => {
+                            self.publish_popup_frame(index, size, full_damage(size), pixels);
+                        }
+                        Err(error) => {
+                            tracing::warn!(popup = self.popups[index].id, error, "gpu readback");
+                        }
+                    }
+                    buffer.release();
+                    return;
+                }
                 match Self::read_frame(self.popups[index].last_frame.as_ref(), &buffer, &damage, scale)
                 {
                     Ok((size, rect, pixels)) => self.publish_popup_frame(index, size, rect, pixels),
@@ -1178,7 +1238,11 @@ impl CompositorHandler for State {
 }
 
 impl BufferHandler for State {
-    fn buffer_destroyed(&mut self, _buffer: &WlBuffer) {}
+    fn buffer_destroyed(&mut self, buffer: &WlBuffer) {
+        if let (Ok(dmabuf), Some(gpu)) = (get_dmabuf(buffer), self.gpu.as_mut()) {
+            gpu.forget(dmabuf);
+        }
+    }
 }
 
 impl ShmHandler for State {
@@ -1235,9 +1299,8 @@ impl XdgShellHandler for State {
             app_id: String::new(),
             last_frame: None,
             video: None,
-            large_streak: 0,
             small_streak: 0,
-            streak_started: None,
+            recent_full: std::collections::VecDeque::new(),
         });
     }
 
@@ -1397,6 +1460,29 @@ impl State {
     }
 }
 
+impl DmabufHandler for State {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        &mut self.dmabuf_state
+    }
+
+    fn dmabuf_imported(
+        &mut self,
+        _global: &DmabufGlobal,
+        dmabuf: smithay::backend::allocator::dmabuf::Dmabuf,
+        notifier: ImportNotifier,
+    ) {
+        let works = self
+            .gpu
+            .as_mut()
+            .is_some_and(|gpu| gpu.import_test(&dmabuf));
+        if works {
+            let _ = notifier.successful::<State>();
+        } else {
+            notifier.failed();
+        }
+    }
+}
+
 impl ClientDndGrabHandler for State {}
 impl ServerDndGrabHandler for State {}
 
@@ -1406,6 +1492,7 @@ delegate_seat!(State);
 delegate_output!(State);
 delegate_xdg_shell!(State);
 delegate_xdg_decoration!(State);
+delegate_dmabuf!(State);
 delegate_data_device!(State);
 delegate_primary_selection!(State);
 delegate_cursor_shape!(State);

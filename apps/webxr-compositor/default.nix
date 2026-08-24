@@ -70,6 +70,8 @@ let
     rustPlatform,
     pkg-config,
     libxkbcommon,
+    libgbm,
+    libglvnd,
     ...
   }:
     rustPlatform.buildRustPackage {
@@ -90,8 +92,9 @@ let
       cargoLock.lockFile = ./host/Cargo.lock;
 
       nativeBuildInputs = [pkg-config];
-      # smithay's seat keyboard state is xkbcommon.
-      buildInputs = [libxkbcommon];
+      # smithay: xkbcommon for the seat keyboard, gbm/EGL for dmabuf
+      # readback.
+      buildInputs = [libxkbcommon libgbm libglvnd];
 
       meta.description = "webxr-compositor native host (Wayland socket + HTTP/WebSocket server)";
     };
@@ -111,9 +114,12 @@ in {
       # Browser testing will drive a headless chromium served by deno, like
       # the sibling apps do.
       deno
-      # The host links libxkbcommon through smithay.
+      # The host links libxkbcommon and, for dmabuf readback, gbm through
+      # smithay.
       pkg-config
       libxkbcommon
+      libgbm
+      libglvnd
       # test-wayland.nu asks wayland-info what the host advertises.
       wayland-utils
       # test-input.nu types into a real terminal client.
@@ -138,6 +144,8 @@ in {
     which,
     pkg-config,
     libxkbcommon,
+    libgbm,
+    libglvnd,
     makeBinaryWrapper,
     symlinkJoin,
     ...
@@ -145,7 +153,7 @@ in {
     frontend = mkFrontend {
       inherit lib rustPlatform dioxus-cli wasm-bindgen-cli binaryen lld just which;
     };
-    host = mkHost {inherit lib rustPlatform pkg-config libxkbcommon;};
+    host = mkHost {inherit lib rustPlatform pkg-config libxkbcommon libgbm libglvnd;};
   in
     symlinkJoin {
       name = "webxr-compositor";
@@ -153,7 +161,8 @@ in {
       nativeBuildInputs = [makeBinaryWrapper];
       postBuild = ''
         wrapProgram $out/bin/webxr-compositor \
-          --set-default WEBXR_COMPOSITOR_WEB_ROOT ${frontend}
+          --set-default WEBXR_COMPOSITOR_WEB_ROOT ${frontend} \
+          --prefix LD_LIBRARY_PATH : ${libglvnd}/lib
       '';
       meta.description = "webxr-compositor: Wayland apps in the browser";
     };

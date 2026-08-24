@@ -5,6 +5,7 @@
 //! speaks the wire protocol with them over /ws (session).
 
 mod comp;
+mod gpu;
 mod session;
 
 use std::net::SocketAddr;

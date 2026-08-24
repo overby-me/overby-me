@@ -20,7 +20,10 @@ futures-util = "0.3"
 openh264 = "0.9.8"
 rcgen = "0.14.9"
 smithay = { version = "0.7.0", default-features = false, features = [
-  "wayland_frontend"
+  "backend_egl",
+  "backend_gbm",
+  "renderer_gl",
+  "wayland_frontend",
 ] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
 tower-http = { version = "0.6", features = ["fs"] }
