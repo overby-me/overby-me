@@ -153,3 +153,15 @@ holdout keeps everything on rects, and joiners force the next frame to a
 keyframe. `just video` measures the fast checker at around 600x under raw
 (52 KB wire for 32 MB of frames) with the decoded quadrants still
 palette-correct within codec tolerance.
+
+Hardware GPU clients work: with a usable render node the host advertises
+zwp_linux_dmabuf v4 with default feedback (without the main device in the
+feedback, mesa silently falls back to software), imports committed
+dmabufs through EGL/GLES, blits them into an offscreen target (external
+textures cannot back an FBO directly) and reads RGBA back into the same
+pipeline, caching one imported texture per client buffer since importing
+per frame exhausts GL within seconds. `just gpu` proves es2gears on the
+real GPU end to end, and Zed on the real Vulkan driver commits hardware
+dmabufs the same way. Hosts without a render node or the EGL runtime
+come up unchanged with dmabuf off; the nix wrapper carries libglvnd for
+the runtime.
