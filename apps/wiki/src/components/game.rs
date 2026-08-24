@@ -38,6 +38,9 @@ const JUMP_COST: f64 = 2.0;
 /// Battery drain per second at full speed. Sized so the course cannot be done
 /// on the starting charge alone: refusing to stop for green power loses.
 const DRAIN_FULL_SPEED: f64 = 5.5;
+/// Drain while standing still: without it a poster detour cost nothing, and
+/// the battery only ever measured distance.
+const DRAIN_IDLE: f64 = 0.9;
 const SUN_CHARGE: f64 = 5.0;
 const BATTERY_GAIN: f64 = 35.0;
 const BOOST_SPEED: f64 = 660.0;
@@ -51,8 +54,12 @@ const BARRIER_CLEAR_ALT: f64 = 118.0;
 const BARRIER_OVERLAP: f64 = 71.0;
 const PICKUP_RANGE: f64 = 75.0;
 const POSTER_RANGE: f64 = 110.0;
-const FINISH_X: f64 = 8950.0;
-const WORLD_RIGHT: f64 = 10120.0;
+/// How far above or below the car a poster or pickup can still be reached.
+/// Every height in the course is chosen against these two.
+const POSTER_REACH_V: f64 = 55.0;
+const PICKUP_REACH_V: f64 = 70.0;
+const FINISH_X: f64 = 15200.0;
+const WORLD_RIGHT: f64 = 16400.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Tier {
@@ -94,6 +101,9 @@ struct Input {
 
 struct Pickup {
     x: f64,
+    /// Height above the road. Non-zero puts it on a platform deck, out of
+    /// reach of a car driving underneath.
+    alt: f64,
     taken: bool,
 }
 
@@ -106,9 +116,31 @@ struct Barrier {
     hit_cool: f64,
 }
 
+/// What a poster spot is fixed to. Only the drawing differs; reaching one is
+/// the same rule everywhere (`POSTER_REACH_V` around the car).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SpotKind {
+    Board,
+    /// Panel up a light pole: only in reach near the top of a jump.
+    Lamp,
+    /// On a city platform, so the car has to be parked up there.
+    Ledge,
+}
+
 struct Spot {
     x: f64,
+    alt: f64,
+    kind: SpotKind,
     hung: bool,
+}
+
+/// A city ledge the car can land on. One-way: the car passes up through the
+/// deck and settles on it coming down, so a platform never traps anyone
+/// underneath.
+struct Platform {
+    x0: f64,
+    x1: f64,
+    top: f64,
 }
 
 struct Strip {
@@ -122,9 +154,11 @@ struct World {
     time_s: f64,
     car_x: f64,
     vx: f64,
-    /// Height of the car bottom above the road; 0 means grounded.
+    /// Height of the car bottom above the road; 0 is the road itself.
     alt: f64,
     vy: f64,
+    /// Resting on a surface (road or platform deck), so a jump is available.
+    grounded: bool,
     battery: f64,
     boost_s: f64,
     flag_held: bool,
@@ -133,22 +167,50 @@ struct World {
     flags: Vec<Pickup>,
     barriers: Vec<Barrier>,
     spots: Vec<Spot>,
+    platforms: Vec<Platform>,
     rainbows: Vec<Strip>,
-    sun: (f64, f64),
+    sun: Vec<(f64, f64)>,
     in_sun: bool,
 }
 
+/// Whether a car at (`cx`, `calt`) can hang this spot's poster. Shared with the
+/// renderer so the highlight marks exactly what the action key would take.
+fn spot_in_reach(s: &Spot, cx: f64, calt: f64) -> bool {
+    (s.x - cx).abs() < POSTER_RANGE && (s.alt - calt).abs() < POSTER_REACH_V
+}
+
 impl World {
+    /// The course, left to right, in five stretches that each add one demand:
+    /// suburbs teach the jump, town adds light poles, the city adds platforms,
+    /// the harbour tightens the charge, and the approach stacks a pole above a
+    /// deck. Every platform top is under the standing-jump apex so the road can
+    /// reach it, and the one pole above that height sits over a deck to jump
+    /// from.
     fn new() -> Self {
-        let pickup = |x: f64| Pickup { x, taken: false };
+        let ground = |x: f64| Pickup {
+            x,
+            alt: 0.0,
+            taken: false,
+        };
+        let up = |(x, alt): (f64, f64)| Pickup {
+            x,
+            alt,
+            taken: false,
+        };
         let barrier = |x: f64| Barrier {
             x,
             lift: 0.0,
             opening: false,
             hit_cool: 0.0,
         };
-        let spot = |x: f64| Spot { x, hung: false };
-        let strip = |x0: f64, x1: f64| Strip { x0, x1, cool: 0.0 };
+        let spot = |(x, alt, kind): (f64, f64, SpotKind)| Spot {
+            x,
+            alt,
+            kind,
+            hung: false,
+        };
+        let platform = |(x0, x1, top): (f64, f64, f64)| Platform { x0, x1, top };
+        let strip = |(x0, x1): (f64, f64)| Strip { x0, x1, cool: 0.0 };
         World {
             phase: Phase::Intro,
             time_s: 0.0,
@@ -156,27 +218,66 @@ impl World {
             vx: 0.0,
             alt: 0.0,
             vy: 0.0,
+            grounded: true,
             battery: 100.0,
             boost_s: 0.0,
             flag_held: false,
             hung: 0,
-            // The course, left to right. The first barrier has no flag before
-            // it, so it teaches the jump; the later two can be lifted instead.
-            // One battery sits inside the sun zone to read as a charging hub.
-            batteries: [1900.0, 3450.0, 5050.0, 6250.0, 7650.0, 8500.0]
-                .map(pickup)
+            batteries: [1900.0, 3450.0, 8200.0, 10900.0, 12000.0, 14450.0]
+                .map(ground)
+                .into_iter()
+                .chain(
+                    [
+                        (5050.0, 130.0),
+                        (6750.0, 145.0),
+                        (9700.0, 135.0),
+                        (13250.0, 160.0),
+                    ]
+                    .map(up),
+                )
+                .collect(),
+            flags: [3800.0, 9100.0, 11750.0].map(ground).into(),
+            // The first barrier has no flag before it, so it teaches the jump.
+            barriers: [2150.0, 4400.0, 7000.0, 10100.0, 12200.0]
+                .map(barrier)
                 .into(),
-            flags: [3800.0, 6450.0].map(pickup).into(),
-            barriers: [2150.0, 4400.0, 6900.0].map(barrier).into(),
             spots: [
-                700.0, 1500.0, 2400.0, 3200.0, 3950.0, 4700.0, 5450.0, 6300.0, 7250.0, 8300.0,
+                (700.0, 0.0, SpotKind::Board),
+                (1500.0, 0.0, SpotKind::Board),
+                (2900.0, 160.0, SpotKind::Lamp),
+                (3300.0, 0.0, SpotKind::Board),
+                (4900.0, 130.0, SpotKind::Ledge),
+                (5900.0, 0.0, SpotKind::Board),
+                (6550.0, 145.0, SpotKind::Ledge),
+                (7400.0, 165.0, SpotKind::Lamp),
+                (8600.0, 0.0, SpotKind::Board),
+                (9550.0, 135.0, SpotKind::Ledge),
+                (10600.0, 160.0, SpotKind::Lamp),
+                (11450.0, 150.0, SpotKind::Ledge),
+                (12600.0, 0.0, SpotKind::Board),
+                // Out of reach from the road: jump from the deck below it.
+                (13350.0, 285.0, SpotKind::Lamp),
             ]
             .map(spot)
             .into(),
-            rainbows: [(1150.0, 1400.0), (5150.0, 5400.0), (7800.0, 8050.0)]
-                .map(|(a, b)| strip(a, b))
-                .into(),
-            sun: (5750.0, 6650.0),
+            platforms: [
+                (4650.0, 5150.0, 130.0),
+                (6350.0, 6800.0, 145.0),
+                (9300.0, 9800.0, 135.0),
+                (11200.0, 11650.0, 150.0),
+                (13100.0, 13520.0, 160.0),
+            ]
+            .map(platform)
+            .into(),
+            rainbows: [
+                (1150.0, 1400.0),
+                (5350.0, 5600.0),
+                (8800.0, 9050.0),
+                (14000.0, 14400.0),
+            ]
+            .map(strip)
+            .into(),
+            sun: [(5750.0, 6650.0), (12550.0, 13050.0)].into(),
             in_sun: false,
         }
     }
@@ -186,12 +287,31 @@ impl World {
         self.phase = Phase::Playing;
     }
 
+    /// A share rather than a count, so the thresholds survive a change to the
+    /// course length.
     fn tier(&self) -> Tier {
-        match self.hung {
-            8.. => Tier::Landslide,
-            4.. => Tier::Elected,
-            _ => Tier::BelowThreshold,
+        let total = self.spots.len();
+        if self.hung * 100 >= total * 85 {
+            Tier::Landslide
+        } else if self.hung * 100 >= total * 50 {
+            Tier::Elected
+        } else {
+            Tier::BelowThreshold
         }
+    }
+
+    /// Highest surface the car can settle on at `x`, given where it was before
+    /// this step's fall. A deck only catches a car coming down onto it
+    /// (`alt_prev` at or above the top), which is what lets one be jumped
+    /// through from below.
+    fn support_at(&self, x: f64, alt_prev: f64) -> f64 {
+        let mut best = 0.0;
+        for p in &self.platforms {
+            if x >= p.x0 && x <= p.x1 && p.top > best && alt_prev >= p.top - 1.0 {
+                best = p.top;
+            }
+        }
+        best
     }
 
     fn tick(&mut self, dt: f64, inp: Input) -> Vec<Ev> {
@@ -225,16 +345,19 @@ impl World {
             }
         }
 
-        if inp.jump && self.alt == 0.0 && powered {
+        if inp.jump && self.grounded && powered {
             self.vy = JUMP_VY;
             self.battery -= JUMP_COST;
+            self.grounded = false;
         }
-        if self.alt > 0.0 || self.vy > 0.0 {
-            self.vy -= GRAVITY * dt;
-            self.alt = (self.alt + self.vy * dt).max(0.0);
-            if self.alt == 0.0 {
-                self.vy = 0.0;
-            }
+        let alt_prev = self.alt;
+        self.vy -= GRAVITY * dt;
+        self.alt += self.vy * dt;
+        let support = self.support_at(self.car_x, alt_prev);
+        self.grounded = self.alt <= support;
+        if self.grounded {
+            self.alt = support;
+            self.vy = 0.0;
         }
 
         let old_x = self.car_x;
@@ -268,8 +391,11 @@ impl World {
             }
         }
 
+        let (cx, calt) = (self.car_x, self.alt);
+        let in_reach =
+            |p: &Pickup| (p.x - cx).abs() < PICKUP_RANGE && (p.alt - calt).abs() < PICKUP_REACH_V;
         for p in &mut self.batteries {
-            if !p.taken && (p.x - self.car_x).abs() < PICKUP_RANGE {
+            if !p.taken && in_reach(p) {
                 p.taken = true;
                 self.battery = (self.battery + BATTERY_GAIN).min(100.0);
                 evs.push(Ev::Battery);
@@ -278,7 +404,7 @@ impl World {
         // Holding a flag already, leave the next one standing for later.
         if !self.flag_held {
             for p in &mut self.flags {
-                if !p.taken && (p.x - self.car_x).abs() < PICKUP_RANGE {
+                if !p.taken && in_reach(p) {
                     p.taken = true;
                     self.flag_held = true;
                     evs.push(Ev::Flag);
@@ -289,14 +415,18 @@ impl World {
 
         for s in &mut self.rainbows {
             s.cool = (s.cool - dt).max(0.0);
-            if self.alt == 0.0 && self.car_x >= s.x0 && self.car_x <= s.x1 && s.cool <= 0.0 {
+            // Painted on the road, so a car up on a deck passes over them.
+            if self.alt <= 0.0 && self.car_x >= s.x0 && self.car_x <= s.x1 && s.cool <= 0.0 {
                 s.cool = 3.0;
                 self.boost_s = BOOST_S;
                 evs.push(Ev::Rainbow);
             }
         }
 
-        let inside_sun = self.car_x >= self.sun.0 && self.car_x <= self.sun.1;
+        let inside_sun = self
+            .sun
+            .iter()
+            .any(|&(a, b)| self.car_x >= a && self.car_x <= b);
         if inside_sun {
             self.battery = (self.battery + SUN_CHARGE * dt).min(100.0);
             if !self.in_sun {
@@ -309,12 +439,8 @@ impl World {
             let near = self
                 .spots
                 .iter_mut()
-                .filter(|s| !s.hung && (s.x - self.car_x).abs() < POSTER_RANGE)
-                .min_by(|a, b| {
-                    (a.x - self.car_x)
-                        .abs()
-                        .total_cmp(&(b.x - self.car_x).abs())
-                });
+                .filter(|s| !s.hung && spot_in_reach(s, cx, calt))
+                .min_by(|a, b| (a.x - cx).abs().total_cmp(&(b.x - cx).abs()));
             if let Some(s) = near {
                 s.hung = true;
                 self.hung += 1;
@@ -323,6 +449,7 @@ impl World {
         }
 
         // The boost is the point of the rainbow: distance that costs nothing.
+        self.battery -= DRAIN_IDLE * dt;
         if self.boost_s <= 0.0 {
             self.battery -= DRAIN_FULL_SPEED * (self.vx.abs() / MAX_SPEED) * dt;
         }
@@ -333,7 +460,7 @@ impl World {
             self.phase = Phase::Won(tier);
             self.vx = 0.0;
             evs.push(Ev::Won(tier));
-        } else if self.battery <= 0.0 && self.alt == 0.0 && self.vx.abs() < 8.0 {
+        } else if self.battery <= 0.0 && self.grounded && self.vx.abs() < 8.0 {
             self.phase = Phase::Lost;
             evs.push(Ev::Lost);
         }
@@ -347,7 +474,7 @@ impl World {
 enum UiPhase {
     Intro,
     Playing,
-    Won(Tier, usize),
+    Won(Tier, usize, usize),
     Lost,
 }
 
@@ -355,7 +482,7 @@ fn ui_phase(w: &World) -> UiPhase {
     match w.phase {
         Phase::Intro => UiPhase::Intro,
         Phase::Playing => UiPhase::Playing,
-        Phase::Won(t) => UiPhase::Won(t, w.hung),
+        Phase::Won(t) => UiPhase::Won(t, w.hung, w.spots.len()),
         Phase::Lost => UiPhase::Lost,
     }
 }
@@ -479,7 +606,7 @@ impl Fx {
                 self.firework_s -= dt;
                 if self.firework_s <= 0.0 {
                     self.firework_s = if tier == Tier::Landslide { 0.45 } else { 1.1 };
-                    let x = 9100.0 + self.rand() * 800.0;
+                    let x = FINISH_X + 150.0 + self.rand() * 800.0;
                     let y = 60.0 + self.rand() * 180.0;
                     self.burst(x, y, 36, 260.0, &RAINBOW);
                 }
@@ -504,6 +631,9 @@ mod tests {
     use super::*;
 
     const DT: f64 = 1.0 / 60.0;
+    /// Apex of a standing jump, the ceiling every platform deck and lamp-post
+    /// height in the course is chosen against.
+    const JUMP_APEX: f64 = JUMP_VY * JUMP_VY / (2.0 * GRAVITY);
 
     fn run(w: &mut World, secs: f64, inp: Input) -> Vec<Ev> {
         let mut evs = Vec::new();
@@ -618,6 +748,103 @@ mod tests {
     }
 
     #[test]
+    fn a_jump_lands_the_car_on_a_platform_and_it_falls_off_the_end() {
+        let mut w = playing();
+        let p = (w.platforms[0].x0, w.platforms[0].x1, w.platforms[0].top);
+        w.car_x = p.0 - 120.0;
+        w.vx = 300.0;
+        let jump = Input {
+            right: true,
+            jump: true,
+            ..Default::default()
+        };
+        w.tick(DT, jump);
+        run(&mut w, 0.9, right());
+        assert!(w.grounded, "settled on the deck");
+        assert!((w.alt - p.2).abs() < 1.0, "at deck height: {}", w.alt);
+        assert!(w.car_x > p.0 && w.car_x < p.1, "on the deck: {}", w.car_x);
+
+        run(&mut w, 2.0, right());
+        assert!(w.car_x > p.1, "left the deck: {}", w.car_x);
+        assert_eq!(w.alt, 0.0, "back on the road");
+    }
+
+    #[test]
+    fn the_road_passes_under_a_platform() {
+        let mut w = playing();
+        let p0 = w.platforms[0].x0;
+        w.car_x = p0 - 200.0;
+        w.vx = MAX_SPEED;
+        run(&mut w, 1.5, right());
+        assert!(w.car_x > p0, "drove on: {}", w.car_x);
+        assert_eq!(w.alt, 0.0, "stayed on the road, not lifted onto the deck");
+    }
+
+    #[test]
+    fn a_lamp_post_poster_needs_the_car_in_the_air() {
+        let mut w = playing();
+        let lamp = w
+            .spots
+            .iter()
+            .position(|s| s.kind == SpotKind::Lamp)
+            .expect("course has a lamp post");
+        let (lx, lalt) = (w.spots[lamp].x, w.spots[lamp].alt);
+        assert!(lalt < JUMP_APEX, "reachable from the road: {lalt}");
+        w.car_x = lx;
+        let act = Input {
+            action: true,
+            ..Default::default()
+        };
+        let evs = w.tick(DT, act);
+        assert!(!evs.contains(&Ev::Poster), "out of reach from the ground");
+
+        // Jump under it and hang the poster near the top of the arc.
+        w.tick(
+            DT,
+            Input {
+                jump: true,
+                ..Default::default()
+            },
+        );
+        let mut hung = false;
+        for _ in 0..(1.2 / DT) as usize {
+            let inp = Input {
+                action: (w.alt - lalt).abs() < POSTER_REACH_V,
+                ..Default::default()
+            };
+            hung |= w.tick(DT, inp).contains(&Ev::Poster);
+        }
+        assert!(hung, "hung it from the air");
+    }
+
+    #[test]
+    fn a_rooftop_battery_is_out_of_reach_from_the_road() {
+        let mut w = playing();
+        let high = w
+            .batteries
+            .iter()
+            .position(|p| p.alt > 0.0)
+            .expect("course has a rooftop battery");
+        let (bx, balt) = (w.batteries[high].x, w.batteries[high].alt);
+        w.battery = 40.0;
+        w.car_x = bx;
+        run(&mut w, 0.5, Input::default());
+        assert!(!w.batteries[high].taken, "not scooped up from below");
+
+        w.alt = balt;
+        w.tick(DT, Input::default());
+        assert!(w.batteries[high].taken, "collected from the deck");
+    }
+
+    #[test]
+    fn standing_still_still_drains_the_battery() {
+        let mut w = playing();
+        run(&mut w, 5.0, Input::default());
+        assert!(w.battery < 99.0, "idling costs charge: {}", w.battery);
+        assert!(w.battery > 92.0, "but only slowly: {}", w.battery);
+    }
+
+    #[test]
     fn rainbow_strip_boosts_past_top_speed() {
         let mut w = playing();
         w.car_x = w.rainbows[0].x0 - 60.0;
@@ -634,7 +861,7 @@ mod tests {
     fn sun_zone_recharges_while_inside() {
         let mut w = playing();
         w.battery = 50.0;
-        w.car_x = w.sun.0 + 100.0;
+        w.car_x = w.sun[0].0 + 100.0;
         let evs = run(&mut w, 2.0, Input::default());
         assert!(evs.contains(&Ev::Sun));
         assert!(w.battery > 55.0, "solar charged: {}", w.battery);
@@ -653,9 +880,9 @@ mod tests {
     #[test]
     fn finishing_tiers_follow_the_poster_count() {
         for (hung, tier) in [
-            (9, Tier::Landslide),
-            (5, Tier::Elected),
-            (1, Tier::BelowThreshold),
+            (13, Tier::Landslide),
+            (8, Tier::Elected),
+            (3, Tier::BelowThreshold),
         ] {
             let mut w = playing();
             w.hung = hung;
@@ -679,7 +906,7 @@ mod tests {
                 .any(|&bx| bx - w.car_x > 0.0 && bx - w.car_x < 210.0);
             let inp = Input {
                 right: true,
-                jump: near_barrier && w.alt == 0.0 && w.vx > 380.0,
+                jump: near_barrier && w.grounded && w.vx > 380.0,
                 ..Default::default()
             };
             w.tick(DT, inp);
@@ -837,7 +1064,9 @@ fn draw_frame(
 
     // No parallax factor: the rays mark a world place, not scenery.
     ctx.set_global_alpha(0.85);
-    blit(ctx, &spr.sun, w.sun.0 - 150.0 - cam, 0.0, 1100.0, 660.0);
+    for &(a, b) in &w.sun {
+        blit(ctx, &spr.sun, a - 150.0 - cam, 0.0, b - a + 300.0, 660.0);
+    }
     ctx.set_global_alpha(1.0);
 
     draw_parallax(ctx, spr, cam, view_w);
@@ -932,7 +1161,7 @@ fn draw_entities(
     blit(
         ctx,
         &spr.christiansborg,
-        9000.0 - cam,
+        FINISH_X + 50.0 - cam,
         ROAD_TOP - 450.0,
         1060.0,
         450.0,
@@ -940,7 +1169,7 @@ fn draw_entities(
     blit(
         ctx,
         &spr.flag_dk,
-        8830.0 - cam,
+        FINISH_X - 120.0 - cam,
         ROAD_TOP - 135.0,
         66.0,
         135.0,
@@ -948,31 +1177,74 @@ fn draw_entities(
     blit(
         ctx,
         &spr.flag_eu,
-        8905.0 - cam,
+        FINISH_X - 45.0 - cam,
         ROAD_TOP - 135.0,
         66.0,
         135.0,
     );
 
+    for p in &w.platforms {
+        let (x0, x1) = (p.x0 - cam, p.x1 - cam);
+        let deck = BASE_Y - p.top;
+        ctx.set_fill_style_str("#7C848C");
+        ctx.fill_rect(x0, deck, x1 - x0, 12.0);
+        ctx.set_fill_style_str("#98A0A8");
+        ctx.fill_rect(x0, deck + 12.0, x1 - x0, 8.0);
+        // Legs at the ends only: the gap between them is the visual promise
+        // that a deck can be driven under.
+        ctx.set_fill_style_str("#8A9299");
+        for lx in [x0 + 6.0, x1 - 20.0] {
+            ctx.fill_rect(lx, deck + 20.0, 14.0, BASE_Y - deck - 20.0);
+        }
+    }
+
     for s in &w.spots {
         let x = s.x - cam;
-        ctx.set_fill_style_str("#9AA0A6");
-        ctx.fill_rect(x - 3.0, 372.0, 6.0, ROAD_TOP - 372.0);
+        let panel_y = BASE_Y - s.alt - 130.0;
+        match s.kind {
+            SpotKind::Lamp => {
+                ctx.set_fill_style_str("#6E767E");
+                ctx.fill_rect(x - 4.0, panel_y, 8.0, BASE_Y - s.alt - panel_y);
+                ctx.fill_rect(x - 4.0, panel_y - 26.0, 34.0, 7.0);
+                ctx.set_fill_style_str("#F6D66B");
+                ctx.fill_rect(x + 22.0, panel_y - 22.0, 16.0, 12.0);
+            }
+            SpotKind::Board | SpotKind::Ledge => {
+                ctx.set_fill_style_str("#9AA0A6");
+                ctx.fill_rect(
+                    x - 3.0,
+                    panel_y + 44.0,
+                    6.0,
+                    BASE_Y - s.alt - panel_y - 44.0,
+                );
+            }
+        }
         if s.hung {
-            blit(ctx, &spr.poster, x - 27.0, 290.0, 54.0, 86.0);
+            blit(ctx, &spr.poster, x - 27.0, panel_y - 42.0, 54.0, 86.0);
         } else {
             ctx.set_fill_style_str("#F3F3F3");
-            ctx.fill_rect(x - 27.0, 290.0, 54.0, 86.0);
-            let near = w.phase == Phase::Playing && (s.x - w.car_x).abs() < POSTER_RANGE;
-            let pulse = if near {
+            ctx.fill_rect(x - 27.0, panel_y - 42.0, 54.0, 86.0);
+            // Bright only when the action key would actually take it, so the
+            // reach rule is legible: drive up, or jump, until it lights.
+            let live = w.phase == Phase::Playing;
+            let ready = live && spot_in_reach(s, w.car_x, w.alt);
+            let near = live && (s.x - w.car_x).abs() < POSTER_RANGE * 1.6;
+            ctx.set_global_alpha(if ready {
                 0.55 + 0.45 * (anim_t * 6.0).sin()
+            } else if near {
+                0.5
             } else {
-                0.35
-            };
-            ctx.set_global_alpha(pulse);
-            ctx.set_stroke_style_str(if near { "#E6007E" } else { "#9AA0A6" });
+                0.3
+            });
+            ctx.set_stroke_style_str(if ready {
+                "#E6007E"
+            } else if near {
+                "#F9A825"
+            } else {
+                "#9AA0A6"
+            });
             ctx.set_line_width(4.0);
-            ctx.stroke_rect(x - 27.0, 290.0, 54.0, 86.0);
+            ctx.stroke_rect(x - 27.0, panel_y - 42.0, 54.0, 86.0);
             ctx.set_global_alpha(1.0);
         }
     }
@@ -989,7 +1261,14 @@ fn draw_entities(
     for p in &w.batteries {
         if !p.taken {
             let bob = 10.0 * (anim_t * 3.0 + p.x * 0.01).sin();
-            blit(ctx, &spr.battery, p.x - cam - 31.0, 370.0 + bob, 62.0, 62.0);
+            blit(
+                ctx,
+                &spr.battery,
+                p.x - cam - 31.0,
+                BASE_Y - p.alt - 141.0 + bob,
+                62.0,
+                62.0,
+            );
         }
     }
     for p in &w.flags {
@@ -1322,21 +1601,16 @@ pub fn GameApp() -> Element {
                 },
             }
         },
-        UiPhase::Won(tier, hung) => {
-            let n = hung.to_string();
+        UiPhase::Won(tier, hung, total) => {
+            let (n, total) = (hung.to_string(), total.to_string());
+            let args = [("n", n.as_str()), ("total", total.as_str())];
             let (title, body) = match tier {
                 Tier::Landslide => (
                     t("game.wonTitleLandslide"),
-                    t_with("game.wonLandslide", &[("n", &n)]),
+                    t_with("game.wonLandslide", &args),
                 ),
-                Tier::Elected => (
-                    t("game.wonTitleElected"),
-                    t_with("game.wonElected", &[("n", &n)]),
-                ),
-                Tier::BelowThreshold => (
-                    t("game.wonTitleBelow"),
-                    t_with("game.wonBelow", &[("n", &n)]),
-                ),
+                Tier::Elected => (t("game.wonTitleElected"), t_with("game.wonElected", &args)),
+                Tier::BelowThreshold => (t("game.wonTitleBelow"), t_with("game.wonBelow", &args)),
             };
             rsx! {
                 GameOverlay {
