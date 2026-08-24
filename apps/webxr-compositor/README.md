@@ -66,8 +66,17 @@ closed). Not there yet: wp_viewporter and fractional-scale are deliberately
 not advertised (clients render correctly at scale 1 instead of being lied
 to), subsurfaces are not composited (GTK4 does not need them for normal
 windows), popups never receive keyboard focus (menu arrow-key navigation
-stays with the mouse), and xdg_activation is absent. Roadmap: GPU clients
-(Zed), WebXR mode.
+stays with the mouse), and xdg_activation is absent.
+
+Zed runs. With Mesa's software Vulkan (lavapipe presents through wl_shm),
+Zed opens, renders its full UI and accepts mouse and keyboard input in the
+browser (`just zed` boots an isolated stateless Zed, accepts the trust
+dialog and types into the buffer; it wants `zeditor` on PATH and resolves
+the lavapipe ICD from nixpkgs#mesa). Hardware GPU clients are not
+supported: zwp_linux_dmabuf is not advertised, so Vulkan and GL clients
+fall back to software rendering, which is the honest limit of a
+pixel-streaming compositor until host-side readback exists. Roadmap:
+WebXR mode.
 
 ## Run
 

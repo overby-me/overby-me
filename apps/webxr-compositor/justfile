@@ -69,6 +69,12 @@ gtk *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-gtk.nu {{args}}
 
+# The end goal: Zed (software Vulkan) editing in the browser. Needs
+# `just build` first and zeditor on PATH.
+zed *args:
+    cargo build --manifest-path host/Cargo.toml
+    nu test-zed.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings
