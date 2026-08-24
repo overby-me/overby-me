@@ -101,7 +101,10 @@ fn App() -> Element {
     let mut view3d = use_signal(|| false);
 
     let session = use_coroutine(move |rx| session_loop(rx, link, windows, popups, cursor));
-    use_hook(move || install_key_listeners(session, focused));
+    use_hook(move || {
+        install_key_listeners(session, focused);
+        install_resize_listener(session);
+    });
 
     // The 3D render loop lives here so it survives XrView mounting and
     // unmounting; it idles cheaply while the flat view is active.
@@ -561,6 +564,46 @@ fn wheel_delta(e: &Event<WheelData>) -> (f64, f64) {
     }
 }
 
+/// The desk's client size, the area Wayland windows actually get; falls
+/// back to the whole browser viewport before the desk mounts.
+fn desk_size() -> Option<protocol::Size> {
+    let window = web_sys::window()?;
+    let document = window.document()?;
+    let (width, height) = match document.get_element_by_id("desk") {
+        Some(desk) => (f64::from(desk.client_width()), f64::from(desk.client_height())),
+        None => (
+            window.inner_width().ok()?.as_f64()?,
+            window.inner_height().ok()?.as_f64()?,
+        ),
+    };
+    if width < 1.0 || height < 1.0 {
+        return None;
+    }
+    Some(protocol::Size {
+        width: width as u32,
+        height: height as u32,
+    })
+}
+
+/// Report browser resizes so the host can retune the output mode.
+fn install_resize_listener(session: Coroutine<protocol::ClientToHost>) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let handler = Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
+        if let Some(size) = desk_size() {
+            session.send(protocol::ClientToHost::Viewport { size });
+        }
+    });
+    if window
+        .add_event_listener_with_callback("resize", handler.as_ref().unchecked_ref())
+        .is_err()
+    {
+        tracing::warn!("could not install the resize listener");
+    }
+    handler.forget();
+}
+
 /// Window-level listeners so keys arrive regardless of DOM focus; browser
 /// defaults are suppressed only while a compositor window holds focus.
 fn install_key_listeners(
@@ -649,6 +692,23 @@ async fn run_session(
     {
         return;
     }
+    // The desk has no layout until the stylesheet lands, so poll briefly
+    // rather than reporting a zero-height viewport or none at all.
+    let mut viewport = None;
+    for _ in 0..40 {
+        viewport = desk_size();
+        if viewport.is_some() {
+            break;
+        }
+        gloo_timers::future::TimeoutFuture::new(50).await;
+    }
+    if let Some(size) = viewport
+        && send(&mut sink, &protocol::ClientToHost::Viewport { size })
+            .await
+            .is_none()
+    {
+        return;
+    }
 
     loop {
         match select(stream.next(), rx.next()).await {
@@ -715,6 +775,11 @@ async fn apply(
                 return None;
             }
             link.set(Link::Connected { host, output });
+        }
+        protocol::HostToClient::OutputMode { size } => {
+            if let Link::Connected { output, .. } = &mut *link.write() {
+                *output = size;
+            }
         }
         protocol::HostToClient::WindowCreated { id, app_id, title } => {
             let count = i32::try_from(windows.read().len()).unwrap_or(0);

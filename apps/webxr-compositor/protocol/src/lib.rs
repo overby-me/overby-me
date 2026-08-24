@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any wire-incompatible change; both ends refuse a mismatch.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 
 pub type WindowId = u32;
 
@@ -78,6 +78,10 @@ pub enum HostToClient {
     Clipboard {
         text: String,
     },
+    /// The advertised output changed to match a browser viewport.
+    OutputMode {
+        size: Size,
+    },
     /// The pointer cursor to show, as a CSS cursor keyword.
     Cursor {
         name: String,
@@ -127,6 +131,10 @@ pub enum ClientToHost {
     /// The browser clipboard, pushed so clients can paste it.
     Clipboard {
         text: String,
+    },
+    /// The page's desk size; the host advertises it as the output mode.
+    Viewport {
+        size: Size,
     },
 }
 

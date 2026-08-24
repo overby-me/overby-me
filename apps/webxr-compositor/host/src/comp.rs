@@ -66,8 +66,13 @@ use webxr_compositor_protocol as protocol;
 
 use crate::session::{Hub, HubEvent};
 
-/// The mode advertised on the virtual output until browsers can size it.
+/// The mode advertised on the virtual output until a browser reports its
+/// viewport; the first Viewport message replaces it.
 const OUTPUT_SIZE: (i32, i32) = (1920, 1080);
+
+/// Viewport reports below this are ignored: no real browser desk is that
+/// small, and clients react badly to a 1x1 output.
+const MIN_OUTPUT: (i32, i32) = (320, 240);
 
 /// How often pending wl_callback frame acks are fired (roughly 60 Hz).
 const FRAME_TICK: Duration = Duration::from_millis(16);
@@ -113,6 +118,8 @@ pub struct State {
     non_video_clients: std::collections::BTreeSet<crate::session::ClientId>,
     dmabuf_state: DmabufState,
     gpu: Option<crate::gpu::Gpu>,
+    /// The single virtual output; its mode tracks the browser viewport.
+    output: Output,
     windows: Vec<Window>,
     next_window_id: protocol::WindowId,
     pending_callbacks: Vec<WlCallback>,
@@ -206,7 +213,7 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
     seat.add_keyboard(XkbConfig::default(), 200, 25)?;
     seat.add_pointer();
 
-    advertise_output(&display_handle);
+    let output = advertise_output(&display_handle);
     insert_sources(event_loop.handle(), display, events)?;
 
     let mut state = State {
@@ -225,6 +232,7 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
         non_video_clients: std::collections::BTreeSet::new(),
         dmabuf_state,
         gpu,
+        output,
         windows: Vec::new(),
         next_window_id: 1,
         pending_callbacks: Vec::new(),
@@ -240,7 +248,7 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
     Ok(())
 }
 
-fn advertise_output(display_handle: &DisplayHandle) {
+fn advertise_output(display_handle: &DisplayHandle) -> Output {
     let output = Output::new(
         "webxr-0".into(),
         PhysicalProperties {
@@ -263,6 +271,7 @@ fn advertise_output(display_handle: &DisplayHandle) {
         Some((0, 0).into()),
     );
     output.set_preferred(mode);
+    output
 }
 
 fn insert_sources(
@@ -358,6 +367,7 @@ impl State {
             protocol::ClientToHost::Close { id } => self.close_window(id),
             protocol::ClientToHost::Resize { id, size } => self.resize_window(id, size),
             protocol::ClientToHost::Clipboard { text } => self.set_clipboard(text),
+            protocol::ClientToHost::Viewport { size } => self.set_viewport(size),
         }
     }
 
@@ -442,6 +452,64 @@ impl State {
             .toplevel
             .with_pending_state(|state| state.size = Some((width, height).into()));
         window.toplevel.send_configure();
+    }
+
+    /// A browser reported its desk size: make the output mode match, tell
+    /// every toplevel the new bounds, and shrink windows that no longer fit.
+    /// With several browsers connected the last report wins.
+    fn set_viewport(&mut self, size: protocol::Size) {
+        let width = i32::try_from(size.width).unwrap_or(OUTPUT_SIZE.0).max(MIN_OUTPUT.0);
+        let height = i32::try_from(size.height).unwrap_or(OUTPUT_SIZE.1).max(MIN_OUTPUT.1);
+        if self.output.current_mode().map(|mode| (mode.size.w, mode.size.h)) == Some((width, height)) {
+            return;
+        }
+        tracing::info!(width, height, "output mode follows the browser viewport");
+        let previous = self.output.current_mode();
+        let mode = Mode {
+            size: (width, height).into(),
+            refresh: 60_000,
+        };
+        self.output.change_current_state(Some(mode), None, None, None);
+        self.output.set_preferred(mode);
+        // One mode only: without this every viewport ever seen stays in the
+        // advertised list.
+        if let Some(previous) = previous {
+            self.output.delete_mode(previous);
+        }
+
+        let mut oversized = Vec::new();
+        for window in &self.windows {
+            let changed = window.toplevel.with_pending_state(|state| {
+                let next = Some((width, height).into());
+                let changed = state.bounds != next;
+                state.bounds = next;
+                changed
+            });
+            if changed && initial_configure_sent(window.toplevel.wl_surface()) {
+                window.toplevel.send_configure();
+            }
+            if let Some((size, _)) = &window.last_frame
+                && (size.width > mode.size.w.unsigned_abs()
+                    || size.height > mode.size.h.unsigned_abs())
+            {
+                oversized.push(window.id);
+            }
+        }
+        for id in oversized {
+            self.resize_window(
+                id,
+                protocol::Size {
+                    width: size.width.max(MIN_OUTPUT.0.unsigned_abs()),
+                    height: size.height.max(MIN_OUTPUT.1.unsigned_abs()),
+                },
+            );
+        }
+        self.hub.broadcast(&protocol::HostToClient::OutputMode {
+            size: protocol::Size {
+                width: mode.size.w.unsigned_abs(),
+                height: mode.size.h.unsigned_abs(),
+            },
+        });
     }
 
     fn key(&mut self, code: u32, pressed: bool) {
@@ -1291,6 +1359,11 @@ impl XdgShellHandler for State {
         let id = self.next_window_id;
         self.next_window_id += 1;
         tracing::info!(window = id, "new toplevel");
+        if let Some(mode) = self.output.current_mode() {
+            surface.with_pending_state(|state| {
+                state.bounds = Some((mode.size.w, mode.size.h).into());
+            });
+        }
         self.windows.push(Window {
             id,
             toplevel: surface,

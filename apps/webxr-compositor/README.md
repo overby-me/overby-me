@@ -125,6 +125,7 @@ just clipboard  # copy in one foot, paste into another via the host
 just gtk        # gnome-calculator's popover menu opens and dismisses
 just zed        # Zed (software Vulkan) renders and accepts typing
 just xr         # the 3D scene shows live window content
+just output     # the output mode follows the browser viewport
 ```
 
 `nix build .#webxr-compositor-frontend` and `.#webxr-compositor-app` build
@@ -153,6 +154,15 @@ holdout keeps everything on rects, and joiners force the next frame to a
 keyframe. `just video` measures the fast checker at around 600x under raw
 (52 KB wire for 32 MB of frames) with the decoded quadrants still
 palette-correct within codec tolerance.
+
+The output is the browser's, not a hardcoded panel: each page reports its
+desk size on connect and on every browser resize, the host retunes the
+wl_output mode to match (pruning the replaced mode, so exactly one is ever
+advertised), tells every toplevel its new bounds and shrinks windows that no
+longer fit, and broadcasts the mode back so the header reflects it. With
+several browsers connected the last report wins. `just output` proves the
+placeholder gives way to the real desk size, that a CDP viewport resize
+lands in wayland-info, and that the chosen mode outlives the page.
 
 Hardware GPU clients work: with a usable render node the host advertises
 zwp_linux_dmabuf v4 with default feedback (without the main device in the
