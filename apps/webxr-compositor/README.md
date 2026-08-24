@@ -94,10 +94,35 @@ which does not exist yet (in-headset pointing needs controller rays).
 ```sh
 just run        # dx-build the frontend, then serve it from the host
 just dev        # frontend-only hot reload (dx serve)
-just test       # both workspaces
-just lint
-just browser    # headless-chromium check of the page against the real host
+nix run .#webxr-compositor-app   # hermetic build, bundle served from the store
 ```
+
+Then connect any Wayland app to the socket the host logs:
+
+```sh
+WAYLAND_DISPLAY=wayland-<n> foot
+```
+
+## Checks
+
+```sh
+just test       # unit tests, both workspaces
+just lint       # clippy, both workspaces
+just browser    # the page completes the hello against the real host
+just wayland    # wayland-info sees every advertised global
+just surface    # checker pixels reach the canvas and animate
+just input      # typing echoes in foot
+just windows    # drag, focus, raise, resize, close, reload-resync
+just damage     # typed frames stay hundreds of bytes, not megabytes
+just clipboard  # copy in one foot, paste into another via the host
+just gtk        # gnome-calculator's popover menu opens and dismisses
+just zed        # Zed (software Vulkan) renders and accepts typing
+just xr         # the 3D scene shows live window content
+```
+
+`nix build .#webxr-compositor-frontend` and `.#webxr-compositor-app` build
+both halves hermetically (the flake exposes this app's packages under the
+`webxr-compositor-` prefix).
 
 The host reads `WEBXR_COMPOSITOR_LISTEN` (default `127.0.0.1:8370`) and
 `WEBXR_COMPOSITOR_WEB_ROOT` (default: the dx release output path).

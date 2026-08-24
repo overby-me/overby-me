@@ -123,11 +123,11 @@ in {
     ];
   };
 
-  packages.webxr-compositor-frontend = mkFrontend;
+  packages.frontend = mkFrontend;
 
   # The runnable app: the host wired to the built frontend, so
   # `nix run` serves the real bundle out of the store.
-  packages.webxr-compositor = {
+  packages.app = {
     lib,
     rustPlatform,
     dioxus-cli,

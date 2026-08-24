@@ -602,7 +602,6 @@ fn xr_frame_loop(session: &JsValue, layer: JsValue, space: JsValue) {
             tracing::warn!(?error, "XR frame failed");
             return;
         }
-        // Schedule the next frame with the same closure.
         if let Some(callback) = again.borrow().as_ref()
             && let Ok(raf) = Reflect::get(&session_for_loop, &"requestAnimationFrame".into())
             && let Ok(raf) = raf.dyn_into::<Function>()

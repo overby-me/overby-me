@@ -25,7 +25,6 @@ pub struct Rect {
     pub height: u32,
 }
 
-/// Host to browser.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HostToClient {
     Hello {
@@ -73,7 +72,6 @@ pub enum HostToClient {
     },
 }
 
-/// Browser to host.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ClientToHost {
     Hello {

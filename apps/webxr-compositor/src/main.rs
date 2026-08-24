@@ -323,7 +323,6 @@ fn XrView(
     }
 }
 
-/// Put the window on top of the stack, if it is not already there.
 fn raise(mut windows: Signal<Windows>, id: protocol::WindowId) {
     let top = windows.read().values().map(|w| w.z).max().unwrap_or(0);
     let already_top = windows.read().get(&id).map(|w| w.z) == Some(top);

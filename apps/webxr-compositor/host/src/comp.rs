@@ -497,11 +497,9 @@ impl State {
         );
     }
 
-    /// A client set the clipboard: read the offered text through a pipe on
-    /// this event loop, then hand it to the browsers.
-    /// The actual request is deferred to an idle callback: new_selection
-    /// runs before smithay stores the source, and a synchronous request
-    /// finds no active selection.
+    /// Read a client's new clipboard through a pipe on this event loop,
+    /// deferred one idle tick: new_selection runs before smithay stores
+    /// the source, so a synchronous request finds no active selection.
     fn read_client_selection(&mut self, source: &SelectionSource) {
         let mimes = source.mime_types();
         let Some(mime) = TEXT_MIMES
@@ -538,7 +536,6 @@ impl State {
         let inserted = self.loop_handle.insert_source(source, move |_, fd, state| {
             let mut chunk = [0_u8; 4096];
             loop {
-                // SAFETY-free rustix read on the borrowed fd.
                 match rustix::io::read(&*fd, &mut chunk) {
                     Ok(0) => {
                         tracing::debug!(bytes = collected.len(), "client selection read");

@@ -62,7 +62,6 @@ struct App {
 }
 
 impl App {
-    /// Once the three needed globals exist, build the window.
     fn try_init(&mut self, qh: &QueueHandle<Self>) {
         if self.surface.is_some() {
             return;
