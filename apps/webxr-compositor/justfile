@@ -89,6 +89,13 @@ subsurface *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-subsurface.nu {{args}}
 
+# wp_viewport destinations and fractional scale must be honoured.
+# Needs `just build` first and gnome-calculator on PATH.
+scale *args:
+    cargo build --manifest-path host/Cargo.toml --example checker
+    cargo build --manifest-path host/Cargo.toml
+    nu test-scale.nu {{args}}
+
 # The output mode must follow the browser viewport, resizes included.
 # Needs `just build` first.
 output *args:

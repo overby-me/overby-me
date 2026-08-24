@@ -21,6 +21,8 @@ const EXPECTED = [
     zxdg_output_manager_v1
     xdg_wm_base
     wl_data_device_manager
+    wp_viewporter
+    wp_fractional_scale_manager_v1
 ]
 
 def log-info [...msg: string] { print -e $"(ansi blue_bold)[info](ansi reset) ($msg | str join ' ')" }

@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any wire-incompatible change; both ends refuse a mismatch.
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 
 pub type WindowId = u32;
 
@@ -51,6 +51,9 @@ pub enum HostToClient {
     Frame {
         id: WindowId,
         size: Size,
+        /// CSS size the surface occupies: differs from `size` when the
+        /// client renders through a viewport or at a fractional scale.
+        logical: Size,
         damage: Rect,
         compressed: bool,
         #[serde(with = "serde_bytes")]
@@ -61,6 +64,8 @@ pub enum HostToClient {
     VideoFrame {
         id: WindowId,
         size: Size,
+        /// See [`HostToClient::Frame::logical`].
+        logical: Size,
         keyframe: bool,
         #[serde(with = "serde_bytes")]
         data: Vec<u8>,
@@ -132,9 +137,12 @@ pub enum ClientToHost {
     Clipboard {
         text: String,
     },
-    /// The page's desk size; the host advertises it as the output mode.
+    /// The page's desk size and devicePixelRatio; the host advertises the
+    /// size as the output mode and the ratio as the preferred fractional
+    /// scale.
     Viewport {
         size: Size,
+        scale: f64,
     },
 }
 
@@ -187,6 +195,10 @@ mod tests {
         let msg = HostToClient::Frame {
             id: 7,
             size: Size {
+                width: 2,
+                height: 2,
+            },
+            logical: Size {
                 width: 2,
                 height: 2,
             },

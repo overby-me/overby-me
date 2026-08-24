@@ -13,6 +13,7 @@ use wayland_client::protocol::{
     wl_buffer, wl_callback, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle, delegate_noop};
+use wayland_protocols::wp::viewporter::client::{wp_viewport, wp_viewporter};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
 const WIDTH: usize = 320;
@@ -21,6 +22,9 @@ const STRIDE: usize = WIDTH * 4;
 /// Frame callbacks between rotations; the host acks at roughly 60 Hz, so a
 /// step lands about twice a second.
 const TICKS_PER_STEP: u32 = 30;
+/// CHECKER_VIEWPORT=1 displays the buffer at half size through
+/// wp_viewporter; the scale test asserts backing vs CSS geometry.
+const VIEWPORT_DST: (i32, i32) = (160, 120);
 /// Quadrant palette in XRGB8888 little-endian bytes [B, G, R, X]:
 /// red #E53936, green #43A047, blue #1E88E5, yellow #FDD835.
 const COLORS: [[u8; 4]; 4] = [
@@ -57,6 +61,8 @@ struct App {
     running: bool,
     ticks_per_step: u32,
     compositor: Option<wl_compositor::WlCompositor>,
+    viewporter: Option<wp_viewporter::WpViewporter>,
+    viewport: Option<wp_viewport::WpViewport>,
     shm: Option<wl_shm::WlShm>,
     wm_base: Option<xdg_wm_base::XdgWmBase>,
     surface: Option<wl_surface::WlSurface>,
@@ -77,7 +83,19 @@ impl App {
         let (Some(compositor), Some(wm_base)) = (&self.compositor, &self.wm_base) else {
             return;
         };
+        // The registry announces wp_viewporter after xdg_wm_base; do not
+        // create the surface before it lands when the mode needs it.
+        if std::env::var("CHECKER_VIEWPORT").is_ok() && self.viewporter.is_none() {
+            return;
+        }
         let surface = compositor.create_surface(qh, ());
+        if std::env::var("CHECKER_VIEWPORT").is_ok()
+            && let Some(viewporter) = &self.viewporter
+        {
+            let viewport = viewporter.get_viewport(&surface, qh, ());
+            viewport.set_destination(VIEWPORT_DST.0, VIEWPORT_DST.1);
+            self.viewport = Some(viewport);
+        }
         let xdg_surface = wm_base.get_xdg_surface(&surface, qh, ());
         let toplevel = xdg_surface.get_toplevel(qh, ());
         toplevel.set_title("checker".into());
@@ -159,6 +177,11 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 }
                 "wl_shm" => {
                     app.shm = Some(registry.bind::<wl_shm::WlShm, _, _>(name, 1, qh, ()));
+                }
+                "wp_viewporter" => {
+                    app.viewporter = Some(
+                        registry.bind::<wp_viewporter::WpViewporter, _, _>(name, 1, qh, ()),
+                    );
                 }
                 "xdg_wm_base" => {
                     app.wm_base =
@@ -245,6 +268,8 @@ impl Dispatch<wl_callback::WlCallback, ()> for App {
 }
 
 delegate_noop!(App: ignore wl_compositor::WlCompositor);
+delegate_noop!(App: ignore wp_viewporter::WpViewporter);
+delegate_noop!(App: ignore wp_viewport::WpViewport);
 delegate_noop!(App: ignore wl_surface::WlSurface);
 delegate_noop!(App: ignore wl_shm::WlShm);
 delegate_noop!(App: ignore wl_shm_pool::WlShmPool);

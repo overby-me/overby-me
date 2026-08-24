@@ -26,8 +26,8 @@ server stack never enter the wasm dependency graph.
 Wayland apps draw in the browser. The host runs a smithay compositor on its
 own thread with a real socket (`WEBXR_COMPOSITOR_WAYLAND_DISPLAY`, else
 auto-named) advertising wl_compositor, wl_subcompositor, wl_shm, wl_seat,
-wl_output + xdg-output, xdg_wm_base and wl_data_device_manager
-(`just wayland`). Committed shm buffers are converted to RGBA, broadcast to
+wl_output + xdg-output, xdg_wm_base, wl_data_device_manager,
+wp_viewporter and wp_fractional_scale_manager_v1 (`just wayland`). Committed shm buffers are converted to RGBA, broadcast to
 every connected page and painted onto a per-window canvas, with frame
 callbacks acked at 60 Hz and late-joining browsers resynced (`just surface`
 proves pixel-exact colours and animation with the bundled `checker` client;
@@ -72,10 +72,17 @@ announced through the same overlay mechanism as popups, and follows
 wl_subsurface.set_position moves; nested trees recurse, and pointer
 events on a subsurface overlay reach the right surface (`just subsurface`
 drives the bundled subchecker: an animated child that jumps between two
-anchor points over a solid parent). Not there yet: wp_viewporter and
-fractional-scale are deliberately not advertised (clients render
-correctly at scale 1 instead of being lied to), subsurface z-order
-(place_above/below) is ignored, and xdg_activation is absent.
+anchor points over a solid parent). wp_viewporter and fractional-scale
+are advertised and honoured: every frame carries both its buffer size and
+its logical size, the page pins each canvas to the logical CSS size while
+painting the full backing, a wp_viewport destination that actually
+rescales flips that surface to full frames (an inert one keeps damage
+patching), and the browser's devicePixelRatio rides the Viewport report
+to become every surface's preferred fractional scale (`just scale` proves
+a checker shown at half size through a viewport, and gnome-calculator
+re-rendering at 1.25x under a forced devicePixelRatio). Not there yet:
+subsurface z-order (place_above/below) is ignored and xdg_activation is
+absent.
 
 Zed runs. With Mesa's software Vulkan (lavapipe presents through wl_shm),
 Zed opens, renders its full UI and accepts mouse and keyboard input in the
@@ -155,6 +162,7 @@ just zed        # Zed (software Vulkan) renders and accepts typing
 just xr         # the 3D scene shows live window content
 just output     # the output mode follows the browser viewport
 just subsurface # a wl_subsurface composites, moves and animates
+just scale      # wp_viewport destinations + fractional scale honoured
 ```
 
 `nix build .#webxr-compositor-frontend` and `.#webxr-compositor-app` build

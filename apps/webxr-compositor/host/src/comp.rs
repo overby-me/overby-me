@@ -53,15 +53,19 @@ use smithay::wayland::shell::xdg::{
     PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface, XdgPopupSurfaceData,
     XdgShellHandler, XdgShellState, XdgToplevelSurfaceData,
 };
+use smithay::wayland::fractional_scale::{
+    FractionalScaleHandler, FractionalScaleManagerState, with_fractional_scale,
+};
 use smithay::wayland::shm::{BufferData, ShmHandler, ShmState, with_buffer_contents};
+use smithay::wayland::viewporter::{ViewportCachedState, ViewporterState};
 use openh264::OpenH264API;
 use openh264::encoder::{Encoder, EncoderConfig, FrameType};
 use openh264::formats::{RgbaSliceU8, YUVBuffer};
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::{
     delegate_compositor, delegate_cursor_shape, delegate_data_device, delegate_dmabuf,
-    delegate_output, delegate_primary_selection, delegate_seat, delegate_shm,
-    delegate_xdg_decoration, delegate_xdg_shell,
+    delegate_fractional_scale, delegate_output, delegate_primary_selection, delegate_seat,
+    delegate_shm, delegate_viewporter, delegate_xdg_decoration, delegate_xdg_shell,
 };
 use webxr_compositor_protocol as protocol;
 
@@ -121,6 +125,9 @@ pub struct State {
     gpu: Option<crate::gpu::Gpu>,
     /// The single virtual output; its mode tracks the browser viewport.
     output: Output,
+    /// The devicePixelRatio the browser reported; preferred fractional
+    /// scale for every surface.
+    browser_scale: f64,
     windows: Vec<Window>,
     subs: Vec<Sub>,
     next_window_id: protocol::WindowId,
@@ -139,6 +146,9 @@ struct Window {
     title: String,
     app_id: String,
     last_frame: Option<(protocol::Size, Vec<u8>)>,
+    /// CSS size of the last frame; equals the buffer size until a viewport
+    /// or fractional scale says otherwise.
+    logical: protocol::Size,
     video: Option<Video>,
     small_streak: u32,
     /// Arrival times of the last full-surface commits; video mode wants a
@@ -161,6 +171,7 @@ struct Popup {
     offset: (i32, i32),
     announced: bool,
     last_frame: Option<(protocol::Size, Vec<u8>)>,
+    logical: protocol::Size,
     /// The client asked for an explicit grab: keyboard focus moved here and
     /// returns to the parent chain when the popup goes away.
     grabbed: bool,
@@ -174,6 +185,7 @@ struct Sub {
     parent: protocol::WindowId,
     announced: bool,
     last_frame: Option<(protocol::Size, Vec<u8>)>,
+    logical: protocol::Size,
     /// Top-left corner in parent coordinates, from the last commit.
     location: (i32, i32),
 }
@@ -209,6 +221,10 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
     let _decoration_state = XdgDecorationState::new::<State>(&display_handle);
     // Modern clients name their cursor instead of attaching a surface.
     let _cursor_shape_state = CursorShapeManagerState::new::<State>(&display_handle);
+    // Honoured, not merely advertised: viewport destinations and the
+    // browser's devicePixelRatio flow into the logical size of each frame.
+    let _viewporter_state = ViewporterState::new::<State>(&display_handle);
+    let _fractional_scale_state = FractionalScaleManagerState::new::<State>(&display_handle);
 
     // dmabuf only exists when a render node gives us readback; otherwise
     // GPU clients quietly fall back to software rendering over shm.
@@ -250,6 +266,7 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
         dmabuf_state,
         gpu,
         output,
+        browser_scale: 1.0,
         windows: Vec::new(),
         subs: Vec::new(),
         next_window_id: 1,
@@ -385,7 +402,7 @@ impl State {
             protocol::ClientToHost::Close { id } => self.close_window(id),
             protocol::ClientToHost::Resize { id, size } => self.resize_window(id, size),
             protocol::ClientToHost::Clipboard { text } => self.set_clipboard(text),
-            protocol::ClientToHost::Viewport { size } => self.set_viewport(size),
+            protocol::ClientToHost::Viewport { size, scale } => self.set_viewport(size, scale),
         }
     }
 
@@ -487,7 +504,8 @@ impl State {
     /// A browser reported its desk size: make the output mode match, tell
     /// every toplevel the new bounds, and shrink windows that no longer fit.
     /// With several browsers connected the last report wins.
-    fn set_viewport(&mut self, size: protocol::Size) {
+    fn set_viewport(&mut self, size: protocol::Size, scale: f64) {
+        self.set_preferred_scale(scale);
         let width = i32::try_from(size.width).unwrap_or(OUTPUT_SIZE.0).max(MIN_OUTPUT.0);
         let height = i32::try_from(size.height).unwrap_or(OUTPUT_SIZE.1).max(MIN_OUTPUT.1);
         if self.output.current_mode().map(|mode| (mode.size.w, mode.size.h)) == Some((width, height)) {
@@ -518,9 +536,9 @@ impl State {
             if changed && initial_configure_sent(window.toplevel.wl_surface()) {
                 window.toplevel.send_configure();
             }
-            if let Some((size, _)) = &window.last_frame
-                && (size.width > mode.size.w.unsigned_abs()
-                    || size.height > mode.size.h.unsigned_abs())
+            if window.last_frame.is_some()
+                && (window.logical.width > mode.size.w.unsigned_abs()
+                    || window.logical.height > mode.size.h.unsigned_abs())
             {
                 oversized.push(window.id);
             }
@@ -540,6 +558,31 @@ impl State {
                 height: mode.size.h.unsigned_abs(),
             },
         });
+    }
+
+    /// Tell every surface the browser's devicePixelRatio as its preferred
+    /// fractional scale; clients that listen re-render crisper.
+    fn set_preferred_scale(&mut self, scale: f64) {
+        let scale = if scale.is_finite() { scale.clamp(0.5, 8.0) } else { 1.0 };
+        if (self.browser_scale - scale).abs() < 1e-3 {
+            return;
+        }
+        tracing::info!(scale, "preferred fractional scale follows the browser");
+        self.browser_scale = scale;
+        let surfaces: Vec<WlSurface> = self
+            .windows
+            .iter()
+            .map(|w| w.toplevel.wl_surface().clone())
+            .chain(self.popups.iter().map(|p| p.popup.wl_surface().clone()))
+            .chain(self.subs.iter().map(|s| s.surface.clone()))
+            .collect();
+        for surface in surfaces {
+            with_states(&surface, |states| {
+                with_fractional_scale(states, |fractional| {
+                    fractional.set_preferred_scale(scale);
+                });
+            });
+        }
     }
 
     fn key(&mut self, code: u32, pressed: bool) {
@@ -741,7 +784,7 @@ impl State {
             if let Some((size, pixels)) = &window.last_frame {
                 self.hub.send_to(
                     client,
-                    &frame_message(window.id, *size, full_damage(*size), pixels),
+                    &frame_message(window.id, *size, window.logical, full_damage(*size), pixels),
                 );
             }
         }
@@ -758,7 +801,7 @@ impl State {
             if let Some((size, pixels)) = &popup.last_frame {
                 self.hub.send_to(
                     client,
-                    &frame_message(popup.id, *size, full_damage(*size), pixels),
+                    &frame_message(popup.id, *size, popup.logical, full_damage(*size), pixels),
                 );
             }
         }
@@ -775,7 +818,7 @@ impl State {
             if let Some((size, pixels)) = &sub.last_frame {
                 self.hub.send_to(
                     client,
-                    &frame_message(sub.id, *size, full_damage(*size), pixels),
+                    &frame_message(sub.id, *size, sub.logical, full_damage(*size), pixels),
                 );
             }
         }
@@ -815,7 +858,8 @@ impl State {
                 if get_dmabuf(&buffer).is_ok() {
                     match self.read_gpu(&buffer) {
                         Ok((size, pixels)) => {
-                            self.route_frame(index, size, full_damage(size), pixels);
+                            let logical = Self::logical_of(surface, size, scale);
+                            self.route_frame(index, size, logical, full_damage(size), pixels);
                         }
                         Err(error) => {
                             tracing::warn!(window = self.windows[index].id, error, "gpu readback");
@@ -831,8 +875,12 @@ impl State {
                 } else {
                     self.windows[index].last_frame.as_ref()
                 };
-                match Self::read_frame(last, &buffer, &damage, scale) {
-                    Ok((size, rect, pixels)) => self.route_frame(index, size, rect, pixels),
+                let viewport = Self::viewport_size(surface);
+                match Self::read_frame(last, &buffer, &damage, scale, viewport) {
+                    Ok((size, rect, pixels)) => {
+                        let logical = Self::logical_of(surface, size, scale);
+                        self.route_frame(index, size, logical, rect, pixels);
+                    }
                     Err(error) => {
                         tracing::warn!(window = self.windows[index].id, error, "unreadable buffer");
                     }
@@ -862,6 +910,7 @@ impl State {
         &mut self,
         index: usize,
         size: protocol::Size,
+        logical: protocol::Size,
         rect: protocol::Rect,
         pixels: Vec<u8>,
     ) {
@@ -870,9 +919,9 @@ impl State {
             self.maybe_enter_video(index, size);
         }
         if self.windows[index].video.is_some() {
-            self.publish_video_frame(index, size, pixels);
+            self.publish_video_frame(index, size, logical, pixels);
         } else {
-            self.publish_frame(index, size, rect, pixels);
+            self.publish_frame(index, size, logical, rect, pixels);
         }
     }
 
@@ -926,7 +975,13 @@ impl State {
         }
     }
 
-    fn publish_video_frame(&mut self, index: usize, size: protocol::Size, pixels: Vec<u8>) {
+    fn publish_video_frame(
+        &mut self,
+        index: usize,
+        size: protocol::Size,
+        logical: protocol::Size,
+        pixels: Vec<u8>,
+    ) {
         if !self.windows[index].announced {
             self.announce_window(index);
         }
@@ -949,9 +1004,11 @@ impl State {
         };
         match encoded {
             Ok((keyframe, data)) => {
+                self.windows[index].logical = logical;
                 hub.broadcast(&protocol::HostToClient::VideoFrame {
                     id,
                     size,
+                    logical,
                     keyframe,
                     data,
                 });
@@ -966,7 +1023,7 @@ impl State {
                 tracing::warn!(%error, window = id, "encode failed; back to rects");
                 self.windows[index].video = None;
                 self.windows[index].last_frame = None;
-                self.publish_frame(index, size, full_damage(size), pixels);
+                self.publish_frame(index, size, logical, full_damage(size), pixels);
             }
         }
     }
@@ -989,7 +1046,8 @@ impl State {
                 if get_dmabuf(&buffer).is_ok() {
                     match self.read_gpu(&buffer) {
                         Ok((size, pixels)) => {
-                            self.publish_popup_frame(index, size, full_damage(size), pixels);
+                            let logical = Self::logical_of(surface, size, scale);
+                            self.publish_popup_frame(index, size, logical, full_damage(size), pixels);
                         }
                         Err(error) => {
                             tracing::warn!(popup = self.popups[index].id, error, "gpu readback");
@@ -998,9 +1056,13 @@ impl State {
                     buffer.release();
                     return;
                 }
-                match Self::read_frame(self.popups[index].last_frame.as_ref(), &buffer, &damage, scale)
-                {
-                    Ok((size, rect, pixels)) => self.publish_popup_frame(index, size, rect, pixels),
+                let last = self.popups[index].last_frame.as_ref();
+                let viewport = Self::viewport_size(surface);
+                match Self::read_frame(last, &buffer, &damage, scale, viewport) {
+                    Ok((size, rect, pixels)) => {
+                        let logical = Self::logical_of(surface, size, scale);
+                        self.publish_popup_frame(index, size, logical, rect, pixels);
+                    }
                     Err(error) => {
                         tracing::warn!(popup = self.popups[index].id, error, "unreadable buffer");
                     }
@@ -1030,10 +1092,12 @@ impl State {
         &mut self,
         index: usize,
         size: protocol::Size,
+        logical: protocol::Size,
         rect: protocol::Rect,
         pixels: Vec<u8>,
     ) {
         let popup = &mut self.popups[index];
+        popup.logical = logical;
         if !popup.announced {
             popup.announced = true;
             self.hub.broadcast(&protocol::HostToClient::PopupCreated {
@@ -1044,7 +1108,7 @@ impl State {
             });
         }
         self.hub
-            .broadcast(&frame_message(popup.id, size, rect, &pixels));
+            .broadcast(&frame_message(popup.id, size, logical, rect, &pixels));
         store_frame(&mut self.popups[index].last_frame, size, rect, pixels);
     }
 
@@ -1105,6 +1169,10 @@ impl State {
                     parent,
                     announced: false,
                     last_frame: None,
+                    logical: protocol::Size {
+                        width: 0,
+                        height: 0,
+                    },
                     location: (0, 0),
                 });
                 self.subs.len() - 1
@@ -1141,7 +1209,8 @@ impl State {
                 if get_dmabuf(&buffer).is_ok() {
                     match self.read_gpu(&buffer) {
                         Ok((size, pixels)) => {
-                            self.publish_sub_frame(index, size, full_damage(size), pixels);
+                            let logical = Self::logical_of(surface, size, scale);
+                            self.publish_sub_frame(index, size, logical, full_damage(size), pixels);
                         }
                         Err(error) => {
                             tracing::warn!(sub = self.subs[index].id, error, "gpu readback");
@@ -1150,9 +1219,13 @@ impl State {
                     buffer.release();
                     return;
                 }
-                match Self::read_frame(self.subs[index].last_frame.as_ref(), &buffer, &damage, scale)
-                {
-                    Ok((size, rect, pixels)) => self.publish_sub_frame(index, size, rect, pixels),
+                let last = self.subs[index].last_frame.as_ref();
+                let viewport = Self::viewport_size(surface);
+                match Self::read_frame(last, &buffer, &damage, scale, viewport) {
+                    Ok((size, rect, pixels)) => {
+                        let logical = Self::logical_of(surface, size, scale);
+                        self.publish_sub_frame(index, size, logical, rect, pixels);
+                    }
                     Err(error) => {
                         tracing::warn!(sub = self.subs[index].id, error, "unreadable buffer");
                     }
@@ -1177,10 +1250,12 @@ impl State {
         &mut self,
         index: usize,
         size: protocol::Size,
+        logical: protocol::Size,
         rect: protocol::Rect,
         pixels: Vec<u8>,
     ) {
         let sub = &mut self.subs[index];
+        sub.logical = logical;
         if !sub.announced {
             sub.announced = true;
             self.hub.broadcast(&protocol::HostToClient::PopupCreated {
@@ -1191,7 +1266,7 @@ impl State {
             });
         }
         self.hub
-            .broadcast(&frame_message(sub.id, size, rect, &pixels));
+            .broadcast(&frame_message(sub.id, size, logical, rect, &pixels));
         store_frame(&mut self.subs[index].last_frame, size, rect, pixels);
     }
 
@@ -1204,6 +1279,36 @@ impl State {
         }
     }
 
+    /// The CSS size a buffer of `size` should occupy: the viewport
+    /// destination when set, else the buffer divided by its integer scale.
+    fn logical_of(surface: &WlSurface, size: protocol::Size, scale: i32) -> protocol::Size {
+        if let Some(dst) = Self::viewport_size(surface) {
+            return dst;
+        }
+        if scale > 1 {
+            let scale = scale.unsigned_abs();
+            return protocol::Size {
+                width: size.width.div_ceil(scale),
+                height: size.height.div_ceil(scale),
+            };
+        }
+        size
+    }
+
+    fn viewport_size(surface: &WlSurface) -> Option<protocol::Size> {
+        with_states(surface, |states| {
+            states
+                .cached_state
+                .get::<ViewportCachedState>()
+                .current()
+                .size()
+        })
+        .map(|dst| protocol::Size {
+            width: dst.w.unsigned_abs(),
+            height: dst.h.unsigned_abs(),
+        })
+    }
+
     /// Decide how much of the committed buffer to copy: the damage bounding
     /// box when the previous frame is patchable, the whole buffer otherwise.
     fn read_frame(
@@ -1211,6 +1316,7 @@ impl State {
         buffer: &WlBuffer,
         damage: &[Damage],
         scale: i32,
+        viewport: Option<protocol::Size>,
     ) -> Result<(protocol::Size, protocol::Rect, Vec<u8>), String> {
         with_buffer_contents(buffer, |ptr, len, data| {
             // SAFETY: with_buffer_contents guarantees ptr..ptr+len maps the
@@ -1219,6 +1325,13 @@ impl State {
             let size = protocol::Size {
                 width: data.width.unsigned_abs(),
                 height: data.height.unsigned_abs(),
+            };
+            // A viewport that actually rescales makes buffer damage
+            // unpatchable on the page; one that matches the buffer is inert.
+            let last_frame = if viewport.is_some_and(|v| v != size) {
+                None
+            } else {
+                last_frame
             };
             let rect = Self::wanted_rect(last_frame, size, damage, scale);
             let pixels = convert_rect(bytes, data, rect)?;
@@ -1324,14 +1437,21 @@ impl State {
         &mut self,
         index: usize,
         size: protocol::Size,
+        logical: protocol::Size,
         rect: protocol::Rect,
         pixels: Vec<u8>,
     ) {
         if !self.windows[index].announced {
             self.announce_window(index);
         }
-        self.hub
-            .broadcast(&frame_message(self.windows[index].id, size, rect, &pixels));
+        self.windows[index].logical = logical;
+        self.hub.broadcast(&frame_message(
+            self.windows[index].id,
+            size,
+            logical,
+            rect,
+            &pixels,
+        ));
 
         store_frame(&mut self.windows[index].last_frame, size, rect, pixels);
     }
@@ -1350,6 +1470,7 @@ fn full_damage(size: protocol::Size) -> protocol::Rect {
 fn frame_message(
     id: protocol::WindowId,
     size: protocol::Size,
+    logical: protocol::Size,
     damage: protocol::Rect,
     pixels: &[u8],
 ) -> protocol::HostToClient {
@@ -1357,6 +1478,7 @@ fn frame_message(
     protocol::HostToClient::Frame {
         id,
         size,
+        logical,
         damage,
         compressed,
         pixels,
@@ -1568,6 +1690,17 @@ impl SeatHandler for State {
 
 impl OutputHandler for State {}
 
+impl FractionalScaleHandler for State {
+    fn new_fractional_scale(&mut self, surface: WlSurface) {
+        let scale = self.browser_scale;
+        with_states(&surface, |states| {
+            with_fractional_scale(states, |fractional| {
+                fractional.set_preferred_scale(scale);
+            });
+        });
+    }
+}
+
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
         &mut self.xdg_shell_state
@@ -1589,6 +1722,10 @@ impl XdgShellHandler for State {
             title: String::new(),
             app_id: String::new(),
             last_frame: None,
+            logical: protocol::Size {
+                width: 0,
+                height: 0,
+            },
             video: None,
             small_streak: 0,
             recent_full: std::collections::VecDeque::new(),
@@ -1615,6 +1752,10 @@ impl XdgShellHandler for State {
             offset: (geometry.loc.x, geometry.loc.y),
             announced: false,
             last_frame: None,
+            logical: protocol::Size {
+                width: 0,
+                height: 0,
+            },
             grabbed: false,
         });
     }
@@ -1794,6 +1935,8 @@ delegate_compositor!(State);
 delegate_shm!(State);
 delegate_seat!(State);
 delegate_output!(State);
+delegate_viewporter!(State);
+delegate_fractional_scale!(State);
 delegate_xdg_shell!(State);
 delegate_xdg_decoration!(State);
 delegate_dmabuf!(State);

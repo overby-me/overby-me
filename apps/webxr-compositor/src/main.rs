@@ -62,6 +62,9 @@ struct PopupInfo {
     parent: protocol::WindowId,
     x: i32,
     y: i32,
+    /// CSS size from the last frame's logical size; 0 until a frame lands.
+    width: u32,
+    height: u32,
 }
 
 type Popups = BTreeMap<protocol::WindowId, PopupInfo>;
@@ -400,6 +403,7 @@ fn WindowView(
     };
     let (start_x, start_y) = (info.x, info.y);
     let (start_w, start_h) = (info.width, info.height);
+    let canvas_size = size_css(info.width, info.height);
     rsx! {
         div {
             class: "{class}",
@@ -454,7 +458,7 @@ fn WindowView(
                 canvas {
                     class: "surface",
                     id: "win-{id}",
-                    style: "cursor: {cursor};",
+                    style: "cursor: {cursor};{canvas_size}",
                     onmousemove: move |e| {
                         let p = e.data().element_coordinates();
                         session.send(protocol::ClientToHost::PointerMotion { id, x: p.x, y: p.y });
@@ -500,6 +504,7 @@ fn PopupView(
     cursor: Signal<String>,
 ) -> Element {
     let session = use_coroutine_handle::<protocol::ClientToHost>();
+    let canvas_size = size_css(info.width, info.height);
     rsx! {
         div {
             class: "popup",
@@ -507,7 +512,7 @@ fn PopupView(
             canvas {
                 class: "surface",
                 id: "win-{id}",
-                style: "cursor: {cursor};",
+                style: "cursor: {cursor};{canvas_size}",
                 onmousemove: move |e| {
                     let p = e.data().element_coordinates();
                     session.send(protocol::ClientToHost::PointerMotion { id, x: p.x, y: p.y });
@@ -566,6 +571,10 @@ fn wheel_delta(e: &Event<WheelData>) -> (f64, f64) {
 
 /// The desk's client size, the area Wayland windows actually get; falls
 /// back to the whole browser viewport before the desk mounts.
+fn pixel_ratio() -> f64 {
+    web_sys::window().map_or(1.0, |w| w.device_pixel_ratio())
+}
+
 fn desk_size() -> Option<protocol::Size> {
     let window = web_sys::window()?;
     let document = window.document()?;
@@ -592,7 +601,10 @@ fn install_resize_listener(session: Coroutine<protocol::ClientToHost>) {
     };
     let handler = Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
         if let Some(size) = desk_size() {
-            session.send(protocol::ClientToHost::Viewport { size });
+            session.send(protocol::ClientToHost::Viewport {
+                size,
+                scale: pixel_ratio(),
+            });
         }
     });
     if window
@@ -703,9 +715,15 @@ async fn run_session(
         gloo_timers::future::TimeoutFuture::new(50).await;
     }
     if let Some(size) = viewport
-        && send(&mut sink, &protocol::ClientToHost::Viewport { size })
-            .await
-            .is_none()
+        && send(
+            &mut sink,
+            &protocol::ClientToHost::Viewport {
+                size,
+                scale: pixel_ratio(),
+            },
+        )
+        .await
+        .is_none()
     {
         return;
     }
@@ -811,6 +829,7 @@ async fn apply(
         protocol::HostToClient::VideoFrame {
             id,
             size,
+            logical,
             keyframe,
             data,
         } => {
@@ -819,18 +838,32 @@ async fn apply(
             let stale = windows
                 .read()
                 .get(&id)
-                .is_some_and(|w| w.width != size.width || w.height != size.height);
+                .is_some_and(|w| w.width != logical.width || w.height != logical.height);
             if stale && let Some(info) = windows.write().get_mut(&id) {
-                info.width = size.width;
-                info.height = size.height;
+                info.width = logical.width;
+                info.height = logical.height;
             }
         }
         protocol::HostToClient::PopupCreated { id, parent, x, y } => {
-            popups.write().insert(id, PopupInfo { parent, x, y });
+            let (width, height) = popups
+                .read()
+                .get(&id)
+                .map_or((0, 0), |p| (p.width, p.height));
+            popups.write().insert(
+                id,
+                PopupInfo {
+                    parent,
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+            );
         }
         protocol::HostToClient::Frame {
             id,
             size,
+            logical,
             damage,
             compressed,
             pixels,
@@ -845,10 +878,18 @@ async fn apply(
             let stale = windows
                 .read()
                 .get(&id)
-                .is_some_and(|w| w.width != size.width || w.height != size.height);
+                .is_some_and(|w| w.width != logical.width || w.height != logical.height);
             if stale && let Some(info) = windows.write().get_mut(&id) {
-                info.width = size.width;
-                info.height = size.height;
+                info.width = logical.width;
+                info.height = logical.height;
+            }
+            let popup_stale = popups
+                .read()
+                .get(&id)
+                .is_some_and(|p| p.width != logical.width || p.height != logical.height);
+            if popup_stale && let Some(info) = popups.write().get_mut(&id) {
+                info.width = logical.width;
+                info.height = logical.height;
             }
             record_frame_stats(wire_len, pixels.len(), damage);
             draw_frame(id, size, damage, &pixels).await;
@@ -947,6 +988,16 @@ fn record_frame_stats(wire: usize, raw: usize, damage: protocol::Rect) {
     let _ = js_sys::Reflect::set(&obj, &"raw".into(), &(get("raw") + raw).into());
     let _ = js_sys::Reflect::set(&obj, &"lastW".into(), &f64::from(damage.width).into());
     let _ = js_sys::Reflect::set(&obj, &"lastH".into(), &f64::from(damage.height).into());
+}
+
+/// Inline CSS pinning a canvas to its logical size; empty before the first
+/// frame so the intrinsic (backing) size shows through.
+fn size_css(width: u32, height: u32) -> String {
+    if width > 0 {
+        format!("width:{width}px;height:{height}px;")
+    } else {
+        String::new()
+    }
 }
 
 fn canvas_for(id: protocol::WindowId) -> Option<HtmlCanvasElement> {
