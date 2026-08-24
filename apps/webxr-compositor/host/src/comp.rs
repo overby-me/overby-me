@@ -26,7 +26,7 @@ use smithay::reexports::wayland_server::{Client, Display, DisplayHandle};
 use smithay::utils::{SERIAL_COUNTER, Serial, Transform};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState,
+    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, Damage,
     SurfaceAttributes, with_states,
 };
 use smithay::wayland::output::{OutputHandler, OutputManagerState};
@@ -57,6 +57,15 @@ const OUTPUT_SIZE: (i32, i32) = (1920, 1080);
 /// How often pending wl_callback frame acks are fired (roughly 60 Hz).
 const FRAME_TICK: Duration = Duration::from_millis(16);
 
+/// Frame callbacks are withheld while any browser has this much queued, so
+/// clients stop rendering frames nobody can drain yet.
+const INFLIGHT_BUDGET: u64 = 32 * 1024 * 1024;
+
+/// Damage covering at least this fraction of the surface is sent as a full
+/// frame; the bookkeeping is not worth it above this.
+const FULL_FRAME_NUMERATOR: u64 = 4;
+const FULL_FRAME_DENOMINATOR: u64 = 5;
+
 pub struct State {
     display_handle: DisplayHandle,
     compositor_state: CompositorState,
@@ -70,6 +79,8 @@ pub struct State {
     next_window_id: protocol::WindowId,
     pending_callbacks: Vec<WlCallback>,
     started: Instant,
+    /// bytes_sent at the last throughput log line.
+    reported_bytes: u64,
 }
 
 /// One xdg toplevel and what the browsers know about it.
@@ -132,6 +143,7 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
         next_window_id: 1,
         pending_callbacks: Vec::new(),
         started: Instant::now(),
+        reported_bytes: 0,
     };
 
     event_loop.run(Some(FRAME_TICK), &mut state, |state| {
@@ -213,6 +225,17 @@ fn insert_sources(
     handle.insert_source(Timer::from_duration(FRAME_TICK), |_, _, state| {
         state.fire_frame_callbacks();
         TimeoutAction::ToDuration(FRAME_TICK)
+    })?;
+
+    let throughput_tick = Duration::from_secs(5);
+    handle.insert_source(Timer::from_duration(throughput_tick), move |_, _, state| {
+        let total = state.hub.bytes_sent();
+        let delta = total - state.reported_bytes;
+        state.reported_bytes = total;
+        if delta > 0 {
+            tracing::debug!(kib_per_s = delta / 5 / 1024, "browser payload rate");
+        }
+        TimeoutAction::ToDuration(throughput_tick)
     })?;
 
     Ok(())
@@ -422,6 +445,11 @@ impl State {
         if self.pending_callbacks.is_empty() {
             return;
         }
+        // Backpressure: a browser that cannot drain its queue must not keep
+        // receiving fresh frames, so clients wait for their callbacks.
+        if self.hub.max_inflight() > INFLIGHT_BUDGET {
+            return;
+        }
         let elapsed = u32::try_from(self.started.elapsed().as_millis()).unwrap_or(u32::MAX);
         for callback in self.pending_callbacks.drain(..) {
             callback.done(elapsed);
@@ -436,12 +464,14 @@ impl State {
             return;
         }
 
-        let (assignment, callbacks) = with_states(surface, |states| {
+        let (assignment, callbacks, damage, scale) = with_states(surface, |states| {
             let mut guard = states.cached_state.get::<SurfaceAttributes>();
             let attributes = guard.current();
             (
                 attributes.buffer.take(),
                 std::mem::take(&mut attributes.frame_callbacks),
+                std::mem::take(&mut attributes.damage),
+                attributes.buffer_scale,
             )
         });
         self.pending_callbacks.extend(callbacks);
@@ -450,8 +480,8 @@ impl State {
 
         match assignment {
             Some(BufferAssignment::NewBuffer(buffer)) => {
-                match read_rgba(&buffer) {
-                    Ok((size, pixels)) => self.publish_frame(index, size, pixels),
+                match self.read_frame(index, &buffer, &damage, scale) {
+                    Ok((size, rect, pixels)) => self.publish_frame(index, size, rect, pixels),
                     Err(error) => {
                         tracing::warn!(window = self.windows[index].id, error, "unreadable buffer");
                     }
@@ -459,6 +489,86 @@ impl State {
                 buffer.release();
             }
             Some(BufferAssignment::Removed) | None => {}
+        }
+    }
+
+    /// Decide how much of the committed buffer to copy: the damage bounding
+    /// box when the previous frame is patchable, the whole buffer otherwise.
+    fn read_frame(
+        &self,
+        index: usize,
+        buffer: &WlBuffer,
+        damage: &[Damage],
+        scale: i32,
+    ) -> Result<(protocol::Size, protocol::Rect, Vec<u8>), String> {
+        with_buffer_contents(buffer, |ptr, len, data| {
+            // SAFETY: with_buffer_contents guarantees ptr..ptr+len maps the
+            // pool for the duration of this closure.
+            let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
+            let size = protocol::Size {
+                width: data.width.unsigned_abs(),
+                height: data.height.unsigned_abs(),
+            };
+            let rect = self.wanted_rect(index, size, damage, scale);
+            let pixels = convert_rect(bytes, data, rect)?;
+            Ok((size, rect, pixels))
+        })
+        .map_err(|error| format!("buffer access failed: {error:?}"))?
+    }
+
+    /// The full surface unless a smaller patch is provably enough: the
+    /// stored frame must match the new size, the scale must be 1, and the
+    /// client must have reported usable damage that is worth cropping.
+    fn wanted_rect(
+        &self,
+        index: usize,
+        size: protocol::Size,
+        damage: &[Damage],
+        scale: i32,
+    ) -> protocol::Rect {
+        let full = full_damage(size);
+        let patchable = matches!(&self.windows[index].last_frame, Some((s, _)) if *s == size);
+        if !patchable || scale != 1 || damage.is_empty() {
+            return full;
+        }
+
+        let mut bounds: Option<(i32, i32, i32, i32)> = None;
+        for entry in damage {
+            // With scale 1 and no transform, surface and buffer coordinates
+            // are the same space.
+            let r = match entry {
+                Damage::Surface(r) => (r.loc.x, r.loc.y, r.size.w, r.size.h),
+                Damage::Buffer(r) => (r.loc.x, r.loc.y, r.size.w, r.size.h),
+            };
+            let x0 = r.0.max(0);
+            let y0 = r.1.max(0);
+            let x1 = r.0.saturating_add(r.2).min(i32::try_from(size.width).unwrap_or(i32::MAX));
+            let y1 = r.1.saturating_add(r.3).min(i32::try_from(size.height).unwrap_or(i32::MAX));
+            if x1 <= x0 || y1 <= y0 {
+                continue;
+            }
+            bounds = Some(match bounds {
+                None => (x0, y0, x1, y1),
+                Some((bx0, by0, bx1, by1)) => (bx0.min(x0), by0.min(y0), bx1.max(x1), by1.max(y1)),
+            });
+        }
+        let Some((x0, y0, x1, y1)) = bounds else {
+            // Nothing visibly damaged; be conservative rather than clever.
+            return full;
+        };
+
+        let rect = protocol::Rect {
+            x: x0.unsigned_abs(),
+            y: y0.unsigned_abs(),
+            width: (x1 - x0).unsigned_abs(),
+            height: (y1 - y0).unsigned_abs(),
+        };
+        let rect_area = u64::from(rect.width) * u64::from(rect.height);
+        let full_area = u64::from(size.width) * u64::from(size.height);
+        if rect_area * FULL_FRAME_DENOMINATOR >= full_area * FULL_FRAME_NUMERATOR {
+            full
+        } else {
+            rect
         }
     }
 
@@ -490,7 +600,13 @@ impl State {
         }
     }
 
-    fn publish_frame(&mut self, index: usize, size: protocol::Size, pixels: Vec<u8>) {
+    fn publish_frame(
+        &mut self,
+        index: usize,
+        size: protocol::Size,
+        rect: protocol::Rect,
+        pixels: Vec<u8>,
+    ) {
         let window = &mut self.windows[index];
         if !window.announced {
             window.announced = true;
@@ -503,10 +619,25 @@ impl State {
         self.hub.broadcast(&protocol::HostToClient::Frame {
             id: window.id,
             size,
-            damage: full_damage(size),
+            damage: rect,
             pixels: pixels.clone(),
         });
-        self.windows[index].last_frame = Some((size, pixels));
+
+        // Keep the stored frame current so a joining browser gets the whole
+        // picture, not just the last patch.
+        let window = &mut self.windows[index];
+        if rect == full_damage(size) {
+            window.last_frame = Some((size, pixels));
+        } else if let Some((_, stored)) = &mut window.last_frame {
+            let stride = size.width as usize * 4;
+            let patch_stride = rect.width as usize * 4;
+            for row in 0..rect.height as usize {
+                let to = (rect.y as usize + row) * stride + rect.x as usize * 4;
+                let from = row * patch_stride;
+                stored[to..to + patch_stride]
+                    .copy_from_slice(&pixels[from..from + patch_stride]);
+            }
+        }
     }
 }
 
@@ -533,18 +664,8 @@ fn initial_configure_sent(surface: &WlSurface) -> bool {
     })
 }
 
-/// Copy an shm buffer out as tightly packed RGBA8888.
-fn read_rgba(buffer: &WlBuffer) -> Result<(protocol::Size, Vec<u8>), String> {
-    with_buffer_contents(buffer, |ptr, len, data| {
-        // SAFETY: with_buffer_contents guarantees ptr..ptr+len maps the pool
-        // for the duration of this closure.
-        let bytes = unsafe { std::slice::from_raw_parts(ptr, len) };
-        convert_rgba(bytes, data)
-    })
-    .map_err(|error| format!("buffer access failed: {error:?}"))?
-}
-
-fn convert_rgba(bytes: &[u8], data: BufferData) -> Result<(protocol::Size, Vec<u8>), String> {
+/// Copy one rectangle of an shm buffer out as tightly packed RGBA8888.
+fn convert_rect(bytes: &[u8], data: BufferData, rect: protocol::Rect) -> Result<Vec<u8>, String> {
     let width = usize::try_from(data.width).map_err(|_| "negative width".to_owned())?;
     let height = usize::try_from(data.height).map_err(|_| "negative height".to_owned())?;
     let stride = usize::try_from(data.stride).map_err(|_| "negative stride".to_owned())?;
@@ -561,11 +682,16 @@ fn convert_rgba(bytes: &[u8], data: BufferData) -> Result<(protocol::Size, Vec<u
     if stride < width * 4 || bytes.len() < end {
         return Err("buffer smaller than its own geometry".to_owned());
     }
+    let (rx, ry) = (rect.x as usize, rect.y as usize);
+    let (rw, rh) = (rect.width as usize, rect.height as usize);
+    if rx + rw > width || ry + rh > height {
+        return Err("damage rect outside the buffer".to_owned());
+    }
 
-    let mut out = Vec::with_capacity(width * height * 4);
-    for row in 0..height {
-        let base = offset + row * stride;
-        for pixel in bytes[base..base + width * 4].chunks_exact(4) {
+    let mut out = Vec::with_capacity(rw * rh * 4);
+    for row in ry..ry + rh {
+        let base = offset + row * stride + rx * 4;
+        for pixel in bytes[base..base + rw * 4].chunks_exact(4) {
             // wl_shm formats are little-endian words: [B, G, R, A].
             out.extend_from_slice(&[
                 pixel[2],
@@ -575,13 +701,7 @@ fn convert_rgba(bytes: &[u8], data: BufferData) -> Result<(protocol::Size, Vec<u
             ]);
         }
     }
-    Ok((
-        protocol::Size {
-            width: data.width.unsigned_abs(),
-            height: data.height.unsigned_abs(),
-        },
-        out,
-    ))
+    Ok(out)
 }
 
 impl CompositorHandler for State {

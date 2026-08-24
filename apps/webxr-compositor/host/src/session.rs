@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
+
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
@@ -32,9 +33,17 @@ pub enum HubEvent {
 /// Fan-out point between one compositor and any number of browser sessions:
 /// encoded frames go out to every client, input events come back tagged with
 /// the client that sent them.
+struct ClientQueue {
+    tx: mpsc::UnboundedSender<Bytes>,
+    /// Bytes queued but not yet written to the socket, for backpressure.
+    inflight: Arc<AtomicU64>,
+}
+
 pub struct Hub {
-    clients: Mutex<BTreeMap<ClientId, mpsc::UnboundedSender<Bytes>>>,
+    clients: Mutex<BTreeMap<ClientId, ClientQueue>>,
     next_id: AtomicU64,
+    /// Total payload bytes ever broadcast, for throughput logging.
+    bytes_sent: AtomicU64,
     events: calloop::channel::Sender<HubEvent>,
 }
 
@@ -43,6 +52,7 @@ impl Hub {
         Self {
             clients: Mutex::new(BTreeMap::new()),
             next_id: AtomicU64::new(1),
+            bytes_sent: AtomicU64::new(0),
             events,
         }
     }
@@ -55,10 +65,15 @@ impl Hub {
         };
         let bytes = Bytes::from(bytes);
         let clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
-        for tx in clients.values() {
+        for queue in clients.values() {
+            queue
+                .inflight
+                .fetch_add(bytes.len() as u64, Ordering::Relaxed);
             // A closed queue only means that client is gone; session() cleans up.
-            let _ = tx.send(bytes.clone());
+            let _ = queue.tx.send(bytes.clone());
         }
+        self.bytes_sent
+            .fetch_add(bytes.len() as u64, Ordering::Relaxed);
     }
 
     pub fn send_to(&self, id: ClientId, msg: &protocol::HostToClient) {
@@ -67,18 +82,44 @@ impl Hub {
             return;
         };
         let clients = self.clients.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(tx) = clients.get(&id) {
-            let _ = tx.send(Bytes::from(bytes));
+        if let Some(queue) = clients.get(&id) {
+            queue
+                .inflight
+                .fetch_add(bytes.len() as u64, Ordering::Relaxed);
+            let _ = queue.tx.send(Bytes::from(bytes));
         }
     }
 
-    fn register(&self, tx: mpsc::UnboundedSender<Bytes>) -> ClientId {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+    /// The largest unsent backlog across clients; the compositor holds frame
+    /// callbacks while this is high so clients stop rendering into the void.
+    pub fn max_inflight(&self) -> u64 {
         self.clients
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(id, tx);
-        id
+            .values()
+            .map(|q| q.inflight.load(Ordering::Relaxed))
+            .max()
+            .unwrap_or(0)
+    }
+
+    pub fn bytes_sent(&self) -> u64 {
+        self.bytes_sent.load(Ordering::Relaxed)
+    }
+
+    fn register(&self, tx: mpsc::UnboundedSender<Bytes>) -> (ClientId, Arc<AtomicU64>) {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let inflight = Arc::new(AtomicU64::new(0));
+        self.clients
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(
+                id,
+                ClientQueue {
+                    tx,
+                    inflight: Arc::clone(&inflight),
+                },
+            );
+        (id, inflight)
     }
 
     fn unregister(&self, id: ClientId) {
@@ -98,7 +139,7 @@ pub async fn ws_handler(State(hub): State<Arc<Hub>>, ws: WebSocketUpgrade) -> Re
 async fn session(hub: Arc<Hub>, socket: WebSocket) {
     let (mut to_browser, mut from_browser) = socket.split();
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let id = hub.register(tx);
+    let (id, inflight) = hub.register(tx);
     tracing::info!(client = id, "browser connected");
 
     let hello = protocol::HostToClient::Hello {
@@ -121,7 +162,10 @@ async fn session(hub: Arc<Hub>, socket: WebSocket) {
             tokio::select! {
                 queued = rx.recv() => {
                     let Some(bytes) = queued else { break };
-                    if to_browser.send(Message::Binary(bytes)).await.is_err() {
+                    let len = bytes.len() as u64;
+                    let sent = to_browser.send(Message::Binary(bytes)).await;
+                    inflight.fetch_sub(len, Ordering::Relaxed);
+                    if sent.is_err() {
                         break;
                     }
                 }

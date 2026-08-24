@@ -51,6 +51,12 @@ windows *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-windows.nu {{args}}
 
+# Check that typing into foot ships small damage rects, not full frames.
+# Needs `just build` first.
+damage *args:
+    cargo build --manifest-path host/Cargo.toml
+    nu test-damage.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings

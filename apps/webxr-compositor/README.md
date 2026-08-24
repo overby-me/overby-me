@@ -39,8 +39,15 @@ echo). Windows behave like windows: titlebar drag, click to focus and raise
 (with xdg activated state), a close button, a resize handle that becomes an
 xdg configure clamped to the client's min/max, server-side decorations
 forced via zxdg-decoration, and reload resync (`just windows` drives all of
-it with checker and foot side by side). Roadmap: damage optimization,
-clipboard and cursors, GTK-class apps, GPU clients (Zed), WebXR mode.
+it with checker and foot side by side). Frames carry client damage rather
+than full surfaces: the host crops commits to the damage bounding box
+(falling back to full frames on resize, scale != 1 or near-full damage),
+patches its stored frame for resync, and withholds frame callbacks while
+any browser has over 32 MB queued (`just damage` measures typing into foot
+at about 600 bytes per frame against a 1.3 MB full surface). Occlusion
+culling is not done: the host does not know the browser's window layout.
+Roadmap: clipboard and cursors, GTK-class apps, GPU clients (Zed), WebXR
+mode.
 
 ## Run
 

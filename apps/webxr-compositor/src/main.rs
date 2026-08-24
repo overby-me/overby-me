@@ -458,6 +458,7 @@ async fn apply(
                 info.width = size.width;
                 info.height = size.height;
             }
+            record_frame_stats(pixels.len(), damage);
             draw_frame(id, size, damage, &pixels).await;
         }
     }
@@ -483,6 +484,31 @@ async fn draw_frame(
         gloo_timers::future::TimeoutFuture::new(16).await;
     }
     tracing::warn!("no canvas appeared for window {id}");
+}
+
+/// Frame payload counters on `window.__wxr`, so the browser tests can
+/// assert that damage frames stay small.
+fn record_frame_stats(bytes: usize, damage: protocol::Rect) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let key = wasm_bindgen::JsValue::from_str("__wxr");
+    let obj = js_sys::Reflect::get(&window, &key)
+        .ok()
+        .filter(wasm_bindgen::JsValue::is_object)
+        .unwrap_or_else(|| js_sys::Object::new().into());
+    let get = |name: &str| {
+        js_sys::Reflect::get(&obj, &name.into())
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0)
+    };
+    let bytes = f64::from(u32::try_from(bytes).unwrap_or(u32::MAX));
+    let _ = js_sys::Reflect::set(&obj, &"frames".into(), &(get("frames") + 1.0).into());
+    let _ = js_sys::Reflect::set(&obj, &"bytes".into(), &(get("bytes") + bytes).into());
+    let _ = js_sys::Reflect::set(&obj, &"lastW".into(), &f64::from(damage.width).into());
+    let _ = js_sys::Reflect::set(&obj, &"lastH".into(), &f64::from(damage.height).into());
+    let _ = js_sys::Reflect::set(&window, &key, &obj);
 }
 
 fn canvas_for(id: protocol::WindowId) -> Option<HtmlCanvasElement> {
