@@ -16,6 +16,9 @@ path = "src/main.rs"
 axum = { version = "0.8", features = ["ws"] }
 bytes = "1"
 futures-util = "0.3"
+smithay = { version = "0.7.0", default-features = false, features = [
+  "wayland_frontend"
+] }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
 tower-http = { version = "0.6", features = ["fs"] }
 tracing = "0.1"

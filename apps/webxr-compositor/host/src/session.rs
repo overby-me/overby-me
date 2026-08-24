@@ -9,6 +9,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
+use smithay::reexports::calloop;
 use tokio::sync::mpsc;
 use webxr_compositor_protocol as protocol;
 
@@ -26,11 +27,11 @@ pub type ClientId = u64;
 pub struct Hub {
     clients: Mutex<BTreeMap<ClientId, mpsc::UnboundedSender<Bytes>>>,
     next_id: AtomicU64,
-    events: mpsc::UnboundedSender<(ClientId, protocol::ClientToHost)>,
+    events: calloop::channel::Sender<(ClientId, protocol::ClientToHost)>,
 }
 
 impl Hub {
-    pub fn new(events: mpsc::UnboundedSender<(ClientId, protocol::ClientToHost)>) -> Self {
+    pub fn new(events: calloop::channel::Sender<(ClientId, protocol::ClientToHost)>) -> Self {
         Self {
             clients: Mutex::new(BTreeMap::new()),
             next_id: AtomicU64::new(1),

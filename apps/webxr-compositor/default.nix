@@ -68,6 +68,8 @@ let
   mkHost = {
     lib,
     rustPlatform,
+    pkg-config,
+    libxkbcommon,
     ...
   }:
     rustPlatform.buildRustPackage {
@@ -87,6 +89,10 @@ let
       buildAndTestSubdir = "host";
       cargoLock.lockFile = ./host/Cargo.lock;
 
+      nativeBuildInputs = [pkg-config];
+      # smithay's seat keyboard state is xkbcommon.
+      buildInputs = [libxkbcommon];
+
       meta.description = "webxr-compositor native host (Wayland socket + HTTP/WebSocket server)";
     };
 in {
@@ -105,6 +111,11 @@ in {
       # Browser testing will drive a headless chromium served by deno, like
       # the sibling apps do.
       deno
+      # The host links libxkbcommon through smithay.
+      pkg-config
+      libxkbcommon
+      # test-wayland.nu asks wayland-info what the host advertises.
+      wayland-utils
     ];
   };
 
@@ -121,6 +132,8 @@ in {
     lld,
     just,
     which,
+    pkg-config,
+    libxkbcommon,
     makeBinaryWrapper,
     symlinkJoin,
     ...
@@ -128,7 +141,7 @@ in {
     frontend = mkFrontend {
       inherit lib rustPlatform dioxus-cli wasm-bindgen-cli binaryen lld just which;
     };
-    host = mkHost {inherit lib rustPlatform;};
+    host = mkHost {inherit lib rustPlatform pkg-config libxkbcommon;};
   in
     symlinkJoin {
       name = "webxr-compositor";

@@ -23,11 +23,14 @@ server stack never enter the wasm dependency graph.
 
 ## Status
 
-The host serves the built frontend over HTTP and completes the wire-protocol
-hello with the page over /ws (checked end to end by `just browser`). No
-Wayland socket yet. Roadmap: Wayland globals, shm surface pipeline, input,
-window management, damage optimization, clipboard and cursors, GTK-class
-apps, GPU clients (Zed), WebXR mode.
+The host runs a smithay compositor on its own thread with a real Wayland
+socket (`WEBXR_COMPOSITOR_WAYLAND_DISPLAY`, else auto-named) advertising
+wl_compositor, wl_subcompositor, wl_shm, wl_seat, wl_output + xdg-output,
+xdg_wm_base and wl_data_device_manager (`just wayland` proves it with
+wayland-info), and completes the wire-protocol hello with the page over /ws
+(`just browser`). Clients can connect but nothing is drawn yet. Roadmap: shm
+surface pipeline, input, window management, damage optimization, clipboard
+and cursors, GTK-class apps, GPU clients (Zed), WebXR mode.
 
 ## Run
 
