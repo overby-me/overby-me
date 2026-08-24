@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any wire-incompatible change; both ends refuse a mismatch.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 pub type WindowId = u32;
 
@@ -45,11 +45,14 @@ pub enum HostToClient {
         id: WindowId,
     },
     /// RGBA pixels of `damage`, tightly packed (stride = damage.width * 4).
-    /// `size` is the full surface size the rect is positioned in.
+    /// `size` is the full surface size the rect is positioned in. With
+    /// `compressed`, `pixels` is an lz4 block with the raw length prepended
+    /// ([`wire_pixels`] / [`unwire_pixels`]).
     Frame {
         id: WindowId,
         size: Size,
         damage: Rect,
+        compressed: bool,
         #[serde(with = "serde_bytes")]
         pixels: Vec<u8>,
     },
@@ -125,6 +128,26 @@ impl HostToClient {
     }
 }
 
+/// Compress pixels for a Frame when it pays; UI content usually collapses,
+/// photographic content is sent raw rather than inflated.
+pub fn wire_pixels(pixels: &[u8]) -> (bool, Vec<u8>) {
+    let compressed = lz4_flex::compress_prepend_size(pixels);
+    if compressed.len() < pixels.len() / 10 * 9 {
+        (true, compressed)
+    } else {
+        (false, pixels.to_vec())
+    }
+}
+
+/// The inverse of [`wire_pixels`], applied by the receiving side.
+pub fn unwire_pixels(compressed: bool, pixels: Vec<u8>) -> Option<Vec<u8>> {
+    if compressed {
+        lz4_flex::decompress_size_prepended(&pixels).ok()
+    } else {
+        Some(pixels)
+    }
+}
+
 impl ClientToHost {
     pub fn encode(&self) -> Result<Vec<u8>, postcard::Error> {
         postcard::to_allocvec(self)
@@ -153,6 +176,7 @@ mod tests {
                 width: 2,
                 height: 1,
             },
+            compressed: false,
             pixels: vec![1, 2, 3, 4, 5, 6, 7, 8],
         };
         assert_eq!(
@@ -161,6 +185,22 @@ mod tests {
             "a frame must roundtrip unchanged"
         );
         Ok(())
+    }
+
+    #[test]
+    fn pixels_wire_roundtrips() {
+        let flat = vec![7_u8; 4096];
+        let (compressed, wire) = wire_pixels(&flat);
+        assert!(compressed, "solid pixels must take the compressed path");
+        assert!(
+            wire.len() < flat.len() / 10,
+            "solid pixels should collapse by an order of magnitude"
+        );
+        assert_eq!(
+            unwire_pixels(compressed, wire).as_deref(),
+            Some(flat.as_slice()),
+            "wire pixels must roundtrip unchanged"
+        );
     }
 
     #[test]

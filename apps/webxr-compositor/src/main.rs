@@ -716,8 +716,14 @@ async fn apply(
             id,
             size,
             damage,
+            compressed,
             pixels,
         } => {
+            let wire_len = pixels.len();
+            let Some(pixels) = protocol::unwire_pixels(compressed, pixels) else {
+                tracing::warn!("dropping an undecompressable frame for window {id}");
+                return Some(());
+            };
             let stale = windows
                 .read()
                 .get(&id)
@@ -726,7 +732,7 @@ async fn apply(
                 info.width = size.width;
                 info.height = size.height;
             }
-            record_frame_stats(pixels.len(), damage);
+            record_frame_stats(wire_len, pixels.len(), damage);
             draw_frame(id, size, damage, &pixels).await;
         }
         protocol::HostToClient::Clipboard { text } => {
@@ -805,8 +811,8 @@ fn set_wxr_field(name: &str, value: &wasm_bindgen::JsValue) {
 }
 
 /// Frame payload counters on `window.__wxr`, so the browser tests can
-/// assert that damage frames stay small.
-fn record_frame_stats(bytes: usize, damage: protocol::Rect) {
+/// assert that damage frames stay small and compression pays.
+fn record_frame_stats(wire: usize, raw: usize, damage: protocol::Rect) {
     let Some(obj) = wxr_object() else {
         return;
     };
@@ -816,9 +822,11 @@ fn record_frame_stats(bytes: usize, damage: protocol::Rect) {
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0)
     };
-    let bytes = f64::from(u32::try_from(bytes).unwrap_or(u32::MAX));
+    let wire = f64::from(u32::try_from(wire).unwrap_or(u32::MAX));
+    let raw = f64::from(u32::try_from(raw).unwrap_or(u32::MAX));
     let _ = js_sys::Reflect::set(&obj, &"frames".into(), &(get("frames") + 1.0).into());
-    let _ = js_sys::Reflect::set(&obj, &"bytes".into(), &(get("bytes") + bytes).into());
+    let _ = js_sys::Reflect::set(&obj, &"bytes".into(), &(get("bytes") + wire).into());
+    let _ = js_sys::Reflect::set(&obj, &"raw".into(), &(get("raw") + raw).into());
     let _ = js_sys::Reflect::set(&obj, &"lastW".into(), &f64::from(damage.width).into());
     let _ = js_sys::Reflect::set(&obj, &"lastH".into(), &f64::from(damage.height).into());
 }

@@ -5,6 +5,10 @@ edition = "2024"
 description = "Wire protocol between the compositor host and its browser frontend"
 
 [dependencies]
+lz4_flex = { version = "0.11", default-features = false, features = [
+  "safe-decode",
+  "safe-encode"
+] }
 postcard = { version = "1", default-features = false, features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 serde_bytes = "0.11"

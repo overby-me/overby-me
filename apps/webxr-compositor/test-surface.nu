@@ -95,16 +95,20 @@ for (let i = 0; i < 240; i++) {
 }
 
 let second = null;
+let stats = null;
 if (first) {
   await pause(1200);
   second = await read(probe);
+  stats = await read(
+    `window.__wxr ? { frames: window.__wxr.frames, wire: window.__wxr.bytes, raw: window.__wxr.raw } : null`,
+  );
 }
 
 const shot = await send("Page.captureScreenshot", { format: "png" });
 await Deno.writeFile(out, Uint8Array.from(atob(shot.data), (c) => c.charCodeAt(0)));
 
 for (const line of lines) console.error("  " + line);
-console.log(JSON.stringify({ first, second, console: lines }));
+console.log(JSON.stringify({ first, second, stats, console: lines }));
 ws.close();
 '
 
@@ -234,6 +238,18 @@ def main [--out: string = "/tmp/webxr-compositor-surface.png"]: nothing -> nothi
             $failures = ($failures | append "no second sample")
         } else if ($second.q == $first.q) {
             $failures = ($failures | append "the quadrants never rotated; frame callbacks are not driving the client")
+        }
+        let stats = ($report.stats? | default null)
+        if $stats == null {
+            $failures = ($failures | append "the page recorded no frame stats")
+        } else {
+            let wire = ($stats.wire | default 0)
+            let raw = ($stats.raw | default 0)
+            if $wire == 0 or ($raw / $wire) < 20 {
+                $failures = ($failures | append $"solid frames travelled at ($wire) wire bytes for ($raw) raw; compression is not engaging")
+            } else {
+                print $"  wire      ($wire) bytes for ($raw) raw, ratio (($raw / $wire))x"
+            }
         }
     }
     let complaints = ($report.console? | default [] | where {|l| $l =~ "EXCEPTION" })

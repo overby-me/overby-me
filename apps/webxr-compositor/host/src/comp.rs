@@ -584,12 +584,7 @@ impl State {
             if let Some((size, pixels)) = &window.last_frame {
                 self.hub.send_to(
                     client,
-                    &protocol::HostToClient::Frame {
-                        id: window.id,
-                        size: *size,
-                        damage: full_damage(*size),
-                        pixels: pixels.clone(),
-                    },
+                    &frame_message(window.id, *size, full_damage(*size), pixels),
                 );
             }
         }
@@ -606,12 +601,7 @@ impl State {
             if let Some((size, pixels)) = &popup.last_frame {
                 self.hub.send_to(
                     client,
-                    &protocol::HostToClient::Frame {
-                        id: popup.id,
-                        size: *size,
-                        damage: full_damage(*size),
-                        pixels: pixels.clone(),
-                    },
+                    &frame_message(popup.id, *size, full_damage(*size), pixels),
                 );
             }
         }
@@ -717,12 +707,8 @@ impl State {
                 y: popup.offset.1,
             });
         }
-        self.hub.broadcast(&protocol::HostToClient::Frame {
-            id: popup.id,
-            size,
-            damage: rect,
-            pixels: pixels.clone(),
-        });
+        self.hub
+            .broadcast(&frame_message(popup.id, size, rect, &pixels));
         store_frame(&mut self.popups[index].last_frame, size, rect, pixels);
     }
 
@@ -857,12 +843,8 @@ impl State {
                 title: window.title.clone(),
             });
         }
-        self.hub.broadcast(&protocol::HostToClient::Frame {
-            id: window.id,
-            size,
-            damage: rect,
-            pixels: pixels.clone(),
-        });
+        self.hub
+            .broadcast(&frame_message(window.id, size, rect, &pixels));
 
         store_frame(&mut self.windows[index].last_frame, size, rect, pixels);
     }
@@ -874,6 +856,23 @@ fn full_damage(size: protocol::Size) -> protocol::Rect {
         y: 0,
         width: size.width,
         height: size.height,
+    }
+}
+
+/// A Frame message with the pixels compressed when that pays.
+fn frame_message(
+    id: protocol::WindowId,
+    size: protocol::Size,
+    damage: protocol::Rect,
+    pixels: &[u8],
+) -> protocol::HostToClient {
+    let (compressed, pixels) = protocol::wire_pixels(pixels);
+    protocol::HostToClient::Frame {
+        id,
+        size,
+        damage,
+        compressed,
+        pixels,
     }
 }
 
