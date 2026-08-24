@@ -61,12 +61,15 @@ through smithay.
 GTK4 apps run: xdg popups (menus, popovers, tooltips) render as overlays
 anchored in their parent surface, nested popups nest, GTK's
 unmap-not-destroy popdown is handled, and a press outside the popup chain
-dismisses it (`just gtk` drives gnome-calculator's hamburger menu open and
-closed). Not there yet: wp_viewporter and fractional-scale are deliberately
-not advertised (clients render correctly at scale 1 instead of being lied
+dismisses it. Menus are keyboard-driven too: an explicit xdg_popup grab
+moves keyboard focus into the popup, dismissal hands it back down the
+chain to the spawning toplevel, so arrow keys walk the menu and Escape
+closes it (`just gtk` drives gnome-calculator's hamburger menu with the
+mouse and the keyboard, Escape-close, reopen and click-away dismissal).
+Not there yet: wp_viewporter and fractional-scale are deliberately not
+advertised (clients render correctly at scale 1 instead of being lied
 to), subsurfaces are not composited (GTK4 does not need them for normal
-windows), popups never receive keyboard focus (menu arrow-key navigation
-stays with the mouse), and xdg_activation is absent.
+windows), and xdg_activation is absent.
 
 Zed runs. With Mesa's software Vulkan (lavapipe presents through wl_shm),
 Zed opens, renders its full UI and accepts mouse and keyboard input in the

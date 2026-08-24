@@ -146,6 +146,53 @@ result.steps.popup = popup;
 result.steps.spot = used;
 
 if (popup) {
+  // The grab moves keyboard focus into the popover: ArrowDown must change
+  // the highlight (popup pixels), Escape must close it.
+  const sample = `(() => {
+    const p = document.querySelector(".popup canvas.surface");
+    if (!p || p.width === 0) return null;
+    const d = p.getContext("2d").getImageData(0, 0, p.width, p.height).data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 53) sum += d[i];
+    return sum;
+  })()`;
+  const key = async (code) => {
+    await send("Input.dispatchKeyEvent", { type: "keyDown", code, key: code });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", code, key: code });
+  };
+  const before = await read(sample);
+  await key("ArrowDown");
+  let navigated = false;
+  for (let i = 0; i < 15; i++) {
+    await pause(200);
+    const now = await read(sample);
+    if (now !== null && now !== before) { navigated = true; break; }
+  }
+  result.steps.navigated = navigated;
+
+  await key("Escape");
+  let escaped = false;
+  for (let i = 0; i < 15; i++) {
+    await pause(200);
+    if (!(await read(`document.querySelector(".popup") !== null`))) { escaped = true; break; }
+  }
+  result.steps.escaped = escaped;
+}
+
+if (result.steps.escaped) {
+  // Reopen the same menu; focus must have returned to the window for the
+  // menubutton to respond at all.
+  popup = null;
+  await click(geo.left + used[0], geo.top + used[1]);
+  for (let i = 0; i < 15; i++) {
+    await pause(200);
+    popup = await read(popupProbe);
+    if (popup) break;
+  }
+  result.steps.reopened = popup !== null;
+}
+
+if (popup) {
   // A click back in the main surface must dismiss the menu. The point must
   // be inside the real viewport (headless screens can be shorter than the
   // window) and left of the popover, which is why it hugs the left edge.
@@ -296,6 +343,15 @@ def main [--out: string = "/tmp/webxr-compositor-gtk.png"]: nothing -> nothing {
         } else {
             if ($popup.painted | default 0) < 500 {
                 $failures = ($failures | append $"the popup canvas has only (($popup.painted | default 0)) painted pixels")
+            }
+            if not ($steps.navigated? | default false) {
+                $failures = ($failures | append "ArrowDown never changed the menu highlight")
+            }
+            if not ($steps.escaped? | default false) {
+                $failures = ($failures | append "Escape did not close the menu")
+            }
+            if not ($steps.reopened? | default false) {
+                $failures = ($failures | append "the menu would not reopen after Escape")
             }
             if not ($steps.dismissed? | default false) {
                 $failures = ($failures | append "clicking the main surface did not dismiss the popup")

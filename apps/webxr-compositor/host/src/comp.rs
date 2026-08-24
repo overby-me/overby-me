@@ -159,6 +159,9 @@ struct Popup {
     offset: (i32, i32),
     announced: bool,
     last_frame: Option<(protocol::Size, Vec<u8>)>,
+    /// The client asked for an explicit grab: keyboard focus moved here and
+    /// returns to the parent chain when the popup goes away.
+    grabbed: bool,
 }
 
 /// Per-wayland-client data; smithay keeps surface state here.
@@ -965,12 +968,15 @@ impl State {
             Some(BufferAssignment::Removed) => {
                 let popup = &mut self.popups[index];
                 popup.last_frame = None;
+                popup.grabbed = false;
+                let parent = popup.parent;
                 if popup.announced {
                     popup.announced = false;
                     let id = popup.id;
                     self.hub
                         .broadcast(&protocol::HostToClient::WindowClosed { id });
                 }
+                self.restore_popup_focus(&surface.clone(), parent);
             }
             None => {}
         }
@@ -996,6 +1002,36 @@ impl State {
         self.hub
             .broadcast(&frame_message(popup.id, size, rect, &pixels));
         store_frame(&mut self.popups[index].last_frame, size, rect, pixels);
+    }
+
+    /// After a focus-holding popup goes away, keyboard focus falls to the
+    /// deepest surviving grabbed popup, else down the parent chain to the
+    /// toplevel that spawned the menu.
+    fn restore_popup_focus(&mut self, closed: &WlSurface, parent: protocol::WindowId) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if keyboard.current_focus().as_ref() != Some(closed) {
+            return;
+        }
+        let next = self
+            .popups
+            .iter()
+            .rev()
+            .find(|p| p.grabbed && p.popup.wl_surface() != closed)
+            .map(|p| p.popup.wl_surface().clone())
+            .or_else(|| self.root_toplevel_surface(parent));
+        keyboard.set_focus(self, next, SERIAL_COUNTER.next_serial());
+    }
+
+    /// The toplevel at the root of a popup chain.
+    fn root_toplevel_surface(&self, mut id: protocol::WindowId) -> Option<WlSurface> {
+        loop {
+            if let Some(window) = self.windows.iter().find(|w| w.id == id) {
+                return Some(window.toplevel.wl_surface().clone());
+            }
+            id = self.popups.iter().find(|p| p.id == id)?.parent;
+        }
     }
 
     /// A press on anything that is not a popup breaks the popup grab chain,
@@ -1397,12 +1433,24 @@ impl XdgShellHandler for State {
             offset: (geometry.loc.x, geometry.loc.y),
             announced: false,
             last_frame: None,
+            grabbed: false,
         });
     }
 
-    // The browser side enforces the grab: a press outside any popup
-    // dismisses the chain (see dismiss_popups).
-    fn grab(&mut self, _surface: PopupSurface, _seat: WlSeat, _serial: Serial) {}
+    // The pointer side of the grab stays with the browser (a press outside
+    // any popup dismisses the chain, see dismiss_popups); the keyboard side
+    // moves here so menus can be driven by arrow keys and Escape.
+    fn grab(&mut self, surface: PopupSurface, _seat: WlSeat, serial: Serial) {
+        let Some(index) = self.popups.iter().position(|p| p.popup == surface) else {
+            return;
+        };
+        self.popups[index].grabbed = true;
+        tracing::debug!(popup = self.popups[index].id, "popup keyboard grab");
+        let focus = surface.wl_surface().clone();
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            keyboard.set_focus(self, Some(focus), serial);
+        }
+    }
 
     fn popup_destroyed(&mut self, surface: PopupSurface) {
         if let Some(index) = self.popups.iter().position(|p| p.popup == surface) {
@@ -1412,6 +1460,7 @@ impl XdgShellHandler for State {
                 self.hub
                     .broadcast(&protocol::HostToClient::WindowClosed { id: popup.id });
             }
+            self.restore_popup_focus(popup.popup.wl_surface(), popup.parent);
         }
     }
 
