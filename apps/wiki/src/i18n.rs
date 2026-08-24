@@ -702,6 +702,30 @@ const EN_JSON: &str = r#"{
         "gapHeaders": "headers and footers",
         "gapMerges": "merged cells"
     },
+    "game": {
+        "title": "Radikal Rally",
+        "intro": "Drive the campaign's electric car to Christiansborg and hang all ten posters on the way. Mind the battery: grab green power and sunshine, ride the rainbows, and jump the border barriers, or let an EU flag lift them for you.",
+        "controls": "Drive with ← → or A/D. Jump with ↑, W or Space. Hang a poster with ↓, E or Enter.",
+        "start": "Start the campaign",
+        "again": "Run again",
+        "btnJump": "Jump",
+        "btnPoster": "Poster",
+        "toastBattery": "Green power! +35%",
+        "toastFlag": "EU flag: free movement ahead",
+        "toastOpen": "The barrier lifts. Free movement!",
+        "toastBorder": "Stopped at border control. Jump it, or bring an EU flag",
+        "toastRainbow": "Pride boost!",
+        "toastSun": "Solar charging",
+        "toastPoster": "Poster up!",
+        "wonTitleLandslide": "Landslide!",
+        "wonTitleElected": "Elected!",
+        "wonTitleBelow": "Below the threshold",
+        "wonLandslide": "{{n}} of 10 posters up. Christiansborg celebrates with fireworks!",
+        "wonElected": "{{n}} of 10 posters up. A solid campaign.",
+        "wonBelow": "Only {{n}} of 10 posters made it. Copenhagen stays grey tonight.",
+        "lostTitle": "Out of power",
+        "lost": "The battery ran dry. The green transition takes a charging plan: batteries and sunshine next run."
+    },
     "mime": {
         "group": "Group",
         "event": "Event",
@@ -733,6 +757,7 @@ const EN_JSON: &str = r#"{
         "parent": "Missing parents",
         "redirect": "Redirect",
         "cow": "Cow",
+        "game": "Game",
         "feedback": "Feedback",
         "unknown": "Unknown"
     }
@@ -1324,6 +1349,30 @@ const DA_JSON: &str = r#"{
         "gapHeaders": "sidehoveder og sidefødder",
         "gapMerges": "flettede celler"
     },
+    "game": {
+        "title": "Radikal Rally",
+        "intro": "Kør kampagnens elbil til Christiansborg og hæng alle ti valgplakater op undervejs. Hold øje med batteriet: Saml grøn strøm og solskin, kør på regnbuerne, og hop over grænsebommene, eller lad et EU-flag løfte dem for dig.",
+        "controls": "Kør med ← → eller A/D. Hop med ↑, W eller mellemrum. Hæng en plakat op med ↓, E eller Enter.",
+        "start": "Start valgkampen",
+        "again": "Kør igen",
+        "btnJump": "Hop",
+        "btnPoster": "Plakat",
+        "toastBattery": "Grøn strøm! +35 %",
+        "toastFlag": "EU-flag: fri bevægelighed forude",
+        "toastOpen": "Bommen løfter sig. Fri bevægelighed!",
+        "toastBorder": "Stoppet i grænsekontrollen. Hop over, eller find et EU-flag",
+        "toastRainbow": "Pride-fart!",
+        "toastSun": "Solopladning",
+        "toastPoster": "Plakat oppe!",
+        "wonTitleLandslide": "Kanonvalg!",
+        "wonTitleElected": "Valgt ind!",
+        "wonTitleBelow": "Under spærregrænsen",
+        "wonLandslide": "{{n}} af 10 plakater oppe. Christiansborg fejrer med fyrværkeri!",
+        "wonElected": "{{n}} af 10 plakater oppe. En solid kampagne.",
+        "wonBelow": "Kun {{n}} af 10 plakater kom op. København er grå i aften.",
+        "lostTitle": "Strømmen slap op",
+        "lost": "Batteriet løb tørt. Grøn omstilling kræver en ladeplan: Tag batterier og solskin med på næste tur."
+    },
     "mime": {
         "group": "Gruppe",
         "event": "Begivenhed",
@@ -1355,6 +1404,7 @@ const DA_JSON: &str = r#"{
         "parent": "Manglende forældre",
         "redirect": "Omdirigering",
         "cow": "Ko",
+        "game": "Spil",
         "feedback": "Feedback",
         "unknown": "Ukendt"
     }

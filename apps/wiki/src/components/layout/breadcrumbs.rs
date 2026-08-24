@@ -392,6 +392,7 @@ pub(super) fn app_crumb_label(app: &str) -> String {
         "parent" => t("mime.parent"),
         "redirect" => t("mime.redirect"),
         "cow" => t("mime.cow"),
+        "game" => t("mime.game"),
         other => other.to_string(),
     }
 }

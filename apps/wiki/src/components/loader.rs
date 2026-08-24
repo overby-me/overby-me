@@ -147,6 +147,7 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
         // included, so there is one profile page rather than two.
         Some("parent") => return rsx! { super::parent::ParentApp {} },
         Some("feedback") => return rsx! { super::feedback_app::FeedbackApp {} },
+        Some("game") => return rsx! { super::game::GameApp {} },
         _ => {}
     }
 

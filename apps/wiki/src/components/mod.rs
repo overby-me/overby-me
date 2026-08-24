@@ -13,6 +13,7 @@ pub mod feedback;
 pub mod feedback_app;
 pub mod file;
 pub mod folder;
+pub mod game;
 pub mod graph;
 pub mod home;
 pub mod layout;
