@@ -57,6 +57,12 @@ damage *args:
     cargo build --manifest-path host/Cargo.toml
     nu test-damage.nu {{args}}
 
+# Clipboard both ways plus cursor-shape, against foot. Needs `just build`
+# first.
+clipboard *args:
+    cargo build --manifest-path host/Cargo.toml
+    nu test-clipboard.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings

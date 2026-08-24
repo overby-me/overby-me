@@ -46,8 +46,19 @@ patches its stored frame for resync, and withholds frame callbacks while
 any browser has over 32 MB queued (`just damage` measures typing into foot
 at about 600 bytes per frame against a 1.3 MB full surface). Occlusion
 culling is not done: the host does not know the browser's window layout.
-Roadmap: clipboard and cursors, GTK-class apps, GPU clients (Zed), WebXR
-mode.
+
+Clipboard and cursors work: selection offers follow keyboard focus, a
+client copy is read through a pipe, mirrored to the page (and to
+`navigator.clipboard` where the browser permits) and taken over by the
+host so it outlives the client; pastes are served from the host copy, and
+the browser clipboard is pushed to the host on each focus click (needs the
+clipboard-read permission; headless chromium denies it, so `just clipboard`
+proves the client-to-host-to-page-to-other-client circuit instead).
+cursor-shape-v1 maps named cursors straight to CSS cursors; surface-drawn
+cursors fall back to the arrow. Primary selection passes between clients
+through smithay. Roadmap: GTK-class apps (viewporter, single-pixel-buffer
+and presentation-time land there, where they can be honoured rather than
+merely advertised), GPU clients (Zed), WebXR mode.
 
 ## Run
 

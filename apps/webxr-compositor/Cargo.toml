@@ -19,14 +19,17 @@ js-sys = "0.3"
 # Pinned to the devshell's wasm-bindgen-cli: dx runs that binary over this
 # crate's output and the two must agree.
 wasm-bindgen = "=0.2.121"
+wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
   "CanvasRenderingContext2d",
+  "Clipboard",
   "Document",
   "Element",
   "HtmlCanvasElement",
   "ImageData",
   "KeyboardEvent",
   "Location",
+  "Navigator",
   "Window",
 ] }
 webxr-compositor-protocol = { path = "protocol" }

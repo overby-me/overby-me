@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Bumped on any wire-incompatible change; both ends refuse a mismatch.
-pub const VERSION: u32 = 0;
+pub const VERSION: u32 = 1;
 
 pub type WindowId = u32;
 
@@ -54,6 +54,14 @@ pub enum HostToClient {
         #[serde(with = "serde_bytes")]
         pixels: Vec<u8>,
     },
+    /// A client put text in the clipboard selection.
+    Clipboard {
+        text: String,
+    },
+    /// The pointer cursor to show, as a CSS cursor keyword.
+    Cursor {
+        name: String,
+    },
 }
 
 /// Browser to host.
@@ -93,6 +101,10 @@ pub enum ClientToHost {
     Resize {
         id: WindowId,
         size: Size,
+    },
+    /// The browser clipboard, pushed so clients can paste it.
+    Clipboard {
+        text: String,
     },
 }
 

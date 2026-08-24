@@ -3228,6 +3228,7 @@ dependencies = [
  "gloo-timers",
  "js-sys",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
  "webxr-compositor-protocol",
 ]

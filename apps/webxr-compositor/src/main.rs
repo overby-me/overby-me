@@ -83,8 +83,9 @@ fn App() -> Element {
     let mut windows = use_signal(Windows::new);
     let focused: Signal<Option<protocol::WindowId>> = use_signal(|| None);
     let mut drag: Signal<Option<DragOp>> = use_signal(|| None);
+    let cursor: Signal<String> = use_signal(|| "default".to_owned());
 
-    let session = use_coroutine(move |rx| session_loop(rx, link, windows));
+    let session = use_coroutine(move |rx| session_loop(rx, link, windows, cursor));
     use_hook(move || install_key_listeners(session, focused));
 
     let status = match link() {
@@ -133,7 +134,7 @@ fn App() -> Element {
             },
             onmouseup: move |_| drag.set(None),
             for (id, info) in windows() {
-                WindowView { key: "{id}", id, info, focused, windows, drag }
+                WindowView { key: "{id}", id, info, focused, windows, drag, cursor }
             }
         }
     }
@@ -168,6 +169,7 @@ fn WindowView(
     focused: Signal<Option<protocol::WindowId>>,
     windows: Signal<Windows>,
     drag: Signal<Option<DragOp>>,
+    cursor: Signal<String>,
 ) -> Element {
     let session = use_coroutine_handle::<protocol::ClientToHost>();
     let mut focused = focused;
@@ -195,6 +197,9 @@ fn WindowView(
                     focused.set(Some(id));
                     session.send(protocol::ClientToHost::Focus { id: Some(id) });
                 }
+                // The focus gesture doubles as consent to share the browser
+                // clipboard with the focused client.
+                push_browser_clipboard(session);
             },
             div {
                 class: "titlebar",
@@ -233,6 +238,7 @@ fn WindowView(
             canvas {
                 class: "surface",
                 id: "win-{id}",
+                style: "cursor: {cursor};",
                 onmousemove: move |e| {
                     let p = e.data().element_coordinates();
                     session.send(protocol::ClientToHost::PointerMotion { id, x: p.x, y: p.y });
@@ -323,13 +329,14 @@ async fn session_loop(
     mut rx: UnboundedReceiver<protocol::ClientToHost>,
     mut link: Signal<Link>,
     mut windows: Signal<Windows>,
+    mut cursor: Signal<String>,
 ) {
     loop {
         link.set(Link::Connecting);
         // Input queued while disconnected aims at a dead session; drop it.
         while rx.try_recv().is_ok() {}
         if let Some(ws) = open_socket() {
-            run_session(ws, &mut rx, &mut link, &mut windows).await;
+            run_session(ws, &mut rx, &mut link, &mut windows, &mut cursor).await;
         }
         windows.write().clear();
         if matches!(link(), Link::Mismatch { .. }) {
@@ -345,6 +352,7 @@ async fn run_session(
     rx: &mut UnboundedReceiver<protocol::ClientToHost>,
     link: &mut Signal<Link>,
     windows: &mut Signal<Windows>,
+    cursor: &mut Signal<String>,
 ) {
     let (mut sink, mut stream) = ws.split();
     if send(
@@ -364,7 +372,7 @@ async fn run_session(
             Either::Left((Some(Ok(Message::Bytes(bytes))), _)) => {
                 match protocol::HostToClient::decode(&bytes) {
                     Ok(msg) => {
-                        if apply(msg, link, windows).await.is_none() {
+                        if apply(msg, link, windows, cursor).await.is_none() {
                             return;
                         }
                     }
@@ -407,6 +415,7 @@ async fn apply(
     msg: protocol::HostToClient,
     link: &mut Signal<Link>,
     windows: &mut Signal<Windows>,
+    cursor: &mut Signal<String>,
 ) -> Option<()> {
     match msg {
         protocol::HostToClient::Hello {
@@ -461,8 +470,36 @@ async fn apply(
             record_frame_stats(pixels.len(), damage);
             draw_frame(id, size, damage, &pixels).await;
         }
+        protocol::HostToClient::Clipboard { text } => {
+            set_wxr_field("clip", &wasm_bindgen::JsValue::from_str(&text));
+            if let Some(clipboard) = web_sys::window().map(|w| w.navigator().clipboard()) {
+                // The promise resolves on its own; failure only means the
+                // page lacks clipboard permission.
+                let _ = clipboard.write_text(&text);
+            }
+        }
+        protocol::HostToClient::Cursor { name } => {
+            cursor.set(name);
+        }
     }
     Some(())
+}
+
+/// Read the browser clipboard and hand it to the host, so the freshly
+/// focused client can paste it. Needs a user gesture to be permitted, which
+/// is why it rides on the focus click.
+fn push_browser_clipboard(session: Coroutine<protocol::ClientToHost>) {
+    let Some(clipboard) = web_sys::window().map(|w| w.navigator().clipboard()) else {
+        return;
+    };
+    spawn(async move {
+        if let Ok(js) = wasm_bindgen_futures::JsFuture::from(clipboard.read_text()).await
+            && let Some(text) = js.as_string()
+            && !text.is_empty()
+        {
+            session.send(protocol::ClientToHost::Clipboard { text });
+        }
+    });
 }
 
 /// Paint damage onto the window's canvas. The canvas mounts a beat after
@@ -486,17 +523,34 @@ async fn draw_frame(
     tracing::warn!("no canvas appeared for window {id}");
 }
 
+/// The diagnostics object on `window.__wxr`, created on first use. The
+/// browser tests read it to assert what the wire carried.
+fn wxr_object() -> Option<js_sys::Object> {
+    let window = web_sys::window()?;
+    let key = wasm_bindgen::JsValue::from_str("__wxr");
+    let existing = js_sys::Reflect::get(&window, &key)
+        .ok()
+        .filter(wasm_bindgen::JsValue::is_object);
+    let obj = existing.unwrap_or_else(|| {
+        let fresh: wasm_bindgen::JsValue = js_sys::Object::new().into();
+        let _ = js_sys::Reflect::set(&window, &key, &fresh);
+        fresh
+    });
+    obj.dyn_into().ok()
+}
+
+fn set_wxr_field(name: &str, value: &wasm_bindgen::JsValue) {
+    if let Some(obj) = wxr_object() {
+        let _ = js_sys::Reflect::set(&obj, &name.into(), value);
+    }
+}
+
 /// Frame payload counters on `window.__wxr`, so the browser tests can
 /// assert that damage frames stay small.
 fn record_frame_stats(bytes: usize, damage: protocol::Rect) {
-    let Some(window) = web_sys::window() else {
+    let Some(obj) = wxr_object() else {
         return;
     };
-    let key = wasm_bindgen::JsValue::from_str("__wxr");
-    let obj = js_sys::Reflect::get(&window, &key)
-        .ok()
-        .filter(wasm_bindgen::JsValue::is_object)
-        .unwrap_or_else(|| js_sys::Object::new().into());
     let get = |name: &str| {
         js_sys::Reflect::get(&obj, &name.into())
             .ok()
@@ -508,7 +562,6 @@ fn record_frame_stats(bytes: usize, damage: protocol::Rect) {
     let _ = js_sys::Reflect::set(&obj, &"bytes".into(), &(get("bytes") + bytes).into());
     let _ = js_sys::Reflect::set(&obj, &"lastW".into(), &f64::from(damage.width).into());
     let _ = js_sys::Reflect::set(&obj, &"lastH".into(), &f64::from(damage.height).into());
-    let _ = js_sys::Reflect::set(&window, &key, &obj);
 }
 
 fn canvas_for(id: protocol::WindowId) -> Option<HtmlCanvasElement> {

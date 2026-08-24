@@ -4,6 +4,7 @@
 //! Runs on its own thread with a calloop event loop; the HTTP/WebSocket side
 //! reaches it through the channel handed to [`run`].
 
+use std::os::fd::OwnedFd;
 use std::sync::{Arc, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -22,18 +23,25 @@ use smithay::reexports::wayland_server::protocol::wl_callback::WlCallback;
 use smithay::reexports::wayland_server::protocol::wl_seat::WlSeat;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{Client, Display, DisplayHandle};
+use smithay::reexports::wayland_server::{Client, Display, DisplayHandle, Resource};
 use smithay::utils::{SERIAL_COUNTER, Serial, Transform};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, Damage,
     SurfaceAttributes, with_states,
 };
+use smithay::input::pointer::{CursorIcon, CursorImageStatus};
+use smithay::reexports::rustix;
+use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::output::{OutputHandler, OutputManagerState};
-use smithay::wayland::selection::SelectionHandler;
 use smithay::wayland::selection::data_device::{
     ClientDndGrabHandler, DataDeviceHandler, DataDeviceState, ServerDndGrabHandler,
+    request_data_device_client_selection, set_data_device_focus, set_data_device_selection,
 };
+use smithay::wayland::selection::primary_selection::{
+    PrimarySelectionHandler, PrimarySelectionState, set_primary_focus,
+};
+use smithay::wayland::selection::{SelectionHandler, SelectionSource, SelectionTarget};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::wayland::shell::xdg::decoration::{XdgDecorationHandler, XdgDecorationState};
@@ -44,8 +52,9 @@ use smithay::wayland::shell::xdg::{
 use smithay::wayland::shm::{BufferData, ShmHandler, ShmState, with_buffer_contents};
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::{
-    delegate_compositor, delegate_data_device, delegate_output, delegate_seat, delegate_shm,
-    delegate_xdg_decoration, delegate_xdg_shell,
+    delegate_compositor, delegate_cursor_shape, delegate_data_device, delegate_output,
+    delegate_primary_selection, delegate_seat, delegate_shm, delegate_xdg_decoration,
+    delegate_xdg_shell,
 };
 use webxr_compositor_protocol as protocol;
 
@@ -66,6 +75,15 @@ const INFLIGHT_BUDGET: u64 = 32 * 1024 * 1024;
 const FULL_FRAME_NUMERATOR: u64 = 4;
 const FULL_FRAME_DENOMINATOR: u64 = 5;
 
+/// The text flavours offered for and accepted from selections.
+const TEXT_MIMES: [&str; 5] = [
+    "text/plain;charset=utf-8",
+    "text/plain",
+    "UTF8_STRING",
+    "STRING",
+    "TEXT",
+];
+
 pub struct State {
     display_handle: DisplayHandle,
     compositor_state: CompositorState,
@@ -73,8 +91,12 @@ pub struct State {
     xdg_shell_state: XdgShellState,
     seat_state: SeatState<Self>,
     data_device_state: DataDeviceState,
+    primary_selection_state: PrimarySelectionState,
     seat: Seat<Self>,
     hub: Arc<Hub>,
+    loop_handle: LoopHandle<'static, State>,
+    /// The latest text selection, whichever side set it.
+    clipboard: Option<String>,
     windows: Vec<Window>,
     next_window_id: protocol::WindowId,
     pending_callbacks: Vec<WlCallback>,
@@ -118,10 +140,13 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
     let xdg_shell_state = XdgShellState::new::<State>(&display_handle);
     let mut seat_state = SeatState::new();
     let data_device_state = DataDeviceState::new::<State>(&display_handle);
+    let primary_selection_state = PrimarySelectionState::new::<State>(&display_handle);
     // Kept alive by the display; the binding exists to advertise xdg-output.
     let _output_manager_state = OutputManagerState::new_with_xdg_output::<State>(&display_handle);
     // The browser draws every frame, so decorations are always server-side.
     let _decoration_state = XdgDecorationState::new::<State>(&display_handle);
+    // Modern clients name their cursor instead of attaching a surface.
+    let _cursor_shape_state = CursorShapeManagerState::new::<State>(&display_handle);
 
     let mut seat = seat_state.new_wl_seat(&display_handle, "seat0");
     seat.add_keyboard(XkbConfig::default(), 200, 25)?;
@@ -137,8 +162,11 @@ fn serve(hub: Arc<Hub>, events: Channel<HubEvent>) -> Result<(), Box<dyn std::er
         xdg_shell_state,
         seat_state,
         data_device_state,
+        primary_selection_state,
         seat,
         hub,
+        loop_handle: event_loop.handle(),
+        clipboard: None,
         windows: Vec::new(),
         next_window_id: 1,
         pending_callbacks: Vec::new(),
@@ -264,6 +292,7 @@ impl State {
             protocol::ClientToHost::PointerAxis { id: _, dx, dy } => self.pointer_axis(dx, dy),
             protocol::ClientToHost::Close { id } => self.close_window(id),
             protocol::ClientToHost::Resize { id, size } => self.resize_window(id, size),
+            protocol::ClientToHost::Clipboard { text } => self.set_clipboard(text),
         }
     }
 
@@ -413,6 +442,97 @@ impl State {
     fn close_window(&mut self, id: protocol::WindowId) {
         if let Some(window) = self.windows.iter().find(|w| w.id == id) {
             window.toplevel.send_close();
+        }
+    }
+
+    /// The browser pushed its clipboard; hold it as the wayland selection so
+    /// clients can paste it.
+    fn set_clipboard(&mut self, text: String) {
+        if self.clipboard.as_deref() == Some(text.as_str()) {
+            return;
+        }
+        self.clipboard = Some(text);
+        set_data_device_selection(
+            &self.display_handle.clone(),
+            &self.seat.clone(),
+            TEXT_MIMES.iter().map(ToString::to_string).collect(),
+            (),
+        );
+    }
+
+    /// A client set the clipboard: read the offered text through a pipe on
+    /// this event loop, then hand it to the browsers.
+    /// The actual request is deferred to an idle callback: new_selection
+    /// runs before smithay stores the source, and a synchronous request
+    /// finds no active selection.
+    fn read_client_selection(&mut self, source: &SelectionSource) {
+        let mimes = source.mime_types();
+        let Some(mime) = TEXT_MIMES
+            .iter()
+            .find(|wanted| mimes.iter().any(|m| m == *wanted))
+        else {
+            tracing::debug!(?mimes, "selection carries no text flavour");
+            return;
+        };
+        let mime = (*mime).to_owned();
+        self.loop_handle
+            .insert_idle(move |state| state.request_client_selection(mime));
+    }
+
+    fn request_client_selection(&mut self, mime: String) {
+        let (read_end, write_end) = match rustix::pipe::pipe_with(
+            rustix::pipe::PipeFlags::CLOEXEC | rustix::pipe::PipeFlags::NONBLOCK,
+        ) {
+            Ok(ends) => ends,
+            Err(error) => {
+                tracing::warn!(%error, "no pipe for the selection");
+                return;
+            }
+        };
+        if let Err(error) =
+            request_data_device_client_selection::<State>(&self.seat.clone(), mime, write_end)
+        {
+            tracing::warn!(%error, "could not request the client selection");
+            return;
+        }
+
+        let mut collected = Vec::new();
+        let source = Generic::new(read_end, Interest::READ, TriggerMode::Level);
+        let inserted = self.loop_handle.insert_source(source, move |_, fd, state| {
+            let mut chunk = [0_u8; 4096];
+            loop {
+                // SAFETY-free rustix read on the borrowed fd.
+                match rustix::io::read(&*fd, &mut chunk) {
+                    Ok(0) => {
+                        tracing::debug!(bytes = collected.len(), "client selection read");
+                        let text = String::from_utf8_lossy(&collected).into_owned();
+                        state.clipboard = Some(text.clone());
+                        state
+                            .hub
+                            .broadcast(&protocol::HostToClient::Clipboard { text });
+                        // Take ownership: the text now outlives the client,
+                        // and pastes are served from the host copy.
+                        set_data_device_selection(
+                            &state.display_handle.clone(),
+                            &state.seat.clone(),
+                            TEXT_MIMES.iter().map(ToString::to_string).collect(),
+                            (),
+                        );
+                        return Ok(PostAction::Remove);
+                    }
+                    Ok(count) => collected.extend_from_slice(&chunk[..count]),
+                    Err(rustix::io::Errno::WOULDBLOCK) => {
+                        return Ok(PostAction::Continue);
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "selection pipe read failed");
+                        return Ok(PostAction::Remove);
+                    }
+                }
+            }
+        });
+        if let Err(error) = inserted {
+            tracing::warn!(%error, "could not watch the selection pipe");
         }
     }
 
@@ -745,6 +865,25 @@ impl SeatHandler for State {
     fn seat_state(&mut self) -> &mut SeatState<Self> {
         &mut self.seat_state
     }
+
+    /// Selection offers follow keyboard focus; without this no client is
+    /// ever told about the clipboard.
+    fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        let client = focused.and_then(|surface| self.display_handle.get_client(surface.id()).ok());
+        set_data_device_focus(&self.display_handle.clone(), seat, client.clone());
+        set_primary_focus(&self.display_handle.clone(), seat, client);
+    }
+
+    fn cursor_image(&mut self, _seat: &Seat<Self>, image: CursorImageStatus) {
+        let name = match image {
+            CursorImageStatus::Hidden => "none".to_owned(),
+            CursorImageStatus::Named(icon) => icon.name().to_owned(),
+            // Surface cursors are not composited yet; keep the arrow rather
+            // than a wrong image.
+            CursorImageStatus::Surface(_) => CursorIcon::Default.name().to_owned(),
+        };
+        self.hub.broadcast(&protocol::HostToClient::Cursor { name });
+    }
 }
 
 impl OutputHandler for State {}
@@ -794,6 +933,57 @@ impl XdgShellHandler for State {
 
 impl SelectionHandler for State {
     type SelectionUserData = ();
+
+    fn new_selection(
+        &mut self,
+        ty: SelectionTarget,
+        source: Option<SelectionSource>,
+        _seat: Seat<Self>,
+    ) {
+        // Primary selection stays between clients; only the clipboard is
+        // bridged to the browser.
+        if ty == SelectionTarget::Clipboard
+            && let Some(source) = source
+        {
+            self.read_client_selection(&source);
+        }
+    }
+
+    fn send_selection(
+        &mut self,
+        ty: SelectionTarget,
+        mime_type: String,
+        fd: OwnedFd,
+        _seat: Seat<Self>,
+        (): &Self::SelectionUserData,
+    ) {
+        tracing::debug!(?ty, mime = %mime_type, "serving the host-owned selection");
+        if ty != SelectionTarget::Clipboard || !TEXT_MIMES.contains(&mime_type.as_str()) {
+            return;
+        }
+        let Some(text) = self.clipboard.clone() else {
+            tracing::debug!("no host clipboard to serve");
+            return;
+        };
+        // A blocking write on a helper thread: the reader may be slow, and
+        // the compositor loop must not wait for it.
+        std::thread::spawn(move || {
+            let bytes = text.as_bytes();
+            let mut written = 0;
+            while written < bytes.len() {
+                match rustix::io::write(&fd, &bytes[written..]) {
+                    Ok(0) => break,
+                    Ok(count) => written += count,
+                    // A signal interrupted the write; retry the same slice.
+                    Err(rustix::io::Errno::INTR) => continue,
+                    Err(error) => {
+                        tracing::debug!(%error, "selection reader hung up early");
+                        break;
+                    }
+                }
+            }
+        });
+    }
 }
 
 impl DataDeviceHandler for State {
@@ -801,6 +991,16 @@ impl DataDeviceHandler for State {
         &self.data_device_state
     }
 }
+
+impl PrimarySelectionHandler for State {
+    fn primary_selection_state(&self) -> &PrimarySelectionState {
+        &self.primary_selection_state
+    }
+}
+
+// Required by delegate_cursor_shape for tablet tools; the defaults ignore
+// them, which is right for a compositor with no tablets.
+impl smithay::wayland::tablet_manager::TabletSeatHandler for State {}
 
 impl XdgDecorationHandler for State {
     fn new_decoration(&mut self, toplevel: ToplevelSurface) {
@@ -839,3 +1039,5 @@ delegate_output!(State);
 delegate_xdg_shell!(State);
 delegate_xdg_decoration!(State);
 delegate_data_device!(State);
+delegate_primary_selection!(State);
+delegate_cursor_shape!(State);
