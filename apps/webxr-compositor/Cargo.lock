@@ -3223,7 +3223,11 @@ name = "webxr-compositor"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "futures-util",
+ "gloo-net",
+ "gloo-timers",
  "wasm-bindgen",
+ "web-sys",
  "webxr-compositor-protocol",
 ]
 

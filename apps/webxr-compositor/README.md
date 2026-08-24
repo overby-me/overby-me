@@ -23,10 +23,11 @@ server stack never enter the wasm dependency graph.
 
 ## Status
 
-Scaffold. The host serves the built frontend over HTTP; no Wayland socket
-and no WebSocket session yet. Roadmap: WebSocket session, Wayland globals,
-shm surface pipeline, input, window management, damage optimization,
-clipboard and cursors, GTK-class apps, GPU clients (Zed), WebXR mode.
+The host serves the built frontend over HTTP and completes the wire-protocol
+hello with the page over /ws (checked end to end by `just browser`). No
+Wayland socket yet. Roadmap: Wayland globals, shm surface pipeline, input,
+window management, damage optimization, clipboard and cursors, GTK-class
+apps, GPU clients (Zed), WebXR mode.
 
 ## Run
 
@@ -35,6 +36,7 @@ just run        # dx-build the frontend, then serve it from the host
 just dev        # frontend-only hot reload (dx serve)
 just test       # both workspaces
 just lint
+just browser    # headless-chromium check of the page against the real host
 ```
 
 The host reads `WEBXR_COMPOSITOR_LISTEN` (default `127.0.0.1:8370`) and

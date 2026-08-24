@@ -20,6 +20,12 @@ test:
     cargo test --workspace
     cargo test --workspace --manifest-path host/Cargo.toml
 
+# Run the built bundle against the real host in headless chromium and check
+# the hello exchange completes. Needs `just build` and a host build first.
+browser *args:
+    cargo build --manifest-path host/Cargo.toml
+    nu test-browser.nu {{args}}
+
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
     cargo clippy --workspace --all-targets --manifest-path host/Cargo.toml -- -D warnings
