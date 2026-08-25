@@ -53,6 +53,12 @@ def meta [url: string, secret: string, body: any] {
     $resp
 }
 
+# `export_metadata` answers `{sources, version}` on some versions and wraps it in
+# `{metadata: ...}` on others. Read whichever this Hasura speaks.
+def sources [exported: any]: nothing -> list {
+    $exported | get -o metadata.sources | default ($exported | get -o sources | default [])
+}
+
 # The roles this script is willing to widen, with their current column list.
 def widenable [table: any]: nothing -> list {
     $table
@@ -80,15 +86,14 @@ def main [] {
     let url = ($gql_url | str replace "/v1/graphql" "/v1/metadata")
 
     let exported = (meta $url $secret { type: "export_metadata", args: {} })
-    let sources = ($exported | get -o metadata.sources | default [])
     let found = (
-        $sources
+        sources $exported
         | each {|s|
-            let t = ($s.tables | where {|t| $t.table.name == "members" } | first?)
+            let t = ($s.tables | where {|t| $t.table.name == "members" } | get -o 0)
             if $t == null { null } else { { source: $s.name, table: $t } }
         }
         | compact
-        | first?
+        | get -o 0
     )
     if $found == null { fail "no `members` table in this Hasura's metadata" }
 
@@ -127,7 +132,7 @@ def main [] {
     # serves, not what it accepted.
     let after = (meta $url $secret { type: "export_metadata", args: {} })
     let table = (
-        $after | get metadata.sources
+        sources $after
         | where {|s| $s.name == $found.source } | first
         | get tables | where {|t| $t.table.name == "members" } | first
     )
