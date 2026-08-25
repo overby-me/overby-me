@@ -331,27 +331,38 @@ pub struct InsertMembersMutation {
 /// What a roster import did. `skipped` names people this context had already
 /// invited: a roster says who belongs here, not that none of them are here
 /// yet, so they are passed over rather than failing the import.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RosterImport {
     pub inserted: usize,
     pub skipped: usize,
+    /// Of those inserted, how many the file gave no address for. On the roster,
+    /// but not invitable until someone fills one in.
+    pub without_email: usize,
 }
 
-/// The rows worth sending: emails only, lowercased, and each address once.
-/// Deduplicating here rather than at the database keeps `skipped` meaningful,
-/// since a file listing someone twice is a duplicate the importer can see.
+/// The rows worth sending: anything naming a person or an address, lowercased,
+/// with each address sent once. Deduplicating here rather than at the database
+/// keeps `skipped` meaningful, since a file listing someone twice is a
+/// duplicate the importer can see for itself.
 fn roster_objects(parent_id: &str, roster: &[(String, String)]) -> Vec<MembersInsertInput> {
     let mut seen = std::collections::HashSet::new();
     roster
         .iter()
         .filter_map(|(name, email)| {
+            let name = name.trim();
             let email = email.trim().to_lowercase();
-            if email.is_empty() || !seen.insert(email.clone()) {
+            // Only addresses can collide, so only addresses are deduplicated.
+            // Two rows sharing a name and no address are two people, which is
+            // how the database's unique index reads them too.
+            if !email.is_empty() && !seen.insert(email.clone()) {
+                return None;
+            }
+            if name.is_empty() && email.is_empty() {
                 return None;
             }
             Some(MembersInsertInput {
-                name: (!name.trim().is_empty()).then(|| name.clone()),
-                email: Some(email),
+                name: (!name.is_empty()).then(|| name.to_string()),
+                email: (!email.is_empty()).then_some(email),
                 parent_id: Some(Uuid(parent_id.to_string())),
                 ..Default::default()
             })
@@ -374,11 +385,11 @@ pub async fn invite_members(
     use cynic::MutationBuilder;
     let objects = roster_objects(parent_id, roster);
     let submitted = objects.len();
+    // Counted before the objects are sent: a row with no address never
+    // conflicts, so every one of these is among the rows that go in.
+    let without_email = objects.iter().filter(|o| o.email.is_none()).count();
     if submitted == 0 {
-        return Ok(RosterImport {
-            inserted: 0,
-            skipped: 0,
-        });
+        return Ok(RosterImport::default());
     }
     let op = InsertMembersMutation::build(InsertMembersVariables {
         objects,
@@ -412,6 +423,7 @@ pub async fn invite_members(
     Ok(RosterImport {
         inserted,
         skipped: submitted - inserted,
+        without_email: without_email.min(inserted),
     })
 }
 
@@ -928,6 +940,45 @@ mod tests {
         let objects = roster_objects("ctx", &roster(&[("   ", "ada@example.org")]));
         assert_eq!(objects.len(), 1);
         assert_eq!(objects[0].name, None, "no name is not a reason to skip");
+    }
+
+    /// The reported case: a roster with a blank Email column. Those rows are
+    /// members too, so they are sent with no address rather than dropped.
+    #[test]
+    fn rows_with_no_address_are_imported_without_one() {
+        let objects = roster_objects(
+            "ctx",
+            &roster(&[
+                ("Ada Lovelace", ""),
+                ("Grace Hopper", "  "),
+                ("", ""),
+                ("Alan Turing", "alan@example.org"),
+            ]),
+        );
+        let sent: Vec<_> = objects
+            .iter()
+            .map(|o| (o.name.as_deref(), o.email.as_deref()))
+            .collect();
+        assert_eq!(
+            sent,
+            [
+                (Some("Ada Lovelace"), None),
+                (Some("Grace Hopper"), None),
+                (Some("Alan Turing"), Some("alan@example.org")),
+            ],
+            "a row with neither name nor address is the only one dropped"
+        );
+    }
+
+    /// Two people can share a name; only an address is unique, and it is the
+    /// only thing the database's index collides on.
+    #[test]
+    fn rows_without_an_address_are_not_deduplicated_by_name() {
+        let objects = roster_objects(
+            "ctx",
+            &roster(&[("Anders Jensen", ""), ("Anders Jensen", "")]),
+        );
+        assert_eq!(objects.len(), 2, "both are imported: {objects:?}");
     }
 
     /// Turnout asks the server for a number, not for the members.

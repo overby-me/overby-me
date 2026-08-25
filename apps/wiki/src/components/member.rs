@@ -75,6 +75,8 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     let mut edit_id = use_signal(|| Option::<String>::None);
     let mut edit_name = use_signal(String::new);
     let mut edit_email = use_signal(String::new);
+    // What the dialog opened with, so a save sends only what was touched.
+    let mut edit_orig = use_signal(|| (String::new(), String::new()));
     let mut remove_target = use_signal(|| Option::<(String, String)>::None);
     // Pending owner promote/demote, confirmed via a dialog: (member id, make-owner,
     // label). Ownership changes are as consequential as removal, so they confirm too.
@@ -92,14 +94,13 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
             return;
         };
         let token = session.read().access_token.clone();
-        let name = edit_name.read().trim().to_string();
-        let email = edit_email.read().trim().to_string();
+        let orig = edit_orig.read().clone();
+        let set = member_edit_set((&orig.0, &orig.1), &edit_name.read(), &edit_email.read());
+        if set == MembersSetInput::default() {
+            edit_id.set(None);
+            return;
+        }
         spawn(async move {
-            let set = MembersSetInput {
-                name: (!name.is_empty()).then_some(name),
-                email: (!email.is_empty()).then_some(email),
-                ..Default::default()
-            };
             match graphql::update_member(token.as_deref(), &id, set).await {
                 Ok(true) => {
                     crate::session::bump_data_version();
@@ -232,8 +233,13 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                 member: m.clone(),
                                 can_manage,
                                 on_edit: move |mm: MemberFields| {
-                                    edit_name.set(mm.name.clone().unwrap_or_default());
-                                    edit_email.set(mm.email.clone().unwrap_or_default());
+                                    let (name, email) = (
+                                        mm.name.clone().unwrap_or_default(),
+                                        mm.email.clone().unwrap_or_default(),
+                                    );
+                                    edit_orig.set((name.clone(), email.clone()));
+                                    edit_name.set(name);
+                                    edit_email.set(email);
                                     edit_id.set(Some(mm.id.0.clone()));
                                 },
                                 on_remove: move |mm: MemberFields| {
@@ -554,24 +560,57 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
     }
 }
 
-/// What to tell someone after a roster import. Everyone being already invited
-/// is a finished import, not the failure it used to be reported as. Split from
-/// the lookup so the choice is testable without a Dioxus runtime.
-fn roster_import_key(r: graphql::RosterImport) -> &'static str {
-    match (r.inserted, r.skipped) {
-        (0, 0) => "invite.noRosterRows",
-        (0, _) => "invite.allAlreadyInvited",
-        (_, 0) => "invite.imported",
-        _ => "invite.importedSomeSkipped",
+/// What to tell someone after a roster import, as translation keys: a headline
+/// plus a clause per thing worth knowing. Composed rather than one key per
+/// combination, since "some were already here" and "some have no address" can
+/// both be true. Split from the lookup so the choice is testable without a
+/// Dioxus runtime. Everyone being already invited is a finished import, not the
+/// failure it used to be reported as.
+fn roster_import_keys(r: graphql::RosterImport) -> Vec<&'static str> {
+    let mut keys = match (r.inserted, r.skipped) {
+        (0, 0) => vec!["invite.noRosterRows"],
+        (0, _) => vec!["invite.allAlreadyInvited"],
+        (_, 0) => vec!["invite.imported"],
+        _ => vec!["invite.imported", "invite.someAlreadyInvited"],
+    };
+    if r.without_email > 0 {
+        keys.push("invite.someWithoutEmail");
     }
+    keys
 }
 
 fn roster_import_message(r: graphql::RosterImport) -> String {
     let (count, skipped) = (r.inserted.to_string(), r.skipped.to_string());
-    t_with(
-        roster_import_key(r),
-        &[("count", &count), ("skipped", &skipped)],
-    )
+    let no_email = r.without_email.to_string();
+    let args = [
+        ("count", count.as_str()),
+        ("skipped", skipped.as_str()),
+        ("noEmail", no_email.as_str()),
+    ];
+    roster_import_keys(r)
+        .into_iter()
+        .map(|k| t_with(k, &args))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The fields an edit actually changed.
+///
+/// Naming a column is enough for Hasura to reject the mutation when the role
+/// may not update it, so sending the untouched ones made renaming a member fail
+/// on a deployment whose role has no `email` in `members_set_input`. An emptied
+/// field counts as untouched: `None` already means "leave it alone" on the way
+/// out, so clearing one has never been possible here.
+fn member_edit_set(orig: (&str, &str), name: &str, email: &str) -> MembersSetInput {
+    let changed = |before: &str, after: &str| {
+        let after = after.trim();
+        (!after.is_empty() && before.trim() != after).then(|| after.to_string())
+    };
+    MembersSetInput {
+        name: changed(orig.0, name),
+        email: changed(orig.1, email),
+        ..Default::default()
+    }
 }
 
 /// The roster table's columns (adds an Actions column for managers).
@@ -936,19 +975,78 @@ fn apply_member_update(token: Option<String>, id: String, set: MembersSetInput) 
 mod tests {
     use super::*;
 
+    fn keys(inserted: usize, skipped: usize, without_email: usize) -> Vec<&'static str> {
+        roster_import_keys(graphql::RosterImport {
+            inserted,
+            skipped,
+            without_email,
+        })
+    }
+
     /// An import that inserted nobody because everyone was already there has
     /// done its job. It used to fall through to "something went wrong", which
     /// told the person their file had failed when the roster was simply
     /// already up to date.
     #[test]
     fn an_import_that_only_skips_is_not_reported_as_a_failure() {
-        let key =
-            |inserted, skipped| roster_import_key(graphql::RosterImport { inserted, skipped });
-        assert_eq!(key(0, 12), "invite.allAlreadyInvited");
-        assert_eq!(key(8, 4), "invite.importedSomeSkipped");
-        assert_eq!(key(8, 0), "invite.imported");
+        assert_eq!(keys(0, 12, 0), ["invite.allAlreadyInvited"]);
+        assert_eq!(
+            keys(8, 4, 0),
+            ["invite.imported", "invite.someAlreadyInvited"]
+        );
+        assert_eq!(keys(8, 0, 0), ["invite.imported"]);
         // Nothing usable in the file at all is the one case that is not a win.
-        assert_eq!(key(0, 0), "invite.noRosterRows");
+        assert_eq!(keys(0, 0, 0), ["invite.noRosterRows"]);
+    }
+
+    /// The second report: saving the edit dialog failed with "field 'email'
+    /// not found in type: 'members_set_input'". Mentioning a column the role
+    /// may not update is enough to be rejected, so an edit that only renamed
+    /// someone was failing on an address it never touched.
+    #[test]
+    fn an_edit_sends_only_the_fields_it_changed() {
+        let before = ("Ada", "ada@example.org");
+
+        let renamed = member_edit_set(before, "Ada Lovelace", "ada@example.org");
+        assert_eq!(renamed.name.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(renamed.email, None, "the untouched address stays out of it");
+
+        let readdressed = member_edit_set(before, "Ada", "ada@lovelace.org");
+        assert_eq!(readdressed.name, None);
+        assert_eq!(readdressed.email.as_deref(), Some("ada@lovelace.org"));
+
+        // Whitespace is not an edit, and neither is saving an untouched dialog.
+        assert_eq!(
+            member_edit_set(before, " Ada ", " ada@example.org "),
+            MembersSetInput::default()
+        );
+    }
+
+    /// Clearing a field has never worked (`None` means "leave it alone" on the
+    /// way out), so an emptied box must not be sent as a change either.
+    #[test]
+    fn an_emptied_field_is_left_alone_rather_than_blanked() {
+        let set = member_edit_set(("Ada", "ada@example.org"), "", "");
+        assert_eq!(set, MembersSetInput::default());
+    }
+
+    /// Rows with a blank Email column import, but they cannot be invited, so
+    /// the count says so alongside whatever else the import has to report.
+    #[test]
+    fn members_imported_without_an_address_are_called_out() {
+        assert_eq!(
+            keys(8, 0, 3),
+            ["invite.imported", "invite.someWithoutEmail"]
+        );
+        assert_eq!(
+            keys(8, 4, 3),
+            [
+                "invite.imported",
+                "invite.someAlreadyInvited",
+                "invite.someWithoutEmail"
+            ],
+            "both warnings can be true at once"
+        );
     }
 
     #[test]

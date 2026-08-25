@@ -3,6 +3,11 @@ name = "wiki-backend"
 version = "0.1.0"
 edition = "2021"
 
+# Its own root, not a member of the frontend workspace above it: this crate has
+# its own Cargo.lock and ships as a separate container. Without this, cargo
+# refuses to build it in place, so `just test` here never ran.
+[workspace]
+
 # The request handler `handle(req) -> response` lives in the lib; the binary
 # (src/main.rs) serves it over HTTP on $PORT as a Serverless Container.
 [lib]
