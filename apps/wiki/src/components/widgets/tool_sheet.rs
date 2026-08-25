@@ -10,6 +10,18 @@ use super::focus::{active_html_element, close_modal, trap_tab_focus};
 /// the sheet unmounts (e.g. navigating to a view with no tools).
 pub static TOOLS_DOCKED: GlobalSignal<bool> = Signal::global(|| false);
 
+/// Bumped by each docked sheet as it mounts, so a release can tell "nothing has
+/// tools any more" from "the next view's sheet has already taken over".
+static DOCK_GEN: GlobalSignal<u64> = Signal::global(|| 0);
+
+/// How long the shell keeps the right gutter after a docked sheet unmounts.
+///
+/// Moving between two nodes tears the old view down and only mounts the new
+/// one's sheet once its data arrives. Releasing in that gap animates the whole
+/// content pane and app bar out to the window edge and straight back, which
+/// reads as the panel flickering; waiting through it keeps the pane still.
+const DOCK_RELEASE_MS: u32 = 700;
+
 /// A copy-link segment of the sheet's quick-action group. [`ToolSheet`] renders
 /// this itself as the group's first segment, so copy-link is available on all
 /// content and always sits at the top; call sites pass only their own segments.
@@ -140,10 +152,21 @@ pub fn ToolSheet(
     let docked = use_memo(move || crate::window_size::WINDOW_SIZE().is_extra_large());
     // Reserve/release the shell's right gutter as this sheet docks or unmounts.
     use_effect(move || {
+        if docked() {
+            *DOCK_GEN.write() += 1;
+        }
         *TOOLS_DOCKED.write() = docked();
     });
     use_drop(move || {
-        *TOOLS_DOCKED.write() = false;
+        // Detached: a task spawned on a scope being dropped dies with it, and
+        // the release has to outlive this sheet to see whether another docks.
+        let generation = DOCK_GEN();
+        wasm_bindgen_futures::spawn_local(async move {
+            gloo_timers::future::TimeoutFuture::new(DOCK_RELEASE_MS).await;
+            if DOCK_GEN() == generation {
+                *TOOLS_DOCKED.write() = false;
+            }
+        });
     });
 
     if docked() {
