@@ -182,6 +182,8 @@ pub struct ParentNodeFields {
     pub data: Option<Jsonb>,
     /// The parent author's avatar, readable even where `owner` is not.
     pub author_avatar: Option<String>,
+    /// The grandparent, name and mime only: where a quoted reply happened.
+    pub parent: Option<Box<ParentNodeFields>>,
 }
 
 // --- Mime types ---

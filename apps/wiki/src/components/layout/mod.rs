@@ -833,6 +833,7 @@ mod tests {
                 mime_id: Some("wiki/group".to_string()),
                 data: None,
                 author_avatar: None,
+                parent: None,
             }),
         }
     }

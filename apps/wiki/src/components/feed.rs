@@ -459,9 +459,8 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
     // neither can use it as a headline the way content does.
     let is_comment = mime == "vote/comment";
     let is_reaction = mime == "vote/reaction";
-    // Where a quoted reply happened, once asked for (see the button below).
+    // Where a quoted reply happened, when only a climb can say (see below).
     let mut host_name = use_signal(|| Option::<String>::None);
-    let mut host_busy = use_signal(|| false);
     let comment_text = |d: Option<&crate::model::Jsonb>| {
         d.and_then(|d| d.0.get("text"))
             .and_then(|t| t.as_str())
@@ -500,6 +499,37 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
             })
     } else {
         None
+    };
+    // Where a quoted row happened. Its parent is the comment it answers, so the
+    // page hosting the thread is the grandparent, which rides along with the row.
+    let quoted_host = node
+        .parent
+        .as_ref()
+        .and_then(|p| p.parent.as_deref())
+        .filter(|g| g.mime_id.as_deref() != Some("vote/comment"))
+        .map(|g| g.name.clone());
+    // Only a reply nested under another reply is still short of its host, and
+    // that one climbs on its own rather than waiting to be asked.
+    let needs_climb = about.is_some() && quoted_host.is_none();
+    let climb_id = node_id.clone();
+    let climb_token = session.read().access_token.clone();
+    use_future(move || {
+        let id = climb_id.clone();
+        let token = climb_token.clone();
+        async move {
+            if !needs_climb {
+                return;
+            }
+            let (_, name) = graphql::thread_host(token.as_deref(), &id).await;
+            host_name.set(name);
+        }
+    });
+    // What the row prints as its "where": the parent for content, the thread's
+    // page for a quoted reply or reaction.
+    let where_name = if about.is_none() {
+        parent_name.clone()
+    } else {
+        quoted_host.clone().or(host_name())
     };
     let quote_initials = about
         .as_ref()
@@ -621,51 +651,13 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
                         "referrerpolicy": "no-referrer",
                     }
                 }
-                // Where. Skipped when the quote above already names the parent:
-                // a comment node's name IS its author, so for a reply or a
-                // reaction this line would just repeat the credit.
-                if about.is_none() {
-                    if let Some(parent) = parent_name.as_ref() {
-                        div { class: "recent-context",
-                            {super::loader::node_icon_el(&mime, data.as_ref())}
-                            span { "{parent}" }
-                        }
-                    }
-                } else if let Some(host) = host_name() {
-                    // Resolved on demand, below.
+                // Where. A quoted row names the page hosting the thread rather
+                // than its parent, because a comment node's name IS its author
+                // and the quote above has already credited them.
+                if let Some(where_name) = where_name.as_ref() {
                     div { class: "recent-context",
                         {super::loader::node_icon_el(&mime, data.as_ref())}
-                        span { "{host}" }
-                    }
-                } else {
-                    // A quoted reply says who and what, never where: its parent
-                    // is another comment, and the page hosting the thread is
-                    // further up than this row was fetched. Finding it is a
-                    // climb per row, so it is offered rather than paid for on
-                    // every row of every feed.
-                    button {
-                        class: "btn btn-text recent-context-action",
-                        disabled: host_busy(),
-                        onclick: {
-                            let node_id = node_id.clone();
-                            move |e: Event<MouseData>| {
-                                // The row itself navigates; this only reveals.
-                                e.stop_propagation();
-                                if host_busy() {
-                                    return;
-                                }
-                                host_busy.set(true);
-                                let node_id = node_id.clone();
-                                let token = session.read().access_token.clone();
-                                spawn(async move {
-                                    let (_, name) =
-                                        graphql::thread_host(token.as_deref(), &node_id).await;
-                                    host_name.set(name);
-                                    host_busy.set(false);
-                                });
-                            }
-                        },
-                        "{t(\"common.showContext\")}"
+                        span { "{where_name}" }
                     }
                 }
             }
@@ -706,6 +698,7 @@ mod tests {
                 mime_id: Some("vote/comment".into()),
                 data: Some(Jsonb(d)),
                 author_avatar: None,
+                parent: None,
             }),
         }
     }

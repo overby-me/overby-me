@@ -105,6 +105,10 @@ pub struct ParentNodeFields {
     // And who wrote it. The computed field, not the `owner` relationship, so the
     // face still appears for a comment in a context the reader is not in.
     pub author_avatar: Option<String>,
+    // The grandparent, name only. A reply's parent is the comment it answers, so
+    // the page hosting the thread is one level further up; fetching it with the
+    // row is what lets the feed say where a reply happened without a climb.
+    pub parent: Option<ParentNameRef>,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone, PartialEq)]

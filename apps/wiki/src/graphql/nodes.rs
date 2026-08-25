@@ -60,6 +60,17 @@ impl From<ParentNodeFields> for model::ParentNodeFields {
             mime_id: p.mime_id,
             data: p.data.map(Into::into),
             author_avatar: p.author_avatar,
+            parent: p.parent.map(|g| {
+                Box::new(model::ParentNodeFields {
+                    id: g.id.into(),
+                    name: g.name,
+                    key: g.key,
+                    mime_id: g.mime_id,
+                    data: None,
+                    author_avatar: None,
+                    parent: None,
+                })
+            }),
         }
     }
 }
@@ -444,6 +455,7 @@ impl From<SearchNodeFields> for model::NodeFields {
                 // Not fetched for a search result; see ParentNameRef.
                 data: None,
                 author_avatar: None,
+                parent: None,
             }),
         }
     }

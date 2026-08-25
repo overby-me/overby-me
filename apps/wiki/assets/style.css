@@ -3060,13 +3060,6 @@ select:focus {
 /* The "show context" action on a quoted reply, which resolves into a
    .recent-context line. Sized and spaced to match the line it becomes, so the
    row does not shift when the answer arrives. */
-.recent-context-action {
-	margin-top: var(--md-sys-spacing-0-5);
-	padding-inline: 0;
-	min-height: auto;
-	font-size: var(--md-sys-typescale-body-small-size);
-}
-
 /* Radikal Rally (components/game.rs). The canvas is drawn in its own world
    units, but everything AROUND it is ordinary chrome and belongs on the same
    spacing and colour tokens as the rest of the app. */
