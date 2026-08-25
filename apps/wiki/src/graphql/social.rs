@@ -381,9 +381,20 @@ pub async fn query_feedback(access_token: Option<&str>) -> Result<Vec<FeedbackIt
 /// ancestor is something that renders, bounded like [`path_from_id`]. Anything
 /// else is returned unchanged, so callers may pass any node id.
 pub async fn thread_host_id(access_token: Option<&str>, id: &str) -> String {
+    thread_host(access_token, id).await.0
+}
+
+/// The thread host as [`thread_host_id`] finds it, plus what it is called.
+///
+/// The climb already fetches every node on the way up, so the name of the one it
+/// stops at costs nothing extra; it was simply being thrown away. The feed asks
+/// for it to say WHERE a reply happened, which is the one thing a quoted reply
+/// does not otherwise show.
+pub async fn thread_host(access_token: Option<&str>, id: &str) -> (String, Option<String>) {
     use cynic::QueryBuilder;
     const PASS_THROUGH: [&str; 2] = ["vote/comment", "vote/reaction"];
     let mut current = id.to_string();
+    let mut name = None;
     for _ in 0..16 {
         let op = NodeByIdQuery::build(NodeByIdVariables {
             id: Uuid(current.clone()),
@@ -397,6 +408,8 @@ pub async fn thread_host_id(access_token: Option<&str>, id: &str) -> String {
             .as_deref()
             .is_some_and(|m| PASS_THROUGH.contains(&m))
         {
+            // The node that stops the climb is the host, so this is its name.
+            name = Some(node.name.clone()).filter(|n| !n.trim().is_empty());
             break;
         }
         match node.parent_id {
@@ -404,5 +417,5 @@ pub async fn thread_host_id(access_token: Option<&str>, id: &str) -> String {
             None => break,
         }
     }
-    current
+    (current, name)
 }

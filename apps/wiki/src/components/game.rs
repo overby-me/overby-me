@@ -3101,12 +3101,12 @@ pub fn GameApp() -> Element {
                 style: "display:block; width:100%; height:420px; border-radius:12px; background:#BFE3F0; touch-action:none;",
             }
             div {
-                style: "position:absolute; left:12px; bottom:12px; display:flex; gap:10px;",
+                class: "game-pad game-pad-left",
                 HoldButton { label: "◀", on_hold: hold_left }
                 HoldButton { label: "▶", on_hold: hold_right }
             }
             div {
-                style: "position:absolute; right:12px; bottom:12px; display:flex; gap:10px;",
+                class: "game-pad game-pad-right",
                 TapButton { label: t("game.btnJump"), on_tap: tap_jump }
                 TapButton { label: t("game.btnPoster"), on_tap: tap_act }
             }
@@ -3169,13 +3169,12 @@ fn GameOverlay(
 ) -> Element {
     rsx! {
         div {
-            style: "position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(10, 14, 24, 0.45); border-radius:12px; padding:16px;",
+            class: "game-overlay",
             // A plain `card`, not `app-card`: the app-card rule strips the very
             // background a floating dialog needs.
             div { class: "card", style: "max-width:560px; margin:0;",
                 div {
-                    class: "card-content",
-                    style: "display:flex; flex-direction:column; gap:14px; padding:24px 28px; text-align:center;",
+                    class: "card-content game-overlay-body",
                     h2 { style: "margin:0;", "{title}" }
                     if !body.is_empty() {
                         p { style: "margin:0;", "{body}" }
@@ -3183,7 +3182,7 @@ fn GameOverlay(
                     if let Some(extra) = extra {
                         p { class: "body-medium text-muted", style: "margin:0;", "{extra}" }
                     }
-                    div { style: "display:flex; gap:10px; justify-content:center; flex-wrap:wrap;",
+                    div { class: "game-overlay-actions",
                         button {
                             class: "btn btn-primary",
                             autofocus: true,

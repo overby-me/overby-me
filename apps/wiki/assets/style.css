@@ -3057,6 +3057,60 @@ select:focus {
 	font-size: 0.9375rem;
 }
 
+/* The "show context" action on a quoted reply, which resolves into a
+   .recent-context line. Sized and spaced to match the line it becomes, so the
+   row does not shift when the answer arrives. */
+.recent-context-action {
+	margin-top: var(--md-sys-spacing-0-5);
+	padding-inline: 0;
+	min-height: auto;
+	font-size: var(--md-sys-typescale-body-small-size);
+}
+
+/* Radikal Rally (components/game.rs). The canvas is drawn in its own world
+   units, but everything AROUND it is ordinary chrome and belongs on the same
+   spacing and colour tokens as the rest of the app. */
+.game-pad {
+	position: absolute;
+	bottom: var(--md-sys-spacing-1-5);
+	display: flex;
+	gap: var(--md-sys-spacing-1);
+}
+
+.game-pad-left {
+	left: var(--md-sys-spacing-1-5);
+}
+
+.game-pad-right {
+	right: var(--md-sys-spacing-1-5);
+}
+
+.game-overlay {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--md-sys-spacing-2);
+	border-radius: var(--md-sys-shape-corner-medium);
+	background: color-mix(in srgb, var(--md-sys-color-scrim) 45%, transparent);
+}
+
+.game-overlay-body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--md-sys-spacing-2);
+	padding: var(--md-sys-spacing-3) var(--md-sys-spacing-3-5);
+	text-align: center;
+}
+
+.game-overlay-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--md-sys-spacing-1);
+}
+
 /* List */
 .list {
 	list-style: none;

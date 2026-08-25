@@ -459,6 +459,9 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
     // neither can use it as a headline the way content does.
     let is_comment = mime == "vote/comment";
     let is_reaction = mime == "vote/reaction";
+    // Where a quoted reply happened, once asked for (see the button below).
+    let mut host_name = use_signal(|| Option::<String>::None);
+    let mut host_busy = use_signal(|| false);
     let comment_text = |d: Option<&crate::model::Jsonb>| {
         d.and_then(|d| d.0.get("text"))
             .and_then(|t| t.as_str())
@@ -627,6 +630,42 @@ fn RecentItem(node: model::ChildNodeFields) -> Element {
                             {super::loader::node_icon_el(&mime, data.as_ref())}
                             span { "{parent}" }
                         }
+                    }
+                } else if let Some(host) = host_name() {
+                    // Resolved on demand, below.
+                    div { class: "recent-context",
+                        {super::loader::node_icon_el(&mime, data.as_ref())}
+                        span { "{host}" }
+                    }
+                } else {
+                    // A quoted reply says who and what, never where: its parent
+                    // is another comment, and the page hosting the thread is
+                    // further up than this row was fetched. Finding it is a
+                    // climb per row, so it is offered rather than paid for on
+                    // every row of every feed.
+                    button {
+                        class: "btn btn-text recent-context-action",
+                        disabled: host_busy(),
+                        onclick: {
+                            let node_id = node_id.clone();
+                            move |e: Event<MouseData>| {
+                                // The row itself navigates; this only reveals.
+                                e.stop_propagation();
+                                if host_busy() {
+                                    return;
+                                }
+                                host_busy.set(true);
+                                let node_id = node_id.clone();
+                                let token = session.read().access_token.clone();
+                                spawn(async move {
+                                    let (_, name) =
+                                        graphql::thread_host(token.as_deref(), &node_id).await;
+                                    host_name.set(name);
+                                    host_busy.set(false);
+                                });
+                            }
+                        },
+                        "{t(\"common.showContext\")}"
                     }
                 }
             }
