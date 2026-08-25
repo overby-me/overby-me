@@ -363,6 +363,16 @@ fn ContextSection(
     }
 }
 
+/// Whether the new-place dialog has everything it needs to create one.
+///
+/// An event belongs to a group, so it needs one chosen; a group is created at
+/// the top level and needs only a name. The button and the submit both ask
+/// this, so the requirement cannot be enforced in one and forgotten in the
+/// other.
+fn can_create_context(is_group: bool, name: &str, chosen_group: &str, busy: bool) -> bool {
+    !busy && !name.trim().is_empty() && (is_group || !chosen_group.is_empty())
+}
+
 /// A per-list "add group" / "add event" action, rendered in a list header for
 /// the root owner (the caller gates on the root's `inserts`). It opens a name
 /// dialog and drives [`graphql::create_context`], which creates the node under
@@ -370,9 +380,10 @@ fn ContextSection(
 /// template — so the new group/event is usable immediately. On success it jumps
 /// into it.
 ///
-/// An event may be placed inside one of the user's groups instead of at the top
-/// level; `groups` carries the choices (empty for the group button, which always
-/// creates at the top level).
+/// An event must be placed inside one of the user's groups: `groups` carries the
+/// choices, and the dialog will not submit until one is picked (it is empty for
+/// the group button, which always creates at the top level). With no group to
+/// choose, the dialog says so rather than offering an event with nowhere to go.
 #[component]
 fn NewContextButton(
     mime: String,
@@ -400,15 +411,21 @@ fn NewContextButton(
         let groups = groups.clone();
         move |_| {
             let title = name.read().trim().to_string();
-            if title.is_empty() || *busy.read() {
+            if !can_create_context(is_group, &title, &parent.read(), *busy.read()) {
                 return;
             }
             let mime = mime.clone();
             // A group is its own context (create_context locks it that way), so the
-            // chosen group serves as both parent and context. An unknown or empty
-            // selection falls back to the root rather than guessing.
+            // chosen group serves as both parent and context.
             let chosen = parent.read().clone();
             let chosen = groups.iter().find(|g| g.id.0 == chosen);
+            // An event belongs to a group. The button is disabled until one is
+            // picked; this refuses rather than falling back to the top level,
+            // so a selection that goes missing cannot quietly create the event
+            // somewhere the person did not choose.
+            if !is_group && chosen.is_none() {
+                return;
+            }
             let (root_id, root_context_id) = match chosen {
                 Some(g) => (g.id.0.clone(), g.id.0.clone()),
                 None => (root_id.clone(), root_context_id.clone()),
@@ -479,7 +496,12 @@ fn NewContextButton(
                 }
                 button {
                     class: "btn btn-primary",
-                    disabled: name.read().trim().is_empty() || *busy.read(),
+                    disabled: !can_create_context(
+                        is_group,
+                        &name.read(),
+                        &parent.read(),
+                        *busy.read(),
+                    ),
                     onclick: submit,
                     "{t(\"common.add\")}"
                 }
@@ -493,18 +515,24 @@ fn NewContextButton(
                     oninput: move |e| name.set(e.value()),
                 }
             }
-            // Where the event goes. Only for events, and only when there is a
-            // group to choose — otherwise the top level is the only answer and a
-            // one-option select is just noise.
-            if !is_group && !groups.is_empty() {
-                div { class: "text-field mt-2",
-                    label { "{t(\"layout.parentGroup\")}" }
-                    select {
-                        value: "{parent}",
-                        onchange: move |e| parent.set(e.value()),
-                        option { value: "", "{t(\"layout.topLevel\")}" }
-                        for g in groups.iter() {
-                            option { key: "{g.id.0}", value: "{g.id.0}", "{g.name}" }
+            // Which group the event belongs to. Required, so it is always shown
+            // for an event: hiding it when unanswered would hide the reason the
+            // Add button is refusing.
+            if !is_group {
+                if groups.is_empty() {
+                    p { class: "body-medium text-muted mt-2", "{t(\"layout.needGroupFirst\")}" }
+                } else {
+                    div { class: "text-field mt-2",
+                        label { "{t(\"layout.parentGroup\")}" }
+                        select {
+                            value: "{parent}",
+                            onchange: move |e| parent.set(e.value()),
+                            // Unselectable once past: there is no "no group"
+                            // answer, only one not given yet.
+                            option { value: "", disabled: true, "{t(\"layout.chooseGroup\")}" }
+                            for g in groups.iter() {
+                                option { key: "{g.id.0}", value: "{g.id.0}", "{g.name}" }
+                            }
                         }
                     }
                 }
@@ -743,5 +771,41 @@ pub(super) fn abbrev_context_name(name: &str) -> String {
         // "HB"); more than that reads as crammed.
         1..=3 => words.concat().chars().take(2).collect(),
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::can_create_context;
+
+    /// The requirement: an event has to be put in a group. Enforced here rather
+    /// than only in the markup, since the submit path asks the same question.
+    #[test]
+    fn an_event_cannot_be_created_without_a_group() {
+        assert!(
+            !can_create_context(false, "Landsmøde", "", false),
+            "named but homeless: nothing to create yet"
+        );
+        assert!(
+            can_create_context(false, "Landsmøde", "group-id", false),
+            "named and placed in a group"
+        );
+    }
+
+    /// A group is created at the top level, so it has no group to choose and
+    /// must not be held back waiting for one.
+    #[test]
+    fn a_group_needs_only_a_name() {
+        assert!(can_create_context(true, "Hovedbestyrelsen", "", false));
+        assert!(
+            !can_create_context(true, "   ", "", false),
+            "blank is no name"
+        );
+    }
+
+    #[test]
+    fn nothing_is_created_twice_while_the_first_is_in_flight() {
+        assert!(!can_create_context(true, "Hovedbestyrelsen", "", true));
+        assert!(!can_create_context(false, "Landsmøde", "group-id", true));
     }
 }
