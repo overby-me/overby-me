@@ -64,7 +64,16 @@ pub fn Home(app: Option<String>) -> Element {
 /// the rail/bar item entry animation).
 pub(crate) static CTX_IS_OWNER: GlobalSignal<Option<bool>> = Signal::global(|| None);
 
-/// Which context the flag above was worked out for, as its path.
+/// The id of the context the current page belongs to, or `None` while that is
+/// unknown. Read by the pending-invitation prompt (`layout::InviteToJoin`) to
+/// tell whether the reader has an unaccepted invitation to THIS place.
+///
+/// Published from the same resolve as [`CTX_IS_OWNER`] and on the same terms:
+/// a context is a property of the page, so working it out twice would be two
+/// chances to disagree.
+pub(crate) static CTX_ID: GlobalSignal<Option<String>> = Signal::global(|| None);
+
+/// Which context the flags above were worked out for, as its path.
 ///
 /// Ownership belongs to the CONTEXT, not to the node inside it, so stepping from
 /// one document to the next in the same place cannot change the answer. It was
@@ -133,6 +142,20 @@ fn PathResolver(segments: Vec<String>, app: Option<String>) -> Element {
         };
         if *CTX_IS_OWNER.peek() != owner {
             *CTX_IS_OWNER.write() = owner;
+        }
+        // Same three cases as the owner flag: answered, answered-but-nothing,
+        // or still resolving (in which case the previous answer stands only
+        // while it was about this same context).
+        let ctx_id = match &*node_future.read() {
+            Some(Ok(Some(node))) => node.context_id.as_ref().map(|u| u.0.clone()),
+            Some(_) => None,
+            None => match CTX_OWNER_FOR.peek().as_deref() == Some(here.as_slice()) {
+                true => CTX_ID.peek().clone(),
+                false => None,
+            },
+        };
+        if *CTX_ID.peek() != ctx_id {
+            *CTX_ID.write() = ctx_id;
         }
         if answered && CTX_OWNER_FOR.peek().as_deref() != Some(here.as_slice()) {
             *CTX_OWNER_FOR.write() = Some(here);

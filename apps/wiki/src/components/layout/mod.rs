@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 
 use crate::graphql::{self};
-use crate::i18n::t;
+use crate::i18n::{t, t_with};
 use crate::model::{self, NodeFields};
 use crate::route::Route;
-use crate::session::SESSION;
+use crate::session::{use_session, SESSION};
 
 mod appbar;
 mod breadcrumbs;
@@ -41,9 +41,146 @@ pub(super) static NAV_CRUMBS_LOADING: GlobalSignal<bool> = Signal::global(|| fal
 
 pub(super) static CONTEXT_DEPTH: GlobalSignal<usize> = Signal::global(|| 0);
 
-/// The signed-in user's pending-invitation count, for the Home nav badge. Set by
+/// The signed-in user's pending invitations, for the Home nav badge and the
+/// prompt shown inside a context they have not joined ([`InviteToJoin`]). Set by
 /// [`Layout`] (once per session, refreshed on mutations via the data version).
-pub static PENDING_INVITES: GlobalSignal<usize> = Signal::global(|| 0);
+///
+/// The whole list rather than a count, because the prompt has to ask "is one of
+/// these for the place being read", and the poll that fills this already paid
+/// for the rows. Asking again per page would undo the reason this is polled at
+/// all (see `INVITE_POLL_MS`).
+pub static PENDING_INVITE_LIST: GlobalSignal<Vec<model::InvitationFields>> =
+    Signal::global(Vec::new);
+
+/// How many of the above there are, for the Home nav badge.
+pub fn pending_invites() -> usize {
+    PENDING_INVITE_LIST.read().len()
+}
+
+/// Invitations the reader has waved away this session, by member id, so moving
+/// between pages of a context does not ask again on every step. Deliberately
+/// not persisted: a new session is a fair time to mention it once more.
+static INVITES_DISMISSED: GlobalSignal<std::collections::HashSet<String>> =
+    Signal::global(std::collections::HashSet::new);
+
+/// The reader's unaccepted invitation to `ctx`, unless they have already waved
+/// it away this session. An invitation whose context did not come back (the
+/// place is gone, or unreadable) matches nothing.
+fn invite_for_context(
+    invites: &[model::InvitationFields],
+    ctx: &str,
+    dismissed: &std::collections::HashSet<String>,
+) -> Option<model::InvitationFields> {
+    invites
+        .iter()
+        .find(|i| i.parent.as_ref().is_some_and(|p| p.id.0 == ctx) && !dismissed.contains(&i.id.0))
+        .cloned()
+}
+
+/// Asks the reader to join the context they are reading, when they have an
+/// invitation to it they have never accepted.
+///
+/// An invitation arrives as a link to a page, not to the invitation. Following
+/// it lands you INSIDE the place, reading it, with the offer to join sitting on
+/// a home screen you have no reason to visit, so people read a group for weeks
+/// while still counting as invited. This carries the offer to wherever they
+/// actually are.
+///
+/// It costs no query: the context comes from the page's own resolve
+/// (`loader::CTX_ID`) and the invitations from the poll that already feeds the
+/// nav badge. Only a match between the two opens anything.
+#[component]
+pub(super) fn InviteToJoin() -> Element {
+    let session = use_session();
+    let mut dismissed_open = use_signal(|| false);
+
+    let Some(ctx) = crate::components::loader::CTX_ID() else {
+        return rsx! {};
+    };
+    let invite = invite_for_context(&PENDING_INVITE_LIST.read(), &ctx, &INVITES_DISMISSED.read());
+    let Some(invite) = invite else {
+        return rsx! {};
+    };
+    if dismissed_open() {
+        return rsx! {};
+    }
+    let member_id = invite.id.0.clone();
+    let place = invite
+        .parent
+        .as_ref()
+        .map_or_else(String::new, |p| p.name.clone());
+
+    let accept = {
+        let member_id = member_id.clone();
+        move |_| {
+            let token = session.read().access_token.clone();
+            let Some(uid) = session.read().user.as_ref().map(|u| u.id.clone()) else {
+                return;
+            };
+            let (member_id, ctx) = (member_id.clone(), ctx.clone());
+            // Optimistic: the prompt goes now, and the poll confirms it.
+            INVITES_DISMISSED.write().insert(member_id.clone());
+            spawn(async move {
+                // Already a bound member of this place (the invitation is a
+                // leftover): accept THAT row and drop the invitation, which is
+                // what the home list does for the same reason.
+                let already = graphql::accept_existing_member(token.as_deref(), &ctx, &uid)
+                    .await
+                    .unwrap_or(false);
+                let ok = if already {
+                    let _ = graphql::decline_invitation(token.as_deref(), &member_id).await;
+                    true
+                } else {
+                    graphql::accept_invitation(token.as_deref(), &member_id, &uid)
+                        .await
+                        .unwrap_or(false)
+                };
+                if ok {
+                    PENDING_INVITE_LIST.write().retain(|i| i.id.0 != member_id);
+                    crate::session::bump_data_version();
+                } else {
+                    INVITES_DISMISSED.write().remove(&member_id);
+                    crate::snackbar::show_snackbar(&t("error.somethingWentWrong"));
+                }
+            });
+        }
+    };
+
+    // Dismissing is "not now", not "no": declining is a decision, and it
+    // belongs where the invitation is listed rather than behind a scrim tap in
+    // the middle of reading.
+    let not_now = {
+        let member_id = member_id.clone();
+        move || {
+            dismissed_open.set(true);
+            INVITES_DISMISSED.write().insert(member_id.clone());
+        }
+    };
+
+    rsx! {
+        crate::components::widgets::Dialog {
+            open: true,
+            on_dismiss: {
+                let mut not_now = not_now.clone();
+                move |()| not_now()
+            },
+            headline: t_with("invite.joinHeadline", &[("name", &place)]),
+            icon: Some("group_add".to_string()),
+            actions: rsx! {
+                button {
+                    class: "btn btn-text",
+                    onclick: {
+                        let mut not_now = not_now.clone();
+                        move |_| not_now()
+                    },
+                    "{t(\"invite.notNow\")}"
+                }
+                button { class: "btn btn-primary", onclick: accept, "{t(\"invite.join\")}" }
+            },
+            p { "{t_with(\"invite.joinBody\", &[(\"name\", &place)])}" }
+        }
+    }
+}
 
 /// Wraps an icon in the pending-invitation badge.
 ///
@@ -57,7 +194,7 @@ pub static PENDING_INVITES: GlobalSignal<usize> = Signal::global(|| 0);
 /// noticed when it appears.
 #[component]
 pub(super) fn NavBadge(children: Element) -> Element {
-    let pending = PENDING_INVITES();
+    let pending = pending_invites();
     rsx! {
         span { class: "badged-icon",
             {children}
@@ -391,9 +528,11 @@ pub fn Layout() -> Element {
                 let list = graphql::query_invitations(token.as_deref(), &uid, &email)
                     .await
                     .unwrap_or_default();
-                *PENDING_INVITES.write() = list.len();
-            } else {
-                *PENDING_INVITES.write() = 0;
+                if *PENDING_INVITE_LIST.peek() != list {
+                    *PENDING_INVITE_LIST.write() = list;
+                }
+            } else if !PENDING_INVITE_LIST.peek().is_empty() {
+                PENDING_INVITE_LIST.write().clear();
             }
         });
     }
@@ -661,6 +800,9 @@ pub fn Layout() -> Element {
                         },
                         Outlet::<Route> {}
                     }
+                    // Inside the shell, so it reaches every node page; it opens
+                    // only where the reader has an unaccepted invitation.
+                    InviteToJoin {}
                     div { class: "bar-spacer" }
                 }
             }
@@ -677,7 +819,55 @@ pub fn Layout() -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_reset_token;
+    use super::{invite_for_context, parse_reset_token};
+    use crate::model::{InvitationFields, ParentNodeFields, Uuid};
+    use std::collections::HashSet;
+
+    fn invite(member: &str, ctx: Option<&str>) -> InvitationFields {
+        InvitationFields {
+            id: Uuid(member.to_string()),
+            parent: ctx.map(|c| ParentNodeFields {
+                id: Uuid(c.to_string()),
+                name: "Landsmøde".to_string(),
+                key: "lm".to_string(),
+                mime_id: Some("wiki/group".to_string()),
+                data: None,
+                author_avatar: None,
+            }),
+        }
+    }
+
+    /// The prompt exists because an invitation link lands you inside the place,
+    /// not on the invitation, so it must fire on the context being READ.
+    #[test]
+    fn an_invitation_is_offered_on_the_context_it_is_for() {
+        let invites = [invite("m1", Some("ctx-a")), invite("m2", Some("ctx-b"))];
+        let none = HashSet::new();
+
+        let hit = invite_for_context(&invites, "ctx-b", &none).expect("matched");
+        assert_eq!(hit.id.0, "m2", "the invitation for THIS place");
+        assert!(
+            invite_for_context(&invites, "ctx-elsewhere", &none).is_none(),
+            "a place they were not invited to asks nothing"
+        );
+    }
+
+    #[test]
+    fn waving_it_away_stops_it_asking_again() {
+        let invites = [invite("m1", Some("ctx-a"))];
+        let dismissed: HashSet<String> = ["m1".to_string()].into_iter().collect();
+        assert!(invite_for_context(&invites, "ctx-a", &dismissed).is_none());
+        // Still offered to someone who has not dismissed it.
+        assert!(invite_for_context(&invites, "ctx-a", &HashSet::new()).is_some());
+    }
+
+    /// A context that did not come back cannot be matched or named, so it must
+    /// not open a dialog headlined after nothing.
+    #[test]
+    fn an_invitation_without_its_context_is_ignored() {
+        let invites = [invite("m1", None)];
+        assert!(invite_for_context(&invites, "ctx-a", &HashSet::new()).is_none());
+    }
 
     #[test]
     fn extracts_reset_token() {
