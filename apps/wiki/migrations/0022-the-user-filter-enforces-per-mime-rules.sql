@@ -1,0 +1,254 @@
+-- 0022: the user role's row filter enforces the per-mime rules.
+--
+-- A METADATA CHANGE, NOT SQL. This file records it, and the query at the end
+-- verifies which filter is live. Applied 2026-08-25 via the metadata API as a
+-- single `bulk` of pg_drop_select_permission + pg_create_select_permission on
+-- `nodes` for role `user`, preserving that permission's 18 columns, 10
+-- computed fields and allow_aggregations.
+--
+-- WHAT WAS WRONG. The old filter admitted a node if the reader was a member of
+-- its context, full stop. The per-mime rows in `permissions` were consulted
+-- only to look for a `public` rule, so a rule granting `owner` select and not
+-- `member` was written, displayed, and never enforced: any member of the
+-- context read it. 0018 and 0020 both name this; neither closed it.
+--
+-- WHAT THE NEW FILTER ASKS. Ownership still admits unconditionally -- your own
+-- node, and any node in a context you own -- exactly as before. Everything else
+-- now needs an active select rule for that (context_id, mime_id), whose role is
+-- `public`, or `member` and you are a member of the context, or `owner` and you
+-- are an owning member. Membership matches by `node_id` or by email, so a user
+-- who was invited but has not linked their account keeps what they could see.
+--
+-- MEASURED BEFORE APPLYING, over all 304 readers, one bounded query each:
+--
+--   * nobody gains a single node
+--   * 151 readers lose nothing
+--   * 153 lose between 1 and 20; the worst single reader loses 10
+--   * 1,481 node-views removed in total
+--
+-- All of it is content whose rule says owner-only: `vote/poll` in Landsmøde
+-- 2022 (5) and HB5 21/22 (5), and 26 nodes inside the Test event context. That
+-- is the enforcement this migration exists to deliver.
+--
+-- Two earlier candidates were measured and rejected. Calling `public."select"`
+-- as a computed field costs ~1,000 ms against ~6 ms for the inline filter, a
+-- 165x regression. The rule that function implements, written inline, keeps the
+-- `permission.node_id = member.parent_id` join, and members rows hang on the
+-- context node while most permission rows' node_id does not -- so the member
+-- branch almost never matches and a typical reader drops from ~7,100 nodes to
+-- ~500. This filter is ~15.5 ms and drops the join.
+--
+-- 0021 IS A PREREQUISITE. Every non-ownership branch here begins by requiring a
+-- select rule to exist; 0021 created the 36 that were missing. Applying this
+-- without it hides 75 nodes from everyone.
+--
+-- VERIFIED END TO END BEFORE THE SWAP by carrying this filter on a throwaway
+-- `selecttest` role and diffing its per-user counts against role `user` through
+-- Hasura itself, so the numbers above are not just a SQL translation of the
+-- filter. That role was dropped afterwards.
+--
+-- THE FILTER THAT WAS REPLACED, to paste back verbatim if this has to go:
+--
+--     {
+--       "_and": [
+--         {
+--           "_or": [
+--             {
+--               "owner_id": {
+--                 "_eq": "X-Hasura-User-Id"
+--               }
+--             },
+--             {
+--               "context": {
+--                 "members": {
+--                   "node_id": {
+--                     "_eq": "X-Hasura-User-Id"
+--                   }
+--                 }
+--               }
+--             },
+--             {
+--               "contextPublicPermissions": {
+--                 "active": {
+--                   "_eq": true
+--                 },
+--                 "role": {
+--                   "_eq": "public"
+--                 },
+--                 "select": {
+--                   "_eq": true
+--                 }
+--               }
+--             },
+--             {
+--               "members": {
+--                 "emailUser": {
+--                   "id": {
+--                     "_eq": "X-Hasura-User-Id"
+--                   }
+--                 }
+--               }
+--             },
+--             {
+--               "context": {
+--                 "owner_id": {
+--                   "_eq": "X-Hasura-User-Id"
+--                 }
+--               }
+--             },
+--             {
+--               "context": {
+--                 "members": {
+--                   "emailUser": {
+--                     "id": {
+--                       "_eq": "X-Hasura-User-Id"
+--                     }
+--                   }
+--                 }
+--               }
+--             }
+--           ]
+--         },
+--         {
+--           "deleted_at": {
+--             "_is_null": true
+--           }
+--         }
+--       ]
+--     }
+--
+-- THE FILTER NOW LIVE:
+--
+--     {
+--       "_and": [
+--         {
+--           "_or": [
+--             {
+--               "owner_id": {
+--                 "_eq": "X-Hasura-User-Id"
+--               }
+--             },
+--             {
+--               "context": {
+--                 "owner_id": {
+--                   "_eq": "X-Hasura-User-Id"
+--                 }
+--               }
+--             },
+--             {
+--               "contextPublicPermissions": {
+--                 "active": {
+--                   "_eq": true
+--                 },
+--                 "select": {
+--                   "_eq": true
+--                 },
+--                 "role": {
+--                   "_eq": "public"
+--                 }
+--               }
+--             },
+--             {
+--               "_and": [
+--                 {
+--                   "contextPublicPermissions": {
+--                     "active": {
+--                       "_eq": true
+--                     },
+--                     "select": {
+--                       "_eq": true
+--                     },
+--                     "role": {
+--                       "_eq": "member"
+--                     }
+--                   }
+--                 },
+--                 {
+--                   "context": {
+--                     "members": {
+--                       "_or": [
+--                         {
+--                           "node_id": {
+--                             "_eq": "X-Hasura-User-Id"
+--                           }
+--                         },
+--                         {
+--                           "emailUser": {
+--                             "id": {
+--                               "_eq": "X-Hasura-User-Id"
+--                             }
+--                           }
+--                         }
+--                       ]
+--                     }
+--                   }
+--                 }
+--               ]
+--             },
+--             {
+--               "_and": [
+--                 {
+--                   "contextPublicPermissions": {
+--                     "active": {
+--                       "_eq": true
+--                     },
+--                     "select": {
+--                       "_eq": true
+--                     },
+--                     "role": {
+--                       "_eq": "owner"
+--                     }
+--                   }
+--                 },
+--                 {
+--                   "context": {
+--                     "members": {
+--                       "owner": {
+--                         "_eq": true
+--                       },
+--                       "_or": [
+--                         {
+--                           "node_id": {
+--                             "_eq": "X-Hasura-User-Id"
+--                           }
+--                         },
+--                         {
+--                           "emailUser": {
+--                             "id": {
+--                               "_eq": "X-Hasura-User-Id"
+--                             }
+--                           }
+--                         }
+--                       ]
+--                     }
+--                   }
+--                 }
+--               ]
+--             }
+--           ]
+--         },
+--         {
+--           "deleted_at": {
+--             "_is_null": true
+--           }
+--         }
+--       ]
+--     }
+
+-- Verification: fails loudly unless the live metadata carries the new filter.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM hdb_catalog.hdb_metadata
+        WHERE jsonb_path_exists(
+            metadata::jsonb,
+            '$.sources[0].tables[*] ? (@.table.name == "nodes")'
+            '.select_permissions[*] ? (@.role == "user")'
+            '.permission.filter._and[0]._or[*].contextPublicPermissions'
+        )
+    ) THEN
+        RAISE EXCEPTION 'the user role is not on the per-mime filter';
+    END IF;
+END
+$$;
