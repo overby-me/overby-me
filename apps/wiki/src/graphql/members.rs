@@ -261,9 +261,60 @@ pub struct MembersInsertInput {
     pub parent_id: Option<Uuid>,
 }
 
+#[derive(cynic::Enum, Clone, Copy, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "members_constraint",
+    rename_all = "snake_case"
+)]
+#[expect(
+    clippy::enum_variant_names,
+    reason = "the variants are the database's constraint names; cynic derives the wire name from the Rust one, so they cannot be shortened"
+)]
+pub enum MembersConstraint {
+    MembersParentIdEmailKey,
+    MembersParentIdNameEmailNodeIdKey,
+    MembersParentIdNodeIdKey,
+    MembersPkey,
+}
+
+#[derive(cynic::Enum, Clone, Copy, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "members_update_column",
+    rename_all = "camelCase"
+)]
+pub enum MembersUpdateColumn {
+    Accepted,
+    Active,
+    Email,
+    Hidden,
+    Id,
+    Name,
+    NodeId,
+    Owner,
+    ParentId,
+}
+
+#[derive(cynic::InputObject, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "members_on_conflict"
+)]
+pub struct MembersOnConflict {
+    pub constraint: MembersConstraint,
+    // Hasura's on_conflict meta-field stays snake_case (unlike the camelCase
+    // column fields), so keep cynic from rewriting it to `updateColumns`.
+    #[cynic(rename = "update_columns")]
+    pub update_columns: Vec<MembersUpdateColumn>,
+}
+
 #[derive(cynic::QueryVariables, Debug)]
 pub struct InsertMembersVariables {
     pub objects: Vec<MembersInsertInput>,
+    /// Nullable so the same mutation can be sent without it, which is the
+    /// fallback when Hasura will not let this role upsert at all.
+    pub on_conflict: Option<MembersOnConflict>,
 }
 
 #[derive(cynic::QueryFragment, Debug, Clone)]
@@ -273,37 +324,95 @@ pub struct InsertMembersVariables {
     variables = "InsertMembersVariables"
 )]
 pub struct InsertMembersMutation {
-    #[arguments(objects: $objects)]
+    #[arguments(objects: $objects, on_conflict: $on_conflict)]
     pub insert_members: Option<MembersAffected>,
 }
 
+/// What a roster import did. `skipped` names people this context had already
+/// invited: a roster says who belongs here, not that none of them are here
+/// yet, so they are passed over rather than failing the import.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RosterImport {
+    pub inserted: usize,
+    pub skipped: usize,
+}
+
+/// The rows worth sending: emails only, lowercased, and each address once.
+/// Deduplicating here rather than at the database keeps `skipped` meaningful,
+/// since a file listing someone twice is a duplicate the importer can see.
+fn roster_objects(parent_id: &str, roster: &[(String, String)]) -> Vec<MembersInsertInput> {
+    let mut seen = std::collections::HashSet::new();
+    roster
+        .iter()
+        .filter_map(|(name, email)| {
+            let email = email.trim().to_lowercase();
+            if email.is_empty() || !seen.insert(email.clone()) {
+                return None;
+            }
+            Some(MembersInsertInput {
+                name: (!name.trim().is_empty()).then(|| name.clone()),
+                email: Some(email),
+                parent_id: Some(Uuid(parent_id.to_string())),
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+
 /// Bulk-invite members from an imported roster: one email invite per `(name,
-/// email)` pair in a single `insertMembers`. Mirrors React InvitesFab's bulk
-/// insert. Returns how many rows were inserted.
+/// email)` pair in a single `insertMembers`.
+///
+/// Anyone already invited to this context is skipped by the database rather
+/// than aborting the insert. Without that, one familiar face in a spreadsheet
+/// of two hundred failed the whole import on
+/// `members_parent_id_email_key` and nobody was invited at all.
 pub async fn invite_members(
     access_token: Option<&str>,
     parent_id: &str,
     roster: &[(String, String)],
-) -> Result<usize, String> {
+) -> Result<RosterImport, String> {
     use cynic::MutationBuilder;
-    let objects: Vec<MembersInsertInput> = roster
-        .iter()
-        .filter(|(_, email)| !email.trim().is_empty())
-        .map(|(name, email)| MembersInsertInput {
-            name: (!name.trim().is_empty()).then(|| name.clone()),
-            email: Some(email.to_lowercase()),
-            parent_id: Some(Uuid(parent_id.to_string())),
-            ..Default::default()
-        })
-        .collect();
-    if objects.is_empty() {
-        return Ok(0);
+    let objects = roster_objects(parent_id, roster);
+    let submitted = objects.len();
+    if submitted == 0 {
+        return Ok(RosterImport {
+            inserted: 0,
+            skipped: 0,
+        });
     }
-    let op = InsertMembersMutation::build(InsertMembersVariables { objects });
-    let r = execute(access_token, op).await?;
-    Ok(r.insert_members
+    let op = InsertMembersMutation::build(InsertMembersVariables {
+        objects,
+        // No columns to update: a conflict means "leave the existing invite
+        // alone", not "overwrite it with the spreadsheet".
+        on_conflict: Some(MembersOnConflict {
+            constraint: MembersConstraint::MembersParentIdEmailKey,
+            update_columns: Vec::new(),
+        }),
+    });
+    let affected = match execute(access_token, op).await {
+        Ok(r) => r.insert_members,
+        // Hasura refuses `on_conflict` outright for a role it will not let
+        // upsert. Retrying without it keeps a clean roster importing as it did
+        // before, rather than making a permission an import cannot check into
+        // an import that never works.
+        Err(e) if e.to_lowercase().contains("upsert") => {
+            crate::errors::log_handled("roster upsert refused, retrying plain", &e);
+            let retry = InsertMembersMutation::build(InsertMembersVariables {
+                objects: roster_objects(parent_id, roster),
+                on_conflict: None,
+            });
+            execute(access_token, retry).await?.insert_members
+        }
+        Err(e) => return Err(e),
+    };
+    let inserted = affected
         .map(|m| m.affected_rows.max(0) as usize)
-        .unwrap_or(0))
+        .unwrap_or(0)
+        .min(submitted);
+    Ok(RosterImport {
+        inserted,
+        skipped: submitted - inserted,
+    })
 }
 
 /// Build the Hasura `where` object (as GraphQL literal text) for a member page.
@@ -743,6 +852,83 @@ pub async fn set_node_authors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn roster(rows: &[(&str, &str)]) -> Vec<(String, String)> {
+        rows.iter()
+            .map(|(n, e)| ((*n).to_string(), (*e).to_string()))
+            .collect()
+    }
+
+    /// The reported failure: a roster naming someone already invited aborted
+    /// the whole insert on `members_parent_id_email_key`, so two hundred good
+    /// rows were lost to one familiar face.
+    #[test]
+    fn a_roster_import_asks_the_database_to_skip_people_already_invited() {
+        use cynic::MutationBuilder;
+        let op = InsertMembersMutation::build(InsertMembersVariables {
+            objects: roster_objects("ctx", &roster(&[("Ada", "ada@example.org")])),
+            on_conflict: Some(MembersOnConflict {
+                constraint: MembersConstraint::MembersParentIdEmailKey,
+                update_columns: Vec::new(),
+            }),
+        });
+        let q = &op.query;
+        assert!(
+            q.contains("on_conflict:"),
+            "the insert handles conflicts: {q}"
+        );
+        let vars = serde_json::to_string(&op.variables).expect("variables serialize");
+        assert!(
+            vars.contains("members_parent_id_email_key"),
+            "on the constraint that was failing: {vars}"
+        );
+        // Hasura's meta-field stays snake_case while columns are camelCase, and
+        // an empty list is what makes a conflict skip rather than overwrite.
+        assert!(
+            vars.contains(r#""update_columns":[]"#),
+            "leaving the existing invite alone: {vars}"
+        );
+    }
+
+    /// The retry for a role Hasura will not let upsert sends the same mutation
+    /// with no `on_conflict`, so the variable has to be declared nullable. A
+    /// `members_on_conflict!` here would make that fallback unsendable.
+    #[test]
+    fn the_same_mutation_can_be_sent_without_an_on_conflict() {
+        use cynic::MutationBuilder;
+        let op = InsertMembersMutation::build(InsertMembersVariables {
+            objects: roster_objects("ctx", &roster(&[("Ada", "ada@example.org")])),
+            on_conflict: None,
+        });
+        assert!(
+            op.query.contains("$onConflict: members_on_conflict)")
+                || op.query.contains("$onConflict: members_on_conflict,"),
+            "on_conflict must be nullable: {}",
+            op.query
+        );
+    }
+
+    #[test]
+    fn a_roster_is_lowercased_and_each_address_sent_once() {
+        let objects = roster_objects(
+            "ctx",
+            &roster(&[
+                ("Ada", "Ada@Example.org"),
+                ("Ada again", " ada@example.org "),
+                ("No mail", "  "),
+                ("Grace", "grace@example.org"),
+            ]),
+        );
+        let emails: Vec<_> = objects.iter().filter_map(|o| o.email.clone()).collect();
+        assert_eq!(emails, ["ada@example.org", "grace@example.org"]);
+    }
+
+    #[test]
+    fn a_nameless_row_still_gets_its_invite() {
+        let objects = roster_objects("ctx", &roster(&[("   ", "ada@example.org")]));
+        assert_eq!(objects.len(), 1);
+        assert_eq!(objects[0].name, None, "no name is not a reason to skip");
+    }
 
     /// Turnout asks the server for a number, not for the members.
     ///

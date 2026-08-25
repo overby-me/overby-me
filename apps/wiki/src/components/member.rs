@@ -411,11 +411,16 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
                                                     return;
                                                 }
                                                 match graphql::invite_members(token.as_deref(), &node_id, &roster).await {
-                                                    Ok(n) if n > 0 => {
-                                                        show_snackbar(&t_with("invite.imported", &[("count", &n.to_string())]));
-                                                        crate::session::bump_data_version();
+                                                    Ok(r) => {
+                                                        show_snackbar(&roster_import_message(r));
+                                                        if r.inserted > 0 {
+                                                            crate::session::bump_data_version();
+                                                        }
                                                     }
-                                                    _ => show_snackbar(&t("error.somethingWentWrong")),
+                                                    Err(e) => {
+                                                        crate::errors::log_handled("import roster", &e);
+                                                        show_snackbar(&t("error.somethingWentWrong"));
+                                                    }
                                                 }
                                             });
                                         }
@@ -547,6 +552,26 @@ pub fn MemberApp(node: NodeWithChildren) -> Element {
             }
         }
     }
+}
+
+/// What to tell someone after a roster import. Everyone being already invited
+/// is a finished import, not the failure it used to be reported as. Split from
+/// the lookup so the choice is testable without a Dioxus runtime.
+fn roster_import_key(r: graphql::RosterImport) -> &'static str {
+    match (r.inserted, r.skipped) {
+        (0, 0) => "invite.noRosterRows",
+        (0, _) => "invite.allAlreadyInvited",
+        (_, 0) => "invite.imported",
+        _ => "invite.importedSomeSkipped",
+    }
+}
+
+fn roster_import_message(r: graphql::RosterImport) -> String {
+    let (count, skipped) = (r.inserted.to_string(), r.skipped.to_string());
+    t_with(
+        roster_import_key(r),
+        &[("count", &count), ("skipped", &skipped)],
+    )
 }
 
 /// The roster table's columns (adds an Actions column for managers).
@@ -910,6 +935,21 @@ fn apply_member_update(token: Option<String>, id: String, set: MembersSetInput) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An import that inserted nobody because everyone was already there has
+    /// done its job. It used to fall through to "something went wrong", which
+    /// told the person their file had failed when the roster was simply
+    /// already up to date.
+    #[test]
+    fn an_import_that_only_skips_is_not_reported_as_a_failure() {
+        let key =
+            |inserted, skipped| roster_import_key(graphql::RosterImport { inserted, skipped });
+        assert_eq!(key(0, 12), "invite.allAlreadyInvited");
+        assert_eq!(key(8, 4), "invite.importedSomeSkipped");
+        assert_eq!(key(8, 0), "invite.imported");
+        // Nothing usable in the file at all is the one case that is not a win.
+        assert_eq!(key(0, 0), "invite.noRosterRows");
+    }
 
     #[test]
     fn accepted_excludes_pending_invitations() {
