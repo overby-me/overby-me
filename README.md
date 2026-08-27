@@ -439,6 +439,7 @@ Specifications and protocols this stack bets on, tracked separately from the imp
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | Text | [UTF-8 📖](https://en.wikipedia.org/wiki/UTF-8) | | 🆗 | [UTF-16 📖](https://en.wikipedia.org/wiki/UTF-16) |
+| ✅ | Syntax Grammar | [Tree-sitter 📖](https://tree-sitter.github.io/tree-sitter/) | | [tree-sitter-mojo 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/tree-sitter-mojo) | [TextMate Grammar 🔒](https://macromates.com/manual/en/language_grammars) |
 | ✅ | Object Notation | [JSON 📖](https://www.json.org) | [KDL](https://kdl.dev), [EON](https://github.com/emilk/eon) | 🆗 | |
 | ✅ | Binary Object Notation | [CBOR 📖](https://cbor.io) | [DAG-CBOR / DRISL 🌀📖](https://ipld.io/specs/codecs/dag-cbor/spec/) | 🆗 | |
 | 🚧 | Content Addressing | [CID / Multihash 🌀📖](https://github.com/multiformats/cid) | | 🆗 | |
