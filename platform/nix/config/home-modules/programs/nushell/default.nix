@@ -4,6 +4,8 @@
   config,
   ...
 }: let
+  nushell = pkgs.pkgsUnstable.nushell;
+
   # Translate a Nix value into a nushell literal. home.sessionVariables
   # values are strings or ints; everything is emitted as a quoted string,
   # which matches how POSIX `export` treats them in hm-session-vars.sh.
@@ -43,10 +45,10 @@
 in {
   programs.nushell = {
     enable = true;
-    package = pkgs.pkgsUnstable.nushell;
+    package = nushell;
     configFile.source = ./config.nu;
     envFile.text = ''
-      $env.SHELL = "${pkgs.nushell}/bin/nu"
+      $env.SHELL = "${nushell}/bin/nu"
 
       ${pathSetup}
 

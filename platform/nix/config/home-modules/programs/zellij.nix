@@ -6,6 +6,7 @@
 
   programs.zellij = {
     enable = true;
+    package = pkgs.pkgsUnstable.zellij;
     settings = {
       default_shell = "nu";
       # No copy_command on purpose: it would run where the zellij server
