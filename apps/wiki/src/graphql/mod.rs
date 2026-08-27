@@ -517,10 +517,22 @@ async fn execute_raw_vars_inner(
         }
         other => other,
     };
-    if report {
+    // A caller that asked for quiet meant "the DATABASE may refuse this, and I
+    // handle that". It did not mean "swallow anything at all": a query the
+    // server will not even accept is a bug in this app, and staying quiet about
+    // one is how a broken paint button went two days without a report.
+    if report || result.as_ref().err().is_some_and(|e| !is_db_refusal(e)) {
         report_raw_failure(access_token, &result, "raw vars");
     }
     result
+}
+
+/// Whether a failure is the database declining a write the caller expects to be
+/// declined -- a trigger raising, which Hasura reports as "database query error"
+/// with the reason buried in `extensions.internal` and omitted outside dev mode.
+/// The pixel cooldown is the case this exists for.
+fn is_db_refusal(error: &str) -> bool {
+    error.contains("database query error")
 }
 
 /// The remembered answer to a read, if the failure was the kind a copy answers.
@@ -539,6 +551,26 @@ fn offline_copy<T: serde::de::DeserializeOwned>(key: &str, error: &str) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A quiet caller silences the refusal it expects, and nothing else. The
+    /// pixel canvas asked for quiet so the paint cooldown would not file a bug
+    /// report on every early click; that also hid `validation-failed` for two
+    /// days, which is the app sending a query the server will not accept.
+    #[test]
+    fn quiet_hides_a_refusal_but_not_a_broken_query() {
+        assert!(super::is_db_refusal(
+            "hasura error: [{\"message\":\"database query error\"}]"
+        ));
+        for bug in [
+            "hasura error: [{\"message\":\"field 'ownerId' not found in type: \
+             'nodes_set_input'\",\"extensions\":{\"code\":\"validation-failed\"}}]",
+            "hasura error: [{\"message\":\"check constraint of an insert/update \
+             permission has failed\"}]",
+            "network error",
+        ] {
+            assert!(!super::is_db_refusal(bug), "must be reported: {bug}");
+        }
+    }
 
     /// The same keyword decides whether two requests may become one.
     ///
