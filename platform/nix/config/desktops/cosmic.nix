@@ -166,6 +166,9 @@ in {
         # `source` points at the image home.nix installs from nix-wallpaper;
         # without this key cosmic never picks that file up.
         // defaults "CosmicBackground" {
+          # Carried over from cosmic-bg for the same reason as the shortcut
+          # keybindings: declaring part of an app id hides the rest of it.
+          backgrounds = "[All]";
           same-on-all = "true";
           all = ''
             (
