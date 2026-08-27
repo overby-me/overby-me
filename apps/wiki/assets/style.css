@@ -5978,6 +5978,21 @@ h6,
 	animation: lightbox-img-in var(--md-sys-motion-duration-long1)
 		var(--md-sys-motion-spring-spatial-default);
 }
+/* The lightbox is rendered INSIDE the element that held the thumbnail, so a
+   container rule reaches it: `.comment-image img` (0,1,1) beat the line above
+   (0,1,0) and pinned the expanded picture at 260px, cropped to a square, so
+   zooming a comment's photo showed the same small image. Two classes win, and
+   the sizing is restated because the rule being overridden also set width,
+   height and object-fit. `.slate-content`, `.file-viewer` and `.rich-editor`
+   cap their images the same way and had the same bug. */
+.image-lightbox .image-lightbox-img {
+	width: auto;
+	height: auto;
+	max-width: 96vw;
+	max-height: 92vh;
+	max-height: 92dvh;
+	object-fit: contain;
+}
 
 @keyframes lightbox-img-in {
 	from {
