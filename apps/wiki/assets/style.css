@@ -951,6 +951,12 @@ html {
    lighter surface panel floating in that frame with rounded corners. */
 .app-shell:not([data-size-class="compact"]) {
 	background: var(--md-surface-container);
+	/* A flow root, so the pane's top margin stays INSIDE the shell. Collapsing
+	   out of it moved the whole shell down by that margin while the shell was
+	   still a viewport tall, which made the window a second scroller. See the
+	   pane's own `min-height` below: the two together are what keep the window
+	   from scrolling at all on this axis. */
+	display: flow-root;
 }
 /* Where the content pane starts, per shell state. Mirrors the pane's own
    margin-left rules so anything anchored to the reading column (a FAB) moves
@@ -982,6 +988,13 @@ html {
 	   hides its address bar only for the window, and no corner is worth that. */
 	height: calc(100vh - 64px - var(--md-sys-margin));
 	height: calc(100dvh - 64px - var(--md-sys-margin));
+	/* The base rule asks for a viewport-tall pane, and a min-height outranks a
+	   height: the frame came out a whole 64px bar taller than the space it was
+	   sized for, so it hung past the bottom margin and the WINDOW scrolled to
+	   show the rest. Two scrollers, and only this one is put back when a page
+	   jump or the back-to-top button asks for the top -- so after using the
+	   page switcher the last stretch of the way up was unreachable. */
+	min-height: 0;
 	overflow-y: auto;
 	/* The page is the last thing that should scroll behind a sheet or a menu. */
 	overscroll-behavior: contain;
