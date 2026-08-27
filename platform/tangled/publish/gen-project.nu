@@ -54,10 +54,9 @@ def flake-text [
     build: list<string> = []
     toolchain: bool = false
     build_env: record = {}
-    test_flags: list<string> = []
+    run_tests: bool = true
     aliases: record = {}
     setup_hook: string = ""
-    fine: bool = false
     nixos_modules: record = {}
     home_modules: record = {}
 ]: nothing -> string {
@@ -72,9 +71,7 @@ def flake-text [
     if not ($build | is-empty) {
         $rust = ($rust | append $"        buildInputs = [(do $quoted $build)];")
     }
-    if not ($test_flags | is-empty) {
-        $rust = ($rust | append $"        cargoTestFlags = [(do $quoted $test_flags)];")
-    }
+    if not $run_tests { $rust = ($rust | append "        runTests = false;") }
     # Keys are quoted without exception: c++filt, pkg-config and opt-rs are
     # not nix identifiers, and quoting only the ones that need it means the
     # generator has to know which those are.
@@ -118,7 +115,7 @@ def flake-text [
     # block, so the extras land inside `inputs` rather than beside it.
     let extra_inputs = ([
         (if $toolchain { "\n    # This project pins rustc through its own rust-toolchain.toml.\n    rust-overlay.url = \"github:oxalica/rust-overlay\";" } else { "" })
-        (if $fine { "\n    # Declaring nix-lib is the whole of opting into the fine-grained\n    # per-crate build; the input carries the builder and its index.\n    nix-lib = {\n      url = \"git+https://tangled.org/overby.me/nix-lib\";\n      inputs.workspace.follows = \"workspace\";\n    };" } else { "" })
+        "\n    # nix-lib carries buildCargoProject, which every project builds\n    # with: one derivation per crate rather than one for the whole graph.\n    nix-lib = {\n      url = \"git+https://tangled.org/overby.me/nix-lib\";\n      inputs.workspace.follows = \"workspace\";\n    };"
     ] | where {|s| $s != "" })
     # The Rust build, as an input. Its own workspace follows this one, so the
     # framework and the module that extends it are one flake in the lock.
@@ -330,10 +327,9 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
                 ($p | get -o buildInputs | default [])
                 ($p | get -o toolchain | default false)
                 ($p | get -o env | default {})
-                ($p | get -o cargoTestFlags | default [])
+                ($p | get -o runTests | default true)
                 ($p | get -o aliases | default {})
                 ($p | get -o setupHook | default "")
-                ($p | get -o fineBuild | default false)
                 ($p | get -o nixosModules | default {})
                 ($p | get -o homeModules | default {})
         ) }

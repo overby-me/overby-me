@@ -99,7 +99,7 @@ the project's own directory: they live together under
   checks and the overlay are derived from a single package definition, so
   `nix flake check` builds the package and checks formatting with nothing
   further declared. A project states only what differs: `subdir`,
-  `nativeBuildInputs`, `buildInputs`, `cargoTestFlags`, `env`, `toolchain`.
+  `nativeBuildInputs`, `buildInputs`, `runTests`, `env`, `toolchain`.
 - `.tangled/workflows/ci.yml`, which runs `nix flake check`. One file, mapped
   into all 39: Tangled reads workflows from a repo root, so a copy under
   `safety/oxidized/<name>/` did nothing here but wait to be edited by mistake.
@@ -186,14 +186,12 @@ Two things about this are non-obvious, and both were measured:
   could drift from the published lock. That holds only because a project flake
   has exactly one input; nixpkgs and the hooks arrive through the functor.
 
-This does not replace `default.nix`, and is not meant to. The monorepo builds
-the crate with `lib.buildCargoProject` - per-crate derivations against the
-committed 7.3 MB index shared by all 39 projects - while the flake builds it
-with `rustPlatform.buildRustPackage`, one derivation and nothing bespoke.
-Converging them would mean slicing that index into every published repo, or
-making each one do IFD against the sparse index on every `nix flake check`:
-paying, in repos an outsider clones, for a property only the monorepo benefits
-from.
+This does not replace `default.nix`, and is not meant to. Both builds go
+through `lib.buildCargoProject` - per-crate derivations rather than one for the
+whole graph - so a published repo and the tree compile the same way; the flake
+declares `nix-lib` to get the builder. The price is the index: without a
+committed snapshot each repo generates one by IFD on every `nix flake check`,
+which is the cost of not slicing a copy into all 39.
 
 So the second build is kept and made to earn its place. `checks.project-flake-*`
 builds both and holds them against each other: everything the published repo

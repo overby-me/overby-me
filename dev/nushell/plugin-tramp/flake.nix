@@ -15,11 +15,19 @@
       url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/rust";
       inputs.workspace.follows = "workspace";
     };
+
+    # nix-lib carries buildCargoProject, which every project builds
+    # with: one derivation per crate rather than one for the whole graph.
+    nix-lib = {
+      url = "git+https://tangled.org/overby.me/nix-lib";
+      inputs.workspace.follows = "workspace";
+    };
   };
 
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
+      rust.runTests = false;
       homeModules."nushell-plugin-tramp" = ./hm-module.nix;
     };
 }

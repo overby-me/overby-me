@@ -18,6 +18,13 @@
 
     # This project pins rustc through its own rust-toolchain.toml.
     rust-overlay.url = "github:oxalica/rust-overlay";
+
+    # nix-lib carries buildCargoProject, which every project builds
+    # with: one derivation per crate rather than one for the whole graph.
+    nix-lib = {
+      url = "git+https://tangled.org/overby.me/nix-lib";
+      inputs.workspace.follows = "workspace";
+    };
   };
 
   outputs = inputs:
