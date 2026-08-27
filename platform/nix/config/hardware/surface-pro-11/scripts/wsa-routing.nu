@@ -103,18 +103,33 @@ def apply-route [card: string] {
 
 # Bounded because a graph that fails to open takes aplay down with it, and this
 # runs between the boot and the greeter.
+#
+# The widgets are read while aplay still holds the PCM, not after it: DAPM
+# powers the graph down on close, so a probe that waits for aplay to exit reads
+# `SpkrLeft SPKR: Off` every time however well the route came up.
 def probe-graph [card: string] {
-  let result = (^timeout 15 aplay -q -D $"hw:($card),1" -t raw -f S16_LE -r 48000 -c 4 -d 2 /dev/zero
-    | complete)
+  let widgets = "/sys/devices/platform/sound/WSA Playback/dapm_widget"
+
+  # aplay is what runs in the spawned job, not the read: a foreground external
+  # blocks nushell's job threads, so a reader spawned beside it only gets to
+  # look once the PCM is already closed. Measured both ways on the machine.
+  job spawn {
+    (^timeout 15 aplay -q -D $"hw:($card),1" -t raw -f S16_LE -r 48000 -c 4 -d 4 /dev/zero
+      | complete)
+    | job send 0
+  }
+
+  # Two seconds in, comfortably inside the four above.
+  sleep 2sec
+  let dapm = if ($widgets | path exists) { open $widgets } else { "" }
+  let result = (job recv)
+
   if $result.exit_code != 0 {
     log $"silent probe failed: ($result.stderr | str trim)"
     return false
   }
 
-  let widgets = "/sys/devices/platform/sound/WSA Playback/dapm_widget"
-  if not ($widgets | path exists) { return true }
-
-  let dapm = (open $widgets)
+  if ($dapm | is-empty) { return true }
   ["SpkrLeft SPKR: On" "SpkrRight SPKR: On"] | all {|endpoint|
     $dapm | str contains $endpoint
   }
