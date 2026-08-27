@@ -54,7 +54,6 @@ def flake-text [
     build: list<string> = []
     toolchain: bool = false
     build_env: record = {}
-    run_tests: bool = true
     aliases: record = {}
     setup_hook: string = ""
     nixos_modules: record = {}
@@ -71,7 +70,6 @@ def flake-text [
     if not ($build | is-empty) {
         $rust = ($rust | append $"        buildInputs = [(do $quoted $build)];")
     }
-    if not $run_tests { $rust = ($rust | append "        runTests = false;") }
     # Keys are quoted without exception: c++filt, pkg-config and opt-rs are
     # not nix identifiers, and quoting only the ones that need it means the
     # generator has to know which those are.
@@ -327,7 +325,6 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
                 ($p | get -o buildInputs | default [])
                 ($p | get -o toolchain | default false)
                 ($p | get -o env | default {})
-                ($p | get -o runTests | default true)
                 ($p | get -o aliases | default {})
                 ($p | get -o setupHook | default "")
                 ($p | get -o nixosModules | default {})

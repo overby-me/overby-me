@@ -41,6 +41,12 @@ in {
         pname = "oxidized-systemd";
         version = "unstable";
 
+        # A disk limit, not a problem with the tests: a CI runner fills up
+        # building test binaries on top of a release build this size, and no
+        # subset fits either. cargo test passes 9659 and skips 4 where there
+        # is room for it.
+        runTests = false;
+
         src = lib.fileset.toSource {
           root = ./.;
           fileset = lib.fileset.unions [
@@ -99,6 +105,9 @@ in {
       lib.buildCargoProject {
         pname = "oxidized-systemd-dev";
         version = "unstable";
+
+        # Same disk limit as the package above.
+        runTests = false;
 
         src = lib.fileset.toSource {
           root = ./.;

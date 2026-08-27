@@ -30,7 +30,6 @@
       rust = {
         nativeBuildInputs = ["pkg-config"];
         buildInputs = ["openssl" "dbus"];
-        runTests = false;
       };
     };
 }

@@ -99,7 +99,7 @@ the project's own directory: they live together under
   checks and the overlay are derived from a single package definition, so
   `nix flake check` builds the package and checks formatting with nothing
   further declared. A project states only what differs: `subdir`,
-  `nativeBuildInputs`, `buildInputs`, `runTests`, `env`, `toolchain`.
+  `nativeBuildInputs`, `buildInputs`, `env`, `toolchain`.
 - `.tangled/workflows/ci.yml`, which runs `nix flake check`. One file, mapped
   into all 39: Tangled reads workflows from a repo root, so a copy under
   `safety/oxidized/<name>/` did nothing here but wait to be edited by mistake.

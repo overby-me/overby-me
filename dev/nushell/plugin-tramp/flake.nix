@@ -27,7 +27,6 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      rust.runTests = false;
       homeModules."nushell-plugin-tramp" = ./hm-module.nix;
     };
 }
