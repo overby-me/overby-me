@@ -41,6 +41,7 @@
   - [🧮 Compute & Interfaces](#-compute--interfaces)
   - [📝 Data & Formats](#-data--formats)
     - [Media Codecs](#media-codecs)
+    - [Documents](#documents)
     - [Text & Object Notation](#text--object-notation)
   - [📡 Network](#-network)
     - [Internet & Web](#internet--web)
@@ -418,6 +419,19 @@ Specifications and protocols this stack bets on, tracked separately from the imp
 | ✅ | Video Codec | [AV1 📖](https://aomedia.org/av1-features/get-started) | | [rav1d 🦀](https://github.com/memorysafety/rav1d), [h26xtoav1 🦀](https://tangled.org/@overby.me/overby.me/tree/main/media/h26xtoav1) | [H.264 🔒](https://en.wikipedia.org/wiki/Advanced_Video_Coding) |
 | 🚧 | 3D Model Format | [glTF 📖](https://www.khronos.org/gltf/) | [OpenUSD](https://openusd.org) | 🆗 | |
 
+<a id="documents"></a>
+
+#### Documents
+
+| Status | Component | Current | Research & Development | Compatibility | Legacy |
+|:-:|-|-|-|-|-|
+| ✅ | Text Document | [ODF Text (.odt) 📖](https://en.wikipedia.org/wiki/OpenDocument) | | ⬅️ | [Microsoft OOXML (.docx) 🔒🇺🇸](https://en.wikipedia.org/wiki/Office_Open_XML), [Microsoft Word (.doc) 🔒🇺🇸](https://en.wikipedia.org/wiki/Doc_(computing)) |
+| ✅ | Spreadsheet | [ODF Spreadsheet (.ods) 📖](https://en.wikipedia.org/wiki/OpenDocument) | | ⬅️ | [Microsoft OOXML (.xlsx) 🔒🇺🇸](https://en.wikipedia.org/wiki/Office_Open_XML), [Microsoft Excel (.xls) 🔒🇺🇸](https://en.wikipedia.org/wiki/Microsoft_Excel) |
+| ✅ | Presentation | [ODF Presentation (.odp) 📖](https://en.wikipedia.org/wiki/OpenDocument) | | ⬅️ | [Microsoft OOXML (.pptx) 🔒🇺🇸](https://en.wikipedia.org/wiki/Office_Open_XML), [Microsoft PowerPoint (.ppt) 🔒🇺🇸](https://en.wikipedia.org/wiki/Microsoft_PowerPoint) |
+| ✅ | Fixed-Layout Document | [PDF 📖](https://en.wikipedia.org/wiki/PDF) | | 🆗 | |
+| ✅ | E-book | [EPUB 📖](https://en.wikipedia.org/wiki/EPUB) | | 🆗 | [Amazon Kindle (.azw3) 🔒🇺🇸](https://en.wikipedia.org/wiki/Kindle_File_Format) |
+| ✅ | Lightweight Markup | [CommonMark 📖](https://commonmark.org) | | 🆗 | |
+
 <a id="text--object-notation"></a>
 
 #### Text & Object Notation
@@ -715,7 +729,7 @@ End-user programs on top of the system, from the command line to desktop and mob
 | ✅ | Application Store Frontend | [Cosmic Store 🦀](https://github.com/pop-os/cosmic-store) | | 🆗 | [GNOME Software 💣](https://gitlab.gnome.org/GNOME/gnome-software) |
 | ✅ | System Monitor | [Cosmic Monitor 🦀](https://github.com/pop-os/cosmic-monitor) | | 🆗 | [GNOME System Monitor 💣](https://gitlab.gnome.org/GNOME/gnome-system-monitor) |
 | 🚫 | Application Store Backend | [Flatpak 💣](https://github.com/flatpak/flatpak) | [Oxidized Flatpak 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/flatpak) | ⬅️ | [Snap 🔒](https://github.com/canonical/snapd), [AppImage 💣](https://github.com/AppImage) |
-| ✅ | Office Suite | [Euro-Office 🐒🇪🇺](https://github.com/Euro-Office) | | [OpenDocument Format 📖](https://en.wikipedia.org/wiki/OpenDocument) | [OnlyOffice 🐒🇷🇺](https://www.onlyoffice.com), [LibreOffice 💣🐷](https://www.libreoffice.org) |
+| ✅ | Office Suite | [Euro-Office 🐒🇪🇺](https://github.com/Euro-Office) | | [OpenDocument Format 📖](https://en.wikipedia.org/wiki/OpenDocument), [Microsoft OOXML 🔒🇺🇸](https://en.wikipedia.org/wiki/Office_Open_XML) | [OnlyOffice 🐒🇷🇺](https://www.onlyoffice.com), [LibreOffice 💣🐷](https://www.libreoffice.org) |
 | ✅ | Remote Desktop | [Rustdesk 🦀](https://github.com/rustdesk/rustdesk) | | [VNC](https://en.wikipedia.org/wiki/VNC) | [GNOME Remote Desktop 💣](https://gitlab.gnome.org/GNOME/gnome-remote-desktop) |
 
 </details>
