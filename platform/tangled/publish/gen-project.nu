@@ -52,7 +52,6 @@ def flake-text [
     subdir: string = ""
     native: list<string> = []
     build: list<string> = []
-    check: bool = true
     toolchain: bool = false
     build_env: record = {}
     test_flags: list<string> = []
@@ -73,7 +72,6 @@ def flake-text [
     if not ($build | is-empty) {
         $rust = ($rust | append $"        buildInputs = [(do $quoted $build)];")
     }
-    if not $check { $rust = ($rust | append "        doCheck = false;") }
     if not ($test_flags | is-empty) {
         $rust = ($rust | append $"        cargoTestFlags = [(do $quoted $test_flags)];")
     }
@@ -330,7 +328,6 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
             flake-text $p.name $description "git+https://tangled.org/overby.me/nix-workspace" "git+https://tangled.org/overby.me/nix-workspace?dir=modules/rust" $subdir
                 ($p | get -o nativeBuildInputs | default [])
                 ($p | get -o buildInputs | default [])
-                ($p | get -o doCheck | default true)
                 ($p | get -o toolchain | default false)
                 ($p | get -o env | default {})
                 ($p | get -o cargoTestFlags | default [])

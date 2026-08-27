@@ -51,7 +51,6 @@
 #
 #   nativeBuildInputs  build-time tools, e.g. ["pkg-config"]
 #   buildInputs        libraries linked against, e.g. ["openssl" "dbus"]
-#   doCheck            set false where the tests need network or a server
 #
 # Stated here rather than read out of default.nix, because telling that file's
 # main package apart from the test fixtures beside it is guesswork: most of
@@ -98,18 +97,6 @@
     name: "oxidized-systemd"
     description: "A systemd-compatible service manager written in Rust"
     path: "safety/oxidized/systemd"
-    # Tests are built but not run here, and this is a disk limit rather than
-    # anything wrong with them: the Spindle microvm runs out of space while
-    # linking the first test binary, after the release build of a systemd
-    # reimplementation has already nearly filled it. Spindle exposes no way to
-    # ask for a bigger disk, and the margin is gone before even one test
-    # binary, so no subset fits either. Every other published repo runs its
-    # tests; this is the largest project by a wide margin.
-    #
-    # Nothing is being hidden: cargo test passes 9659 and skips 4 anywhere
-    # with the disk for it, and the monorepo's own CI is where the heavy
-    # suite belongs.
-    doCheck: false
     formerPaths: [{path: "systemd-rs" deps: []} {path: "rust/systemd" deps: []}]
   }
   {
@@ -398,7 +385,6 @@
     path: "platform/tangled/cli"
     nativeBuildInputs: ["pkg-config"]
     buildInputs: ["openssl" "dbus"]
-    doCheck: false
     formerPaths: [{path: "tangled/cli" deps: []}]
   }
   # The two multi-directory projects. Each dependency keeps its own name at
@@ -488,9 +474,6 @@
     name: "nushell-plugin-tramp"
     homeModules: {nushell-plugin-tramp: "hm-module.nix"}
     path: "dev/nushell/plugin-tramp"
-    # One test writes to the real cache dir, which the sandbox forbids; the
-    # in-tree build disables checks for the same reason.
-    doCheck: false
   }
   {
     name: "ast-grep-rules"

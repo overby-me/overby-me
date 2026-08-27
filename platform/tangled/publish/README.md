@@ -99,8 +99,7 @@ the project's own directory: they live together under
   checks and the overlay are derived from a single package definition, so
   `nix flake check` builds the package and checks formatting with nothing
   further declared. A project states only what differs: `subdir`,
-  `nativeBuildInputs`, `buildInputs`, `doCheck`, `cargoTestFlags`, `env`,
-  `toolchain`.
+  `nativeBuildInputs`, `buildInputs`, `cargoTestFlags`, `env`, `toolchain`.
 - `.tangled/workflows/ci.yml`, which runs `nix flake check`. One file, mapped
   into all 39: Tangled reads workflows from a repo root, so a copy under
   `safety/oxidized/<name>/` did nothing here but wait to be edited by mistake.
@@ -257,7 +256,6 @@ A project can declare in `projects.nuon` what its build needs:
 ```text
 nativeBuildInputs: ["pkg-config"]
 buildInputs: ["openssl" "dbus"]
-doCheck: false
 ```
 
 Stated there rather than read out of `default.nix`, because telling that file's
