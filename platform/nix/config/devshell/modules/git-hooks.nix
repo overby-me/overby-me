@@ -135,21 +135,19 @@
         files = "\\.ncl$";
         pass_filenames = true;
       };
-      # The guard is meta.available rather than a system test: mojo builds from
-      # source on both x86_64-linux and aarch64-linux now, so no platform is
-      # excluded, but naming `${pkgs.mojo}` unconditionally would still make a
-      # mojo gone broken, or unfree under a stricter config, a checkMeta throw
-      # that took down the whole devshell rather than this one hook.
+      # Off, and `entry` names no package on purpose: mojo builds from source
+      # here, so interpolating `${pkgs.mojo}` puts a full mojo build in front of
+      # every devshell entry and every commit, to reformat files a commit
+      # usually does not touch. Re-enable with `enable = pkgs.mojo.meta.available`
+      # and the entry below, once a cache serves it.
       #
-      # Where it is unavailable, *.mojo files go unformatted: `nix fmt` skips
-      # them too (platform/nix/config/formatters.nix), so no formatter reaches
-      # them there. The ast-grep hook above still lints them.
-      mojo-format = let
-        available = pkgs.mojo.meta.available;
-      in {
-        enable = available;
+      # *.mojo files go unformatted meanwhile: `nix fmt` skips them too
+      # (platform/nix/config/formatters.nix), so no formatter reaches them
+      # either way. The ast-grep hook above still lints them.
+      mojo-format = {
+        enable = false;
         name = "mojo-format";
-        entry = lib.optionalString available "${pkgs.mojo}/bin/mojo format";
+        entry = "mojo format";
         files = "\\.mojo$";
         pass_filenames = true;
       };
