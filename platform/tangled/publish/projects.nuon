@@ -384,6 +384,9 @@
     path: "platform/tangled/cli"
     nativeBuildInputs: ["pkg-config"]
     buildInputs: ["openssl" "dbus"]
+    # Carried over from the doCheck this replaced, where no reason was
+    # recorded. Off rather than silently turned on by the rename.
+    runTests: false
     formerPaths: [{path: "tangled/cli" deps: []}]
   }
   # The two multi-directory projects. Each dependency keeps its own name at
