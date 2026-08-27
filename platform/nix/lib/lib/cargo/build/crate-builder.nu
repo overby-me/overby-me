@@ -12,8 +12,10 @@ def snake [s: string] {
   $s | str replace -a "-" "_"
 }
 
+# `str upcase`, not its 0.114 rename `str uppercase`: this runs under
+# `pkgs.nushell`, which nixos-26.05 pins to 0.112.
 def upperize [s: string] {
-  $s | str uppercase | str replace -a "-" "_"
+  $s | str upcase | str replace -a "-" "_"
 }
 
 # Build-time manifest planning for registry crates (published, normalized
