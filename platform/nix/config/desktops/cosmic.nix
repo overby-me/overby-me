@@ -82,6 +82,12 @@ in {
         {
           # Super+T, and every other Terminal system action, open WezTerm.
           "cosmic/com.system76.CosmicSettings.Shortcuts/v1/system_actions".source = systemActions;
+
+          # The keybindings themselves, carried over untouched. Declaring one
+          # key of an app id puts a directory of that name ahead of the system
+          # one, and cosmic then finds no `defaults` at all: every stock
+          # shortcut disappears, which is what happens on a fresh install.
+          "cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults".source = "${pkgs.cosmic-comp}/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults";
         }
         # Open COSMIC Terminal straight into zellij, the same way GNOME Console
         # does through `org/gnome/Console`.`shell`.
