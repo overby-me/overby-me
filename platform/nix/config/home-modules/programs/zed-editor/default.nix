@@ -1,5 +1,4 @@
 {
-  config,
   inputs,
   lib,
   pkgs,
@@ -36,36 +35,27 @@
       "jj-lsp"
       "meson"
     ];
+
+    # The @opencode@ and @goose@ placeholders in settings.json are overwritten
+    # here rather than substituted into the text: it keeps the file plain JSON
+    # for editors, insulates a running zed from PATH differences, and a store
+    # path may not pass through importJSON, which rejects strings with context.
+    # Both serve the agent panel over ACP on stdio.
+    userSettings = lib.recursiveUpdate (lib.importJSON ./settings.json) {
+      agent_servers = {
+        OpenCode.command = "${pkgs.pkgsUnstable.opencode}/bin/opencode";
+        Goose.command = "${pkgs.pkgsUnstable.goose-cli}/bin/goose";
+      };
+    };
+    userKeymaps = lib.importJSON ./keymap.json;
+    userTasks = lib.importJSON ./tasks.json;
   };
   home = {
     # Jupyter Notebook
     sessionVariables = {
       LOCAL_NOTEBOOK_DEV = 1;
     };
-    activation = let
-      configDir = "${config.xdg.configHome}/zed";
-      settingsPath = "${configDir}/settings.json";
-      keymapPath = "${configDir}/keymap.json";
-      tasksPath = "${configDir}/tasks.json";
-
-      userKeymaps = lib.readFile ./keymap.json;
-      # @opencode@ stands in for the store path of the opencode binary that
-      # serves ACP to the agent panel: the file stays plain JSON for editors,
-      # and a running zed is insulated from PATH differences.
-      userSettings = lib.replaceStrings ["@opencode@"] ["${pkgs.pkgsUnstable.opencode}/bin/opencode"] (lib.readFile ./settings.json);
-      userTasks = lib.readFile ./tasks.json;
-    in {
-      removeExistingZedSettings = lib.hm.dag.entryBefore ["checkLinkTargets"] ''
-        rm -rf "${settingsPath}" "${keymapPath}"
-      '';
-
-      overwriteZedSymlink = lib.hm.dag.entryAfter ["linkGeneration"] ''
-        mkdir -p "${configDir}"
-        cat ${pkgs.writeText "zed-settings" userSettings} > "${settingsPath}"
-        cat ${pkgs.writeText "zed-keymaps" userKeymaps} > "${keymapPath}"
-        cat ${pkgs.writeText "zed-tasks" userTasks} > "${tasksPath}"
-      '';
-
+    activation = {
       # Dev Extensions - copied (not symlinked) so Zed can write build
       # artifacts. Built by monorepo projects, so a standalone evaluation of
       # this tree has none and installs none.

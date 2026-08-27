@@ -14,6 +14,11 @@
 			"type": "custom",
 			"command": "@opencode@",
 			"args": ["acp"]
+		},
+		"Goose": {
+			"type": "custom",
+			"command": "@goose@",
+			"args": ["acp"]
 		}
 	},
 	"lsp_document_colors": "inlay",
