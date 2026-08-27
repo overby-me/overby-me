@@ -22,7 +22,6 @@
 - [🗝️ Legend](#-legend)
 - [📁 Repository](#-repository)
   - [🚀 Projects](#-projects)
-    - [safety/oxidized](#safetyoxidized)
     - [safety](#safety)
     - [media](#media)
     - [dev](#dev)
@@ -30,22 +29,15 @@
     - [ai](#ai)
     - [apps](#apps)
   - [📦 Nix Packages](#-nix-packages)
-    - [AI & Agents](#ai--agents)
-    - [Development](#development)
-    - [Desktop](#desktop)
-    - [Jupyter](#jupyter)
-    - [Media & Graphics](#media--graphics)
-    - [Security](#security)
-    - [Social](#social)
-    - [System](#system)
+    - [AI & Social](#ai--social)
+    - [Desktop & Media](#desktop--media)
+    - [Development & Jupyter](#development--jupyter)
+    - [System & Security](#system--security)
   - [📋 Nix Configurations](#-nix-configurations)
   - [🧩 Nix Modules](#-nix-modules)
   - [🧰 Nix Libraries](#-nix-libraries)
 - [📏 Standards](#-standards)
   - [🔌 Hardware](#-hardware)
-    - [Architecture & Firmware](#architecture--firmware)
-    - [Connectivity & Interfaces](#connectivity--interfaces)
-    - [Satellite](#satellite)
   - [🧮 Compute & Interfaces](#-compute--interfaces)
   - [📝 Data & Formats](#-data--formats)
     - [Media Codecs](#media-codecs)
@@ -58,12 +50,10 @@
   - [💻 Devices](#-devices)
   - [⚙️ Operating System](#-operating-system)
   - [📚 Frameworks & Libraries](#-frameworks--libraries)
-    - [Data & Compression](#data--compression)
-    - [Networking & Web](#networking--web)
+    - [Data & Networking](#data--networking)
     - [Graphics & UI](#graphics--ui)
-    - [Web Engines](#web-engines)
   - [🧱 Platform](#-platform)
-    - [Runtimes & Isolation](#runtimes--isolation)
+    - [Runtimes & Engines](#runtimes--engines)
     - [Data & Storage](#data--storage)
     - [Servers & Networking](#servers--networking)
 - [📱 Applications](#-applications)
@@ -89,13 +79,10 @@
   - [🤖 AI](#-ai)
   - [🧑 Personal Services](#-personal-services)
     - [Communication & Productivity](#communication--productivity)
-    - [Code Hosting](#code-hosting)
     - [Finance](#finance)
-    - [Media & Entertainment](#media--entertainment)
     - [Security & Privacy](#security--privacy)
   - [👥 Social Platforms](#-social-platforms)
-    - [Collaboration & Knowledge](#collaboration--knowledge)
-    - [Communication Platforms](#communication-platforms)
+    - [Collaboration & Communication](#collaboration--communication)
     - [Content Cataloging](#content-cataloging)
     - [Discussion Platforms](#discussion-platforms)
     - [Media Platforms](#media-platforms)
@@ -142,12 +129,13 @@ Original code, grouped by directory.
 
 <details open>
 
-<a id="safetyoxidized"></a>
+<a id="safety"></a>
 
-#### safety/oxidized
+#### safety
 
 | Project | Description |
 |-|-|
+| [Fe-C 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
 | [Oxidized Awk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/awk) | GNU awk-compatible pattern processing tool |
 | [Oxidized Bash 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bash) | Bash-compatible shell written in Rust |
 | [Oxidized Binutils 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/binutils) | GNU binutils-compatible binary utilities |
@@ -182,14 +170,6 @@ Original code, grouped by directory.
 | [Oxidized Tar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/tar) | GNU tar-compatible tape archive tool |
 | [Oxidized Texinfo 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/texinfo) | GNU makeinfo-compatible Texinfo processor |
 | [Oxidized XZ 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/xz) | xz-compatible compression tool |
-
-<a id="safety"></a>
-
-#### safety
-
-| Project | Description |
-|-|-|
-| [Fe-C 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/fe-c) | Gradual memory-safety hardening for unsafe Rust and mixed-language programs |
 
 <a id="media"></a>
 
@@ -262,86 +242,58 @@ Third-party software packaged under `platform/nix/packages/`, grouped by theme.
 
 <details open>
 
-<a id="ai--agents"></a>
+<a id="ai--social"></a>
 
-#### AI & Agents
+#### AI & Social
 
 | Package | Homepage | Description |
 |-|-|-|
 | [IronClaw 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/ironclaw.nix) | [IronClaw](https://www.ironclaw.com) | OpenClaw-inspired secure personal AI assistant |
+| [Microcosm-rs 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/microcosm-rs) | [Microcosm](https://microcosm.blue) | AT Protocol crates and services for Microcosm |
+| [Perch 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/perch.nix) | [Perch](https://perch.ricardodantas.me/) | AT Protocol social client |
 | [Pi Agent 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/pi-agent-rust.nix) | [pi_agent_rust](https://github.com/Dicklesworthstone/pi_agent_rust) | High-performance AI coding agent CLI written in Rust |
 
-<a id="development"></a>
+<a id="desktop--media"></a>
 
-#### Development
-
-| Package | Homepage | Description |
-|-|-|-|
-| [Datui 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/datui.nix) | [GitHub](https://github.com/derekwisong/datui) | Data exploration in the terminal |
-| [Mojo 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/mojo.nix) | [Modular](https://www.modular.com/mojo) | Mojo development toolchain |
-| [Envy 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/envy.nix) | [GitHub](https://github.com/mre/envy) | Environment variable loader |
-| [Rcgen 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/rcgen.nix) | [GitHub](https://github.com/rustls/rcgen) | X.509 certificate generator |
-
-<a id="desktop"></a>
-
-#### Desktop
+#### Desktop & Media
 
 | Package | Homepage | Description |
 |-|-|-|
 | [Cosmic-osk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/cosmic-osk.nix) | [GitHub](https://github.com/pop-os/cosmic-osk) | COSMIC on-screen keyboard |
 | [Cthulock 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/cthulock.nix) | [GitHub](https://github.com/FriederHannenheim/cthulock) | Wayland screen locker focused on customizability |
 | [Euro-Office 💣🇪🇺](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/euro-office/default.nix) | [GitHub](https://github.com/Euro-Office/DesktopEditors) | Sovereign European fork of ONLYOFFICE DesktopEditors |
+| [Layout 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/layout/default.nix) | [GitHub](https://github.com/nadavrot/layout) | Graphviz dot renderer |
 | [Non-spatial-input 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/non-spatial-input.nix) | [GitHub](https://github.com/StardustXR/non-spatial-input) | Non-spatial input drivers (eclipse/manifold) for Stardust XR |
 | [Rustyfications 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/rustyfications.nix) | [GitHub](https://github.com/bzglve/rustyfications) | Rusty notification daemon for Wayland |
 | [Stochos 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/stochos.nix) | [GitHub](https://github.com/museslabs/stochos) | Keyboard-driven mouse control for Wayland and X11 |
-
-<a id="jupyter"></a>
-
-#### Jupyter
-
-| Package | Homepage | Description |
-|-|-|-|
-| [Deno-jupyter-kernel 🐒](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/deno-jupyter-kernel.nix) | [Deno Docs](https://docs.deno.com/runtime/reference/cli/jupyter/) | Jupyter Notebook kernel for Deno |
-| [Mojo-jupyter-kernel 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/mojo-jupyter-kernel.nix) | [Modular](https://www.modular.com/mojo) | Jupyter Notebook kernel for Mojo |
-| [Nu-jupyter-kernel 🦪](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/nu-jupyter-kernel.nix) | [GitHub](https://github.com/cptpiepmatz/nu-jupyter-kernel) | Jupyter Notebook kernel for Nushell |
-| [Rust-jupyter-kernel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/rust-jupyter-kernel.nix) | [GitHub](https://github.com/evcxr/evcxr) | Jupyter Notebook kernel for Rust |
-| [Sidecar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/sidecar/default.nix) | [GitHub](https://github.com/runtimed/runtimed/) | Jupyter Notebook viewer |
-
-<a id="media--graphics"></a>
-
-#### Media & Graphics
-
-| Package | Homepage | Description |
-|-|-|-|
-| [Layout 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/layout/default.nix) | [GitHub](https://github.com/nadavrot/layout) | Graphviz dot renderer |
 | [Vibe 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/vibe.nix) | [GitHub](https://github.com/TornaxO7/vibe) | Desktop audio visualizer |
 | [Wondermagick 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/wondermagick/default.nix) | [GitHub](https://github.com/Shnatsel/wondermagick) | Memory-safe ImageMagick replacement |
 
-<a id="security"></a>
+<a id="development--jupyter"></a>
 
-#### Security
-
-| Package | Homepage | Description |
-|-|-|-|
-| [Forkfs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/forkfs.nix) | [GitHub](https://github.com/SUPERCILEX/forkfs) | Filesystem change sandbox for processes |
-| [Hakoniwa 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/hakoniwa.nix) | [GitHub](https://github.com/souk4711/hakoniwa) | Process isolation tool |
-
-<a id="social"></a>
-
-#### Social
+#### Development & Jupyter
 
 | Package | Homepage | Description |
 |-|-|-|
-| [Microcosm-rs 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/microcosm-rs) | [Microcosm](https://microcosm.blue) | AT Protocol crates and services for Microcosm |
-| [Perch 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/perch.nix) | [Perch](https://perch.ricardodantas.me/) | AT Protocol social client |
+| [Datui 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/datui.nix) | [GitHub](https://github.com/derekwisong/datui) | Data exploration in the terminal |
+| [Deno-jupyter-kernel 🐒](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/deno-jupyter-kernel.nix) | [Deno Docs](https://docs.deno.com/runtime/reference/cli/jupyter/) | Jupyter Notebook kernel for Deno |
+| [Envy 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/envy.nix) | [GitHub](https://github.com/mre/envy) | Environment variable loader |
+| [Mojo 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/mojo.nix) | [Modular](https://www.modular.com/mojo) | Mojo development toolchain |
+| [Mojo-jupyter-kernel 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/mojo-jupyter-kernel.nix) | [Modular](https://www.modular.com/mojo) | Jupyter Notebook kernel for Mojo |
+| [Nu-jupyter-kernel 🦪](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/nu-jupyter-kernel.nix) | [GitHub](https://github.com/cptpiepmatz/nu-jupyter-kernel) | Jupyter Notebook kernel for Nushell |
+| [Rcgen 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/rcgen.nix) | [GitHub](https://github.com/rustls/rcgen) | X.509 certificate generator |
+| [Rust-jupyter-kernel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/rust-jupyter-kernel.nix) | [GitHub](https://github.com/evcxr/evcxr) | Jupyter Notebook kernel for Rust |
+| [Sidecar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/sidecar/default.nix) | [GitHub](https://github.com/runtimed/runtimed/) | Jupyter Notebook viewer |
 
-<a id="system"></a>
+<a id="system--security"></a>
 
-#### System
+#### System & Security
 
 | Package | Homepage | Description |
 |-|-|-|
 | [Busd 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/busd.nix) | [GitHub](https://github.com/dbus2/busd) | D-Bus bus implementation |
+| [Forkfs 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/forkfs.nix) | [GitHub](https://github.com/SUPERCILEX/forkfs) | Filesystem change sandbox for processes |
+| [Hakoniwa 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/hakoniwa.nix) | [GitHub](https://github.com/souk4711/hakoniwa) | Process isolation tool |
 | [Sunsetc 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/sunsetc.nix) | [GitHub](https://github.com/mkj/sunset) | SSH client and server |
 
 </details>
@@ -413,35 +365,17 @@ Specifications and protocols this stack bets on, tracked separately from the imp
 
 <details open>
 
-<a id="architecture--firmware"></a>
-
-#### Architecture & Firmware
-
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | 🚧 | Architecture | [X86-64 🔒](https://en.wikipedia.org/wiki/X86-64) | [RISC-V 📖](https://en.wikipedia.org/wiki/RISC-V), [ARM 🔒🇯🇵🇬🇧](https://en.wikipedia.org/wiki/ARM_architecture_family) | [FEX-Emu](https://fex-emu.com/), [felix86](https://felix86.com/) | |
 | 🚧 | Firmware | [Thinkpad UEFI 🔒](https://en.wikipedia.org/wiki/UEFI) | [Coreboot 💣](https://coreboot.org), [Oreboot 🦀](https://github.com/oreboot/oreboot) | [UEFI 📖](https://en.wikipedia.org/wiki/UEFI) | |
-
-<a id="connectivity--interfaces"></a>
-
-#### Connectivity & Interfaces
-
-| Status | Component | Current | Research & Development | Compatibility | Legacy |
-|:-:|-|-|-|-|-|
 | ✅ | Internet of Things Connectivity | [Matter 📖](https://en.wikipedia.org/wiki/Matter_(standard)), [Zigbee 📖](https://en.wikipedia.org/wiki/Zigbee) | | 🆗 | |
 | 🚧 | Wireless Media | [Google ChromeCast 🔒](https://en.wikipedia.org/wiki/Chromecast) | [MatterCast 📖](https://en.wikipedia.org/wiki/Matter_(standard)) | 🆗 | [Miracast 📖](https://en.wikipedia.org/wiki/Miracast) |
 | 🚧 | Wireless Network | [Wi‑Fi 6 (IEEE 802.11ax) 📖](https://en.wikipedia.org/wiki/IEEE_802.11ax) | [Wi‑Fi 7 (IEEE 802.11be) 📖](https://en.wikipedia.org/wiki/IEEE_802.11be) | ⬅️ | [Wi‑Fi 5 (IEEE 802.11ac) 📖](https://en.wikipedia.org/wiki/IEEE_802.11ac) |
 | ✅ | Peripheral Interface | [USB4 📖](https://www.usb.org/usb4) | | ⬅️ | [Thunderbolt 3 🔒](https://en.wikipedia.org/wiki/Thunderbolt_(interface)) |
 | ✅ | Display Interface | [DisplayPort 📖](https://en.wikipedia.org/wiki/DisplayPort) | | 🆗 | [HDMI 2.1 🔒](https://en.wikipedia.org/wiki/HDMI) |
-
-<a id="satellite"></a>
-
-#### Satellite
-
-| Status | Component | Current | Research & Development | Compatibility | Legacy |
-|:-:|-|-|-|-|-|
-| 🚧 | Navigation | [Galileo 🇪🇺](https://www.euspa.europa.eu/eu-space-programme/galileo), [GPS 🏛️🇺🇸](https://www.gps.gov) | | 🆗 | |
-| 🚧 | Internet | | [Iris² 🏛️🇪🇺](https://defence-industry-space.ec.europa.eu/eu-space-policy/iris2_en) | 🆗 | [Starlink 🔒🇺🇸](https://www.starlink.com) |
+| 🚧 | Satellite Navigation | [Galileo 🇪🇺](https://www.euspa.europa.eu/eu-space-programme/galileo), [GPS 🏛️🇺🇸](https://www.gps.gov) | | 🆗 | |
+| 🚧 | Satellite Internet | | [Iris² 🏛️🇪🇺](https://defence-industry-space.ec.europa.eu/eu-space-policy/iris2_en) | 🆗 | [Starlink 🔒🇺🇸](https://www.starlink.com) |
 
 </details>
 
@@ -606,21 +540,14 @@ Userspace libraries and frameworks: what the system links against and what my ow
 
 <details open>
 
-<a id="data--compression"></a>
+<a id="data--networking"></a>
 
-#### Data & Compression
+#### Data & Networking
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | 🚧 | Archive Format | [GNU Tar 💣](https://www.gnu.org/software/tar/) | [Tar-rs 🦀](https://github.com/alexcrichton/tar-rs) | [Tar 📖](https://en.wikipedia.org/wiki/Tar_(computing)), [Oxidized Tar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/tar) | |
 | 🚧 | Compression | [Zstd 💣](https://github.com/facebook/zstd) | [Zstd-rs 🦀](https://github.com/KillingSpark/zstd-rs) | [Zlib-rs 🦀](https://github.com/memorysafety/zlib-rs), [Oxidized Gzip 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/gzip), [Oxidized Bzip2 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/bzip2), [Oxidized XZ 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/xz) | [Zlib 💣](https://github.com/madler/zlib) |
-
-<a id="networking--web"></a>
-
-#### Networking & Web
-
-| Status | Component | Current | Research & Development | Compatibility | Legacy |
-|:-:|-|-|-|-|-|
 | ✅ | TLS Protocol | [Rustls 🦀](https://github.com/rustls/rustls) | | 🆗 | [Openssl 💣](https://github.com/openssl/openssl) |
 | ✅ | HTTP Protocol | [Hyper 🦀](https://github.com/hyperium/hyper) | | 🆗 | [Nghttp2 💣](https://github.com/nghttp2/nghttp2), [Nghttp3 💣](https://github.com/ngtcp2/nghttp3) |
 | ✅ | HTTP Client | [Reqwest 🦀](https://github.com/seanmonstar/reqwest) | | [Oxidized Curl 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/curl) | [Curl 💣](https://github.com/curl/curl) |
@@ -642,15 +569,6 @@ Userspace libraries and frameworks: what the system links against and what my ow
 | ✅ | UI Components | [MD 3 Expressive Components 🦀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki/src/components/ui) | [Dioxus Components 🦀](https://github.com/DioxusLabs/components) | 🆗 | [MUI 🐒](https://mui.com) |
 | 🚫 | XR Toolkit | [Stereokit 💣](https://github.com/StereoKit/StereoKit) | | 🆗 | |
 
-<a id="web-engines"></a>
-
-#### Web Engines
-
-| Status | Component | Current | Research & Development | Compatibility | Legacy |
-|:-:|-|-|-|-|-|
-| 🚧 | Browser Engine | [Gecko 🦀💣](https://en.wikipedia.org/wiki/Gecko_(software)) | [Servo 🦀](https://github.com/servo/servo) | ⬅️ | |
-| 🚫 | ECMAScript Engine | [V8 💣](https://v8.dev) | [Boa 🦀](https://github.com/boa-dev/boa), [Nova 🦀](https://github.com/trynova/nova) | 🆗 | |
-
 </details>
 
 <a id="-platform"></a>
@@ -661,14 +579,16 @@ The long-running substrate: language runtimes, data stores, and self-hosted serv
 
 <details open>
 
-<a id="runtimes--isolation"></a>
+<a id="runtimes--engines"></a>
 
-#### Runtimes & Isolation
+#### Runtimes & Engines
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | WebAssembly Runtime | [Wasmtime 🦀](https://github.com/bytecodealliance/wasmtime) | | [WASI 📖](https://wasi.dev) | |
 | ✅ | ECMAScript Runtime | [Deno 🦀](https://github.com/denoland/deno) | [Bun 🦀](https://github.com/oven-sh/bun) | [Deno Node APIs](https://docs.deno.com/runtime/reference/node_apis) | [Node.js 💣](https://github.com/nodejs/node) |
+| 🚫 | ECMAScript Engine | [V8 💣](https://v8.dev) | [Boa 🦀](https://github.com/boa-dev/boa), [Nova 🦀](https://github.com/trynova/nova) | 🆗 | |
+| 🚧 | Browser Engine | [Gecko 🦀💣](https://en.wikipedia.org/wiki/Gecko_(software)) | [Servo 🦀](https://github.com/servo/servo) | ⬅️ | |
 | ✅ | Container Runtime | [Youki 🦀](https://github.com/containers/youki) | | [OCI 📖](https://github.com/opencontainers/runtime-spec) | [Runc 🐹](https://github.com/opencontainers/runc) |
 | ✅ | Virtualization | [Cloud Hypervisor 🦀](https://github.com/cloud-hypervisor/cloud-hypervisor) | | [KVM 📖](https://en.wikipedia.org/wiki/Kernel-based_Virtual_Machine) | [QEMU 💣](https://github.com/qemu/qemu) |
 
@@ -1044,14 +964,6 @@ Hosted services used as an individual.
 | ✅ | Search Engine | [Qwant 🇪🇺](https://www.qwant.com) | [Stract 🦀🇪🇺](https://github.com/StractOrg/stract) | [Search Shortcuts](https://support.mozilla.org/en-US/kb/assign-shortcuts-search-engines), [EU Search Perspective 🇪🇺](https://eu-searchperspective.com) | [StartPage 🔒🇪🇺](https://startpage.com) |
 | ✅ | Translation | [DeepL 🔒🇪🇺](https://www.deepl.com) | | 🆗 | [Google Translate 🔒🇺🇸](https://translate.google.com) |
 
-<a id="code-hosting"></a>
-
-#### Code Hosting
-
-| Status | Component | Current | Research & Development | Compatibility | Legacy |
-|:-:|-|-|-|-|-|
-| ✅ | Version Control | [Tangled 🇪🇺🌀](https://tangled.sh/@overby.me) | | | [Codeberg 🇪🇺](https://codeberg.org/overby-me), [Microsoft GitHub 🔒🇺🇸](https://github.com/overby-me), [GitLab 🇺🇸](https://gitlab.com/noverby) |
-
 <a id="finance"></a>
 
 #### Finance
@@ -1061,15 +973,6 @@ Hosted services used as an individual.
 | ✅ | Payment | [MobilePay 🇪🇺](https://mobilepay.dk) | [Wero 🇪🇺](https://wero-wallet.eu) | 🆗 | [PayPal 🇺🇸](https://paypal.com) |
 | 🚧 | Payment Medium | [Dankort 🔒🇪🇺](https://www.dankort.dk), [Visa 🔒🇺🇸](https://www.visa.com) | [Digital Euro 🏛️🇪🇺](https://www.ecb.europa.eu/paym/digital_euro/html/index.en.html), [GNU Taler 📖](https://taler.net) | [EMV 📖](https://en.wikipedia.org/wiki/EMV) | |
 | 🚧 | Donation | [Ko-fi 🇬🇧](https://ko-fi.com) | [Liberapay 🌐🇪🇺](https://liberapay.com) | [GNU Taler 📖🇪🇺](https://taler.net) | [Patreon 🔒🇺🇸](https://patreon.com) |
-
-<a id="media--entertainment"></a>
-
-#### Media & Entertainment
-
-| Status | Component | Current | Research & Development | Compatibility | Legacy |
-|:-:|-|-|-|-|-|
-| 🚧 | Music | [Spotify 🇪🇺](https://spotify.com) | [Qobuz 🇪🇺](https://www.qobuz.com) | 🆗 | [Deezer 🇪🇺](https://deezer.com) |
-| ✅ | Audiobooks | [LibriVox 🌐](https://librivox.org/) | | 🆗 | [Amazon Audible 🇺🇸](https://www.audible.com) |
 
 <a id="security--privacy"></a>
 
@@ -1089,21 +992,14 @@ Hosted services used as an individual.
 
 <details open>
 
-<a id="collaboration--knowledge"></a>
+<a id="collaboration--communication"></a>
 
-#### Collaboration & Knowledge
+#### Collaboration & Communication
 
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | Collaboration Tools | [AppFlowy 🦀](https://github.com/AppFlowy-IO/AppFlowy) | | [Import](https://docs.appflowy.io/docs/guides/import-from-notion) | [Notion 🔒🇺🇸](https://notion.so) |
 | ✅ | [Online Encyclopedia](https://en.wikipedia.org/wiki/Online_encyclopedia) | [Wikipedia 🌐](https://en.wikipedia.org/wiki/User:Niclas_Overby) | [Ibis 🦀](https://github.com/Nutomic/ibis) | 🆗 | |
-
-<a id="communication-platforms"></a>
-
-#### Communication Platforms
-
-| Status | Component | Current | Research & Development | Compatibility | Legacy |
-|:-:|-|-|-|-|-|
 | ✅ | Messaging | [Etke.cc Matrix 🇪🇺](https://etke.cc) | | [Matrix 🌐](https://matrix.org), [Matrix Bridges](https://matrix.org/ecosystem/bridges) | [Discord 🔒🇺🇸](https://discord.com), [Telegram 🔒🇦🇪](https://telegram.org), [Automattic Beeper 🔒🇺🇸](https://www.beeper.com), [Meta Messenger 🔒🇺🇸](https://messenger.com), [Meta WhatsApp 🔒🇺🇸](https://whatsapp.com) |
 
 <a id="content-cataloging"></a>
@@ -1139,6 +1035,8 @@ Hosted services used as an individual.
 | 🚧 | Long-form Video | [Alphabet YouTube 🔒🇺🇸](https://youtube.com) | [Skytube 🔒🇺🇸🌀](https://skytube.video), [PeerTube 🌐🇪🇺](https://joinpeertube.org) | [AT Protocol 🌀](https://atproto.com) | |
 | 🚧 | Short-form Video | | [SkyLight 🔒🇺🇸🌀](https://skylight.social), [Spark 🔒🇺🇸🌀](https://sprk.so) | [AT Protocol 🌀](https://atproto.com) | |
 | ✅ | Live Streaming | [Stream.place 🌀](https://stream.place/) | | [AT Protocol 🌀](https://atproto.com) | [Twitch 🔒🇺🇸](https://twitch.tv) |
+| 🚧 | Music | [Spotify 🇪🇺](https://spotify.com) | [Qobuz 🇪🇺](https://www.qobuz.com) | 🆗 | [Deezer 🇪🇺](https://deezer.com) |
+| ✅ | Audiobooks | [LibriVox 🌐](https://librivox.org/) | | 🆗 | [Amazon Audible 🇺🇸](https://www.audible.com) |
 
 <a id="events--dating"></a>
 
@@ -1162,6 +1060,7 @@ Hosted services used as an individual.
 | 🚧 | Cloud Provider | [Amazon AWS 🇺🇸](https://aws.amazon.com), [Scaleway 🇪🇺](https://www.scaleway.com), [UpCloud 🇪🇺](https://www.upcloud.com) | | 🆗 | |
 | ✅ | Bare Metal Hosting | [Hetzner 🇪🇺](https://hetzner.com) | | 🆗 | |
 | ✅ | Static Host | [Statichost 🇪🇺](https://statichost.eu) | [FastFront 🇪🇺](https://www.fastfront.io) | 🆗 | [Vercel 🇺🇸](https://vercel.com) |
+| ✅ | Code Hosting | [Tangled 🇪🇺🌀](https://tangled.sh/@overby.me) | | | [Codeberg 🇪🇺](https://codeberg.org/overby-me), [Microsoft GitHub 🔒🇺🇸](https://github.com/overby-me), [GitLab 🇺🇸](https://gitlab.com/noverby) |
 | ✅ | Domain Registrar | [Simply 🇪🇺](https://simply.com) | | 🆗 | |
 | 🚧 | Backend | [Nhost 🇪🇺](https://nhost.io) | [AT Protocol AppView (axum) 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki/backend) | 🆗 | |
 | ✅ | Logging | [Better Stack 🇪🇺](https://betterstack.com) | | 🆗 | [Bugfender 🇪🇺](https://bugfender.com), [Sentry 🇺🇸](https://sentry.io) |
