@@ -1,0 +1,5 @@
+# Snapshot index for the cargo builder (lib/cargo/tools/snapshot-index.nu):
+# regenerable, hundreds of files per project. A snapshot meant to be kept needs
+# `git add -f`, since flakes read only tracked files and an ignored one never
+# reaches eval, leaving the builder on its import-from-derivation fallback.
+/lib/cargo/index/
