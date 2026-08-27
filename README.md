@@ -953,7 +953,7 @@ Models, providers, and assistants, local and hosted.
 | ✅ | Local Provider | [Ollama 🐹🏡🇪🇺](https://github.com/ollama/ollama) | | 🆗 | |
 | ✅ | Hosted Provider | [Cortecs 🇪🇺](https://cortecs.ai), [Mistral 🇪🇺](https://mistral.ai) | [Lumo 🇪🇺](https://lumo.proton.me), [Nebius 🇪🇺](https://nebius.com) | 🆗 | [OpenAI 🔒🇺🇸](https://openai.com), [Anthropic Claude ⚖️🇺🇸](https://claude.ai) |
 | ✅ | Personal AI Assistant | [IronClaw 🦀🏡](https://github.com/nearai/ironclaw) | | 🆗 | [OpenClaw 🐒🏡](https://github.com/openclaw/openclaw) |
-| ✅ | Coding Agent | [OpenCode 🐒🏡](https://opencode.ai) | | 🆗 | [Claude Code 🔒🇺🇸](https://claude.com/claude-code) |
+| ✅ | Coding Agent | [Goose 🦀🏡](https://github.com/aaif-goose/goose) | | 🆗 | [OpenCode 🐒🏡](https://opencode.ai), [Claude Code 🔒🇺🇸](https://claude.com/claude-code) |
 | 🚧 | TTS/STT | | [Vox 🦀](https://github.com/rtk-ai/vox) | 🆗 | |
 
 </details>
