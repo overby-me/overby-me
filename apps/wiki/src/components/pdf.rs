@@ -171,6 +171,24 @@ fn cell_is_number(cell: &[Span]) -> bool {
         })
 }
 
+/// A reflowed picture's box, reserved before its bytes arrive.
+///
+/// These load lazily, and an image with a width but no height is a flat box
+/// until it decodes. Jumping to a late page and scrolling back up then grew
+/// every picture passed on the way, pushing the reader down as fast as they
+/// climbed, and the top of a picture-heavy document could not be reached.
+///
+/// The ratio rather than a height, for the reason `docx::image_style` gives:
+/// `max-width` narrows the picture on a phone, and a fixed height would not
+/// narrow with it.
+fn reflow_image_style(width: f64, height: f64) -> String {
+    let mut css = format!("width:{width:.0}px;max-width:100%;height:auto;");
+    if width > 0.0 && height > 0.0 {
+        css.push_str(&format!("aspect-ratio:{width:.2}/{height:.2};"));
+    }
+    css
+}
+
 fn unlinked(spans: &[Span]) -> Vec<Span> {
     spans
         .iter()
@@ -734,7 +752,7 @@ pub fn PdfDocument(doc: Extracted) -> Element {
                                 key: "{i}",
                                 class: "docx-img",
                                 src: "{picture.src}",
-                                style: "width:{picture.width}px;max-width:100%;height:auto;",
+                                style: "{reflow_image_style(picture.width, picture.height)}",
                                 alt: "",
                                 loading: "lazy",
                             }
@@ -871,6 +889,31 @@ pub fn PdfHasNoText() -> Element {
                 span { class: "material-icons", "image_not_supported" }
             }
             p { class: "empty-state-body", "{t(\"file.pdfNoText\")}" }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reflow_image_style;
+
+    /// A lazily-loaded picture must hold its place before it decodes, or
+    /// scrolling up through a document re-lays it out under the reader.
+    #[test]
+    fn a_reflowed_picture_reserves_its_box() {
+        let css = reflow_image_style(600.0, 400.0);
+        assert!(css.contains("aspect-ratio:600.00/400.00"), "{css}");
+        assert!(css.contains("height:auto"), "{css}");
+        assert!(css.contains("max-width:100%"), "{css}");
+    }
+
+    /// A page that reports no height cannot state a ratio; it must still be
+    /// given a width rather than a broken `aspect-ratio: w/0`.
+    #[test]
+    fn a_picture_of_unknown_height_states_no_ratio() {
+        for css in [reflow_image_style(600.0, 0.0), reflow_image_style(0.0, 0.0)] {
+            assert!(!css.contains("aspect-ratio"), "{css}");
+            assert!(css.contains("height:auto"), "{css}");
         }
     }
 }
