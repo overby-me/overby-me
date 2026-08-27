@@ -207,9 +207,6 @@
         # Networking (blueman removed — crashes under cross-compilation)
         # notify-send for desktop notifications (used by bt-agent wrapper)
         libnotify
-
-        # On-screen keyboard (COSMIC doesn't have one built-in yet)
-        cosmic-osk
       ];
 
       # ── User ────────────────────────────────────────────────────────
