@@ -285,6 +285,7 @@ Third-party software packaged under `platform/nix/packages/`, grouped by theme.
 | [Rcgen 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/rcgen.nix) | [GitHub](https://github.com/rustls/rcgen) | X.509 certificate generator |
 | [Rust-jupyter-kernel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/rust-jupyter-kernel.nix) | [GitHub](https://github.com/evcxr/evcxr) | Jupyter Notebook kernel for Rust |
 | [Sidecar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/sidecar/default.nix) | [GitHub](https://github.com/runtimed/runtimed/) | Jupyter Notebook viewer |
+| [Tree-sitter-mojo 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/tree-sitter-mojo) | [GitHub](https://github.com/oaustegard/tree-sitter-mojo) | Mojo grammar ast-grep loads, patched to parse this tree's corpus |
 
 <a id="system--security"></a>
 
