@@ -124,9 +124,10 @@ pub(super) fn InviteToJoin() -> Element {
                 // Already a bound member of this place (the invitation is a
                 // leftover): accept THAT row and drop the invitation, which is
                 // what the home list does for the same reason.
-                let already = graphql::accept_existing_member(token.as_deref(), &ctx, &uid)
-                    .await
-                    .unwrap_or(false);
+                let already =
+                    graphql::accept_existing_member(token.as_deref(), &ctx, &uid, &member_id)
+                        .await
+                        .unwrap_or(false);
                 let ok = if already {
                     let _ = graphql::decline_invitation(token.as_deref(), &member_id).await;
                     true

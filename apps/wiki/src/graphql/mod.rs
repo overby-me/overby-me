@@ -813,6 +813,22 @@ mod tests {
         }
     }
 
+    /// The "are you already a member?" probe must not be able to find the
+    /// invitation it is asked about. When it did, accepting an invitation that
+    /// already carried the user's id reported a phantom second membership, and
+    /// the caller deleted the only row there was.
+    #[test]
+    fn the_already_a_member_probe_excludes_the_invitation_itself() {
+        let clause = members::existing_member_where("ctx-1", "user-1", "invite-1");
+        let json = serde_json::to_string(&clause).expect("serialize");
+        assert!(!json.contains("null"), "must omit null fields: {json}");
+        assert!(
+            json.contains("\"_neq\":\"invite-1\""),
+            "the invitation must be excluded: {json}"
+        );
+        assert!(json.contains("ctx-1") && json.contains("user-1"), "{json}");
+    }
+
     #[test]
     fn invitations_where_clause_is_well_formed() {
         let clause = invitations_where_clause("user-1", "me@example.com");

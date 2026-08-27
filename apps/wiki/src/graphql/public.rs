@@ -63,6 +63,7 @@ pub async fn query_public_places(
         // Only the root has no parent, so this drops it without naming its mime.
         context: Some(NodesBoolExp {
             parent_id: Some(UuidComparisonExp {
+                neq: None,
                 in_: None,
                 eq: None,
                 is_null: Some(false),

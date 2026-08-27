@@ -81,6 +81,7 @@ pub async fn query_deleted(
             or: Some(vec![
                 DeletedNodesBoolExp {
                     context_id: Some(UuidComparisonExp {
+                        neq: None,
                         in_: None,
                         eq: Some(Uuid(context_id.to_string())),
                         is_null: None,
@@ -89,6 +90,7 @@ pub async fn query_deleted(
                 },
                 DeletedNodesBoolExp {
                     parent_id: Some(UuidComparisonExp {
+                        neq: None,
                         in_: None,
                         eq: Some(Uuid(node_id.to_string())),
                         is_null: None,

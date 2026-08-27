@@ -133,6 +133,7 @@ pub async fn query_permissions(
 ) -> Result<Vec<model::PermissionFields>, String> {
     let where_clause = PermissionsBoolExp {
         context_id: Some(UuidComparisonExp {
+            neq: None,
             in_: None,
             eq: Some(Uuid(context_id.to_string())),
             is_null: None,
@@ -172,6 +173,7 @@ pub struct PollSummaryFields {
 pub async fn poll_vote_count(access_token: Option<&str>, poll_id: &str) -> Result<usize, String> {
     let where_clause = NodesBoolExp {
         parent_id: Some(UuidComparisonExp {
+            neq: None,
             in_: None,
             eq: Some(Uuid(poll_id.to_string())),
             is_null: None,

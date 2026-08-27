@@ -625,9 +625,11 @@ pub(super) fn InvitedContextItem(invite: model::InvitationFields) -> Element {
                     // member this touches nothing and says so, at the cost of
                     // one round trip on an action taken once.
                     let already = match &parent_id {
-                        Some(pid) => graphql::accept_existing_member(token.as_deref(), pid, &uid)
-                            .await
-                            .unwrap_or(false),
+                        Some(pid) => {
+                            graphql::accept_existing_member(token.as_deref(), pid, &uid, &member_id)
+                                .await
+                                .unwrap_or(false)
+                        }
                         None => false,
                     };
                     if already {

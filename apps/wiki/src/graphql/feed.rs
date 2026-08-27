@@ -60,6 +60,7 @@ pub async fn query_group_contributions(
     let where_clause = NodesBoolExp {
         members: Some(MembersBoolExp {
             node_id: Some(UuidComparisonExp {
+                neq: None,
                 in_: None,
                 eq: Some(Uuid(group_id.to_string())),
                 is_null: None,
@@ -258,6 +259,7 @@ pub async fn query_recent_nodes(
 pub(crate) fn belongs_to_user(user_id: &str) -> NodesBoolExp {
     let owned = NodesBoolExp {
         owner_id: Some(UuidComparisonExp {
+            neq: None,
             in_: None,
             eq: Some(Uuid(user_id.to_string())),
             is_null: None,
@@ -273,6 +275,7 @@ pub(crate) fn belongs_to_user(user_id: &str) -> NodesBoolExp {
                 },
                 MembersBoolExp {
                     node_id: Some(UuidComparisonExp {
+                        neq: None,
                         in_: None,
                         eq: Some(Uuid(user_id.to_string())),
                         is_null: None,
@@ -337,6 +340,7 @@ pub async fn query_orphans(
             // caller filters it out.
             NodesBoolExp {
                 parent_id: Some(UuidComparisonExp {
+                    neq: None,
                     in_: None,
                     is_null: Some(true),
                     eq: None,
@@ -350,6 +354,7 @@ pub async fn query_orphans(
             // on this way.
             NodesBoolExp {
                 parent_id: Some(UuidComparisonExp {
+                    neq: None,
                     in_: None,
                     is_null: Some(false),
                     eq: None,

@@ -71,6 +71,7 @@ pub async fn search_nodes(
     // Exclude orphan/root nodes (no parent), matching React's search.
     filters.push(NodesBoolExp {
         parent_id: Some(UuidComparisonExp {
+            neq: None,
             in_: None,
             eq: None,
             is_null: Some(false),
@@ -102,6 +103,7 @@ pub async fn search_nodes(
     if let Some(ctx) = context_id {
         filters.push(NodesBoolExp {
             context_id: Some(UuidComparisonExp {
+                neq: None,
                 in_: None,
                 eq: Some(Uuid(ctx.to_string())),
                 is_null: None,
@@ -380,6 +382,7 @@ pub async fn query_user(access_token: Option<&str>, id: &str) -> Option<model::U
     let op = UsersSearchQuery::build(UsersSearchVariables {
         where_clause: UsersBoolExp {
             id: Some(UuidComparisonExp {
+                neq: None,
                 in_: None,
                 eq: Some(Uuid(id.to_string())),
                 is_null: None,

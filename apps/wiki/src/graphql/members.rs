@@ -54,6 +54,8 @@ pub struct MembersBoolExp {
     #[cynic(rename = "_or", skip_serializing_if = "Option::is_none")]
     pub or: Option<Vec<MembersBoolExp>>,
     #[cynic(skip_serializing_if = "Option::is_none")]
+    pub id: Option<UuidComparisonExp>,
+    #[cynic(skip_serializing_if = "Option::is_none")]
     pub accepted: Option<BooleanComparisonExp>,
     #[cynic(skip_serializing_if = "Option::is_none")]
     pub active: Option<BooleanComparisonExp>,
@@ -114,6 +116,7 @@ pub async fn count_active_members(access_token: Option<&str>, context_id: &str) 
     let op = MembersCountQuery::build(MembersCountVariables {
         where_clause: MembersBoolExp {
             parent_id: Some(UuidComparisonExp {
+                neq: None,
                 in_: None,
                 eq: Some(Uuid(context_id.to_string())),
                 is_null: None,
@@ -521,6 +524,7 @@ pub(crate) fn invitations_where_clause(user_id: &str, email: &str) -> MembersBoo
                 or: Some(vec![
                     MembersBoolExp {
                         node_id: Some(UuidComparisonExp {
+                            neq: None,
                             in_: None,
                             eq: Some(Uuid(user_id.to_string())),
                             is_null: None,
@@ -686,11 +690,13 @@ pub async fn is_active_member(
     use cynic::QueryBuilder;
     let where_clause = MembersBoolExp {
         parent_id: Some(UuidComparisonExp {
+            neq: None,
             in_: None,
             eq: Some(Uuid(context_id.to_string())),
             is_null: None,
         }),
         node_id: Some(UuidComparisonExp {
+            neq: None,
             in_: None,
             eq: Some(Uuid(user_id.to_string())),
             is_null: None,
@@ -770,6 +776,43 @@ pub struct UpdateMembersMutation {
     pub update_members: Option<MembersAffected>,
 }
 
+/// "Is this person already a member of this place, on some OTHER row?"
+///
+/// `invitation_id` is excluded, and that exclusion is the whole correctness of
+/// this filter. An invitation may already carry the reader's node id -- adding
+/// a member by an email that matches an account produces exactly that -- and
+/// without the exclusion the invitation matches itself. The caller reads a hit
+/// as "a separate membership exists" and deletes the invitation as a duplicate,
+/// which leaves the person a member of nothing: they press accept and the place
+/// disappears as though they had declined.
+pub(crate) fn existing_member_where(
+    parent_id: &str,
+    node_id: &str,
+    invitation_id: &str,
+) -> MembersBoolExp {
+    MembersBoolExp {
+        parent_id: Some(UuidComparisonExp {
+            in_: None,
+            eq: Some(Uuid(parent_id.to_string())),
+            neq: None,
+            is_null: None,
+        }),
+        node_id: Some(UuidComparisonExp {
+            in_: None,
+            eq: Some(Uuid(node_id.to_string())),
+            neq: None,
+            is_null: None,
+        }),
+        id: Some(UuidComparisonExp {
+            in_: None,
+            eq: None,
+            neq: Some(Uuid(invitation_id.to_string())),
+            is_null: None,
+        }),
+        ..Default::default()
+    }
+}
+
 /// Accept a pre-existing membership by `(parent, node)` instead of an email
 /// invite row. The fallback when accepting an email invite would violate the
 /// `(parentId, nodeId)` unique constraint because the user is already a member
@@ -778,22 +821,11 @@ pub async fn accept_existing_member(
     access_token: Option<&str>,
     parent_id: &str,
     node_id: &str,
+    invitation_id: &str,
 ) -> Result<bool, String> {
     use cynic::MutationBuilder;
     let op = UpdateMembersMutation::build(UpdateMembersWhereVariables {
-        where_clause: MembersBoolExp {
-            parent_id: Some(UuidComparisonExp {
-                in_: None,
-                eq: Some(Uuid(parent_id.to_string())),
-                is_null: None,
-            }),
-            node_id: Some(UuidComparisonExp {
-                in_: None,
-                eq: Some(Uuid(node_id.to_string())),
-                is_null: None,
-            }),
-            ..Default::default()
-        },
+        where_clause: existing_member_where(parent_id, node_id, invitation_id),
         set: MembersSetInput {
             accepted: Some(true),
             ..Default::default()
@@ -816,6 +848,7 @@ pub async fn delete_node_members(
     let del = DeleteMembersMutation::build(DeleteMembersVariables {
         where_clause: MembersBoolExp {
             parent_id: Some(UuidComparisonExp {
+                neq: None,
                 in_: None,
                 eq: Some(Uuid(node_id.to_string())),
                 is_null: None,
@@ -839,6 +872,7 @@ pub async fn set_node_authors(
     let del = DeleteMembersMutation::build(DeleteMembersVariables {
         where_clause: MembersBoolExp {
             parent_id: Some(UuidComparisonExp {
+                neq: None,
                 in_: None,
                 eq: Some(Uuid(node_id.to_string())),
                 is_null: None,

@@ -354,6 +354,10 @@ pub struct StringComparisonExp {
 pub struct UuidComparisonExp {
     #[cynic(rename = "_eq", skip_serializing_if = "Option::is_none")]
     pub eq: Option<Uuid>,
+    /// "any but this one", for a query that must not match the very row the
+    /// caller is holding.
+    #[cynic(rename = "_neq", skip_serializing_if = "Option::is_none")]
+    pub neq: Option<Uuid>,
     /// "these ones", for fetching exactly the rows a stream said had changed
     /// rather than a whole page to find them.
     #[cynic(rename = "_in", skip_serializing_if = "Option::is_none")]
