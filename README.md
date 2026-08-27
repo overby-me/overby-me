@@ -724,7 +724,7 @@ End-user programs on top of the system, from the command line to desktop and mob
 | Status | Component | Current | Research & Development | Compatibility | Legacy |
 |:-:|-|-|-|-|-|
 | ✅ | File Manager | [Cosmic Files 🦀](https://github.com/pop-os/cosmic-files) | | 🆗 | [GNOME Files 💣](https://gitlab.gnome.org/GNOME/nautilus) |
-| ✅ | Terminal | [Cosmic Term 🦀](https://github.com/pop-os/cosmic-term) | | 🆗 | [Wezterm 🦀](https://github.com/wez/wezterm), [GNOME Console 💣](https://gitlab.gnome.org/GNOME/console) |
+| ✅ | Terminal | [Wezterm 🦀](https://github.com/wez/wezterm) | | 🆗 | [Cosmic Term 🦀](https://github.com/pop-os/cosmic-term), [GNOME Console 💣](https://gitlab.gnome.org/GNOME/console) |
 | ✅ | Web Browser | [Zen Browser 💣🦀](https://zen-browser.app) | [Verso 🦀](https://github.com/versotile-org/verso) | [Chrome Extension API 🔒](https://developer.chrome.com/docs/extensions/reference) | [Firefox 💣🦀](https://github.com/mozilla/gecko-dev), [Unbraved Brave 💣🦀](https://github.com/MulesGaming/brave-debullshitinator) |
 | ✅ | Application Store Frontend | [Cosmic Store 🦀](https://github.com/pop-os/cosmic-store) | | 🆗 | [GNOME Software 💣](https://gitlab.gnome.org/GNOME/gnome-software) |
 | ✅ | System Monitor | [Cosmic Monitor 🦀](https://github.com/pop-os/cosmic-monitor) | | 🆗 | [GNOME System Monitor 💣](https://gitlab.gnome.org/GNOME/gnome-system-monitor) |

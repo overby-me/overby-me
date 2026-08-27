@@ -81,7 +81,12 @@
             value = "dev.zed.Zed.desktop";
           })
           zedMimes
-        );
+        )
+        // {
+          # How cosmic-files resolves "Open in Terminal"; without it the
+          # hardcoded cosmic-term fallback wins.
+          "x-scheme-handler/terminal" = "org.wezfurlong.wezterm.desktop";
+        };
     };
   };
 }

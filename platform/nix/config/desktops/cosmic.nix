@@ -7,6 +7,14 @@
   # binary cache has it and every aarch64 host compiles it under emulation,
   # where it is one of the slowest things in the closure.  x86_64 only.
   quakeTerminal = pkgs.stdenv.hostPlatform.isx86_64;
+
+  # cosmic-config replaces a key wholesale rather than merging, so changing one
+  # action means shipping the whole map; deriving it from upstream keeps the
+  # actions COSMIC adds later, and --replace-fail catches an upstream rename.
+  systemActions = pkgs.runCommand "cosmic-system-actions" {} ''
+    install -m 644 ${pkgs.cosmic-settings-daemon}/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/system_actions $out
+    substituteInPlace $out --replace-fail '"cosmic-term"' '"wezterm"'
+  '';
 in {
   environment = {
     systemPackages = with pkgs;
@@ -99,6 +107,9 @@ in {
         '';
         # Which of the above profiles new terminals launch with.
         "cosmic/com.system76.CosmicTerm/v1/default_profile".text = "Some(0)";
+
+        # Super+T, and every other Terminal system action, open WezTerm.
+        "cosmic/com.system76.CosmicSettings.Shortcuts/v1/system_actions".source = systemActions;
       };
     }
   ];
