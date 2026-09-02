@@ -64,6 +64,11 @@
     # ── Desktop environment ───────────────────────────────────────────
     inputs.self.desktops.cosmic
 
+    # Only the flatscreen half of this works here: the XR session wants
+    # monado's vk_display backend, and turnip exports no
+    # vkGetPhysicalDeviceDisplayPropertiesKHR for it to enumerate.
+    inputs.self.desktops.xr
+
     # ── Shared configuration ──────────────────────────────────────────
     # The portable slice of platform/nix/config/nixos-modules/core.  Deliberately not the whole
     # `core` module: core/boot.nix pins the x86-only zen kernel and enables
