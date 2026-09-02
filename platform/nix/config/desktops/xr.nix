@@ -6,23 +6,23 @@
 }: let
   cfg = config.desktops.xr;
 
-  # Monado is only ever reached by the XR session, so a machine listing the
-  # flatscreen one alone has no reason to carry it - and every reason not to,
-  # since enabling it installs monado-vulkan-layers as an implicit layer that
-  # loads into every Vulkan process on the system.
-  xrSession = lib.elem "stardust-xr" cfg.sessions;
+  # Monado is only reached by the two sessions that render through OpenXR, so a
+  # machine listing the flatscreen one alone has no reason to carry it - and
+  # every reason not to, since enabling it installs monado-vulkan-layers as an
+  # implicit layer that loads into every Vulkan process on the system.
+  xrSession = lib.any (s: lib.elem s cfg.sessions) ["stardust-xr" "stardust-xr-nested"];
 in {
   options.desktops.xr.sessions = lib.mkOption {
-    type = lib.types.listOf (lib.types.enum ["stardust-xr" "stardust-xr-flatscreen"]);
-    default = ["stardust-xr" "stardust-xr-flatscreen"];
+    type = lib.types.listOf (lib.types.enum ["stardust-xr" "stardust-xr-flatscreen" "stardust-xr-nested"]);
+    default = ["stardust-xr" "stardust-xr-flatscreen" "stardust-xr-nested"];
     example = ["stardust-xr-flatscreen"];
     description = ''
       Which Stardust sessions cosmic-greeter lists.
 
       `stardust-xr` needs monado's vk_display backend, which needs a driver
       that answers vkGetPhysicalDeviceDisplayPropertiesKHR. Mesa's turnip does
-      not, so on an Adreno machine that entry can only fail: drop it there and
-      leave the flatscreen one.
+      not, so on an Adreno machine that entry can only fail. `stardust-xr-nested`
+      reaches the headset without it, by giving monado a cage to render into.
     '';
   };
 

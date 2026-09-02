@@ -83,6 +83,33 @@
     '';
   };
 
+  # XR without `vk_display`: cage owns the TTY and monado renders into a window
+  # inside it, which is the backend that does come up on a driver with no
+  # display WSI. `--xr-only` keeps the server off winit even though
+  # WAYLAND_DISPLAY is set here, so it still drives OpenXR rather than opening
+  # a flatscreen window of its own.
+  #
+  # monado is a socket-activated user service and takes its environment from
+  # the user manager, not from this script, so cage's display has to be pushed
+  # there; stopping it first is what makes an already-running one pick that up.
+  nestedInner = writeShellApplication {
+    name = "stardust-xr-nested-inner";
+    text = ''
+      ${getExe' systemd "systemctl"} --user import-environment WAYLAND_DISPLAY
+      ${getExe' systemd "systemctl"} --user stop monado.service || true
+      exec ${getExe stardust-xr-server} --xr-only \
+        --execute-startup-script ${getExe (startup "nested" "${input "manifold"} | ${input "simular"}")}
+    '';
+  };
+
+  nestedSession = writeShellApplication {
+    name = "stardust-xr-nested-session";
+    text = ''
+      ${sessionEnv}
+      exec ${logged} ${getExe cage} -- ${getExe nestedInner}
+    '';
+  };
+
   # The attribute name is the session name: what the greeter lists, what the
   # desktop file must be called, and what `providedSessions` repeats back.
   all = {
@@ -95,6 +122,11 @@
       label = "Stardust XR (flatscreen)";
       comment = "Spatial desktop in a window, driven by mouse and keyboard";
       session = flatscreenSession;
+    };
+    stardust-xr-nested = {
+      label = "Stardust XR (nested headset)";
+      comment = "Spatial desktop on the headset, through Monado inside cage";
+      session = nestedSession;
     };
   };
 
