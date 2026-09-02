@@ -87,6 +87,7 @@
     ../nixos-modules/core/uinput.nix
     ../nixos-modules/core/users.nix
     ../nixos-modules/core/zram.nix
+    ../nixos-modules/services/kanata.nix
     ../nixos-modules/services/netbird.nix
     ../nixos-modules/services/openssh.nix
     ../nixos-modules/services/resolved.nix
