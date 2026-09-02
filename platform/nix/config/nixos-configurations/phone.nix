@@ -65,6 +65,12 @@
     # ── Desktop environment ───────────────────────────────────────────
     inputs.self.desktops.cosmic
 
+    # Adreno 643, so the same turnip that has no vk_display backend for the XR
+    # session. Input is a paired Bluetooth mouse and keyboard, which is what
+    # manifold forwards; the touchscreen alone would reach nothing.
+    inputs.self.desktops.xr
+    {desktops.xr.sessions = ["stardust-xr-flatscreen"];}
+
     # ── Machine configuration ─────────────────────────────────────────
     ({
       pkgs,

@@ -16,6 +16,11 @@
   stardust-xr-non-spatial-input,
   systemd,
   xkeyboard_config,
+  # Which sessions to ship, or null for all of them. A machine whose driver
+  # cannot reach monado's vk_display backend has no use for the XR entry, and
+  # an entry that cannot start is a black screen and a trip back to the
+  # greeter rather than an error anyone sees.
+  enabledSessions ? null,
 }: let
   inherit (lib) getExe getExe';
 
@@ -80,7 +85,7 @@
 
   # The attribute name is the session name: what the greeter lists, what the
   # desktop file must be called, and what `providedSessions` repeats back.
-  sessions = {
+  all = {
     stardust-xr = {
       label = "Stardust XR";
       comment = "Spatial desktop on the headset, through Monado";
@@ -92,6 +97,11 @@
       session = flatscreenSession;
     };
   };
+
+  sessions =
+    if enabledSessions == null
+    then all
+    else lib.getAttrs enabledSessions all;
 
   entry = name: {
     label,

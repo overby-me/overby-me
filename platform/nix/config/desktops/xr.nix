@@ -3,7 +3,29 @@
   lib,
   pkgs,
   ...
-}: {
+}: let
+  cfg = config.desktops.xr;
+
+  # Monado is only ever reached by the XR session, so a machine listing the
+  # flatscreen one alone has no reason to carry it - and every reason not to,
+  # since enabling it installs monado-vulkan-layers as an implicit layer that
+  # loads into every Vulkan process on the system.
+  xrSession = lib.elem "stardust-xr" cfg.sessions;
+in {
+  options.desktops.xr.sessions = lib.mkOption {
+    type = lib.types.listOf (lib.types.enum ["stardust-xr" "stardust-xr-flatscreen"]);
+    default = ["stardust-xr" "stardust-xr-flatscreen"];
+    example = ["stardust-xr-flatscreen"];
+    description = ''
+      Which Stardust sessions cosmic-greeter lists.
+
+      `stardust-xr` needs monado's vk_display backend, which needs a driver
+      that answers vkGetPhysicalDeviceDisplayPropertiesKHR. Mesa's turnip does
+      not, so on an Adreno machine that entry can only fail: drop it there and
+      leave the flatscreen one.
+    '';
+  };
+
   options.desktops.xr.vkDisplay = lib.mkOption {
     type = lib.types.nullOr lib.types.int;
     default = null;
@@ -25,15 +47,16 @@
   };
 
   config = {
-    environment.systemPackages = with pkgs; [
-      monado
-      stardust-xr-server
-      stardust-xr-non-spatial-input
-      stardust-xr-flatland
-      stardust-xr-protostar
-      stardust-xr-atmosphere
-      #weston
-    ];
+    environment.systemPackages = with pkgs;
+      lib.optional xrSession monado
+      ++ [
+        stardust-xr-server
+        stardust-xr-non-spatial-input
+        stardust-xr-flatland
+        stardust-xr-protostar
+        stardust-xr-atmosphere
+        #weston
+      ];
     # stardust-xr-kiara was dropped from nixpkgs on 2026-07-04, "no longer
     # compatible with the latest versions of the Stardust XR server", and the
     # alias now throws.  Surviving clients if a replacement is wanted:
@@ -41,18 +64,23 @@
 
     # Socket-activated, so it takes the display when the session's first
     # client connects rather than while the greeter still holds it.
-    services.monado = {
+    services.monado = lib.mkIf xrSession {
       enable = true;
       defaultRuntime = true;
     };
 
     # The compositor reading this lives in monado-service, not in the session,
-    # so setting it in the session script would do nothing.
-    systemd.user.services.monado.environment.XRT_COMPOSITOR_FORCE_VK_DISPLAY =
-      lib.mkIf (config.desktops.xr.vkDisplay != null)
-      (toString config.desktops.xr.vkDisplay);
+    # so setting it in the session script would do nothing. The whole service
+    # is guarded, not just the variable: naming an attribute of it is enough to
+    # declare the unit on a machine that never installs monado.
+    systemd.user.services.monado = lib.mkIf xrSession {
+      environment.XRT_COMPOSITOR_FORCE_VK_DISPLAY =
+        lib.mkIf (cfg.vkDisplay != null) (toString cfg.vkDisplay);
+    };
 
-    services.displayManager.sessionPackages = [pkgs.stardust-xr-session];
+    services.displayManager.sessionPackages = [
+      (pkgs.stardust-xr-session.override {enabledSessions = cfg.sessions;})
+    ];
 
     services.udev.extraRules = ''
       # XReal
