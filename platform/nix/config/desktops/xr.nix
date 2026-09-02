@@ -28,9 +28,6 @@
     environment.systemPackages = with pkgs; [
       monado
       stardust-xr-server
-      # Not the tree's own `non-spatial-input`: that is a 2025-03 revision
-      # from before Stardust's protocol moved, and it claims the same binary
-      # names, so the two cannot both be here.
       stardust-xr-non-spatial-input
       stardust-xr-flatland
       stardust-xr-protostar
