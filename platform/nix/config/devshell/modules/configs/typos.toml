@@ -230,6 +230,10 @@ extrac23 = "extrac23"
 extrac24 = "extrac24"
 extrac25 = "extrac25"
 
+# The binary StardustXR's non-spatial-input ships under this name, which the
+# stardust-xr session runs by path.
+simular = "simular"
+
 [files]
 extend-exclude = [
   # The Unicode block names unicrud carries, straight from the standard. They
