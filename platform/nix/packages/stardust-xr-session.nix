@@ -11,25 +11,36 @@
   writeShellApplication,
   writeText,
   stardust-xr-server,
-  stardust-xr-atmosphere,
   stardust-xr-flatland,
   stardust-xr-protostar,
   stardust-xr-non-spatial-input,
+  xkeyboard_config,
 }: let
   inherit (lib) getExe getExe';
 
   input = getExe' stardust-xr-non-spatial-input;
 
+  # xkbcommon looks in /usr/share/X11/xkb and finds nothing here, so without
+  # this the server comes up with no keymap and nothing typed reaches a client.
+  # Exported rather than passed, because eclipse builds a keymap of its own.
+  keymapData = ''
+    export XKB_CONFIG_ROOT=${xkeyboard_config}/share/X11/xkb
+  '';
+
   # `--execute-startup-script` runs this once the server accepts clients.
   # Backgrounded rather than waited on: logind kills the session's cgroup at
   # logout, so a wait would only hold the server open behind them. flatland is
   # what 2D applications draw into, so the launcher needs it to launch anything.
+  #
+  # atmosphere is deliberately not here: it is a CLI over a directory of
+  # installed environments, and `atmosphere show` panics on an unwrap in
+  # env.rs when that directory does not exist. Run `atmosphere install <path>`
+  # first, then it belongs in this list.
   startup = name: pipeline:
     writeShellApplication {
       name = "stardust-xr-startup-${name}";
       text = ''
         ${getExe stardust-xr-flatland} &
-        ${getExe stardust-xr-atmosphere} &
         ${getExe' stardust-xr-protostar "hexagon_launcher"} &
         ${pipeline} &
       '';
@@ -42,6 +53,7 @@
   xrSession = writeShellApplication {
     name = "stardust-xr-session";
     text = ''
+      ${keymapData}
       # Inherited from the greeter, either would force flatscreen mode.
       unset DISPLAY WAYLAND_DISPLAY
       exec ${getExe stardust-xr-server} --xr-only \
@@ -52,6 +64,7 @@
   flatscreenSession = writeShellApplication {
     name = "stardust-xr-flatscreen-session";
     text = ''
+      ${keymapData}
       exec ${getExe cage} -- ${getExe stardust-xr-server} --force-flatscreen \
         --execute-startup-script ${getExe (startup "flatscreen" "${input "manifold"} | ${input "simular"}")}
     '';
