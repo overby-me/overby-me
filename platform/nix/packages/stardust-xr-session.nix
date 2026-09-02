@@ -14,17 +14,25 @@
   stardust-xr-flatland,
   stardust-xr-protostar,
   stardust-xr-non-spatial-input,
+  systemd,
   xkeyboard_config,
 }: let
   inherit (lib) getExe getExe';
 
   input = getExe' stardust-xr-non-spatial-input;
 
+  # greetd does not capture a session's stderr, so a server that dies takes its
+  # reason with it: the wgpu abort behind the first failed login was only
+  # recoverable from a core dump. Cosmic's own autologin does the same thing.
+  logged = "${getExe' systemd "systemd-cat"} -t stardust-xr";
+
   # xkbcommon looks in /usr/share/X11/xkb and finds nothing here, so without
   # this the server comes up with no keymap and nothing typed reaches a client.
   # Exported rather than passed, because eclipse builds a keymap of its own.
-  keymapData = ''
+  # RUST_BACKTRACE joins it because these sessions are still being brought up.
+  sessionEnv = ''
     export XKB_CONFIG_ROOT=${xkeyboard_config}/share/X11/xkb
+    export RUST_BACKTRACE=1
   '';
 
   # `--execute-startup-script` runs this once the server accepts clients.
@@ -53,10 +61,10 @@
   xrSession = writeShellApplication {
     name = "stardust-xr-session";
     text = ''
-      ${keymapData}
+      ${sessionEnv}
       # Inherited from the greeter, either would force flatscreen mode.
       unset DISPLAY WAYLAND_DISPLAY
-      exec ${getExe stardust-xr-server} --xr-only \
+      exec ${logged} ${getExe stardust-xr-server} --xr-only \
         --execute-startup-script ${getExe (startup "xr" "${input "eclipse"} | ${input "simular"}")}
     '';
   };
@@ -64,8 +72,8 @@
   flatscreenSession = writeShellApplication {
     name = "stardust-xr-flatscreen-session";
     text = ''
-      ${keymapData}
-      exec ${getExe cage} -- ${getExe stardust-xr-server} --force-flatscreen \
+      ${sessionEnv}
+      exec ${logged} ${getExe cage} -- ${getExe stardust-xr-server} --force-flatscreen \
         --execute-startup-script ${getExe (startup "flatscreen" "${input "manifold"} | ${input "simular"}")}
     '';
   };
