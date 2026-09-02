@@ -2,6 +2,7 @@
 # serial consoles, audio, and automatic root filesystem expansion.
 {
   config,
+  inputs,
   lib,
   pkgs,
   ...
@@ -33,6 +34,51 @@
         }
       ]
     '';
+
+  # Nothing NixOS ships can write an Android boot partition, so switching
+  # generations installs the image itself. Into the inactive slot: a kernel that
+  # will not boot then falls back to the working one instead of to fastboot.
+  installBootImage = pkgs.writeShellApplication {
+    name = "install-android-boot-image";
+    runtimeInputs = [pkgs.coreutils pkgs.diffutils pkgs.qbootctl];
+    text = ''
+      image=${config.system.build.androidBootImage}
+      size=$(stat -Lc %s "$image")
+      current=$(qbootctl -x)
+
+      case "$current" in
+        _a) targetSuffix=_b ;;
+        _b) targetSuffix=_a ;;
+        *)
+          echo "unrecognised slot suffix '$current'" >&2
+          exit 1
+          ;;
+      esac
+      target=/dev/disk/by-partlabel/boot$targetSuffix
+
+      if cmp -s -n "$size" "$image" "/dev/disk/by-partlabel/boot$current"; then
+        echo "boot image unchanged, keeping slot $current active"
+        exit 0
+      fi
+
+      if [ ! -b "$target" ]; then
+        echo "no boot partition at $target" >&2
+        exit 1
+      fi
+
+      dd if="$image" of="$target" bs=4M conv=fsync status=none
+
+      # An image that did not land intact costs a boot per retry and ends in
+      # fastboot, so read it back before handing the slot over.
+      if ! cmp -s -n "$size" "$image" "$target"; then
+        echo "boot image did not verify on $target, keeping slot $current active" >&2
+        exit 1
+      fi
+
+      qbootctl -s "''${targetSuffix#_}"
+      echo "boot image installed to slot $targetSuffix"
+    '';
+  };
 in {
   options.nixos-fairphone-fp5 = {
     enable = lib.mkEnableOption "Fairphone 5 hardware support";
@@ -68,6 +114,10 @@ in {
       # Qualcomm firmware must be uncompressed.
       firmwareCompression = "none";
     };
+
+    # Built from this generation, so `nixos-rebuild` has an image to install.
+    system.build.androidBootImage =
+      inputs.self.lib.mkBootImage {dtb = config.hardware.deviceTree.name;} config pkgs;
 
     boot = {
       kernelPackages = pkgs.linuxPackagesFor pkgs.kernel-fairphone-fp5;
@@ -111,8 +161,15 @@ in {
         "soundwire-qcom" # Qualcomm SoundWire controller
       ];
 
-      # The Android boot image format is used instead.
-      loader.grub.enable = false;
+      loader = {
+        # The Android boot image format is used instead.
+        grub.enable = false;
+
+        external = {
+          enable = true;
+          installHook = "${installBootImage}/bin/install-android-boot-image";
+        };
+      };
 
       # On first boot, register the contents of the initial Nix store.
       postBootCommands = ''
@@ -174,6 +231,7 @@ in {
     environment = {
       systemPackages = [
         pkgs.alsa-ucm-conf-fairphone-fp5
+        pkgs.qbootctl
       ];
 
       # A full replacement set, carrying both the Fairphone-specific profiles and
@@ -189,7 +247,8 @@ in {
 
     systemd.services = {
       # Otherwise the bootloader exhausts its retry counter and falls back to
-      # fastboot.
+      # fastboot. Not bootctl: it has no such verb and no EFI to talk to here,
+      # so it fails until the phone stops booting and nothing says why.
       mark-boot-successful = {
         description = "Mark current A/B slot as boot-successful";
         wantedBy = ["multi-user.target"];
@@ -197,7 +256,7 @@ in {
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
-          ExecStart = "${pkgs.systemd}/bin/bootctl mark-boot-successful";
+          ExecStart = "${pkgs.qbootctl}/bin/qbootctl -m";
         };
       };
 

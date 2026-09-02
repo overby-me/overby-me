@@ -8,7 +8,7 @@
 # Usage:
 #   lib.mkBootImage {
 #     dtb = "qcom/qcm6490-fairphone-fp5.dtb";
-#   } nixosConfig pkgs;
+#   } config pkgs;
 #
 # Parameters:
 #   deviceConfig - attrset of device-specific boot image parameters:
@@ -20,12 +20,12 @@
 #     dtbOffset       - (optional) DTB offset (default: "0x01f00000")
 #     tagsOffset      - (optional) tags offset (default: "0x00000100")
 #     pagesize        - (optional) page size (default: 4096)
-#   nixosConfig - a NixOS system configuration (e.g. nixosConfigurations.phone)
-#   pkgs        - nixpkgs package set
+#   config - the `config` of a NixOS system (e.g. nixosConfigurations.phone.config)
+#   pkgs   - nixpkgs package set
 #
 # Returns: a derivation producing a single boot.img file.
 lib: {
-  mkBootImage = deviceConfig: nixosConfig: pkgs: let
+  mkBootImage = deviceConfig: config: pkgs: let
     cfg =
       {
         headerVersion = 2;
@@ -41,12 +41,13 @@ lib: {
     pkgs.runCommand "boot.img" {
       nativeBuildInputs = [pkgs.android-tools];
     } ''
-      kernelPath="${nixosConfig.config.system.build.kernel}"
-      initrdPath="${nixosConfig.config.system.build.initialRamdisk}/initrd"
-      initPath="${lib.unsafeDiscardStringContext nixosConfig.config.system.build.toplevel}/init"
+      kernelPath="${config.system.build.kernel}"
+      initrdPath="${config.system.build.initialRamdisk}/initrd"
 
-      kernelParams="${lib.toString nixosConfig.config.boot.kernelParams}"
-      cmdline="$kernelParams init=$initPath"
+      # The bootloader appends `init=/init` and wins anyway, and naming the
+      # toplevel here would make the image unbuildable from inside the config.
+      kernelParams="${lib.toString config.boot.kernelParams}"
+      cmdline="$kernelParams init=/init"
 
       # The bootloader expects the kernel and the device tree blob as one file.
       echo "Concatenating kernel and DTB..."

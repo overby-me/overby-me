@@ -29,14 +29,18 @@ decrypt-hostkey device:
     ssh-keygen -y -f /tmp/{{ device }}-hostkeys/ssh_host_ed25519_key > /tmp/{{ device }}-hostkeys/ssh_host_ed25519_key.pub
 
 build-boot device:
-    nix build --impure --print-build-logs -o result-{{ device }}-boot --expr 'let flake = builtins.getFlake "git+file://{{ _flake_dir }}"; nixosConfig = flake.nixosConfigurations.{{ device }}; in flake.lib.mkBootImage { dtb = "qcom/qcm6490-fairphone-fp5.dtb"; } nixosConfig nixosConfig.pkgs'
+    nix build --impure --print-build-logs -o result-{{ device }}-boot --expr 'let flake = builtins.getFlake "git+file://{{ _flake_dir }}"; in flake.nixosConfigurations.{{ device }}.config.system.build.androidBootImage'
 
 build-rootfs device: (decrypt-hostkey device)
     nix build --impure --print-build-logs -o result-{{ device }}-rootfs --expr 'let flake = builtins.getFlake "git+file://{{ _flake_dir }}"; nixosConfig = flake.nixosConfigurations.{{ device }}; in flake.lib.mkRootfsImage nixosConfig nixosConfig.pkgs { sshHostKeyDir = /tmp/{{ device }}-hostkeys; }'
 
+# `fastboot flash` leaves the slot attributes alone, so a slot whose retry
+# counter the bootloader already exhausted stays unbootable however good the
+# new image is.
 flash device: (build-boot device) (build-rootfs device)
     fastboot flash boot result-{{ device }}-boot
     fastboot flash userdata result-{{ device }}-rootfs
+    fastboot set_active "$(fastboot getvar current-slot 2>&1 | sed -n 's/^current-slot: //p' | head -1)"
     fastboot reboot
 
 # armitas (Surface Pro 11) installation
