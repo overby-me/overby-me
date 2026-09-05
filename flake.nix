@@ -40,8 +40,16 @@
       workspace.follows = "workspace";
       # This tree's own copies: fetching the published ones too would declare
       # their home-manager options twice, which is a conflict, not an override.
-      nushell-plugin-tramp.url = "path:./dev/nushell/plugin-tramp";
-      tangled-spindle-nix-engine.url = "path:./platform/tangled/spindle-nix-engine";
+      # The same holds for what those copies themselves fetch, so their
+      # nix-lib has to land on this tree's copy as well.
+      nushell-plugin-tramp = {
+        url = "path:./dev/nushell/plugin-tramp";
+        inputs.nix-lib.follows = "nix-lib";
+      };
+      tangled-spindle-nix-engine = {
+        url = "path:./platform/tangled/spindle-nix-engine";
+        inputs.nix-lib.follows = "nix-lib";
+      };
       nix-packages.follows = "nix-packages";
     };
   };
