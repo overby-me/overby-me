@@ -52,6 +52,7 @@ def flake-text [
     multi_dir: bool = false
     nixos_modules: record = {}
     home_modules: record = {}
+    below_nix_lib: bool = false
 ]: nothing -> string {
     # Nothing about the build is stated here. The project's own default.nix is
     # what builds it, and `outputDirs` below says so; every setting that used
@@ -65,9 +66,12 @@ def flake-text [
     # A project published as several directories keeps its build one level
     # down, beside the siblings its Cargo.toml path-depends on, so the root is
     # projects to discover rather than the project itself.
+    # A project below nix-lib cannot point `outputDirs` at its own default.nix
+    # either: that file builds with buildCargoProject, which is the very thing
+    # it may not take. Its standalone build is the Rust module's instead.
     mut opts = (
         ["      inherit inputs;"]
-        | append (if $multi_dir { [] } else { ["      outputDirs = [./.];"] })
+        | append (if ($multi_dir or $below_nix_lib) { [] } else { ["      outputDirs = [./.];"] })
         | append $rust_block
     )
 
@@ -84,7 +88,11 @@ def flake-text [
     # block, so the extras land inside `inputs` rather than beside it.
     let extra_inputs = ([
         (if $toolchain { "\n    # This project pins rustc through its own rust-toolchain.toml.\n    rust-overlay.url = \"github:oxalica/rust-overlay\";" } else { "" })
-        "\n    # nix-lib carries buildCargoProject, which every project builds\n    # with: one derivation per crate rather than one for the whole graph.\n    nix-lib = {\n      url = \"git+https://tangled.org/overby.me/nix-lib\";\n      inputs.workspace.follows = \"workspace\";\n    };"
+        (if $below_nix_lib {
+            "\n    # nix-lib builds with this project, so taking nix-lib here would be a\n    # cycle. The Rust module builds it instead, as every repo did before\n    # buildCargoProject.\n    rust = {\n      url = \"git+https://tangled.org/overby.me/nix-workspace?dir=modules/rust\";\n      inputs.workspace.follows = \"workspace\";\n    };"
+        } else {
+            "\n    # nix-lib carries buildCargoProject, which every project builds\n    # with: one derivation per crate rather than one for the whole graph.\n    nix-lib = {\n      url = \"git+https://tangled.org/overby.me/nix-lib\";\n      inputs.workspace.follows = \"workspace\";\n    };"
+        })
     ] | where {|s| $s != "" })
     let inputs_block = (
         $"  inputs = {\n    workspace.url = \"($project_url)\";\n"
@@ -113,9 +121,15 @@ def flake-text [
 #
 # The devshell and its hooks, the formatter and the nixpkgs this resolves
 # against are shared with every other repo published from the monorepo, and
-# arrive through nix-workspace. The build itself is this repo's own
+# arrive through nix-workspace. " + (if $below_nix_lib {
+            "The build is the Rust module's: the
+# monorepo builds this from its own default.nix, which this repo may not
+# reach for, so the two differ here and nowhere else."
+        } else {
+            "The build itself is this repo's own
 # default.nix, the same file the monorepo builds it with, so there is nothing
 # about it to restate here."
+        })
     }
 
     # A project's own NixOS module rides beside the build. It is an output of
@@ -293,6 +307,7 @@ def main [--check, --github: string = "overby-me"]: nothing -> nothing {
                 (not (($p | get -o deps | default []) | is-empty))
                 ($p | get -o nixosModules | default {})
                 ($p | get -o homeModules | default {})
+                ($p | get -o belowNixLib | default false)
         ) }
         let flake = ($dir | path join "flake.nix")
         # Only a crate has a generated flake. Checking every project for one

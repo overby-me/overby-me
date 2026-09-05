@@ -142,6 +142,9 @@
   {
     name: "oxidized-ninja"
     path: "safety/oxidized/ninja"
+    # nix-lib builds with this project, so this project cannot build with
+    # nix-lib: as one flake node each, the two would be a cycle.
+    belowNixLib: true
     formerPaths: [{path: "rust/ninja" deps: []}]
   }
   {

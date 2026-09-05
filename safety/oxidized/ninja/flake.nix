@@ -3,19 +3,20 @@
 #
 # The devshell and its hooks, the formatter and the nixpkgs this resolves
 # against are shared with every other repo published from the monorepo, and
-# arrive through nix-workspace. The build itself is this repo's own
-# default.nix, the same file the monorepo builds it with, so there is nothing
-# about it to restate here.
+# arrive through nix-workspace. The build is the Rust module's: the
+# monorepo builds this from its own default.nix, which this repo may not
+# reach for, so the two differ here and nowhere else.
 {
   description = "A Ninja-compatible build system written in Rust";
 
   inputs = {
     workspace.url = "git+https://tangled.org/overby.me/nix-workspace";
 
-    # nix-lib carries buildCargoProject, which every project builds
-    # with: one derivation per crate rather than one for the whole graph.
-    nix-lib = {
-      url = "git+https://tangled.org/overby.me/nix-lib";
+    # nix-lib builds with this project, so taking nix-lib here would be a
+    # cycle. The Rust module builds it instead, as every repo did before
+    # buildCargoProject.
+    rust = {
+      url = "git+https://tangled.org/overby.me/nix-workspace?dir=modules/rust";
       inputs.workspace.follows = "workspace";
     };
   };
@@ -23,6 +24,5 @@
   outputs = inputs:
     inputs.workspace {
       inherit inputs;
-      outputDirs = [./.];
     };
 }
