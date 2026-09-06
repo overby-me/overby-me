@@ -216,12 +216,18 @@ pub fn FolderApp(
         parent_path[..parent_path.len() - 1].to_vec()
     };
 
-    // Live children: subscribe to this folder's child nodes so additions and
-    // removals (by anyone) show up immediately, filtered + ordered like React.
+    // Live children: the context signal (0026) fires on any change in this
+    // folder's context, and the refetch below re-reads the children. Coarser
+    // than the old per-folder token but one shared cohort per user instead of
+    // one per open folder; the per-folder aggregate remains only outside a
+    // context, where no touch row exists.
     let refresh = use_signal(|| 0u32);
     let sub_node = crate::graphql::gql_escape(&node_id);
     crate::subscription::use_live(
-        crate::graphql::nodes_changed_typed(crate::graphql::children_of(&sub_node)),
+        crate::graphql::node_changed(
+            node.context_id.as_ref().map(|c| c.0.as_str()),
+            crate::graphql::children_of(&sub_node),
+        ),
         refresh,
     );
     // Sort the resolver-provided children once per mount rather than re-cloning +

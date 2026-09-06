@@ -267,6 +267,21 @@ mod tests {
         assert_eq!(cursor["initial_value"]["updatedAt"], "2026-01-01T00:00:00Z");
         assert_eq!(cursor["ordering"], "ASC");
     }
+
+    /// Hasura folds subscribers into one cohort only when query AND variables
+    /// are byte-identical, and that folding is the signal's whole point.
+    #[test]
+    fn the_context_signal_is_identical_for_every_view() {
+        let ctx = "c732d24a-36b6-41aa-8fdb-4db3a1537b14";
+        let a = context_changed(ctx);
+        let b = context_changed(ctx);
+        assert_eq!(a.query, b.query);
+        assert_eq!(a.variables, b.variables);
+        assert!(a.query.contains("contextTouch"), "{}", a.query);
+        assert!(a.query.contains("seq"), "{}", a.query);
+        assert!(a.query.contains("$whereClause"), "{}", a.query);
+        assert_eq!(a.variables["whereClause"]["contextId"]["_eq"], ctx);
+    }
 }
 
 // --- Change tokens (for the tables a stream cannot cover) ---
@@ -325,6 +340,74 @@ pub struct NodesChanged {
 pub fn nodes_changed_typed(where_clause: NodesBoolExp) -> Wire {
     use cynic::SubscriptionBuilder;
     wire(NodesChanged::build(NodesWhereOnly { where_clause }))
+}
+
+// --- The context change signal: one row, one probe (migration 0026) ---
+
+/// The payload is a sequence that strictly increases on every write in the
+/// context, so the result always differs and the push always fires. `count`
+/// or a timestamp could repeat; `seq` cannot.
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(schema_path = "graphql/schema.graphql", graphql_type = "context_touch")]
+pub struct ContextTouchRow {
+    pub seq: i64,
+}
+
+#[derive(cynic::InputObject, Debug, Default)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "context_touch_bool_exp"
+)]
+pub struct ContextTouchBoolExp {
+    #[cynic(rename = "contextId", skip_serializing_if = "Option::is_none")]
+    pub context_id: Option<UuidComparisonExp>,
+}
+
+#[derive(cynic::QueryVariables, Debug)]
+pub struct ContextTouchWhereOnly {
+    pub where_clause: ContextTouchBoolExp,
+}
+
+#[derive(cynic::QueryFragment, Debug)]
+#[cynic(
+    schema_path = "graphql/schema.graphql",
+    graphql_type = "subscription_root",
+    variables = "ContextTouchWhereOnly"
+)]
+pub struct ContextChanged {
+    #[cynic(rename = "contextTouch")]
+    #[arguments(where: $where_clause)]
+    pub context_touch: Vec<ContextTouchRow>,
+}
+
+/// Something in this context changed. Carries no rows.
+///
+/// Every view of a context must build this with the SAME context id and
+/// nothing else: identical query + identical variables is what lets Hasura
+/// fold all of a user's views (and tabs) into one cohort, whose poll reads one
+/// row and checks one permission instead of aggregating over the subtree per
+/// view. That folding is the entire point of the signal; do not add
+/// per-view parameters to it.
+pub fn context_changed(context_id: &str) -> Wire {
+    use cynic::SubscriptionBuilder;
+    wire(ContextChanged::build(ContextTouchWhereOnly {
+        where_clause: ContextTouchBoolExp {
+            context_id: Some(UuidComparisonExp {
+                eq: Some(Uuid(context_id.to_string())),
+                ..Default::default()
+            }),
+        },
+    }))
+}
+
+/// The change signal for a node, preferring its context's one-row token and
+/// falling back to the node-scoped aggregate for the rare node outside any
+/// context (where no touch row exists and the signal would never fire).
+pub fn node_changed(context_id: Option<&str>, fallback: NodesBoolExp) -> Wire {
+    match context_id {
+        Some(ctx) => context_changed(ctx),
+        None => nodes_changed_typed(fallback),
+    }
 }
 
 // --- relations and members: no cursor, so a live query and not a stream ---

@@ -49,6 +49,7 @@ mod schema {
 cynic::impl_scalar!(Uuid, schema::uuid);
 cynic::impl_scalar!(Timestamptz, schema::timestamptz);
 cynic::impl_scalar!(Jsonb, schema::jsonb);
+cynic::impl_scalar!(i64, schema::bigint);
 
 /// Escape a value for embedding inside a GraphQL double-quoted string literal.
 /// Used by the hand-built subscription strings in components too, so an id that

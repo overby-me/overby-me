@@ -275,13 +275,15 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
         selected.set(vec![false; options_len]);
     }));
 
-    // Live results: any vote cast on this poll re-runs the tally / voted checks.
+    // Live results: votes are nodes writes in this context, so the shared
+    // context signal (0026) re-runs the tally / voted checks; the per-poll
+    // token remains only outside a context.
     let sub_poll = crate::graphql::gql_escape(&poll_id);
     crate::subscription::use_live(
-        crate::graphql::nodes_changed_typed(crate::graphql::children_of_mime(
-            &sub_poll,
-            "vote/vote",
-        )),
+        crate::graphql::node_changed(
+            node.context_id.as_ref().map(|c| c.0.as_str()),
+            crate::graphql::children_of_mime(&sub_poll, "vote/vote"),
+        ),
         refresh,
     );
     // The chair opening or closing the poll, STREAMED: the pushed row carries the

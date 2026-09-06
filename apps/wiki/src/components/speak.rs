@@ -103,6 +103,7 @@ pub fn SpeakApp(node: NodeWithChildren, mode: SpeakMode) -> Element {
                     list_id: list.id.0.clone(),
                     list_name: if list.name.is_empty() { node.name.clone() } else { list.name.clone() },
                     context_id: context_id.clone(),
+                    signal_context: node.context_id.as_ref().map(|c| c.0.clone()),
                     is_owner,
                     screen,
                     current_user_id: user_id.clone(),
@@ -194,6 +195,9 @@ fn SpeakList(
     list_id: String,
     list_name: String,
     context_id: Uuid,
+    /// The node's REAL context (no node-id fallback): the change signal needs
+    /// the id a touch row exists for, or None to fall back to the old token.
+    signal_context: Option<String>,
     is_owner: bool,
     screen: bool,
     current_user_id: Option<String>,
@@ -229,30 +233,25 @@ fn SpeakList(
     // harmless); on error the entry is dropped to snap back.
     let mut reorder = use_signal(std::collections::HashMap::<String, i32>::new);
 
-    // Live updates: the list's entries AND the list node itself, in one
-    // subscription.
-    //
-    // The entries alone were not enough. Opening or closing the list is `mutable`
-    // on the list node, and the speaking clock is that node's `data`, so a chair
-    // starting the timer changed nothing this watched: their own device caught up
-    // through the local data version, and the room's screen sat on a stale clock
-    // until someone joined the queue.
-    //
-    // The selected fields matter as much as the filter: a subscription re-fires
-    // when its RESULT changes, so `{ id }` on a row whose id never changes would
-    // never fire. `max(updatedAt)` moves whenever any of those rows is touched —
-    // a chair opening the list, starting the clock, or someone joining the queue
-    // — and unlike `data` it does not ship every entry to every device in the
-    // hall each time the clock ticks.
+    // Live updates: the context signal (0026) covers the entries AND the list
+    // node itself, since both are nodes writes in this context, and it is the
+    // same one-row wire every other view of the context holds. The old
+    // aggregate token remains only for a list outside any context, where no
+    // touch row exists to watch. History that must not be re-learned: entries
+    // alone were not enough (the chair's clock lives on the list node's
+    // `data`), and a payload that cannot change never fires.
     let sub_list = crate::graphql::gql_escape(&list_id);
     crate::subscription::use_live(
-        crate::graphql::nodes_changed_typed(crate::graphql::NodesBoolExp {
-            or: Some(vec![
-                crate::graphql::children_of_mime(&sub_list, "speak/speak"),
-                crate::graphql::node_is(&sub_list),
-            ]),
-            ..Default::default()
-        }),
+        crate::graphql::node_changed(
+            signal_context.as_deref(),
+            crate::graphql::NodesBoolExp {
+                or: Some(vec![
+                    crate::graphql::children_of_mime(&sub_list, "speak/speak"),
+                    crate::graphql::node_is(&sub_list),
+                ]),
+                ..Default::default()
+            },
+        ),
         refresh,
     );
 

@@ -2859,6 +2859,32 @@ input checkUnique_nodes_args {
 scalar citext
 
 """
+One row per context that moves when anything in that context does (0026): a
+change signal, not content. All views of a context subscribe to it with the
+same query + variables so Hasura folds them into one cohort per user.
+"""
+type context_touch {
+	contextId: uuid!
+
+	"""
+	An object relationship
+	"""
+	node: nodes
+	seq: bigint!
+	touchedAt: timestamptz!
+}
+
+input context_touch_bool_exp {
+	_and: [context_touch_bool_exp!]
+	_not: context_touch_bool_exp
+	_or: [context_touch_bool_exp!]
+	contextId: uuid_comparison_exp
+	node: nodes_bool_exp
+	seq: bigint_comparison_exp
+	touchedAt: timestamptz_comparison_exp
+}
+
+"""
 Boolean expression to compare columns of type "citext". All fields are combined with logical 'AND'.
 """
 input citext_comparison_exp {
@@ -9163,6 +9189,26 @@ type query_root {
 	): permissions_aggregate!
 
 	"""
+	fetch data from the table: "context_touch"
+	"""
+	contextTouch(
+		"""
+		limit the number of rows returned
+		"""
+		limit: Int
+
+		"""
+		skip the first n rows. Use only with order_by
+		"""
+		offset: Int
+
+		"""
+		filter the rows returned
+		"""
+		where: context_touch_bool_exp
+	): [context_touch!]!
+
+	"""
 	fetch data from the table: "relations" using primary key columns
 	"""
 	relation(id: uuid!): relations
@@ -10779,6 +10825,26 @@ type subscription_root {
 		"""
 		where: permissions_bool_exp
 	): [permissions!]!
+
+	"""
+	fetch data from the table: "context_touch"
+	"""
+	contextTouch(
+		"""
+		limit the number of rows returned
+		"""
+		limit: Int
+
+		"""
+		skip the first n rows. Use only with order_by
+		"""
+		offset: Int
+
+		"""
+		filter the rows returned
+		"""
+		where: context_touch_bool_exp
+	): [context_touch!]!
 
 	"""
 	fetch data from the table: "relations" using primary key columns
