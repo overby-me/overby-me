@@ -27,8 +27,19 @@ final: prev: {
       '';
   });
 
-  # stardust-xr-server runs stock; its two source patches are disabled by
+  # stardust-xr-server's source runs stock; its two patches are disabled by
   # request (restore the postPatch override from git to re-enable). Off, turnip
   # GPUs (phone, XR headset) crash on the OIT resolve buffer and the launcher
   # spawns inside the flatscreen camera; Intel/desktop GPUs are unaffected.
+  #
+  # The build is still overridden. Upstream's release profile is fat LTO at
+  # codegen-units = 1 with debug symbols, so rustc holds the whole program's IR
+  # and DWARF at once: over 10.5GB, more than an aarch64 builder with 15GB of
+  # RAM can give it. Thin LTO still imports across crates and still did not
+  # fit, so no LTO at all.
+  stardust-xr-server = prev.stardust-xr-server.overrideAttrs (_: {
+    CARGO_PROFILE_RELEASE_LTO = "false";
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "16";
+    CARGO_PROFILE_RELEASE_DEBUG = "false";
+  });
 }
