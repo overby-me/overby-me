@@ -59,7 +59,17 @@ pub async fn file_bytes(file_id: &str, token: &str) -> Result<Vec<u8>, String> {
     if file_id.is_empty() {
         return Err("no file".into());
     }
-    let resp = storage_get(file_id, token).await?;
+    let mut resp = storage_get(file_id, token).await?;
+    // A 5xx from storage has only ever been a moment, not a file: the HB1
+    // agenda that answered 500 five times over a week fetched clean when
+    // checked. Same cadence as the graphql read retries.
+    for delay in crate::graphql::RETRY_DELAYS_MS {
+        if !resp.status().is_server_error() {
+            break;
+        }
+        gloo_timers::future::TimeoutFuture::new(*delay).await;
+        resp = storage_get(file_id, token).await?;
+    }
     if !resp.status().is_success() {
         // Said plainly, because storage's own word for it is misleading: it
         // answers 404 for a file you may not read as well as for one that is not

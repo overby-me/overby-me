@@ -46,6 +46,16 @@ fn auth_error_message(err: &nhost::NhostError) -> String {
         Some("schema-validation-error") => t("auth.invalidInput"),
         // A password-reset or verification link that has expired or been used.
         Some("unauthenticated-user") | Some("invalid-refresh-token") => t("auth.linkExpired"),
+        // The request never reached the service: the venue wifi, not the
+        // password. Say so, and let log_handled file it at the level a dropped
+        // connection deserves instead of the error a mapping gap would be.
+        Some("network_error") => {
+            crate::errors::log_handled(
+                "auth request failed",
+                err.message.as_deref().unwrap_or("network_error"),
+            );
+            t("error.offline")
+        }
         _ => {
             log::error!("unmapped auth error: {err:?}");
             t("error.somethingWentWrong")

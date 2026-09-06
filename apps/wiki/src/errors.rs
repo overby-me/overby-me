@@ -82,6 +82,20 @@ pub fn classify(msg: &str) -> Failure {
         "connection",
         "dns",
         "unreachable",
+        // reqwest's word for a body that stopped arriving. A response that
+        // ARRIVED but was not graphql gets its own message (post_body_once),
+        // so this phrase now only ever means the transport died mid-body.
+        "decoding response body",
+        // A gateway speaking instead of the server (post_body_once's wording:
+        // "http 502 Bad Gateway instead of an answer"). 4xx stays Broken: a
+        // refusal or a bug is an answer, and asking again just asks again.
+        "http 5",
+        "http 408",
+        "http 429",
+        // A lapsed session whose refresh lost the race is congress wifi by
+        // another door (see execute_reporting); the terminal case has its own
+        // warn in session.rs, so filing these as faults only counted readers.
+        "jwt",
     ];
     if OFFLINE.iter().any(|needle| m.contains(needle)) {
         return Failure::Offline;
@@ -252,6 +266,13 @@ mod tests {
             "error sending request for url (https://x/v1/graphql)",
             "TypeError: Failed to fetch",
             "operation timed out",
+            // The transport died mid-body (see post_body_once for why this
+            // phrase can no longer mean a parse failure).
+            "error decoding response body",
+            // A gateway answering instead of the server, and a lapsed session.
+            "http 502 Bad Gateway instead of an answer: <html><head>",
+            "http 429 Too Many Requests instead of an answer:",
+            "Could not verify JWT: JWTExpired",
         ] {
             assert_eq!(classify(msg), Failure::Offline, "{msg}");
         }
@@ -263,6 +284,17 @@ mod tests {
         assert_eq!(classify("internal server error"), Failure::Broken);
         assert_eq!(
             classify("expected Int, found String at data.index"),
+            Failure::Broken
+        );
+        // A well-formed 200 carrying garbage is a bug, not weather: the one
+        // decode failure that must stay loud now that the rest retry.
+        assert_eq!(
+            classify("http 200 OK carried something that is not graphql: <html>"),
+            Failure::Broken
+        );
+        // 4xx is an answer; only 5xx/408/429 read as the network.
+        assert_eq!(
+            classify("http 400 Bad Request instead of an answer: not json"),
             Failure::Broken
         );
     }

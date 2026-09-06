@@ -77,7 +77,7 @@ fn is_jwt_error(msg: &str) -> bool {
 ///
 /// Short enough that three attempts still fit inside a reader's patience, and
 /// spread enough to outlast a hand-off between two access points.
-const RETRY_DELAYS_MS: &[u32] = &[300, 900];
+pub(crate) const RETRY_DELAYS_MS: &[u32] = &[300, 900];
 
 /// Whether an operation changes anything.
 ///
@@ -173,7 +173,27 @@ async fn post_body_once(access_token: Option<&str>, body: &serde_json::Value) ->
         req = req.bearer_auth(token);
     }
     let resp = req.json(body).send().await.map_err(|e| e.to_string())?;
-    resp.json().await.map_err(|e| e.to_string())
+    // Status and body read apart, because `resp.json()` folded three failures
+    // into one blind "error decoding response body": a gateway answering 5xx
+    // with an HTML page, a connection dying mid-body, and a 200 carrying
+    // garbage. The first two are the network and get retried (`classify`);
+    // the last is a bug. 68 HB1 reports were untriageable for lack of the
+    // status and first bytes kept here.
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+    serde_json::from_str(&text).map_err(|_| {
+        let prefix = text
+            .chars()
+            .take(160)
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        match status.is_success() {
+            false => format!("http {status} instead of an answer: {prefix}"),
+            true => format!("http {status} carried something that is not graphql: {prefix}"),
+        }
+    })
 }
 
 /// Run `attempt`, retrying a read that failed because the request never
@@ -192,7 +212,12 @@ where
     }
     for delay in RETRY_DELAYS_MS {
         match &result {
-            Err(msg) if crate::errors::classify(msg) == crate::errors::Failure::Offline => {}
+            // A lapsed token classifies offline (errors.rs) but re-asking with
+            // the same token is guaranteed the same answer; the jwt branch in
+            // `execute_reporting` refreshes and retries it properly.
+            Err(msg)
+                if crate::errors::classify(msg) == crate::errors::Failure::Offline
+                    && !is_jwt_error(msg) => {}
             _ => break,
         }
         gloo_timers::future::TimeoutFuture::new(*delay).await;
@@ -304,15 +329,12 @@ where
         let failure = crate::errors::classify(e);
         // A lapsed session is the network, not a fault -- the same congress wifi
         // the refusal/offline note below is about, arriving by another door.
-        //
-        // `classify` cannot see it: "Could not verify JWT: JWTExpired" reads as
-        // Broken, so a token that expired while the refresh happened to fail on a
-        // 4g dip filed an error, with a stack, per query in flight. The refresh
-        // itself already says so once (`session refresh failed (will retry)`, a
-        // warn from session.rs), and the loop there retries every 45s, so these
-        // are duplicates of a thing already reported and not separately
-        // actionable. Reaching here at all means the query was never retried:
-        // either no fresh token could be had, or there is no session to refresh.
+        // `classify` agrees these days (jwt reads as Offline), but this branch
+        // still matters: it keeps even the offline-level note off the log for a
+        // failure the refresh loop already reports once (`session refresh failed
+        // (will retry)`, a warn from session.rs, retried every 45s). Reaching
+        // here at all means the query was never retried: either no fresh token
+        // could be had, or there is no session to refresh.
         if lapsed {
             log::info!(
                 "graphql [{}] on a lapsed session: {e}",
@@ -708,23 +730,21 @@ mod tests {
 
     /// A lapsed session must not be filed as a bug.
     ///
-    /// `classify` reads the JWT message as Broken, which is the level that
-    /// leaves the device and opens a feedback report. One reader on 4g, whose
-    /// token expired while the refresh happened to fail, filed exactly that --
-    /// for a dropped connection the code beside it already refuses to report.
-    /// Both paths now check `is_jwt_error` before classifying, and this pins the
-    /// pair apart.
+    /// One reader on 4g, whose token expired while the refresh happened to
+    /// fail, opened a feedback report for a dropped connection the code beside
+    /// it already refuses to report. Two defences, pinned together here: the
+    /// JWT check routes the message to a refresh-and-retry before any retries
+    /// with the dead token, and `classify` now reads it as the network rather
+    /// than as breakage, so caller-side `log_handled` notes stay off the wire
+    /// too (20 of them shipped during one HB weekend).
     #[test]
     fn a_lapsed_session_is_not_a_bug_the_way_a_real_failure_is() {
         let lapsed = "Could not verify JWT: JWTExpired";
         assert!(is_jwt_error(lapsed));
         assert!(matches!(
             crate::errors::classify(lapsed),
-            crate::errors::Failure::Broken
+            crate::errors::Failure::Offline
         ));
-        // ...which is precisely why the JWT check has to come first: left to
-        // classify alone, this is indistinguishable from a genuine fault.
-        //
         // A malformed variable, which is a real bug and must keep reporting as
         // one. NOT "field 'x' not found in type", which reads like a bug and is
         // classified as a refusal on purpose: that is the schema hiding a column
