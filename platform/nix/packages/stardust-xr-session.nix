@@ -31,6 +31,10 @@
   # recoverable from a core dump. Cosmic's own autologin does the same thing.
   logged = "${getExe' systemd "systemd-cat"} -t stardust-xr";
 
+  # Without it the server hands the startup script and everything under it
+  # /dev/null for stdout and stderr.
+  debugClients = "--debug";
+
   # xkbcommon looks in /usr/share/X11/xkb and finds nothing here, so without
   # this the server comes up with no keymap and nothing typed reaches a client.
   # Exported rather than passed, because eclipse builds a keymap of its own.
@@ -69,7 +73,7 @@
       ${sessionEnv}
       # Inherited from the greeter, either would force flatscreen mode.
       unset DISPLAY WAYLAND_DISPLAY
-      exec ${logged} ${getExe stardust-xr-server} --xr-only \
+      exec ${logged} ${getExe stardust-xr-server} --xr-only ${debugClients} \
         --execute-startup-script ${getExe (startup "xr" "${input "eclipse"} | ${input "simular"}")}
     '';
   };
@@ -78,7 +82,7 @@
     name = "stardust-xr-flatscreen-session";
     text = ''
       ${sessionEnv}
-      exec ${logged} ${getExe cage} -- ${getExe stardust-xr-server} --force-flatscreen \
+      exec ${logged} ${getExe cage} -- ${getExe stardust-xr-server} --force-flatscreen ${debugClients} \
         --execute-startup-script ${getExe (startup "flatscreen" "${input "manifold"} | ${input "simular"}")}
     '';
   };
@@ -97,7 +101,7 @@
     text = ''
       ${getExe' systemd "systemctl"} --user import-environment WAYLAND_DISPLAY
       ${getExe' systemd "systemctl"} --user stop monado.service || true
-      exec ${getExe stardust-xr-server} --xr-only \
+      exec ${getExe stardust-xr-server} --xr-only ${debugClients} \
         --execute-startup-script ${getExe (startup "nested" "${input "manifold"} | ${input "simular"}")}
     '';
   };

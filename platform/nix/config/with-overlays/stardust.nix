@@ -48,6 +48,20 @@ final: prev: {
           --replace-fail \
             'OrderIndependentTransparencySettings::default()' \
             'OrderIndependentTransparencySettings { layer_count: 2, ..Default::default() }'
+
+        # A client the startup script launches carries no state token, so it gets
+        # this root - the world origin, which is exactly where the flatscreen
+        # camera sits and where the XR sessions move their reference space. The
+        # hexagon launcher draws at its root and so comes up inside the eye,
+        # leaving the session with nothing to click. flatland dodges this per
+        # panel in initial_panel_placement.rs; protostar cannot, and moving its
+        # own default does nothing because molecules' Grabbable takes its pose
+        # from the reparentable channel instead. So the root moves, past the 25cm
+        # flatland's panels land at.
+        substituteInPlace src/core/client_state.rs \
+          --replace-fail \
+            'root: Mat4::IDENTITY,' \
+            'root: Mat4::from_translation(glam::Vec3::new(0.0, -0.1, -0.5)),'
       '';
   });
 }
