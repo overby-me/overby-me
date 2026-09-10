@@ -4,15 +4,16 @@
   ...
 }: let
   inherit (inputs.self.secrets) publicKeys;
+  nushell = pkgs.pkgsUnstable.nushell;
 in {
   environment.profiles = ["$HOME/.local"];
 
-  # Must list every login shell below: pkexec rejects a caller whose $SHELL is
-  # absent from /etc/shells, failing privileged desktop helpers with exit 127.
-  environment.shells = [pkgs.pkgsUnstable.nushell];
+  # pkexec matches $SHELL against /etc/shells literally, exiting 127 on a miss.
+  # Both spellings: passwd holds the profile path, the home module the store one.
+  environment.shells = [nushell "${nushell}/bin/nu"];
 
   users.users."overby.me" = {
-    shell = pkgs.pkgsUnstable.nushell;
+    shell = nushell;
     isNormalUser = true;
     description = "Niclas Overby";
     extraGroups = ["networkmanager" "wheel" "docker" "libvirtd" "wireshark" "input" "kvm"];
