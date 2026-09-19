@@ -1,15 +1,20 @@
 {
 	"lexicon": 1,
-	"id": "com.example.wiki.listRecent",
+	"id": "com.example.wiki.listContributions",
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "The feed: submitted content and comments, newest first, each with what it is about. A draft is nobody's news, and neither is what has lost its parent. With `context`, that context's own content (a group's feed is not its events': each is its own context). Without, everything in the contexts the caller belongs to, or whatever is public for someone not signed in.",
+			"description": "What a person, or a group, has put forward, as far as the caller may read it: motions, amendments, candidacies and questions they own or are named as an author of, and for a person their comments. Drafts included, since they are theirs too. Give `did` or `context`.",
 			"parameters": {
 				"type": "params",
 				"properties": {
+					"did": {
+						"type": "string",
+						"format": "did"
+					},
 					"context": {
-						"type": "string"
+						"type": "string",
+						"description": "A group or an event, for what it is named as the author of."
 					},
 					"limit": {
 						"type": "integer",
@@ -44,7 +49,13 @@
 						}
 					}
 				}
-			}
+			},
+			"errors": [
+				{
+					"name": "InvalidRequest",
+					"description": "Neither `did` nor `context`, or both."
+				}
+			]
 		}
 	}
 }

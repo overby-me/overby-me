@@ -404,6 +404,87 @@
 				}
 			}
 		},
+		"nodeRef": {
+			"type": "object",
+			"description": "Enough of a node to name it and link to it.",
+			"required": ["node", "id", "kind", "title", "path"],
+			"properties": {
+				"node": { "type": "string", "knownValues": ["document", "context"] },
+				"id": { "type": "string" },
+				"kind": { "type": "string" },
+				"title": {
+					"type": "string",
+					"description": "A document's title, or a context's name."
+				},
+				"path": { "type": "string" }
+			}
+		},
+		"hitView": {
+			"type": "object",
+			"description": "A search hit: a `nodeRef`, with where it was found and where it sits.",
+			"required": [
+				"node",
+				"id",
+				"kind",
+				"title",
+				"path",
+				"context_id",
+				"created_at",
+				"matched"
+			],
+			"properties": {
+				"node": { "type": "string", "knownValues": ["document", "context"] },
+				"id": { "type": "string" },
+				"kind": { "type": "string" },
+				"title": { "type": "string" },
+				"path": { "type": "string" },
+				"context_id": { "type": "string" },
+				"created_at": { "type": "string", "format": "datetime" },
+				"matched": {
+					"type": "string",
+					"knownValues": ["title", "text"],
+					"description": "`title` when every word is in what it is called."
+				},
+				"parent": {
+					"type": "ref",
+					"ref": "#nodeRef",
+					"description": "Where it sits, if the caller may read that too."
+				}
+			}
+		},
+		"feedItemView": {
+			"type": "object",
+			"description": "One thing that happened. Light on purpose: it never carries a document's content.",
+			"required": ["node", "id", "kind", "text", "context_id", "created_at"],
+			"properties": {
+				"node": { "type": "string", "knownValues": ["document", "comment"] },
+				"id": { "type": "string" },
+				"kind": {
+					"type": "string",
+					"description": "A document's kind; `comment` for a comment."
+				},
+				"text": {
+					"type": "string",
+					"description": "A document's title, or a comment's text."
+				},
+				"path": {
+					"type": "string",
+					"description": "A document's own path. A comment is reached through `about`."
+				},
+				"context_id": { "type": "string" },
+				"by_did": { "type": "string", "format": "did" },
+				"by_text": {
+					"type": "string",
+					"description": "A comment by someone with no account."
+				},
+				"created_at": { "type": "string", "format": "datetime" },
+				"about": {
+					"type": "ref",
+					"ref": "#nodeRef",
+					"description": "Where a document sits, or what a comment is on, if the caller may read it."
+				}
+			}
+		},
 		"feedbackView": {
 			"type": "object",
 			"description": "A report: a person's account, or a crash folded from every time it was seen.",

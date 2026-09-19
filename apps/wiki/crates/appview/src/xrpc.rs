@@ -243,60 +243,6 @@ pub async fn list_contexts(State(state): State<AppState>, caller: MaybeCaller) -
     }
 }
 
-/// `?limit=<n>` (default 20).
-#[derive(Debug, Deserialize)]
-pub struct RecentParam {
-    #[serde(default)]
-    pub limit: Option<i64>,
-}
-
-/// `com.example.wiki.listRecent`: the newest documents across contexts.
-pub async fn list_recent(
-    State(state): State<AppState>,
-    caller: MaybeCaller,
-    Query(p): Query<RecentParam>,
-) -> Response {
-    let limit = p.limit.unwrap_or(20).clamp(1, 200);
-    let store = crate::Store::new(state.db.clone());
-    match store.list_recent(limit, caller.did()).await {
-        Ok(docs) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "documents": docs })),
-        )
-            .into_response(),
-        Err(e) => {
-            tracing::error!("listRecent failed: {e}");
-            err(StatusCode::BAD_GATEWAY, "InternalError", "read failed")
-        }
-    }
-}
-
-/// `?q=<query>`.
-#[derive(Debug, Deserialize)]
-pub struct SearchParam {
-    pub q: String,
-}
-
-/// `com.example.wiki.search`: documents matching a title/content substring.
-pub async fn search(
-    State(state): State<AppState>,
-    caller: MaybeCaller,
-    Query(p): Query<SearchParam>,
-) -> Response {
-    let store = crate::Store::new(state.db.clone());
-    match store.search_documents(&p.q, caller.did()).await {
-        Ok(docs) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "documents": docs })),
-        )
-            .into_response(),
-        Err(e) => {
-            tracing::error!("search failed: {e}");
-            err(StatusCode::BAD_GATEWAY, "InternalError", "read failed")
-        }
-    }
-}
-
 /// `?on=<id>`.
 #[derive(Debug, Deserialize)]
 pub struct OnParam {
@@ -1392,6 +1338,8 @@ pub(crate) mod tests {
         )
         .await
         .expect("seed reaction");
+        // The fixtures go in as rows, past the writes that keep the index fresh.
+        crate::search::rebuild(&db).await.expect("index");
         AppState::new(db, Config::default())
     }
 
@@ -1579,16 +1527,12 @@ pub(crate) mod tests {
         .await;
         assert_eq!(status, StatusCode::OK);
         assert!(
-            v["documents"]
+            v["hits"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .any(|d| d["id"] == "d1")
         );
-
-        let (status, v) = get(seeded_router().await, "/xrpc/com.example.wiki.listRecent").await;
-        assert_eq!(status, StatusCode::OK);
-        assert!(v["documents"].as_array().unwrap().len() >= 2);
     }
 
     #[tokio::test(flavor = "current_thread")]

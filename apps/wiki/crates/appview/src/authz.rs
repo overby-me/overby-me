@@ -198,6 +198,20 @@ impl Authz {
 
     /// The caller's membership of a context. A pending invitation has no DID
     /// bound yet, so it is nobody's membership.
+    /// Whether `did` owns a site: who the feedback and the admin views are for.
+    pub async fn owns_a_site(&self, did: &str) -> Result<bool, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM member m JOIN context c ON c.id = m.context_id \
+                 WHERE c.kind = 'site' AND c.deleted_at IS NULL \
+                   AND m.user_did = ?1 AND m.role = 'owner' LIMIT 1",
+                [did],
+            )
+            .await?;
+        Ok(rows.next().await?.is_some())
+    }
+
     pub async fn membership(
         &self,
         context_id: &str,

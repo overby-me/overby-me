@@ -146,20 +146,6 @@ fn crash_digest(message: &str) -> String {
     format!("{hash:016x}")
 }
 
-/// Whether `did` owns a site: the people feedback is for.
-async fn owns_a_site(state: &AppState, did: &str) -> Result<bool, DbError> {
-    let conn = state.db.acquire().await?;
-    let mut rows = conn
-        .query(
-            "SELECT 1 FROM member m JOIN context c ON c.id = m.context_id \
-             WHERE c.kind = 'site' AND c.deleted_at IS NULL \
-               AND m.user_did = ?1 AND m.role = 'owner' LIMIT 1",
-            [did],
-        )
-        .await?;
-    Ok(rows.next().await?.is_some())
-}
-
 #[derive(Debug, Deserialize)]
 pub struct SubmitBody {
     #[serde(default)]
@@ -304,7 +290,10 @@ pub struct FeedbackView {
 /// behind every DID named.
 pub async fn list_feedback(State(state): State<AppState>, Caller { did }: Caller) -> Response {
     let what = "listFeedback";
-    let all = match owns_a_site(&state, &did).await {
+    let all = match crate::authz::Authz::new(state.db.clone())
+        .owns_a_site(&did)
+        .await
+    {
         Ok(all) => all,
         Err(e) => return write_failed(what, e),
     };
@@ -385,7 +374,10 @@ pub async fn delete_feedback(
     Json(body): Json<DeleteBody>,
 ) -> Response {
     let what = "deleteFeedback";
-    match owns_a_site(&state, &did).await {
+    match crate::authz::Authz::new(state.db.clone())
+        .owns_a_site(&did)
+        .await
+    {
         Ok(true) => {}
         Ok(false) => return forbidden("only an owner of the site clears feedback away"),
         Err(e) => return write_failed(what, e),

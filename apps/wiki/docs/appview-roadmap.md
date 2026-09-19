@@ -200,8 +200,9 @@ The steps:
   the page and in the listing alike; the profile behind every DID a page names.
   It inherits the interim's weakness: an edit bumps `updated_at`, so correcting
   a submitted motion can change its letter unless the chair has set the order.
-- [ ] The parent reference on a node ("in <parent>"), for the feed rows that
-  quote what they are about.
+- [x] The parent reference on a node ("in <parent>"), for the feed rows that
+  quote what they are about: every feed row and search hit carries it, when the
+  caller may read the parent too.
 - [x] Update, with the interim's edit rule (an author edits a draft, an owner of
   the context edits and arranges anything); reorder and the lock with it.
 - [x] The bin: soft delete of a subtree, restore of exactly what went together,
@@ -212,7 +213,15 @@ The steps:
   of a whole subtree, and of the files its nodes point at: a blob is read
   through its own context, so one left behind would stay readable by the old
   group and not by the new.
-- [ ] Search, the recent feed, contributions, orphans.
+- [x] Search, the recent feed, contributions, orphans
+  (`crates/appview/src/search.rs`, `feed.rs`). Search runs over an index of each
+  document's WORDS, lowercased by Unicode's rules: over the stored Slate JSON
+  every document matched `children` and `type`, and SQLite folds case for ASCII
+  only, so `årsmøde` did not find `Årsmøde`. The index is derived, rebuilt at
+  every start and kept fresh by writes, so the loader need not know of it. A
+  title match is ranked before the cut, not after. The feed is the interim's
+  predicate (submitted content and comments, where the caller belongs) over
+  light rows; the interim's rows each carried their whole document.
 
 ### M4: membership and roster
 

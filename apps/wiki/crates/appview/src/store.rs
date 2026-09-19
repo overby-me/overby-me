@@ -1577,72 +1577,6 @@ impl Store {
         Ok(out)
     }
 
-    /// Documents `caller` may read whose title or content matches `query` (a
-    /// case-insensitive substring), most recent first, capped.
-    pub async fn search_documents(
-        &self,
-        query: &str,
-        caller: Option<&str>,
-    ) -> Result<Vec<Document>, DbError> {
-        let like = format!("%{query}%");
-        let bases = {
-            let conn = self.db.acquire().await?;
-            let mut rows = conn
-                .query(
-                    &format!(
-                        "SELECT {DOC_COLS} FROM document d \
-                         WHERE (d.title LIKE ?1 OR d.content LIKE ?1) AND d.{LIVE} AND {} \
-                         ORDER BY d.created_at DESC LIMIT 50",
-                        readable_document("d", 2)
-                    ),
-                    vec![Value::Text(like), opt_str_val(caller)],
-                )
-                .await?;
-            let mut v = Vec::new();
-            while let Some(row) = rows.next().await? {
-                v.push(doc_base(&row)?);
-            }
-            v
-        };
-        let mut out = Vec::with_capacity(bases.len());
-        for b in bases {
-            out.push(self.hydrate_document(b).await?);
-        }
-        Ok(out)
-    }
-
-    /// The most recently created documents `caller` may read, across all
-    /// contexts (the "newest" feed).
-    pub async fn list_recent(
-        &self,
-        limit: i64,
-        caller: Option<&str>,
-    ) -> Result<Vec<Document>, DbError> {
-        let bases = {
-            let conn = self.db.acquire().await?;
-            let mut rows = conn
-                .query(
-                    &format!(
-                        "SELECT {DOC_COLS} FROM document d WHERE d.{LIVE} AND {} \
-                         ORDER BY d.created_at DESC LIMIT ?2",
-                        readable_document("d", 1)
-                    ),
-                    vec![opt_str_val(caller), Value::Integer(limit)],
-                )
-                .await?;
-            let mut v = Vec::new();
-            while let Some(row) = rows.next().await? {
-                v.push(doc_base(&row)?);
-            }
-            v
-        };
-        let mut out = Vec::with_capacity(bases.len());
-        for b in bases {
-            out.push(self.hydrate_document(b).await?);
-        }
-        Ok(out)
-    }
-
     /// The comments on a node (those whose `on_id` is the node) that `caller`
     /// may read, oldest first. Each carries a DID or free-text author.
     pub async fn get_comments(
@@ -1784,6 +1718,7 @@ impl Store {
             )
             .await?;
         }
+        crate::search::index(conn, id, new.title, new.content).await?;
         Ok(())
     }
 
@@ -1970,6 +1905,9 @@ impl Store {
                 params,
             )
             .await?;
+        if changed > 0 && (patch.title.is_some() || patch.content.is_some()) {
+            crate::search::index_document(&conn, id).await?;
+        }
         Ok(changed > 0)
     }
 
@@ -2132,6 +2070,7 @@ impl Store {
             ],
         )
         .await?;
+        crate::search::index(&conn, uri, name, None).await?;
         Ok(())
     }
 
@@ -2262,6 +2201,9 @@ impl Store {
             ],
         )
         .await?;
+        // A resolution's words are its body, which is not Slate.
+        let words = serde_json::json!({ "text": body }).to_string();
+        crate::search::index(&conn, uri, title, Some(&words)).await?;
         conn.execute("DELETE FROM document_author WHERE document_id = ?1", [uri])
             .await?;
         conn.execute(

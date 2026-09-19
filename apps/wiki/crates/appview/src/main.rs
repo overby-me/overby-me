@@ -42,6 +42,15 @@ async fn main() {
         }
     };
     appview::blob::sweep_incoming(&config).await;
+    // In the background: a search in the first seconds finds what is indexed so
+    // far, which beats nothing answering until it all is.
+    let to_index = db.clone();
+    tokio::spawn(async move {
+        match appview::search::rebuild(&to_index).await {
+            Ok(nodes) => tracing::info!("search index rebuilt over {nodes} nodes"),
+            Err(e) => tracing::error!("search index rebuild failed: {e}"),
+        }
+    });
     // Fatal, like the OAuth client: a board that is configured to be replicated
     // and is not is the integrity control silently off.
     let replica = match appview::ballot::open_replica(&config.ballot_replica_log) {

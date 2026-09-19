@@ -11,6 +11,7 @@ pub mod ballot;
 pub mod blob;
 pub mod config;
 pub mod db;
+pub mod feed;
 pub mod feedback;
 pub mod firehose;
 pub mod http;
@@ -24,6 +25,7 @@ pub mod projector;
 pub mod push;
 pub mod roster;
 pub mod schema;
+pub mod search;
 pub mod session;
 pub mod share;
 pub mod slug;
@@ -175,8 +177,16 @@ fn build_router(state: AppState) -> Router {
             "/xrpc/com.example.wiki.listContexts",
             get(xrpc::list_contexts),
         )
-        .route("/xrpc/com.example.wiki.listRecent", get(xrpc::list_recent))
-        .route("/xrpc/com.example.wiki.search", get(xrpc::search))
+        .route("/xrpc/com.example.wiki.listRecent", get(feed::list_recent))
+        .route(
+            "/xrpc/com.example.wiki.listContributions",
+            get(feed::list_contributions),
+        )
+        .route(
+            "/xrpc/com.example.wiki.listOrphans",
+            get(feed::list_orphans),
+        )
+        .route("/xrpc/com.example.wiki.search", get(search::search))
         .route(
             "/xrpc/com.example.wiki.getComments",
             get(xrpc::get_comments),
