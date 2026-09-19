@@ -10,16 +10,16 @@
 }:
 rustPlatform.buildRustPackage rec {
   pname = "rcgen";
-  version = "0.14.3";
+  version = "0.14.10";
 
   src = fetchFromGitHub {
     owner = "rustls";
     repo = "rcgen";
     rev = "v${version}";
-    hash = "sha256-MtzOR7NIXZhGwmGdMvvI8zhKoqRTyiLaS+bIkD4wpeY=";
+    hash = "sha256-MmSgpXaeQewtUJ26o/jChZvvXWuyKSSZrQwpBxWX358=";
   };
 
-  cargoHash = "sha256-hh328dPgbRJuy/YDZ/TBI807qmJ6qdiwnUn0Ols0BFo=";
+  cargoHash = "sha256-FILFyPOaCsXYtUiTs/UVNnd2DEgs1QTPUYOcUXxIfOQ=";
 
   nativeBuildInputs = [
     pkg-config

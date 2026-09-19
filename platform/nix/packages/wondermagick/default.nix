@@ -5,19 +5,19 @@
 }:
 rustPlatform.buildRustPackage {
   pname = "wondermagick";
-  version = "unstable-2025-09-23";
+  version = "unstable-2026-06-19";
 
   src = fetchFromGitHub {
     owner = "Shnatsel";
     repo = "wondermagick";
-    rev = "5c479865e4442afa283521b712a70693d358fba9";
-    hash = "sha256-sfUcHHo/0BKdHTW10OiOORdnYtuHwmMXUmBCkmsDrEQ=";
+    rev = "dfdf8a91b58269a5813a915e976a960d6815e0c5";
+    hash = "sha256-2aupa8J5X0toyXbiU+1t8CT7O/tRFKhnwjAKvOaMUTU=";
   };
 
   cargoLock = {
     lockFile = ./Cargo.lock;
     outputHashes = {
-      "image-0.25.7" = "sha256-NUjB59QjNMSQ8DGz1Yp+u/HVtTtEd9C+ZSZZrDGzaCk=";
+      "image-0.25.9" = "sha256-7/ETMkDGaFQpFyhRvhAQuHovRg3ig7JdBW3zQM25RUs=";
     };
   };
 

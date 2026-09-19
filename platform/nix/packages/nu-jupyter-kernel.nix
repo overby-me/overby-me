@@ -9,16 +9,16 @@
 }: let
   nu-jupyter-kernel = rustPlatform.buildRustPackage rec {
     pname = "nu-jupyter-kernel";
-    version = "0.1.14+0.110.0";
+    version = "0.1.15+0.111.0";
 
     src = fetchFromGitHub {
       owner = "cptpiepmatz";
       repo = "nu-jupyter-kernel";
       rev = "nu-jupyter-kernel/v${version}";
-      hash = "sha256-D56tUCFe4jedjOHLRY2fBi3bMgwPECkwJWRnQSW/NeU=";
+      hash = "sha256-hBMmIJYRUs5fDPLYxVhfpiQHShZV4uj/o+DRuQsCIjk=";
     };
 
-    cargoHash = "sha256-ZqTleo/ql8KY2UV8/xglRbO1KJhfXtdyvksguT2xOaM=";
+    cargoHash = "sha256-GLCK345ADX0YRBpdy0FLonow/9CM2/g/fIJO/lOX3r8=";
 
     nativeBuildInputs = [
       pkg-config

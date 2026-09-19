@@ -10,18 +10,18 @@
 }:
 rustPlatform.buildRustPackage {
   pname = "cosmic-ext-quake-terminal";
-  version = "0.1.0-unstable-2026-02-13";
+  version = "0.1.0-unstable-2026-07-16";
 
   src = fetchFromGitHub {
     owner = "M0Rf30";
     repo = "cosmic-ext-quake-terminal";
-    rev = "3852de8c453d5c8c6f56130bb9ac1b5a84890c68";
-    hash = "sha256-vsS3GATIVXzBiWgdzZfWXUcuV/zuuj5T1u+qntd0/Kg=";
+    rev = "62df0232b4b4505e84c8e6a8f4a4cb545aff308e";
+    hash = "sha256-UJ65rhpvu+4KcpFTI8f12OdVwBH+Mrl5SaIALmABmcI=";
   };
 
   patches = [./toggle-fix.patch ./wezterm-class-fix.patch];
 
-  cargoHash = "sha256-846q7q1Rt2z5qkGK1+IHazzuvR8i8IeU0vK/cWn2vwI=";
+  cargoHash = "sha256-ZZBWk6IYiUjmWxnDZ/SeHqOqxzyd5LE/nWtNa6N58eU=";
 
   nativeBuildInputs = [
     just

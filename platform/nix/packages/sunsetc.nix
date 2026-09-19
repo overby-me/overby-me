@@ -5,16 +5,16 @@
 }:
 rustPlatform.buildRustPackage rec {
   pname = "sunsetc";
-  version = "0.3.0";
+  version = "0.6.0";
 
   src = fetchFromGitHub {
     owner = "mkj";
     repo = "sunset";
     rev = "sunset-${version}";
-    hash = "sha256-EMuxu6ELhrdRT34CQSeYQVvmreD40ZTmwbbpUIeLzZg=";
+    hash = "sha256-It4pDdzfzY1mFTkayOnqPoYN0dBHsF6iCFl4i7lxN40=";
   };
 
-  cargoHash = "sha256-Wr663dve1d+wz5eP39IOFxdvUuHjdpp3gI2JNZa2ggM=";
+  cargoHash = "sha256-RXpVghgpkrtsFueIcjL/mRWal8DadpR9XrJ/g68XayI=";
 
   cargoBuildFlags = ["--example" "sunsetc" "-p" "sunset-stdasync"];
 

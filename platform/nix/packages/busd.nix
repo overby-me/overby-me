@@ -5,16 +5,16 @@
 }:
 rustPlatform.buildRustPackage rec {
   pname = "busd";
-  version = "0.4.0";
+  version = "0.5.0";
 
   src = fetchFromGitHub {
     owner = "dbus2";
     repo = "busd";
     rev = version;
-    hash = "sha256-y603js+NxqD+SqPA3W+SNCX93exgcEM5g8yZb0wwtw8=";
+    hash = "sha256-oEmeFD5UfBq06KmQPOfd2IToD4yF54574Q1L7usJTg0=";
   };
 
-  cargoHash = "sha256-61gmyFTyS2644TbD9goCgcDDVJpvPKhwDXU/mwNW+60=";
+  cargoHash = "sha256-m/ZffZYHu536fjoJknU5P6AFawzFyQ4V7nDYU2kz2ss=";
 
   meta = {
     description = "A D-Bus bus (broker) implementation based on zbus";

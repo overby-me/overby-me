@@ -252,7 +252,6 @@ Third-party software packaged under `platform/nix/packages/`, grouped by theme.
 | [IronClaw 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/ironclaw.nix) | [IronClaw](https://www.ironclaw.com) | OpenClaw-inspired secure personal AI assistant |
 | [Microcosm-rs 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/microcosm-rs) | [Microcosm](https://microcosm.blue) | AT Protocol crates and services for Microcosm |
 | [Perch 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/perch.nix) | [Perch](https://perch.ricardodantas.me/) | AT Protocol social client |
-| [Pi Agent 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/pi-agent-rust.nix) | [pi_agent_rust](https://github.com/Dicklesworthstone/pi_agent_rust) | High-performance AI coding agent CLI written in Rust |
 
 <a id="desktop--media"></a>
 
@@ -277,13 +276,11 @@ Third-party software packaged under `platform/nix/packages/`, grouped by theme.
 |-|-|-|
 | [Datui 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/datui.nix) | [GitHub](https://github.com/derekwisong/datui) | Data exploration in the terminal |
 | [Deno-jupyter-kernel 🐒](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/deno-jupyter-kernel.nix) | [Deno Docs](https://docs.deno.com/runtime/reference/cli/jupyter/) | Jupyter Notebook kernel for Deno |
-| [Envy 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/envy.nix) | [GitHub](https://github.com/mre/envy) | Environment variable loader |
 | [Mojo 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/mojo.nix) | [Modular](https://www.modular.com/mojo) | Mojo development toolchain |
 | [Mojo-jupyter-kernel 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/mojo-jupyter-kernel.nix) | [Modular](https://www.modular.com/mojo) | Jupyter Notebook kernel for Mojo |
 | [Nu-jupyter-kernel 🦪](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/nu-jupyter-kernel.nix) | [GitHub](https://github.com/cptpiepmatz/nu-jupyter-kernel) | Jupyter Notebook kernel for Nushell |
 | [Rcgen 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/rcgen.nix) | [GitHub](https://github.com/rustls/rcgen) | X.509 certificate generator |
 | [Rust-jupyter-kernel 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/rust-jupyter-kernel.nix) | [GitHub](https://github.com/evcxr/evcxr) | Jupyter Notebook kernel for Rust |
-| [Sidecar 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/sidecar/default.nix) | [GitHub](https://github.com/runtimed/runtimed/) | Jupyter Notebook viewer |
 | [Tree-sitter-mojo 🔥](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/tree-sitter-mojo) | [GitHub](https://github.com/oaustegard/tree-sitter-mojo) | Mojo grammar ast-grep loads, patched to parse this tree's corpus |
 
 <a id="system--security"></a>
