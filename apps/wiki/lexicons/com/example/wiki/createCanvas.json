@@ -44,10 +44,14 @@
 				"encoding": "application/json",
 				"schema": {
 					"type": "object",
-					"required": ["id"],
+					"required": ["id", "path"],
 					"properties": {
 						"id": {
 							"type": "string"
+						},
+						"path": {
+							"type": "string",
+							"description": "Where it is, so a screen that has just made it can go straight there."
 						}
 					}
 				}

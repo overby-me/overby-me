@@ -82,7 +82,7 @@ pub async fn share_to_bluesky(
         text,
         url,
         body.title.as_deref().unwrap_or_default(),
-        &crate::util::rfc3339_utc(crate::util::now_secs()),
+        &crate::util::now_stamp(),
     );
     match oauth
         .create_record(&did, "app.bsky.feed.post", record)

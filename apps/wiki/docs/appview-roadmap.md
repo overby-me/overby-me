@@ -477,9 +477,28 @@ asks Bluesky's public API itself. The steps:
   plan had missed: no way to start a group, reactions nobody gated, the canvas,
   and the people pickers. All four are built; nothing in the table is left
   without an answer.
+- [x] A typed client for the AppView (`crates/appview-client`), generated from
+  the lexicons by `crates/lexgen`, and contract tests that drive the real
+  router with it over HTTP, refusing any field no lexicon names. All 83
+  methods are called; a lexicon added without a call fails the tests. Writing
+  it found what the frontend would have tripped over: `createDocument` and
+  `createCanvas` answered with an id and not with where the new node is, which
+  a screen that has just made a page navigates by; `listChildren` had no light
+  rows of both kinds for the drawer to expand by; a reaction was stamped to the
+  second and so sorted ahead of the comment it was to; and clearing the
+  projector took a `null` that a typed client had no way to say.
 - [ ] An AppView client behind `src/model.rs`, replacing `src/graphql/*` and
   `src/nhost.rs`; the session module on AppView tokens. Written from that
-  table.
+  table. The approach: the components call the data layer as `graphql::*` and
+  read `model::*`, so the client is a second implementation of that same
+  surface (105 functions, types and constants, listed by
+  `grep -rhoE "graphql::[a-zA-Z_]+" src`), chosen by a cargo feature that
+  switches which file the `graphql` module is. The default build, which is what
+  `main` ships, is untouched by it. A live query there is "refetch when
+  anything matching this changes", which is what a `/ws` topic is, so `Wire`
+  and its builders keep their names and become topics. Signing in is the one
+  part that cannot hide behind the seam: a password form becomes a handle and a
+  redirect.
 - [x] The extractor and the load cover every kind the interim holds: the tree,
   members, comments, reactions, what each poll came to, canvases with their
   cells, reports, which contexts are open to everyone, and the address each

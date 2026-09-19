@@ -1,0 +1,26 @@
+[package]
+name = "appview-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# No TLS of its own: in a browser the fetch API does it, and on a host the
+# caller's build decides (the contract tests speak plain HTTP to a local port).
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+appview = { path = "../appview" }
+# Itself, with `strict` on: the tests are where an unknown field must fail.
+appview-client = { path = ".", features = ["strict"] }
+axum = "0.8"
+ballot-spec = { path = "../ballot-spec" }
+base64 = "0.22"
+lexgen = { path = "../lexgen" }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+
+[features]
+# Refuse a field the lexicons do not name. For the contract tests: a client in
+# a browser must keep working when the server learns to say more.
+strict = []

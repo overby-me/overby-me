@@ -40,7 +40,7 @@
 							"description": "Live children the caller may read, contexts and documents in one list, by `idx` and then age.",
 							"items": {
 								"type": "ref",
-								"ref": "#childView"
+								"ref": "com.example.wiki.defs#childView"
 							}
 						},
 						"crumbs": {
@@ -72,75 +72,6 @@
 					"description": "Neither `path` nor `id` was given, or both were."
 				}
 			]
-		},
-		"childView": {
-			"type": "object",
-			"description": "A child as a folder view and the drawer need it: the same fields whichever table it lives in, and no content.",
-			"required": [
-				"node",
-				"id",
-				"kind",
-				"name",
-				"slug",
-				"path",
-				"idx",
-				"mutable",
-				"attachable",
-				"child_count"
-			],
-			"properties": {
-				"node": {
-					"type": "string",
-					"enum": ["context", "document"]
-				},
-				"id": {
-					"type": "string"
-				},
-				"kind": {
-					"type": "string"
-				},
-				"name": {
-					"type": "string"
-				},
-				"slug": {
-					"type": "string"
-				},
-				"path": {
-					"type": "string"
-				},
-				"idx": {
-					"type": "integer"
-				},
-				"mutable": {
-					"type": "boolean",
-					"description": "Always false for a context, which is locked from the day it is made."
-				},
-				"attachable": {
-					"type": "boolean"
-				},
-				"owner_did": {
-					"type": "string",
-					"format": "did"
-				},
-				"created_at": {
-					"type": "string"
-				},
-				"data": {
-					"type": "unknown",
-					"description": "A file's id and type, a cover image: what a row needs to draw itself."
-				},
-				"child_count": {
-					"type": "integer",
-					"description": "Live children, so the drawer offers to expand only what has some."
-				},
-				"updated_at": {
-					"type": "string"
-				},
-				"ordinal": {
-					"type": "integer",
-					"description": "As the node's own `ordinal`: present on a submitted document only."
-				}
-			}
 		},
 		"crumbView": {
 			"type": "object",

@@ -1818,7 +1818,10 @@ impl Store {
     ///
     /// The slug is found inside one write transaction, so two members naming a
     /// document the same thing at once get `name` and `name-2`, not an error.
-    pub async fn create_document(&self, new: &NewDocument<'_>) -> Result<String, WriteError> {
+    pub async fn create_document(
+        &self,
+        new: &NewDocument<'_>,
+    ) -> Result<(String, String), WriteError> {
         let id = format!("d-{}", crate::util::random_token(16));
         let parent_id = new.parent_id.unwrap_or(new.context_id);
         let conn = self.db.acquire().await?;
@@ -1833,18 +1836,19 @@ impl Store {
             (),
         )
         .await?;
-        written.map(|()| id)
+        written.map(|path| (id, path))
     }
 
     /// The insert of [`Self::create_document`], for a caller that has more to
-    /// write in the same transaction, which it must already have begun.
+    /// write in the same transaction, which it must already have begun. Returns
+    /// the path it was given, which says its slug too.
     pub(crate) async fn insert_document(
         &self,
         conn: &turso::Connection,
         id: &str,
         parent_id: &str,
         new: &NewDocument<'_>,
-    ) -> Result<(), WriteError> {
+    ) -> Result<String, WriteError> {
         let parent = self
             .parent(conn, parent_id)
             .await?
@@ -1872,7 +1876,7 @@ impl Store {
                 Value::Text(new.kind.to_string()),
                 Value::Text(new.title.to_string()),
                 Value::Text(slug),
-                Value::Text(path),
+                Value::Text(path.clone()),
                 Value::Text(new.author_did.to_string()),
                 opt_str_val(new.content),
                 opt_str_val(new.data),
@@ -1887,7 +1891,7 @@ impl Store {
             .await?;
         }
         crate::search::index(conn, id, new.title, new.content).await?;
-        Ok(())
+        Ok(path)
     }
 
     /// Move a live document, and everything under it, to a new parent. Returns
@@ -2464,7 +2468,7 @@ impl Store {
         emoji: &str,
     ) -> Result<String, DbError> {
         let id = format!("r-{}", crate::util::random_token(16));
-        let now = crate::util::rfc3339_utc(crate::util::now_secs());
+        let now = crate::util::now_stamp();
         self.upsert_reaction(&id, subject_uri, reactor_did, emoji, &now)
             .await?;
         Ok(id)

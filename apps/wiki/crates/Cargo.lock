@@ -165,6 +165,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "appview-client"
+version = "0.1.0"
+dependencies = [
+ "appview",
+ "appview-client",
+ "axum",
+ "ballot-spec",
+ "base64",
+ "lexgen",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2421,6 +2437,13 @@ name = "levenshtein_automata"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2cdeb66e45e9f36bfad5bbdb4d2384e70936afbee843c6f6543f0c551ebb25"
+
+[[package]]
+name = "lexgen"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "libc"

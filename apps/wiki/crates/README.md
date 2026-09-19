@@ -42,6 +42,13 @@ workspace when the rewrite starts.
 - `ballot-store`: the durable half of the ballot scheme: every poll's public
   board in one store, with its kill-9-proven atomic cast and a seal that ends
   it; the private roster DDL; and the off-node replica log.
+- `lexgen` and `appview-client`: a typed client for the AppView, GENERATED from
+  the lexicons (`cargo run -p lexgen`), and the contract tests that run it
+  against the real router over HTTP with unknown fields refused. That holds
+  the three to one another: what the server sends and no lexicon names fails
+  there, as does what a lexicon promises and the server does not send, and a
+  lexicon added without a call in the tests. The frontend's data layer is to
+  be written over this client.
 - `appview`: the backend itself. `docs/appview-roadmap.md` says what it does
   today and what is left.
 

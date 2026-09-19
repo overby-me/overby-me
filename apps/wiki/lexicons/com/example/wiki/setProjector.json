@@ -10,6 +10,7 @@
 				"schema": {
 					"type": "object",
 					"required": ["context_id"],
+					"nullable": ["active_id", "focus"],
 					"properties": {
 						"context_id": {
 							"type": "string"

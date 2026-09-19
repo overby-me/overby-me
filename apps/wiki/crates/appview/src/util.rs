@@ -53,6 +53,18 @@ pub fn rfc3339_utc(secs: u64) -> String {
     format!("{year:04}-{month:02}-{day:02}T{hh:02}:{mm:02}:{ss:02}.000Z")
 }
 
+/// The present, to the millisecond, as the database's own `strftime` default
+/// writes it. A row stamped to the second sorts before one the database stamped
+/// earlier in that same second, which put a reaction ahead of the comment it
+/// was to.
+pub fn now_stamp() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let whole = rfc3339_utc(now.as_secs());
+    format!("{}{:03}Z", &whole[..whole.len() - 4], now.subsec_millis())
+}
+
 /// Percent-decode one `application/x-www-form-urlencoded` component.
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -148,6 +160,13 @@ pub fn parse_query(query: Option<&str>) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_present_is_stamped_to_the_millisecond() {
+        let stamp = now_stamp();
+        assert_eq!(stamp.len(), "2026-05-01T18:30:00.123Z".len(), "{stamp}");
+        assert_eq!(stored_timestamp(&stamp).as_deref(), Some(stamp.as_str()));
+    }
 
     #[test]
     fn a_date_is_stored_as_every_timestamp_is() {

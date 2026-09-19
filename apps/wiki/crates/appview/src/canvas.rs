@@ -199,7 +199,7 @@ pub async fn create_canvas(
         let _turn = state.db.write_turn().await;
         let conn = state.db.acquire().await?;
         conn.execute("BEGIN IMMEDIATE", ()).await?;
-        let written: Result<(), WriteError> = async {
+        let written: Result<String, WriteError> = async {
             let new = NewDocument {
                 context_id: &parent.context_id,
                 parent_id: Some(&body.parent_id),
@@ -210,7 +210,7 @@ pub async fn create_canvas(
                 author_did: &did,
                 credited: false,
             };
-            store
+            let path = store
                 .insert_document(&conn, &id, &body.parent_id, &new)
                 .await?;
             conn.execute(
@@ -223,7 +223,7 @@ pub async fn create_canvas(
                 ],
             )
             .await?;
-            Ok(())
+            Ok(path)
         }
         .await;
         conn.execute(
@@ -238,9 +238,13 @@ pub async fn create_canvas(
         written
     };
     match created.await {
-        Ok(()) => {
+        Ok(path) => {
             state.publish(Topic::Context(parent.context_id.clone()), "node", &id);
-            (StatusCode::OK, Json(serde_json::json!({ "id": id }))).into_response()
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "id": id, "path": path })),
+            )
+                .into_response()
         }
         Err(WriteError::Db(e)) => write_failed(what, e),
         Err(refused) => invalid(&refused.to_string()),
@@ -258,8 +262,9 @@ pub struct GetCanvasParams {
 }
 
 /// `com.example.wiki.getCanvas`: a canvas and its painted cells, or with `since`
-/// only those painted after it. Cells are rows of `[x, y, colour, painter]`,
-/// where `painter` indexes `painters`: a thousand cells are a handful of people.
+/// only those painted after it. Cells are rows of
+/// `[x, y, colour, painter, painted_at]`, where `painter` indexes `painters`: a
+/// thousand cells are a handful of people.
 pub async fn get_canvas(
     State(state): State<AppState>,
     caller: MaybeCaller,

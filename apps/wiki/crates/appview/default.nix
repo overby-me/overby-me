@@ -26,11 +26,13 @@
           ./../Cargo.toml
           ./../Cargo.lock
           ./../appview
+          ./../appview-client
           ./../ballot-spec
           ./../ballot-store
           ./../dagcbor-spike
           ./../domain-types
           ./../durability-harness
+          ./../lexgen
           ./../migration-extractor
           ./../migration-loader
           ./../oauth-spike

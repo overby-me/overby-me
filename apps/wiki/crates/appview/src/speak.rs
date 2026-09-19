@@ -410,7 +410,7 @@ pub async fn list_speaker_lists(
         Ok(profiles) => profiles,
         Err(e) => return write_failed(what, e),
     };
-    let now = crate::util::rfc3339_utc(crate::util::now_secs());
+    let now = crate::util::now_stamp();
     (
         StatusCode::OK,
         Json(serde_json::json!({ "lists": lists, "profiles": profiles, "now": now })),

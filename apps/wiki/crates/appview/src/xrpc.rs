@@ -224,17 +224,25 @@ pub struct ParentParam {
     pub parent: String,
 }
 
-/// `com.example.wiki.listChildren`: the child documents under a node.
+/// `com.example.wiki.listChildren`: what is under a node. `children` is every
+/// child of either kind as a light row, which is what a drawer expands by;
+/// `documents` is the child documents whole, for a page that shows what its
+/// children say (a resolution's amendments, a position's candidates).
 pub async fn list_children(
     State(state): State<AppState>,
     caller: MaybeCaller,
     Query(p): Query<ParentParam>,
 ) -> Response {
     let store = crate::Store::new(state.db.clone());
-    match store.list_children(&p.parent, caller.did()).await {
-        Ok(docs) => (
+    let listed = async {
+        let documents = store.list_children(&p.parent, caller.did()).await?;
+        let children = store.children(&p.parent, caller.did()).await?;
+        Ok::<_, crate::DbError>((documents, children))
+    };
+    match listed.await {
+        Ok((documents, children)) => (
             StatusCode::OK,
-            Json(serde_json::json!({ "documents": docs })),
+            Json(serde_json::json!({ "documents": documents, "children": children })),
         )
             .into_response(),
         Err(e) => {
@@ -944,9 +952,16 @@ pub async fn create_document(
         credited: true,
     };
     match store.create_document(&new).await {
-        Ok(id) => {
+        Ok((id, path)) => {
             state.publish(Topic::Context(body.context_id.clone()), "node", &id);
-            wrote(id)
+            // With where it landed: the name was taken to make the slug, and a
+            // screen that has just made a page goes straight to it.
+            let slug = path.rsplit('/').next().unwrap_or_default();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "id": id, "slug": slug, "path": path })),
+            )
+                .into_response()
         }
         Err(crate::store::WriteError::Db(e)) => write_failed("createDocument", e),
         Err(refused) => err(

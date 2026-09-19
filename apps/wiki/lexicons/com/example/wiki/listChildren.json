@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "List the child documents directly under a node. Serves only what the caller may read.",
+			"description": "What is directly under a node. `children` is every child of either kind as a light row, which is what a drawer expands by; `documents` is the child documents whole, for a page that shows what its children say (a resolution's amendments, a position's candidates). Serves only what the caller may read.",
 			"parameters": {
 				"type": "params",
 				"required": ["parent"],
@@ -16,13 +16,20 @@
 				"encoding": "application/json",
 				"schema": {
 					"type": "object",
-					"required": ["documents"],
+					"required": ["documents", "children"],
 					"properties": {
 						"documents": {
 							"type": "array",
 							"items": {
 								"type": "ref",
 								"ref": "com.example.wiki.defs#documentView"
+							}
+						},
+						"children": {
+							"type": "array",
+							"items": {
+								"type": "ref",
+								"ref": "com.example.wiki.defs#childView"
 							}
 						}
 					}

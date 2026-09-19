@@ -137,6 +137,12 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   account over by signing in with the address it was registered under, and everyone else is handed
   that one seat by link.
 
+These files are not only documentation. `crates/appview-client` is generated from them, and its
+contract tests call every method on the real router with a client that refuses any field a lexicon
+does not name, so a lexicon that has drifted from the server fails `cargo test`. After changing one,
+run `cargo run -p lexgen` in `crates/`. A field that `null` clears, where leaving it out leaves it
+alone, is listed under its object's `nullable`.
+
 Two routes are plain HTTP and have no lexicon: `GET /blob/<id>` (above), and `POST /log`, which takes
 the frontend's batched log entries with no session, resolves the wasm frames in their stacks and
 forwards them to the log sink with a token the browser never sees.
