@@ -168,6 +168,22 @@ fn build_router(state: AppState) -> Router {
             post(xrpc::create_document),
         )
         .route(
+            "/xrpc/com.example.wiki.updateDocument",
+            post(xrpc::update_document),
+        )
+        .route(
+            "/xrpc/com.example.wiki.deleteDocument",
+            post(xrpc::delete_document),
+        )
+        .route(
+            "/xrpc/com.example.wiki.restoreDocument",
+            post(xrpc::restore_document),
+        )
+        .route(
+            "/xrpc/com.example.wiki.listDeleted",
+            get(xrpc::list_deleted),
+        )
+        .route(
             "/xrpc/com.example.wiki.postComment",
             post(xrpc::post_comment),
         )

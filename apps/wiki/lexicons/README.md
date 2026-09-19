@@ -72,6 +72,10 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
 - `createDocument` and `postComment` return `{ id }` and need membership of the context written to;
   `addReaction` returns `{ id }` (idempotent) and `removeReaction` returns `{ ok: true }` (idempotent
   toggle-off).
+- `updateDocument` changes a document (never its slug); `deleteDocument` puts it and its subtree in
+  the bin, `restoreDocument` brings back exactly what went together, and `listDeleted` (a query) is
+  the bin of a context. Who may do which is the interim's rule: an author edits a draft, an owner of
+  the context edits and arranges anything.
 - `claimMembership` binds a pending invitation to the caller by its claim token, and
   `getMemberClaimLink` (a query) gives an active owner the token to hand out.
 

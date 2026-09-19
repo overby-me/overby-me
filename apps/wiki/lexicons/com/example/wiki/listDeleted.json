@@ -1,0 +1,47 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.listDeleted",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "The bin of a context, newest first: each document that was deleted, but not the ones that only went along with a parent, which come back with it. An owner of the context sees all of it; anyone else sees what they created.",
+			"parameters": {
+				"type": "params",
+				"required": ["context"],
+				"properties": {
+					"context": { "type": "string", "description": "The context id." }
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["deleted"],
+					"properties": {
+						"deleted": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"required": ["id", "kind", "title", "path", "deleted_at"],
+								"properties": {
+									"id": { "type": "string" },
+									"kind": { "type": "string" },
+									"title": { "type": "string" },
+									"path": { "type": "string" },
+									"owner_did": { "type": "string", "format": "did" },
+									"deleted_at": { "type": "string" }
+								}
+							}
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				}
+			]
+		}
+	}
+}

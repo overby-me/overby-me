@@ -50,6 +50,7 @@ CREATE TABLE context (
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
   deleted_at    TEXT,
+  deleted_root  TEXT,
   legacy_id     TEXT UNIQUE
 );
 -- Live rows only: a node in the bin does not hold its URL hostage.
@@ -77,6 +78,7 @@ CREATE TABLE document (
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
   deleted_at    TEXT,
+  deleted_root  TEXT,
   legacy_id     TEXT UNIQUE
 );
 CREATE UNIQUE INDEX document_path_live ON document(path) WHERE deleted_at IS NULL;

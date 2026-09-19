@@ -105,6 +105,11 @@ pub struct Place {
     pub updated_at: Option<String>,
     /// Set while the node is in the bin.
     pub deleted_at: Option<String>,
+    /// The node whose deletion took this one to the bin: itself, or an ancestor.
+    /// A restore brings back exactly the rows that share one, so it never digs
+    /// up what was deleted earlier from inside the same folder.
+    #[serde(default)]
+    pub deleted_root: Option<String>,
 }
 
 fn yes() -> bool {

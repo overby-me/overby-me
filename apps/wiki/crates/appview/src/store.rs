@@ -40,7 +40,8 @@ fn parse_enum<T: serde::de::DeserializeOwned>(s: &str) -> Option<T> {
 /// They end each column list, so the same reader serves both tables.
 macro_rules! place_cols {
     () => {
-        "slug, path, parent_id, idx, attachable, owner_did, created_at, updated_at, deleted_at"
+        "slug, path, parent_id, idx, attachable, owner_did, created_at, updated_at, deleted_at, \
+         deleted_root"
     };
 }
 /// The `document` columns the read side selects (order matches [`doc_base`]).
@@ -54,6 +55,10 @@ const CTX_COLS: &str = concat!("id, kind, name, visibility, published_uri, ", pl
 /// A row is live unless it is in the bin. Every read but the bin's own asks.
 const LIVE: &str = "deleted_at IS NULL";
 
+/// The node whose path is `?2` and everything under it. Not `LIKE`: a slug is
+/// full of underscores, and to `LIKE` an underscore is a wildcard.
+const SUBTREE: &str = "(path = ?2 OR substr(path, 1, length(?2) + 1) = ?2 || '/')";
+
 fn place_at(row: &turso::Row, first: usize) -> Result<Place, DbError> {
     Ok(Place {
         slug: row.get::<String>(first)?,
@@ -65,6 +70,7 @@ fn place_at(row: &turso::Row, first: usize) -> Result<Place, DbError> {
         created_at: opt_text(row, first + 6),
         updated_at: opt_text(row, first + 7),
         deleted_at: opt_text(row, first + 8),
+        deleted_root: opt_text(row, first + 9),
     })
 }
 
@@ -177,6 +183,40 @@ pub struct NewDocument<'a> {
     pub author_did: &'a str,
 }
 
+/// What a change to a document may set. `None` leaves a field as it is. The
+/// slug is not among them: a rename keeps the URL people have linked to.
+#[derive(Debug, Default)]
+pub struct DocumentPatch<'a> {
+    pub title: Option<&'a str>,
+    pub content: Option<&'a str>,
+    pub data: Option<&'a str>,
+    pub mutable: Option<bool>,
+    pub attachable: Option<bool>,
+    pub idx: Option<i64>,
+}
+
+/// What authorizing a change to a document needs to know about it.
+pub struct DocumentMeta {
+    pub context_id: String,
+    pub owner_did: Option<String>,
+    pub mutable: bool,
+    pub path: String,
+    pub parent_id: Option<String>,
+    /// Whether it is in the bin.
+    pub binned: bool,
+}
+
+/// A row of the bin: the root of a subtree that was deleted together.
+#[derive(Debug, serde::Serialize)]
+pub struct Binned {
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub path: String,
+    pub owner_did: Option<String>,
+    pub deleted_at: String,
+}
+
 /// Why a write was refused, as distinct from failing.
 #[derive(Debug)]
 pub enum WriteError {
@@ -186,6 +226,8 @@ pub enum WriteError {
     /// The parent is in another context. A member of one context could otherwise
     /// hang a document off another's tree.
     ParentElsewhere,
+    /// A live node has taken the path a restore would put this one back at.
+    PathTaken,
 }
 
 impl std::fmt::Display for WriteError {
@@ -194,6 +236,7 @@ impl std::fmt::Display for WriteError {
             WriteError::Db(e) => write!(f, "{e}"),
             WriteError::NoSuchParent => write!(f, "no such parent"),
             WriteError::ParentElsewhere => write!(f, "parent is not in that context"),
+            WriteError::PathTaken => write!(f, "another node now has that path"),
         }
     }
 }
@@ -1034,6 +1077,177 @@ impl Store {
         )
         .await?;
         Ok(())
+    }
+
+    /// A document's authorization facts, whether or not it is in the bin.
+    /// Ungated: it answers a write check, and says nothing to the caller.
+    pub async fn document_meta(&self, id: &str) -> Result<Option<DocumentMeta>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT context_id, owner_did, mutable, path, parent_id, deleted_at IS NOT NULL \
+                 FROM document WHERE id = ?1",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(DocumentMeta {
+            context_id: row.get::<String>(0)?,
+            owner_did: opt_text(&row, 1),
+            mutable: row.get::<i64>(2)? != 0,
+            path: row.get::<String>(3)?,
+            parent_id: opt_text(&row, 4),
+            binned: row.get::<i64>(5)? != 0,
+        }))
+    }
+
+    /// The bin of a context: each document that was deleted, but not the ones
+    /// that only went along with a parent, which come back with it. `owner`
+    /// narrows it to what one person created.
+    pub async fn list_binned(
+        &self,
+        context_id: &str,
+        owner: Option<&str>,
+    ) -> Result<Vec<Binned>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT d.id, d.kind, d.title, d.path, d.owner_did, d.deleted_at \
+                 FROM document d \
+                 WHERE d.context_id = ?1 AND d.deleted_at IS NOT NULL \
+                   AND (?2 IS NULL OR d.owner_did = ?2) \
+                   AND d.deleted_root = d.id \
+                 ORDER BY d.deleted_at DESC",
+                vec![Value::Text(context_id.to_string()), opt_str_val(owner)],
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(Binned {
+                id: row.get::<String>(0)?,
+                kind: row.get::<String>(1)?,
+                title: row.get::<String>(2)?,
+                path: row.get::<String>(3)?,
+                owner_did: opt_text(&row, 4),
+                deleted_at: row.get::<String>(5)?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Apply `patch` to a live document. Returns whether there was one.
+    pub async fn update_document(
+        &self,
+        id: &str,
+        patch: &DocumentPatch<'_>,
+    ) -> Result<bool, DbError> {
+        let mut sets = Vec::new();
+        let mut params = Vec::new();
+        let mut set = |column: &'static str, value: Value| {
+            params.push(value);
+            sets.push(format!("{column} = ?{}", params.len()));
+        };
+        let flag = |b: bool| Value::Integer(i64::from(b));
+        if let Some(title) = patch.title {
+            set("title", Value::Text(title.to_string()));
+        }
+        if let Some(content) = patch.content {
+            set("content", Value::Text(content.to_string()));
+        }
+        if let Some(data) = patch.data {
+            set("data", Value::Text(data.to_string()));
+        }
+        if let Some(mutable) = patch.mutable {
+            set("mutable", flag(mutable));
+        }
+        if let Some(attachable) = patch.attachable {
+            set("attachable", flag(attachable));
+        }
+        if let Some(idx) = patch.idx {
+            set("idx", Value::Integer(idx));
+        }
+        params.push(Value::Text(id.to_string()));
+        let conn = self.db.acquire().await?;
+        let changed = conn
+            .execute(
+                &format!(
+                    "UPDATE document SET {}updated_at = datetime('now') \
+                     WHERE id = ?{} AND {LIVE}",
+                    sets.iter().map(|s| format!("{s}, ")).collect::<String>(),
+                    params.len()
+                ),
+                params,
+            )
+            .await?;
+        Ok(changed > 0)
+    }
+
+    /// Put the node `id` at `path`, and everything under it, in the bin, contexts
+    /// included. Each row is marked with `id` as the root it went with, so
+    /// [`Store::restore_subtree`] brings back exactly those and nothing that was
+    /// deleted from inside the subtree before.
+    pub async fn bin_subtree(&self, id: &str, path: &str) -> Result<u64, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut binned = 0;
+        for table in ["document", "context"] {
+            binned += conn
+                .execute(
+                    &format!(
+                        "UPDATE {table} SET deleted_at = datetime('now'), deleted_root = ?1, \
+                           updated_at = datetime('now') \
+                         WHERE {LIVE} AND {SUBTREE}"
+                    ),
+                    [id, path],
+                )
+                .await?;
+        }
+        Ok(binned)
+    }
+
+    /// Bring back what went to the bin with the node `id`, whose path is `path`.
+    /// Refused if a live node has since taken that path; a path deeper in the
+    /// subtree cannot be taken while its root's is free.
+    pub async fn restore_subtree(&self, id: &str, path: &str) -> Result<u64, WriteError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let restored = self.restore_in(&conn, id, path).await;
+        conn.execute(
+            if restored.is_ok() {
+                "COMMIT"
+            } else {
+                "ROLLBACK"
+            },
+            (),
+        )
+        .await?;
+        restored
+    }
+
+    async fn restore_in(
+        &self,
+        conn: &turso::Connection,
+        id: &str,
+        path: &str,
+    ) -> Result<u64, WriteError> {
+        if self.path_taken(conn, path).await? {
+            return Err(WriteError::PathTaken);
+        }
+        let mut restored = 0;
+        for table in ["document", "context"] {
+            restored += conn
+                .execute(
+                    &format!(
+                        "UPDATE {table} SET deleted_at = NULL, deleted_root = NULL, \
+                           updated_at = datetime('now') \
+                         WHERE deleted_root = ?1"
+                    ),
+                    [id],
+                )
+                .await?;
+        }
+        Ok(restored)
     }
 
     /// Create a comment on `on_id` authored by `author_did`. Returns its id.

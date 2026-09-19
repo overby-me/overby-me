@@ -170,8 +170,11 @@ The steps:
   votes belongs to M6.)
 - [ ] Node read model in the `src/model.rs` shape (node with children, members,
   permission flags).
-- [ ] Create, update, delete, move, reorder, copy; the bin (soft delete,
-  restore, purge).
+- [x] Update, with the interim's edit rule (an author edits a draft, an owner of
+  the context edits and arranges anything); reorder and the lock with it.
+- [x] The bin: soft delete of a subtree, restore of exactly what went together,
+  the listing.
+- [ ] Move, copy, purge.
 - [ ] Search, the recent feed, contributions, orphans.
 
 ### M4: membership and roster

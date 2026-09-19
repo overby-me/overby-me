@@ -133,6 +133,7 @@ fn push_place(cols: &mut Vec<&'static str>, params: &mut Vec<Value>, place: &Pla
         "attachable",
         "owner_did",
         "deleted_at",
+        "deleted_root",
     ]);
     params.extend([
         text(&place.slug),
@@ -142,6 +143,7 @@ fn push_place(cols: &mut Vec<&'static str>, params: &mut Vec<Value>, place: &Pla
         boolv(place.attachable),
         opt(&place.owner_did),
         opt(&place.deleted_at),
+        opt(&place.deleted_root),
     ]);
     push_timestamp(cols, params, "created_at", &place.created_at);
     push_timestamp(cols, params, "updated_at", &place.updated_at);

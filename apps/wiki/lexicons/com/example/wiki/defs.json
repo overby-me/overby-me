@@ -90,6 +90,10 @@
 					"format": "datetime",
 					"description": "Set while the node is in the bin. No read but the bin's own serves such a node."
 				},
+				"deleted_root": {
+					"type": "string",
+					"description": "The node whose deletion took this one to the bin: itself, or an ancestor."
+				},
 				"mutable": {
 					"type": "boolean",
 					"description": "Whether it may still be edited. Submitting a motion clears it."
@@ -165,6 +169,10 @@
 					"type": "string",
 					"format": "datetime",
 					"description": "Set while the node is in the bin. No read but the bin's own serves such a node."
+				},
+				"deleted_root": {
+					"type": "string",
+					"description": "The node whose deletion took this one to the bin: itself, or an ancestor."
 				},
 				"visibility": {
 					"type": "string",

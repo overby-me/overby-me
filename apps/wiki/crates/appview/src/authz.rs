@@ -148,6 +148,36 @@ pub fn may_create(
     Ok(())
 }
 
+/// A caller's standing towards one node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Standing {
+    /// They created it.
+    pub owns_node: bool,
+    /// They hold the owner role in its context.
+    pub owns_context: bool,
+}
+
+impl Standing {
+    /// Two different powers, deliberately not the same. A node's owner may edit
+    /// it while it is a draft: submitting makes it immutable, which is the point,
+    /// since the room is about to vote on it and its author is exactly who might
+    /// change it. A context owner may edit regardless, because they answer for
+    /// the whole meeting and have a typo in a submitted motion to correct.
+    pub fn may_edit(self, mutable: bool) -> bool {
+        self.owns_context || (self.owns_node && mutable)
+    }
+
+    /// The order of siblings, the folder lock, and reopening what was submitted
+    /// are the meeting's business, not an author's.
+    pub fn may_arrange(self) -> bool {
+        self.owns_context
+    }
+
+    pub fn may_delete(self) -> bool {
+        self.owns_node || self.owns_context
+    }
+}
+
 /// A person's standing in a context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Membership {
@@ -190,6 +220,22 @@ impl Authz {
             },
             active: row.get::<i64>(1)? != 0,
         }))
+    }
+
+    /// The caller's standing towards a node created by `node_owner` in
+    /// `context_id`. Ownership of a context is the role alone, as the interim's
+    /// `isContextOwner` reads it.
+    pub async fn standing(
+        &self,
+        context_id: &str,
+        node_owner: Option<&str>,
+        did: &str,
+    ) -> Result<Standing, DbError> {
+        let membership = self.membership(context_id, did).await?;
+        Ok(Standing {
+            owns_node: node_owner == Some(did),
+            owns_context: membership.is_some_and(|m| m.role == Role::Owner),
+        })
     }
 
     /// May read the context and write content into it.
@@ -285,6 +331,38 @@ mod tests {
         role: Role::Owner,
         active: true,
     };
+
+    #[test]
+    fn an_author_edits_a_draft_and_a_chair_edits_anything() {
+        let author = Standing {
+            owns_node: true,
+            owns_context: false,
+        };
+        let chair = Standing {
+            owns_node: false,
+            owns_context: true,
+        };
+        let stranger = Standing {
+            owns_node: false,
+            owns_context: false,
+        };
+        assert!(author.may_edit(true), "a draft is theirs");
+        assert!(
+            !author.may_edit(false),
+            "the room votes on what was submitted"
+        );
+        assert!(chair.may_edit(false));
+        assert!(!stranger.may_edit(true));
+
+        assert!(
+            !author.may_arrange(),
+            "the lock and the order are the chair's"
+        );
+        assert!(chair.may_arrange());
+        assert!(author.may_delete());
+        assert!(chair.may_delete());
+        assert!(!stranger.may_delete());
+    }
 
     #[test]
     fn members_write_motions_and_owners_make_the_structure() {

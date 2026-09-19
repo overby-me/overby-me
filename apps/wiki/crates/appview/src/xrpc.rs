@@ -521,6 +521,210 @@ pub async fn create_document(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct UpdateDocumentBody {
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub content: Option<serde_json::Value>,
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
+    #[serde(default)]
+    pub mutable: Option<bool>,
+    #[serde(default)]
+    pub attachable: Option<bool>,
+    #[serde(default)]
+    pub idx: Option<i64>,
+}
+
+/// A live document the caller may read, with their standing towards it. A
+/// document they may not read answers as missing, as it does to a read.
+async fn standing_towards(
+    state: &AppState,
+    id: &str,
+    did: &str,
+    what: &str,
+) -> Result<(crate::store::DocumentMeta, crate::authz::Standing), Response> {
+    let store = crate::Store::new(state.db.clone());
+    let missing = || err(StatusCode::NOT_FOUND, "NotFound", "no such document");
+    match store.read_document(id, Some(did)).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return Err(missing()),
+        Err(e) => return Err(write_failed(what, e)),
+    }
+    let meta = match store.document_meta(id).await {
+        Ok(Some(meta)) => meta,
+        Ok(None) => return Err(missing()),
+        Err(e) => return Err(write_failed(what, e)),
+    };
+    let standing = Authz::new(state.db.clone())
+        .standing(&meta.context_id, meta.owner_did.as_deref(), did)
+        .await
+        .map_err(|e| write_failed(what, e))?;
+    Ok((meta, standing))
+}
+
+/// `com.example.wiki.updateDocument` (procedure) — change a document. The slug
+/// stays: a rename keeps the URL people have linked to.
+pub async fn update_document(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Json(body): Json<UpdateDocumentBody>,
+) -> Response {
+    let (meta, standing) = match standing_towards(&state, &body.id, &did, "updateDocument").await {
+        Ok(found) => found,
+        Err(refusal) => return refusal,
+    };
+    let arranges = body.attachable.is_some()
+        || body.idx.is_some()
+        || (body.mutable == Some(true) && !meta.mutable);
+    if arranges && !standing.may_arrange() {
+        return forbidden("only an owner of the context may reorder, lock or reopen");
+    }
+    if !standing.may_edit(meta.mutable) {
+        return forbidden(if meta.mutable {
+            "not yours to edit"
+        } else {
+            "it has been submitted and can no longer be edited"
+        });
+    }
+    let content = body.content.as_ref().map(|v| v.to_string());
+    let data = body.data.as_ref().map(|v| v.to_string());
+    let patch = crate::store::DocumentPatch {
+        title: body.title.as_deref(),
+        content: content.as_deref(),
+        data: data.as_deref(),
+        mutable: body.mutable,
+        attachable: body.attachable,
+        idx: body.idx,
+    };
+    match crate::Store::new(state.db.clone())
+        .update_document(&body.id, &patch)
+        .await
+    {
+        Ok(true) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Ok(false) => err(StatusCode::NOT_FOUND, "NotFound", "no such document"),
+        Err(e) => write_failed("updateDocument", e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DocumentIdBody {
+    pub id: String,
+}
+
+/// `com.example.wiki.deleteDocument` (procedure) — put a document, and
+/// everything under it, in the bin.
+pub async fn delete_document(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Json(body): Json<DocumentIdBody>,
+) -> Response {
+    let (meta, standing) = match standing_towards(&state, &body.id, &did, "deleteDocument").await {
+        Ok(found) => found,
+        Err(refusal) => return refusal,
+    };
+    if !standing.may_delete() {
+        return forbidden("not yours to delete");
+    }
+    match crate::Store::new(state.db.clone())
+        .bin_subtree(&body.id, &meta.path)
+        .await
+    {
+        Ok(binned) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "binned": binned })),
+        )
+            .into_response(),
+        Err(e) => write_failed("deleteDocument", e),
+    }
+}
+
+/// `com.example.wiki.restoreDocument` (procedure) — bring a document back from
+/// the bin, with everything that went there with it.
+pub async fn restore_document(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Json(body): Json<DocumentIdBody>,
+) -> Response {
+    let store = crate::Store::new(state.db.clone());
+    // No read reaches the bin, so there is no reader's view to defer to: a
+    // caller with no standing towards the document is told it is not there.
+    let missing = || {
+        err(
+            StatusCode::NOT_FOUND,
+            "NotFound",
+            "nothing in the bin by that id",
+        )
+    };
+    let meta = match store.document_meta(&body.id).await {
+        Ok(Some(meta)) => meta,
+        Ok(None) => return missing(),
+        Err(e) => return write_failed("restoreDocument", e),
+    };
+    if !meta.binned {
+        return missing();
+    }
+    match Authz::new(state.db.clone())
+        .standing(&meta.context_id, meta.owner_did.as_deref(), &did)
+        .await
+    {
+        Ok(standing) if standing.may_delete() => {}
+        Ok(_) => return missing(),
+        Err(e) => return write_failed("restoreDocument", e),
+    }
+    let parent_id = meta.parent_id.as_deref().unwrap_or(&meta.context_id);
+    match store.parent_of(parent_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return conflict("ParentInBin", "restore what it was in first"),
+        Err(e) => return write_failed("restoreDocument", e),
+    }
+    match store.restore_subtree(&body.id, &meta.path).await {
+        Ok(restored) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "restored": restored })),
+        )
+            .into_response(),
+        Err(crate::store::WriteError::Db(e)) => write_failed("restoreDocument", e),
+        Err(refused) => conflict("PathTaken", &refused.to_string()),
+    }
+}
+
+/// `?context=<id>`.
+#[derive(Debug, Deserialize)]
+pub struct ContextParam {
+    pub context: String,
+}
+
+/// `com.example.wiki.listDeleted` — the bin of a context. An owner of the
+/// context sees all of it; anyone else sees what they created and deleted.
+pub async fn list_deleted(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Query(p): Query<ContextParam>,
+) -> Response {
+    let membership = match Authz::new(state.db.clone())
+        .membership(&p.context, &did)
+        .await
+    {
+        Ok(membership) => membership,
+        Err(e) => return write_failed("listDeleted", e),
+    };
+    let own_only = !membership.is_some_and(|m| m.role == wiki_domain_types::Role::Owner);
+    match crate::Store::new(state.db.clone())
+        .list_binned(&p.context, own_only.then_some(did.as_str()))
+        .await
+    {
+        Ok(deleted) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "deleted": deleted })),
+        )
+            .into_response(),
+        Err(e) => write_failed("listDeleted", e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
 pub struct PostCommentBody {
     pub on_id: String,
     /// Optional, and only ever checked: the comment's context is the one its
@@ -1750,5 +1954,286 @@ mod tests {
         );
         let (status, v) = comment("fold").await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "a folder: {v}");
+    }
+
+    // -- Changing and deleting. Dave writes a motion in `fold`; the chair owns c1. --
+
+    struct Meeting {
+        state: AppState,
+        dave: String,
+        chair: String,
+        motion: String,
+    }
+
+    async fn meeting() -> Meeting {
+        let state = with_a_folder(1).await;
+        let dave = token_for(&state, "did:plc:dave").await;
+        join(&state, "did:plc:dave", "c1").await;
+        let chair = token_for(&state, "did:plc:chair").await;
+        join_as(&state, "did:plc:chair", "c1", "owner").await;
+        let (status, v) = try_create(&state, &dave, "policy", "fold").await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        let motion = v["id"].as_str().expect("id").to_string();
+        Meeting {
+            state,
+            dave,
+            chair,
+            motion,
+        }
+    }
+
+    impl Meeting {
+        async fn call(&self, method: &str, who: &str, body: serde_json::Value) -> StatusCode {
+            post(
+                router(self.state.clone()),
+                &format!("/xrpc/com.example.wiki.{method}"),
+                Some(who),
+                body,
+            )
+            .await
+            .0
+        }
+
+        async fn read(&self, who: &str) -> (StatusCode, serde_json::Value) {
+            get_as(
+                router(self.state.clone()),
+                &format!("/xrpc/com.example.wiki.getDocument?id={}", self.motion),
+                who,
+            )
+            .await
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_author_edits_a_draft_until_it_is_submitted() {
+        let m = meeting().await;
+        let id = &m.motion;
+        let edit = |title: &'static str| serde_json::json!({"id": id, "title": title});
+
+        assert_eq!(
+            m.call("updateDocument", &m.dave, edit("Bedre titel")).await,
+            StatusCode::OK
+        );
+        let (_, doc) = m.read(&m.dave).await;
+        assert_eq!(doc["title"], "Bedre titel");
+        assert_eq!(doc["slug"], "forslag", "a rename must keep the URL");
+
+        let submit = serde_json::json!({"id": id, "mutable": false});
+        assert_eq!(
+            m.call("updateDocument", &m.dave, submit).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            m.call("updateDocument", &m.dave, edit("Fortrudt")).await,
+            StatusCode::FORBIDDEN,
+            "the room votes on what was submitted"
+        );
+        let reopen = serde_json::json!({"id": id, "mutable": true});
+        assert_eq!(
+            m.call("updateDocument", &m.dave, reopen.clone()).await,
+            StatusCode::FORBIDDEN,
+            "an author reopened their own submitted motion"
+        );
+
+        assert_eq!(
+            m.call("updateDocument", &m.chair, edit("Rettet")).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            m.call("updateDocument", &m.chair, reopen).await,
+            StatusCode::OK
+        );
+        let (_, doc) = m.read(&m.dave).await;
+        assert_eq!(doc["title"], "Rettet");
+        assert_eq!(doc["mutable"], true);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_order_and_the_lock_are_the_chairs() {
+        let m = meeting().await;
+        for arrange in [
+            serde_json::json!({"id": m.motion, "idx": 3}),
+            serde_json::json!({"id": m.motion, "attachable": false}),
+        ] {
+            assert_eq!(
+                m.call("updateDocument", &m.dave, arrange.clone()).await,
+                StatusCode::FORBIDDEN,
+                "{arrange}"
+            );
+            assert_eq!(
+                m.call("updateDocument", &m.chair, arrange).await,
+                StatusCode::OK
+            );
+        }
+        let (_, doc) = m.read(&m.dave).await;
+        assert_eq!(doc["idx"], 3);
+        assert_eq!(doc["attachable"], false);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_stranger_changes_nothing_and_is_told_nothing() {
+        let m = meeting().await;
+        let carol = token_for(&m.state, "did:plc:carol").await;
+        join(&m.state, "did:plc:carol", "c1").await;
+        let mallory = token_for(&m.state, "did:plc:mallory").await;
+        let touch = |id: &str| serde_json::json!({"id": id, "title": "Overtaget"});
+
+        // A fellow member reads it, so is told no. c1 is public, so is Mallory.
+        assert_eq!(
+            m.call("updateDocument", &carol, touch(&m.motion)).await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            m.call(
+                "deleteDocument",
+                &carol,
+                serde_json::json!({"id": m.motion})
+            )
+            .await,
+            StatusCode::FORBIDDEN
+        );
+        // What she cannot read, she is not told exists.
+        assert_eq!(
+            m.call("updateDocument", &mallory, touch("s1")).await,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            m.call("deleteDocument", &mallory, serde_json::json!({"id": "s1"}))
+                .await,
+            StatusCode::NOT_FOUND
+        );
+        let (_, doc) = m.read(&m.dave).await;
+        assert_eq!(doc["title"], "Forslag");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn deleting_a_folder_bins_what_is_in_it_and_restore_brings_it_all_back() {
+        let m = meeting().await;
+        let fold = serde_json::json!({"id": "fold"});
+        let motion_path = "/xrpc/com.example.wiki.resolveNode?path=group-one/resolutioner/forslag";
+
+        // An older deletion inside the folder, which must stay deleted.
+        let (_, v) = try_create(&m.state, &m.dave, "policy", "fold").await;
+        let earlier = v["id"].as_str().expect("id").to_string();
+        assert_eq!(
+            m.call(
+                "deleteDocument",
+                &m.dave,
+                serde_json::json!({"id": earlier})
+            )
+            .await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            m.call("deleteDocument", &m.dave, fold.clone()).await,
+            StatusCode::FORBIDDEN,
+            "a member deleted the chair's folder"
+        );
+        assert_eq!(
+            m.call("deleteDocument", &m.chair, fold.clone()).await,
+            StatusCode::OK
+        );
+        assert_eq!(m.read(&m.dave).await.0, StatusCode::NOT_FOUND);
+        let (status, _) = get(router(m.state.clone()), motion_path).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        // The bin lists the folder, not the motion that went along with it.
+        let (_, bin) = get_as(
+            router(m.state.clone()),
+            "/xrpc/com.example.wiki.listDeleted?context=c1",
+            &m.chair,
+        )
+        .await;
+        let ids: Vec<&str> = bin["deleted"]
+            .as_array()
+            .expect("array")
+            .iter()
+            .filter_map(|d| d["id"].as_str())
+            .collect();
+        assert!(ids.contains(&"fold"), "{bin}");
+        assert!(!ids.contains(&m.motion.as_str()), "{bin}");
+        assert!(ids.contains(&earlier.as_str()), "{bin}");
+
+        assert_eq!(
+            m.call("restoreDocument", &m.chair, fold).await,
+            StatusCode::OK
+        );
+        assert_eq!(m.read(&m.dave).await.0, StatusCode::OK);
+        let (status, _) = get(router(m.state.clone()), motion_path).await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = get_as(
+            router(m.state.clone()),
+            &format!("/xrpc/com.example.wiki.getDocument?id={earlier}"),
+            &m.dave,
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "restoring the folder dug up what had been deleted before it"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_restore_is_refused_when_the_path_has_been_taken() {
+        let m = meeting().await;
+        let motion = serde_json::json!({"id": m.motion});
+        assert_eq!(
+            m.call("deleteDocument", &m.dave, motion.clone()).await,
+            StatusCode::OK
+        );
+        // Its URL is free again, and someone takes it.
+        let (status, v) = try_create(&m.state, &m.dave, "policy", "fold").await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        let (status, v) = post(
+            router(m.state.clone()),
+            "/xrpc/com.example.wiki.restoreDocument",
+            Some(&m.dave),
+            motion,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{v}");
+        assert_eq!(v["error"], "PathTaken");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_bin_shows_a_member_only_their_own() {
+        let m = meeting().await;
+        let (_, v) = try_create(&m.state, &m.chair, "policy", "fold").await;
+        let chairs = v["id"].as_str().expect("id").to_string();
+        for (who, id) in [(&m.dave, &m.motion), (&m.chair, &chairs)] {
+            assert_eq!(
+                m.call("deleteDocument", who, serde_json::json!({"id": id}))
+                    .await,
+                StatusCode::OK
+            );
+        }
+        let bin = |who: String| {
+            let state = m.state.clone();
+            async move {
+                get_as(
+                    router(state),
+                    "/xrpc/com.example.wiki.listDeleted?context=c1",
+                    &who,
+                )
+                .await
+                .1["deleted"]
+                    .as_array()
+                    .expect("array")
+                    .len()
+            }
+        };
+        assert_eq!(bin(m.dave.clone()).await, 1);
+        assert_eq!(bin(m.chair.clone()).await, 2);
+        // Dave cannot restore what is not his, and is not told it is there.
+        assert_eq!(
+            m.call(
+                "restoreDocument",
+                &m.dave,
+                serde_json::json!({"id": chairs})
+            )
+            .await,
+            StatusCode::NOT_FOUND
+        );
     }
 }

@@ -1,0 +1,48 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.updateDocument",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Change a document. Absent fields are left as they are. The slug is not among them: a rename keeps the URL people have linked to. Its creator may edit it while it is mutable; clearing `mutable` submits it, after which only an owner of the context may edit it. The order (`idx`), the lock (`attachable`) and reopening a submitted document are an owner's alone.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": {
+						"id": { "type": "string" },
+						"title": { "type": "string" },
+						"content": { "type": "unknown" },
+						"data": { "type": "unknown" },
+						"mutable": { "type": "boolean" },
+						"attachable": { "type": "boolean" },
+						"idx": { "type": "integer" }
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["ok"],
+					"properties": { "ok": { "type": "boolean" } }
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such document, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller may read it but may not make this change."
+				}
+			]
+		}
+	}
+}

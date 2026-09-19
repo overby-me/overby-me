@@ -50,6 +50,9 @@ pub struct InterimNode {
     /// Set while the node is in the bin.
     #[serde(default)]
     pub deleted_at: Option<String>,
+    /// The node whose deletion took this one along.
+    #[serde(default)]
+    pub deleted_root: Option<String>,
 }
 
 /// An interim `members` row.
@@ -416,6 +419,7 @@ fn place_of(
         created_at: n.created_at.clone(),
         updated_at: n.updated_at.clone(),
         deleted_at: n.deleted_at.clone(),
+        deleted_root: n.deleted_root.clone(),
     }
 }
 

@@ -1,0 +1,45 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.deleteDocument",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Put a document, and everything under it, in the bin. Its creator or an owner of its context may. Nothing is destroyed: restoreDocument brings back exactly what went together, and the path is free for another node meanwhile.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": { "id": { "type": "string" } }
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["binned"],
+					"properties": {
+						"binned": {
+							"type": "integer",
+							"description": "How many nodes went to the bin."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such document, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller may read it but neither created it nor owns its context."
+				}
+			]
+		}
+	}
+}
