@@ -314,8 +314,11 @@ CREATE TABLE member (
   user_did    TEXT REFERENCES user(did),                  -- NULL until the invite is claimed
   context_id  TEXT NOT NULL REFERENCES context(id),
   role        TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member','owner')),
-  active      INTEGER NOT NULL DEFAULT 1,
-  email       TEXT,                                       -- the invite (roster) address
+  active      INTEGER NOT NULL DEFAULT 1,                 -- VOTING RIGHTS, not membership
+  name        TEXT,                                       -- the roster's name: all a pending row has
+  hidden      INTEGER NOT NULL DEFAULT 0,                 -- kept off the list everyone sees
+  accepted    INTEGER NOT NULL DEFAULT 0,                 -- an invite by account is bound but unanswered
+  email       TEXT,                                       -- the invite (roster) address; owners only
   claim_token TEXT UNIQUE                                 -- secret for mismatched-email claims
 );
 CREATE UNIQUE INDEX member_bound   ON member(context_id, user_did) WHERE user_did IS NOT NULL;

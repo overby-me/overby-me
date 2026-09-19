@@ -56,6 +56,8 @@ the caller wrote it. A row the caller may not read answers exactly as a missing 
 
 - `getNode` is what a screen loads: a node by path or id with its children of either kind, its
   breadcrumbs, and what the caller may do there.
+- `listMembers` is a context's roster, for its members only, with addresses for its owners only;
+  `getVoterCount` is the number a poll's turnout is out of.
 - `getDocument` / `getContext` return a single entity; `resolveNode` returns the context or document
   a path names. Every node stores its path, so that is one lookup at any depth.
 - `listChildren`, `listContexts`, `listRecent`, `search`, `getComments`, `getReactions` return an

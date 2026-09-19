@@ -70,6 +70,12 @@ data layer.
   binary refuses to start on another one, rather than failing a query at a
   time. Pre-cutover that costs nothing, since the view is rebuilt from the
   migration pipeline; after it, migrations become real work (M9).
+- **The interim serves every member's email to every member.** A column
+  permission is per role and an owner is role `user` too, so one plain member
+  could read 1,467 of the organisation's 2,007 addresses. The AppView can draw
+  the line Hasura could not: `listMembers` serves an address to an owner of
+  that context and to nobody else, and matches a search against one for an
+  owner only.
 - **Reads were ungated.** Every read served private content to anyone. Gated in
   M2 on visibility and membership.
 - **`active` is voting rights, not a read gate.** The interim reads by
@@ -134,8 +140,8 @@ is merged and its tests pass.
 - [ ] Invite binding by email. Needs the account's confirmed address from its
   PDS (`transition:email` and an authenticated `getSession`), so it waits on
   the first authenticated PDS call.
-- [ ] Authorship or ownership to CHANGE a node: arrives with update and delete
-  in M3, which is where those procedures are.
+- [x] Authorship or ownership to change a node (`Standing`, with
+  `updateDocument` in M3).
 
 ### M3: the node tree the frontend routes by
 
@@ -190,7 +196,13 @@ The steps:
 
 ### M4: membership and roster
 
-- [ ] Paged, filtered member list; counts.
+- [x] What a member row holds: the roster's name (the only label 83 percent of
+  rows have, and which the extractor dropped), `hidden` and `accepted`. Whoever
+  made a context is realized as an owner of it, or the general secretary loses
+  Landsmøde 2026 at cutover. A member row on something that is no context is
+  reported, not loaded.
+- [x] Paged, filtered member list, for members only, with addresses and hidden
+  rows for owners only; the voter count.
 - [ ] Invite by email and by user, bulk roster import, update, remove.
 - [ ] Invitations for the caller: list, accept, decline; claim links.
 - [ ] Author chips (`set_node_authors`).

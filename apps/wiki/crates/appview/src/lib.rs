@@ -153,6 +153,14 @@ fn build_router(state: AppState) -> Router {
             post(xrpc::delete_session),
         )
         .route(
+            "/xrpc/com.example.wiki.listMembers",
+            get(xrpc::list_members),
+        )
+        .route(
+            "/xrpc/com.example.wiki.getVoterCount",
+            get(xrpc::get_voter_count),
+        )
+        .route(
             "/xrpc/com.example.wiki.claimMembership",
             post(xrpc::claim_membership),
         )

@@ -228,6 +228,43 @@
 				"legacy_id": { "type": "string" }
 			}
 		},
+		"memberView": {
+			"type": "object",
+			"description": "A row of a context's member list: a member, or an invitation nobody has claimed yet.",
+			"required": ["id", "role", "active", "accepted", "hidden"],
+			"properties": {
+				"id": { "type": "string" },
+				"user_did": {
+					"type": "string",
+					"format": "did",
+					"description": "Absent while the row is an invitation nobody has claimed."
+				},
+				"role": { "type": "string", "enum": ["member", "owner"] },
+				"active": {
+					"type": "boolean",
+					"description": "Voting rights, which an owner grants. Not membership."
+				},
+				"accepted": {
+					"type": "boolean",
+					"description": "Whether they have said yes to the invitation."
+				},
+				"hidden": {
+					"type": "boolean",
+					"description": "Kept off the list everyone sees. Only an owner is served such a row."
+				},
+				"name": {
+					"type": "string",
+					"description": "The roster's name for them: the only label an unclaimed invitation has."
+				},
+				"display_name": { "type": "string" },
+				"handle": { "type": "string", "format": "handle" },
+				"avatar_url": { "type": "string", "format": "uri" },
+				"email": {
+					"type": "string",
+					"description": "Present only when the caller owns the context."
+				}
+			}
+		},
 		"userView": {
 			"type": "object",
 			"description": "A person. The DID is the identity; the rest is profile, absent until it has been read from their PDS.",

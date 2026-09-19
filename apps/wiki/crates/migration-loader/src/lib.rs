@@ -362,6 +362,9 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
                 "context_id",
                 "role",
                 "active",
+                "name",
+                "hidden",
+                "accepted",
                 "email",
                 "claim_token",
                 "legacy_id",
@@ -372,6 +375,9 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
                 text(&m.context_id),
                 enum_val(&m.role)?,
                 boolv(m.active),
+                opt(&m.name),
+                boolv(m.hidden),
+                boolv(m.accepted),
                 opt(&m.email),
                 opt(&m.claim_token),
                 opt(&m.legacy_id),
@@ -483,6 +489,9 @@ mod tests {
                 context_id: "c1".into(),
                 role: Role::Owner,
                 active: true,
+                name: Some("Alice A.".into()),
+                hidden: true,
+                accepted: true,
                 email: Some("alice@x.dk".into()),
                 claim_token: Some("tok".into()),
                 legacy_id: Some("m1".into()),
@@ -679,6 +688,23 @@ mod tests {
         assert_eq!(text(7), r#"{"image":"file-1"}"#);
         assert_eq!(text(8), "2026-02-02 00:00:00");
         assert_eq!(text(9), "2026-03-03 00:00:00");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_members_name_and_flags_survive_the_load() {
+        let conn = staging().await;
+        load(&conn, &sample()).await.expect("load");
+        let mut rows = conn
+            .query(
+                "SELECT name, hidden, accepted FROM member WHERE id = 'm1'",
+                (),
+            )
+            .await
+            .expect("query");
+        let row = rows.next().await.expect("next").expect("row");
+        assert_eq!(row.get::<String>(0).expect("name"), "Alice A.");
+        assert_eq!(row.get::<i64>(1).expect("hidden"), 1);
+        assert_eq!(row.get::<i64>(2).expect("accepted"), 1);
     }
 
     /// The load is the rehearsal's integrity check, so it must be checking.

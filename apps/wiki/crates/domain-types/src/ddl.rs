@@ -123,6 +123,10 @@ CREATE TABLE member (
   context_id  TEXT NOT NULL REFERENCES context(id),
   role        TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member','owner')),
   active      INTEGER NOT NULL DEFAULT 1,
+  name        TEXT,
+  hidden      INTEGER NOT NULL DEFAULT 0,
+  accepted    INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   email       TEXT,
   claim_token TEXT UNIQUE,
   legacy_id   TEXT UNIQUE

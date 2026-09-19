@@ -44,7 +44,7 @@ if ($url | is-empty) or ($secret | is-empty) {
 # The exact fields the extractor's InterimNode / InterimMember / InterimUser
 # deserialize (camelCase; `claim_token` aliased to the extractor's `claimToken`).
 let nodes_q = "query { nodes { id name key path mimeId parentId contextId ownerId data index mutable attachable createdAt updatedAt deleted_at deleted_root } }"
-let members_q = "query { members { id name email nodeId parentId accepted active owner claimToken: claim_token } }"
+let members_q = "query { members { id name email nodeId parentId accepted active owner hidden claimToken: claim_token } }"
 let users_q = "query { users { id displayName avatarUrl } }"
 
 let nodes = (gql $url $secret $nodes_q | get nodes)

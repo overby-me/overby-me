@@ -206,7 +206,19 @@ pub struct Member {
     pub user_did: Option<String>,
     pub context_id: String,
     pub role: Role,
+    /// Voting rights, which an owner grants. Not membership: see `accepted`.
     pub active: bool,
+    /// The roster's name for them. For a pending invitation it is the only
+    /// label there is, since no account stands behind the row yet.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Kept off the member list everyone sees.
+    #[serde(default)]
+    pub hidden: bool,
+    /// Whether they have said yes. An invitation by account is bound from the
+    /// start, so being bound does not say it.
+    #[serde(default)]
+    pub accepted: bool,
     /// The invite address, normalized (lowercased, trimmed) at import: the
     /// census found 11 case/whitespace variant clusters.
     pub email: Option<String>,

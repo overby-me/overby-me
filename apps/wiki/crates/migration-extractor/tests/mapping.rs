@@ -306,3 +306,83 @@ fn extraction_round_trips_through_serde() {
     let back: Vec<Document> = serde_json::from_str(&s).unwrap();
     assert_eq!(back, ex.documents);
 }
+
+fn context_owned_by(owner: Option<&str>) -> InterimNode {
+    serde_json::from_value(json!({
+        "id": "ctx1", "name": "Landsmøde", "key": "landsmøde", "mimeId": "wiki/event",
+        "parentId": null, "contextId": "ctx1", "ownerId": owner, "data": null
+    }))
+    .expect("context")
+}
+
+#[test]
+fn a_roster_row_keeps_the_only_name_it_has() {
+    let mut invited = member("m1", "ctx1", None, Some("bo@x.dk"));
+    invited.name = Some("Bo Jensen".into());
+    invited.hidden = true;
+    invited.accepted = false;
+    let ex = extract(&[context_owned_by(None)], &[invited], &[]);
+    let m = &ex.members[0];
+    assert_eq!(
+        m.name.as_deref(),
+        Some("Bo Jensen"),
+        "a pending invitation has no account to take a name from"
+    );
+    assert!(m.hidden);
+    assert!(
+        !m.accepted,
+        "an unanswered invitation was accepted on their behalf"
+    );
+    assert!(
+        !ex.report.unmapped_source.contains_key("members.accepted"),
+        "accepted is carried now, so it is no gap"
+    );
+}
+
+/// The general secretary owns Landsmøde 2026 and holds no membership row in it.
+#[test]
+fn whoever_made_a_context_still_owns_it_after_the_move() {
+    let owns = |ex: &Extraction, did: &str| {
+        ex.members
+            .iter()
+            .any(|m| m.user_did.as_deref() == Some(did) && m.role == Role::Owner)
+    };
+
+    // No row at all: one is added, hidden, since they were never on the list.
+    let ex = extract(&[context_owned_by(Some("gs"))], &[], &[]);
+    assert!(owns(&ex, "gs"), "the owner of the meeting lost it");
+    assert!(ex.members[0].hidden);
+    assert!(ex.members[0].accepted && ex.members[0].active);
+
+    // A plain member row: it is raised, not duplicated.
+    let plain = member("m1", "ctx1", Some("gs"), None);
+    let ex = extract(&[context_owned_by(Some("gs"))], &[plain], &[]);
+    assert_eq!(ex.members.len(), 1);
+    assert!(owns(&ex, "gs"));
+    assert_eq!(
+        ex.report.unmapped_source["nodes.ownerId (context)"].count,
+        1
+    );
+
+    // Already an owner by their row: nothing to do, and nothing to report.
+    let mut already = member("m1", "ctx1", Some("gs"), None);
+    already.owner = true;
+    let ex = extract(&[context_owned_by(Some("gs"))], &[already], &[]);
+    assert_eq!(ex.members.len(), 1);
+    assert!(ex.report.unmapped_source.is_empty());
+}
+
+#[test]
+fn a_member_row_on_something_that_is_no_context_is_reported_not_loaded() {
+    let nodes = vec![context_owned_by(None), node("p1", "vote/poll", json!({}))];
+    let ex = extract(&nodes, &[member("m1", "p1", Some("u"), None)], &[]);
+    assert!(
+        ex.members.is_empty(),
+        "a membership of a poll would fail the context foreign key"
+    );
+    assert!(
+        ex.report
+            .unmapped_source
+            .contains_key("members(on vote/poll)")
+    );
+}

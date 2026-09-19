@@ -73,6 +73,8 @@ pub struct InterimMember {
     pub active: bool,
     #[serde(default)]
     pub owner: bool,
+    #[serde(default)]
+    pub hidden: bool,
     #[serde(rename = "claimToken", default)]
     pub claim_token: Option<String>,
 }
@@ -200,26 +202,25 @@ pub fn extract(
         ..Default::default()
     };
 
-    // Author chips: member rows hung on CONTENT nodes become that document's
-    // authors, keyed by the content node id. Roster members hang on contexts.
-    let content_ids: BTreeSet<&str> = nodes
-        .iter()
-        .filter(|n| {
-            n.mime_id
-                .as_deref()
-                .is_some_and(|m| CONTENT_MIMES.contains(&m))
-        })
-        .map(|n| n.id.as_str())
-        .collect();
+    // A member row is one of two things, told apart by what it hangs on. On a
+    // CONTENT node it is an author chip, and becomes one of that document's
+    // authors. On a CONTEXT it is a roster membership. On anything else it has
+    // no home, and is reported rather than loaded against a context that is not
+    // one, which the foreign key would refuse.
+    let mimes_of = |wanted: &[&str]| -> BTreeSet<&str> {
+        nodes
+            .iter()
+            .filter(|n| n.mime_id.as_deref().is_some_and(|m| wanted.contains(&m)))
+            .map(|n| n.id.as_str())
+            .collect()
+    };
+    let content_ids = mimes_of(CONTENT_MIMES);
+    let context_ids = mimes_of(CONTEXT_MIMES);
     let mut authors_by_node: BTreeMap<String, Vec<Author>> = BTreeMap::new();
 
     for m in members {
-        let on_content = m
-            .parent_id
-            .as_deref()
-            .is_some_and(|p| content_ids.contains(p));
-        if on_content {
-            // An author chip (not a roster membership).
+        let parent = m.parent_id.as_deref().unwrap_or_default();
+        if content_ids.contains(parent) {
             let author = match &m.node_id {
                 Some(uid) => Author::User { did: uid.clone() },
                 None => Author::FreeText {
@@ -227,35 +228,44 @@ pub fn extract(
                 },
             };
             authors_by_node
-                .entry(m.parent_id.clone().unwrap_or_default())
+                .entry(parent.to_string())
                 .or_default()
                 .push(author);
             continue;
         }
-        // A roster membership row. Normalize the email (census: 11 case/space
-        // variant clusters); track the drop of accepted/owner-into-role.
+        if !context_ids.contains(parent) {
+            let on = nodes
+                .iter()
+                .find(|n| n.id == parent)
+                .and_then(|n| n.mime_id.as_deref())
+                .unwrap_or("a node that is not in the dump");
+            out.report.note_source(
+                &format!("members(on {on})"),
+                "a member row on neither a context nor content: no home",
+            );
+            continue;
+        }
+        // Normalize the email (census: 11 case/space variant clusters).
         let email = m
             .email
             .as_ref()
             .map(|e| e.trim().to_lowercase())
             .filter(|e| !e.is_empty());
-        if m.accepted {
-            out.report.note_source(
-                "members.accepted",
-                "folded into active/bind state, not a target column",
-            );
-        }
         out.members.push(Member {
             id: m.id.clone(),
             user_did: m.node_id.clone(),
-            context_id: m.parent_id.clone().unwrap_or_default(),
+            context_id: parent.to_string(),
             role: if m.owner { Role::Owner } else { Role::Member },
             active: m.active,
+            name: m.name.clone().filter(|n| !n.trim().is_empty()),
+            hidden: m.hidden,
+            accepted: m.accepted,
             email,
             claim_token: m.claim_token.clone(),
             legacy_id: Some(m.id.clone()),
         });
     }
+    realize_context_owners(nodes, &context_ids, &mut out);
 
     let tree: BTreeMap<&str, &InterimNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     // The ids that become a `context` or a `document`: the rows a `parent_id`
@@ -380,6 +390,59 @@ pub fn extract(
     }
 
     out
+}
+
+/// Whoever made a context owns it, whether or not a member row says so: the
+/// interim's read rules and its `is_active_owner` both count `nodes.owner_id`.
+/// The new model knows owners only as members, so without this the general
+/// secretary who owns Landsmøde 2026 and holds no row in it
+/// (`docs/read-permissions.md`) would lose the meeting at cutover.
+///
+/// A missing row is added hidden, because they were never on the member list;
+/// an existing one is raised to owner. Both are counted in the report.
+fn realize_context_owners(
+    nodes: &[InterimNode],
+    context_ids: &BTreeSet<&str>,
+    out: &mut Extraction,
+) {
+    for n in nodes.iter().filter(|n| context_ids.contains(n.id.as_str())) {
+        let Some(owner) = n.owner_id.as_deref() else {
+            continue;
+        };
+        let held = out
+            .members
+            .iter_mut()
+            .find(|m| m.context_id == n.id && m.user_did.as_deref() == Some(owner));
+        match held {
+            Some(member) if member.role == Role::Owner => {}
+            Some(member) => {
+                member.role = Role::Owner;
+                out.report.note_source(
+                    "nodes.ownerId (context)",
+                    "the owner of a context, realized as an owner membership",
+                );
+            }
+            None => {
+                out.members.push(Member {
+                    id: format!("owner-of-{}", n.id),
+                    user_did: Some(owner.to_string()),
+                    context_id: n.id.clone(),
+                    role: Role::Owner,
+                    active: true,
+                    name: None,
+                    hidden: true,
+                    accepted: true,
+                    email: None,
+                    claim_token: None,
+                    legacy_id: None,
+                });
+                out.report.note_source(
+                    "nodes.ownerId (context)",
+                    "the owner of a context, realized as an owner membership",
+                );
+            }
+        }
+    }
 }
 
 /// Where a node sits: its key, its path and its parent.

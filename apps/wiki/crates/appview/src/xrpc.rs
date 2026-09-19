@@ -490,6 +490,111 @@ pub async fn claim_membership(
     }
 }
 
+/// The caller's membership of a context, or the response to send instead. To
+/// someone who may not even read the context it does not exist; to a reader
+/// who is not a member, its roster is none of their business.
+async fn member_of(
+    state: &AppState,
+    context_id: &str,
+    did: &str,
+    what: &str,
+) -> Result<crate::authz::Membership, Response> {
+    match Authz::new(state.db.clone())
+        .membership(context_id, did)
+        .await
+    {
+        Ok(Some(membership)) => return Ok(membership),
+        Ok(None) => {}
+        Err(e) => return Err(write_failed(what, e)),
+    }
+    match crate::Store::new(state.db.clone())
+        .read_context(context_id, Some(did))
+        .await
+    {
+        Ok(Some(_)) => Err(forbidden("the member list is for members")),
+        Ok(None) => Err(err(StatusCode::NOT_FOUND, "NotFound", "no such context")),
+        Err(e) => Err(write_failed(what, e)),
+    }
+}
+
+fn owns(membership: crate::authz::Membership) -> bool {
+    membership.role == wiki_domain_types::Role::Owner
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListMembersParams {
+    pub context: String,
+    #[serde(default)]
+    pub owner: Option<bool>,
+    #[serde(default)]
+    pub active: Option<bool>,
+    #[serde(default)]
+    pub accepted: Option<bool>,
+    #[serde(default)]
+    pub hidden: Option<bool>,
+    #[serde(default)]
+    pub q: String,
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(default)]
+    pub offset: Option<i64>,
+}
+
+/// `com.example.wiki.listMembers` — a page of a context's members, by name.
+/// For members only. An owner of the context is served the addresses and the
+/// hidden rows; nobody else is.
+pub async fn list_members(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Query(p): Query<ListMembersParams>,
+) -> Response {
+    let membership = match member_of(&state, &p.context, &did, "listMembers").await {
+        Ok(membership) => membership,
+        Err(refusal) => return refusal,
+    };
+    let query = crate::store::MemberQuery {
+        owner: p.owner,
+        active: p.active,
+        accepted: p.accepted,
+        hidden: p.hidden,
+        search: p.q,
+        for_owner: owns(membership),
+        limit: p.limit.unwrap_or(50).clamp(1, 200),
+        offset: p.offset.unwrap_or(0).max(0),
+    };
+    match crate::Store::new(state.db.clone())
+        .list_members(&p.context, &query)
+        .await
+    {
+        Ok((members, total)) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "members": members, "total": total })),
+        )
+            .into_response(),
+        Err(e) => write_failed("listMembers", e),
+    }
+}
+
+/// `com.example.wiki.getVoterCount` — how many members of a context hold
+/// voting rights, which a poll's turnout is out of. A number and no names, so it
+/// is served to whoever may read the context.
+pub async fn get_voter_count(
+    State(state): State<AppState>,
+    caller: MaybeCaller,
+    Query(p): Query<ContextParam>,
+) -> Response {
+    let store = crate::Store::new(state.db.clone());
+    match store.read_context(&p.context, caller.did()).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "NotFound", "no such context"),
+        Err(e) => return write_failed("getVoterCount", e),
+    }
+    match store.count_voters(&p.context).await {
+        Ok(count) => (StatusCode::OK, Json(serde_json::json!({ "count": count }))).into_response(),
+        Err(e) => write_failed("getVoterCount", e),
+    }
+}
+
 /// `?member=<member id>`.
 #[derive(Debug, Deserialize)]
 pub struct MemberParam {
@@ -2646,6 +2751,173 @@ mod tests {
                 .as_deref(),
             Some("fold"),
             "a refused move must leave the tree as it was"
+        );
+    }
+
+    // -- The member list. In c9: alice owns, bob and ivan are members, and there
+    //    is a hidden owner and two pending invitations below. --
+
+    async fn roster() -> AppState {
+        let state = seeded_state().await;
+        let conn = state.db.acquire().await.expect("conn");
+        conn.execute_batch(
+            "UPDATE user SET display_name = 'Bob B.' WHERE did = 'did:plc:bob';
+             UPDATE member SET email = 'alice@x.dk', accepted = 1 WHERE id = 'm-alice';
+             UPDATE member SET email = 'bob@x.dk', accepted = 1 WHERE id = 'm-bob';
+             INSERT INTO user (did) VALUES ('did:plc:gs');
+             INSERT INTO member (id, user_did, context_id, role, active, hidden, accepted) \
+               VALUES ('m-gs', 'did:plc:gs', 'c9', 'owner', 1, 1, 1);
+             INSERT INTO member (id, context_id, role, active, name, email, claim_token) \
+               VALUES ('inv-1', 'c9', 'member', 1, 'Carla Jensen', 'carla@x.dk', 't1');
+             INSERT INTO member (id, context_id, role, active, name, claim_token) \
+               VALUES ('inv-2', 'c9', 'member', 1, 'Dennis', 't2');",
+        )
+        .await
+        .expect("roster");
+        state
+    }
+
+    async fn members(state: &AppState, who: &str, query: &str) -> (StatusCode, serde_json::Value) {
+        get_as(
+            router(state.clone()),
+            &format!("/xrpc/com.example.wiki.listMembers?context=c9{query}"),
+            who,
+        )
+        .await
+    }
+
+    fn ids(v: &serde_json::Value) -> Vec<&str> {
+        v["members"]
+            .as_array()
+            .expect("members")
+            .iter()
+            .filter_map(|m| m["id"].as_str())
+            .collect()
+    }
+
+    /// The interim serves `email` to every member of a context: one plain member
+    /// could read 1,467 of the organisation's 2,007 addresses.
+    #[tokio::test(flavor = "current_thread")]
+    async fn only_an_owner_is_served_an_address() {
+        let state = roster().await;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let (status, v) = members(&state, &bob, "").await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert!(
+            !v.to_string().contains("@x.dk"),
+            "a plain member was served addresses: {v}"
+        );
+
+        let alice = token_for(&state, "did:plc:alice").await;
+        let (_, v) = members(&state, &alice, "").await;
+        let carla = v["members"]
+            .as_array()
+            .expect("members")
+            .iter()
+            .find(|m| m["id"] == "inv-1")
+            .expect("the invitation");
+        assert_eq!(carla["email"], "carla@x.dk");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_search_is_no_way_to_ask_whether_an_address_is_on_the_roster() {
+        let state = roster().await;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let (_, v) = members(&state, &bob, "&q=carla@x.dk").await;
+        assert!(ids(&v).is_empty(), "{v}");
+        let (_, v) = members(&state, &bob, "&q=carla").await;
+        assert_eq!(ids(&v), ["inv-1"], "a name is still searchable");
+
+        let alice = token_for(&state, "did:plc:alice").await;
+        let (_, v) = members(&state, &alice, "&q=carla@x.dk").await;
+        assert_eq!(ids(&v), ["inv-1"]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_hidden_member_is_on_the_owners_list_only() {
+        let state = roster().await;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let (_, v) = members(&state, &bob, "").await;
+        assert!(!ids(&v).contains(&"m-gs"), "{v}");
+        let (_, v) = members(&state, &bob, "&hidden=true").await;
+        assert!(
+            ids(&v).is_empty(),
+            "asking for the hidden ones does not reveal them"
+        );
+
+        let alice = token_for(&state, "did:plc:alice").await;
+        let (_, v) = members(&state, &alice, "").await;
+        assert!(ids(&v).contains(&"m-gs"), "{v}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_list_is_by_name_filtered_and_paged() {
+        let state = roster().await;
+        let alice = token_for(&state, "did:plc:alice").await;
+        let (_, v) = members(&state, &alice, "&accepted=false").await;
+        assert_eq!(
+            ids(&v),
+            ["inv-1", "inv-2", "m-ivan"],
+            "Carla, Dennis, then the nameless"
+        );
+        let (_, v) = members(&state, &alice, "&owner=true").await;
+        assert_eq!(v["total"], 2);
+
+        let (_, first) = members(&state, &alice, "&limit=2").await;
+        let (_, second) = members(&state, &alice, "&limit=2&offset=2").await;
+        assert_eq!(first["total"], 6);
+        assert_eq!(ids(&first).len(), 2);
+        assert!(
+            ids(&first).iter().all(|id| !ids(&second).contains(id)),
+            "a page repeated a row of the one before"
+        );
+        let bob_row = members(&state, &alice, "&q=Bob").await.1;
+        assert_eq!(bob_row["members"][0]["display_name"], "Bob B.");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn who_belongs_is_told_to_members_and_to_nobody_else() {
+        let state = roster().await;
+        let mallory = token_for(&state, "did:plc:mallory").await;
+        assert_eq!(members(&state, &mallory, "").await.0, StatusCode::NOT_FOUND);
+        // c1 is public, so she may read it. Its roster is still not hers to see.
+        let (status, _) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.listMembers?context=c1",
+            &mallory,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _) = get(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.listMembers?context=c1",
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn turnout_counts_voting_rights_and_names_nobody() {
+        let state = roster().await;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let (status, v) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getVoterCount?context=c9",
+            &bob,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        // alice, bob, the hidden owner and two invitations; ivan has no rights.
+        assert_eq!(v, serde_json::json!({ "count": 5 }));
+        let (status, _) = get(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getVoterCount?context=c9",
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "a closed group has no public turnout"
         );
     }
 }

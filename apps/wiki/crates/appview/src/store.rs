@@ -235,6 +235,47 @@ pub struct CrumbName {
     pub name: String,
 }
 
+/// A row of a context's member list.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct MemberRow {
+    pub id: String,
+    pub user_did: Option<String>,
+    pub role: String,
+    /// Voting rights.
+    pub active: bool,
+    pub accepted: bool,
+    pub hidden: bool,
+    /// The roster's name for them, the only label a pending invitation has.
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub handle: Option<String>,
+    pub avatar_url: Option<String>,
+    /// Served to owners of the context and to nobody else: see
+    /// [`MemberQuery::for_owner`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+/// Which members of a context to list.
+#[derive(Debug, Default, Clone)]
+pub struct MemberQuery {
+    pub owner: Option<bool>,
+    pub active: Option<bool>,
+    pub accepted: Option<bool>,
+    pub hidden: Option<bool>,
+    /// Matched against the names. Against the email too, for an owner only:
+    /// for anyone else a search that matched an address would be a way to ask
+    /// whether it is on the roster.
+    pub search: String,
+    /// The caller owns the context, so they are served addresses and the rows
+    /// that are hidden from everyone else. The interim could not draw this
+    /// line (a column permission is per role, and an owner is role `user` too),
+    /// so any member could read most of the organisation's addresses.
+    pub for_owner: bool,
+    pub limit: i64,
+    pub offset: i64,
+}
+
 /// A document to create. The store picks its slug and path.
 pub struct NewDocument<'a> {
     pub context_id: &'a str,
@@ -488,7 +529,8 @@ impl Store {
     /// Bind a pending member row to a user, guarded on `user_did` still NULL so a
     /// race cannot double-claim. Returns whether a row was actually bound. The
     /// `member_bound` partial unique additionally rejects binding a DID already
-    /// active in the context (surfaces as a constraint error).
+    /// active in the context (surfaces as a constraint error). Claiming an
+    /// invitation is saying yes to it, so the row is accepted too.
     pub async fn bind_member_to_user(
         &self,
         member_id: &str,
@@ -497,7 +539,8 @@ impl Store {
         let conn = self.db.acquire().await?;
         let affected = conn
             .execute(
-                "UPDATE member SET user_did = ?1 WHERE id = ?2 AND user_did IS NULL",
+                "UPDATE member SET user_did = ?1, accepted = 1 \
+                 WHERE id = ?2 AND user_did IS NULL",
                 [user_did, member_id],
             )
             .await?;
@@ -523,6 +566,114 @@ impl Store {
             parent_id: opt_text(&row, 0),
             claim_token: opt_text(&row, 1),
         }))
+    }
+
+    /// A page of a context's members, by name with the nameless last, and how
+    /// many match in all.
+    pub async fn list_members(
+        &self,
+        context_id: &str,
+        q: &MemberQuery,
+    ) -> Result<(Vec<MemberRow>, i64), DbError> {
+        let mut wheres = vec!["m.context_id = ?1".to_string()];
+        let mut params = vec![Value::Text(context_id.to_string())];
+        let flag = |b: bool| Value::Integer(i64::from(b));
+        if let Some(owner) = q.owner {
+            params.push(Value::Text(
+                if owner { "owner" } else { "member" }.to_string(),
+            ));
+            wheres.push(format!("m.role = ?{}", params.len()));
+        }
+        for (column, wanted) in [
+            ("active", q.active),
+            ("accepted", q.accepted),
+            ("hidden", q.hidden),
+        ] {
+            if let Some(wanted) = wanted {
+                params.push(flag(wanted));
+                wheres.push(format!("m.{column} = ?{}", params.len()));
+            }
+        }
+        if !q.for_owner {
+            wheres.push("m.hidden = 0".to_string());
+        }
+        let search = q.search.trim();
+        if !search.is_empty() {
+            params.push(Value::Text(format!("%{search}%")));
+            let n = params.len();
+            let email = if q.for_owner {
+                format!(" OR m.email LIKE ?{n}")
+            } else {
+                String::new()
+            };
+            wheres.push(format!(
+                "(m.name LIKE ?{n} OR u.display_name LIKE ?{n} OR u.handle LIKE ?{n}{email})"
+            ));
+        }
+        let from = format!(
+            "FROM member m LEFT JOIN user u ON u.did = m.user_did WHERE {}",
+            wheres.join(" AND ")
+        );
+
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(&format!("SELECT count(*) {from}"), params.clone())
+            .await?;
+        let total = match rows.next().await? {
+            Some(row) => row.get::<i64>(0)?,
+            None => 0,
+        };
+        drop(rows);
+
+        params.push(Value::Integer(q.limit));
+        params.push(Value::Integer(q.offset));
+        let (limit, offset) = (params.len() - 1, params.len());
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT m.id, m.user_did, m.role, m.active, m.accepted, m.hidden, m.name, \
+                            u.display_name, u.handle, u.avatar_url, m.email \
+                     {from} \
+                     ORDER BY coalesce(m.name, u.display_name, u.handle) IS NULL, \
+                              lower(coalesce(m.name, u.display_name, u.handle)), m.id \
+                     LIMIT ?{limit} OFFSET ?{offset}"
+                ),
+                params,
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(MemberRow {
+                id: row.get::<String>(0)?,
+                user_did: opt_text(&row, 1),
+                role: row.get::<String>(2)?,
+                active: row.get::<i64>(3)? != 0,
+                accepted: row.get::<i64>(4)? != 0,
+                hidden: row.get::<i64>(5)? != 0,
+                name: opt_text(&row, 6),
+                display_name: opt_text(&row, 7),
+                handle: opt_text(&row, 8),
+                avatar_url: opt_text(&row, 9),
+                email: opt_text(&row, 10).filter(|_| q.for_owner),
+            });
+        }
+        Ok((out, total))
+    }
+
+    /// How many members of a context hold voting rights: a poll's turnout is
+    /// out of this.
+    pub async fn count_voters(&self, context_id: &str) -> Result<i64, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT count(*) FROM member WHERE context_id = ?1 AND active = 1",
+                [context_id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => Ok(row.get::<i64>(0)?),
+            None => Ok(0),
+        }
     }
 
     /// The emails of a context's active members (push fan-out targets). The

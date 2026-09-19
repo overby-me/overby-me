@@ -1,0 +1,69 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.listMembers",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "A page of a context's members, by name with the nameless last. For members of the context only: who belongs is not told to anyone else, even where the context itself is public. An owner of the context is also served each row's email and the rows that are hidden from everyone else; nobody else is served either, and a search matches an address for an owner only, so it is no way to ask whether someone is on the roster.",
+			"parameters": {
+				"type": "params",
+				"required": ["context"],
+				"properties": {
+					"context": { "type": "string" },
+					"owner": {
+						"type": "boolean",
+						"description": "Only owners, or only plain members."
+					},
+					"active": { "type": "boolean", "description": "By voting rights." },
+					"accepted": { "type": "boolean" },
+					"hidden": { "type": "boolean" },
+					"q": {
+						"type": "string",
+						"description": "A substring of a name or handle."
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 200,
+						"default": 50
+					},
+					"offset": { "type": "integer", "minimum": 0, "default": 0 }
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["members", "total"],
+					"properties": {
+						"members": {
+							"type": "array",
+							"items": {
+								"type": "ref",
+								"ref": "com.example.wiki.defs#memberView"
+							}
+						},
+						"total": {
+							"type": "integer",
+							"description": "How many match in all, for paging."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such context, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller may read the context but is not a member of it."
+				}
+			]
+		}
+	}
+}
