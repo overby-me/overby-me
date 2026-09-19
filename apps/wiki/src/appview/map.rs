@@ -41,6 +41,11 @@ const HIDDEN: &[&str] = &["poll", "canvas", "comment", "reaction"];
 
 const CONTEXTS: &[&str] = &["home", "group", "event", "site"];
 
+/// Whether a listing leaves this kind out, as the interim's `mimes.hidden` does.
+pub fn is_hidden(kind: &str) -> bool {
+    HIDDEN.contains(&kind)
+}
+
 pub fn mime_of(kind: &str) -> String {
     MIMES
         .iter()
@@ -138,6 +143,30 @@ fn author_chip(
         node: author.context_id.as_ref().map(|_| MemberNodeRef {
             mime_id: Some("wiki/group".to_string()),
         }),
+    }
+}
+
+/// A seat on a roster as the member row the components know.
+pub fn member(seat: &defs::MemberView) -> MemberFields {
+    MemberFields {
+        id: Uuid(seat.id.clone()),
+        name: seat.name.clone(),
+        email: seat.email.clone(),
+        accepted: seat.accepted,
+        active: seat.active,
+        owner: seat.role == "owner",
+        hidden: seat.hidden,
+        node_id: seat.user_did.clone().map(Uuid),
+        user: seat.user_did.as_ref().map(|did| UserRef {
+            id: Uuid(did.clone()),
+            display_name: seat
+                .display_name
+                .clone()
+                .or_else(|| seat.handle.clone())
+                .unwrap_or_default(),
+            avatar_url: seat.avatar_url.clone().unwrap_or_default(),
+        }),
+        node: None,
     }
 }
 

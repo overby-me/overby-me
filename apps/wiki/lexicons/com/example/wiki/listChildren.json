@@ -16,7 +16,7 @@
 				"encoding": "application/json",
 				"schema": {
 					"type": "object",
-					"required": ["documents", "children"],
+					"required": ["documents", "children", "profiles"],
 					"properties": {
 						"documents": {
 							"type": "array",
@@ -31,6 +31,10 @@
 								"type": "ref",
 								"ref": "com.example.wiki.defs#childView"
 							}
+						},
+						"profiles": {
+							"type": "unknown",
+							"description": "An object from DID to profileView, for everyone the rows name by DID: each child's creator, each document's authors."
 						}
 					}
 				}

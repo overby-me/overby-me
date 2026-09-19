@@ -237,12 +237,26 @@ pub async fn list_children(
     let listed = async {
         let documents = store.list_children(&p.parent, caller.did()).await?;
         let children = store.children(&p.parent, caller.did()).await?;
-        Ok::<_, crate::DbError>((documents, children))
+        // Everyone the rows name by DID, so a list can show faces without
+        // asking again for each.
+        let dids: std::collections::BTreeSet<String> = children
+            .iter()
+            .filter_map(|c| c.owner_did.clone())
+            .chain(
+                documents
+                    .iter()
+                    .flat_map(|d| d.authors.iter().filter_map(|a| a.did().map(str::to_string))),
+            )
+            .collect();
+        let profiles = store.profiles(&dids).await?;
+        Ok::<_, crate::DbError>((documents, children, profiles))
     };
     match listed.await {
-        Ok((documents, children)) => (
+        Ok((documents, children, profiles)) => (
             StatusCode::OK,
-            Json(serde_json::json!({ "documents": documents, "children": children })),
+            Json(serde_json::json!({
+                "documents": documents, "children": children, "profiles": profiles
+            })),
         )
             .into_response(),
         Err(e) => {

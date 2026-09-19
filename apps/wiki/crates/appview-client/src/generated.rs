@@ -1527,6 +1527,8 @@ pub mod list_children {
     pub struct Output {
         pub children: Vec<defs::ChildView>,
         pub documents: Vec<defs::DocumentView>,
+        /// An object from DID to profileView, for everyone the rows name by DID: each child's creator, each document's authors.
+        pub profiles: serde_json::Value,
     }
 
     #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
