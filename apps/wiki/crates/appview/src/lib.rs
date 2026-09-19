@@ -16,6 +16,7 @@ pub mod firehose;
 pub mod http;
 pub mod oauth;
 pub mod schema;
+pub mod session;
 pub mod statecookie;
 pub mod store;
 pub mod util;
@@ -103,7 +104,12 @@ pub fn router(state: AppState) -> Router {
             "/xrpc/com.example.wiki.getReactions",
             get(xrpc::get_reactions),
         )
-        // The write procedures (Phase 1: the authenticated DID authors content).
+        .route("/xrpc/com.example.wiki.getSession", get(xrpc::get_session))
+        .route(
+            "/xrpc/com.example.wiki.deleteSession",
+            post(xrpc::delete_session),
+        )
+        // The write procedures (the session's DID authors content).
         .route(
             "/xrpc/com.example.wiki.createDocument",
             post(xrpc::create_document),

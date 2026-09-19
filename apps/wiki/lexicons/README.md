@@ -57,12 +57,17 @@ Queries (GET, identity-free public reads):
   wrapped, never a bare top-level array, because a bare array is not a valid lexicon `output.schema`
   and the wrapper leaves room for a future `cursor`.
 
-Procedures (POST, authenticated; the caller's DID comes from the request authorization, not the body):
+The session (`crates/appview/src/session.rs`): `getSession` returns the caller as a `userView`;
+`deleteSession` (a procedure) signs out the presented session and no other. A session is an opaque
+bearer token minted by `/callback` after an atproto OAuth login.
+
+Procedures (POST, authenticated; the caller's DID comes from the session, never the body):
 
 - `createDocument` and `postComment` return `{ id }`; `addReaction` returns `{ id }` (idempotent) and
   `removeReaction` returns `{ ok: true }` (idempotent toggle-off).
 
-The membership/authz-gated reads and richer write procedures are deferred with the DID-binding flow.
+Reads are not yet gated on visibility or membership, and the richer write procedures are not built:
+`docs/appview-roadmap.md` tracks both.
 
 ## NSID
 

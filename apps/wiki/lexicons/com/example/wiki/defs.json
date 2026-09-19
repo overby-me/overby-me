@@ -159,6 +159,18 @@
 				"created_at": { "type": "string", "format": "datetime" },
 				"legacy_id": { "type": "string" }
 			}
+		},
+		"userView": {
+			"type": "object",
+			"description": "A person. The DID is the identity; the rest is profile, absent until it has been read from their PDS.",
+			"required": ["did"],
+			"properties": {
+				"did": { "type": "string", "format": "did" },
+				"handle": { "type": "string", "format": "handle" },
+				"display_name": { "type": "string" },
+				"avatar_url": { "type": "string", "format": "uri" },
+				"legacy_id": { "type": "string" }
+			}
 		}
 	}
 }

@@ -12,14 +12,14 @@
 //! method lexicons in `lexicons/com/example/wiki/` are the contract for exactly
 //! these shapes.
 //!
-//! These are the IDENTITY-FREE reads (public content lookups, no auth). The
-//! membership/authz-gated reads and the write procedures wait on the DID-binding
-//! flow (see `store.rs`); this is the buildable-now slice of the serving layer.
+//! The reads here are still IDENTITY-FREE (no visibility or membership gate yet,
+//! `docs/appview-roadmap.md` M2). The procedures take the caller from a session
+//! (`crate::session::Caller`), never from the request body.
 
 use crate::AppState;
+use crate::session::{Caller, Sessions};
 use axum::Json;
 use axum::extract::{Query, State};
-use axum::http::header::AUTHORIZATION;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
@@ -31,7 +31,7 @@ pub struct IdParam {
 }
 
 /// An XRPC error body (`{ "error": ..., "message": ... }`, the atproto shape).
-fn err(status: StatusCode, error: &str, message: &str) -> Response {
+pub(crate) fn err(status: StatusCode, error: &str, message: &str) -> Response {
     (
         status,
         Json(serde_json::json!({ "error": error, "message": message })),
@@ -226,31 +226,42 @@ pub async fn get_reactions(
 }
 
 // ---------------------------------------------------------------------------
-// Write side (Phase 1): a freshly-authenticated DID authors its own content.
+// The session itself.
 // ---------------------------------------------------------------------------
 
-/// PLACEHOLDER auth: the `Authorization: Bearer <did>` value is treated as the
-/// caller's DID. Real auth resolves an atproto session / access token to a DID
-/// (the deferred identity slice) and enforces membership; do NOT deploy this
-/// as-is. It exists so the write vertical (validation + SQL + XRPC shape) is
-/// buildable and testable ahead of the identity flow.
-fn caller_did(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get(AUTHORIZATION)?
-        .to_str()
-        .ok()?
-        .strip_prefix("Bearer ")
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+/// `com.example.wiki.getSession` — who the presented session belongs to.
+pub async fn get_session(State(state): State<AppState>, caller: Caller) -> Response {
+    let store = crate::Store::new(state.db.clone());
+    match store.read_user(&caller.did).await {
+        Ok(Some(user)) => (StatusCode::OK, Json(user)).into_response(),
+        // Login writes the user row before the session, so the user was deleted since.
+        Ok(None) => err(StatusCode::UNAUTHORIZED, "InvalidToken", "no such user"),
+        Err(e) => {
+            tracing::error!("getSession failed: {e}");
+            err(StatusCode::BAD_GATEWAY, "InternalError", "read failed")
+        }
+    }
 }
 
-fn auth_required() -> Response {
-    err(
-        StatusCode::UNAUTHORIZED,
-        "AuthRequired",
-        "missing bearer DID",
-    )
+/// `com.example.wiki.deleteSession` (procedure) — sign out: ends the presented
+/// session and no other, so a phone stays signed in when a laptop signs out.
+pub async fn delete_session(
+    State(state): State<AppState>,
+    _caller: Caller,
+    headers: HeaderMap,
+) -> Response {
+    let Some(token) = crate::session::bearer(&headers) else {
+        return err(StatusCode::UNAUTHORIZED, "AuthRequired", "no session");
+    };
+    match Sessions::new(state.db.clone()).revoke(token).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(e) => write_failed("deleteSession", e),
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Write side: the caller authors content. Membership gating is M2.
+// ---------------------------------------------------------------------------
 
 fn wrote(id: String) -> Response {
     (StatusCode::OK, Json(serde_json::json!({ "id": id }))).into_response()
@@ -275,12 +286,9 @@ pub struct CreateDocumentBody {
 /// `com.example.wiki.createDocument` (procedure) — the caller authors a document.
 pub async fn create_document(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Caller { did }: Caller,
     Json(body): Json<CreateDocumentBody>,
 ) -> Response {
-    let Some(did) = caller_did(&headers) else {
-        return auth_required();
-    };
     let content = body.content.as_ref().map(|v| v.to_string());
     let store = crate::Store::new(state.db.clone());
     match store
@@ -309,12 +317,9 @@ pub struct PostCommentBody {
 /// `com.example.wiki.postComment` (procedure) — the caller comments on a node.
 pub async fn post_comment(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Caller { did }: Caller,
     Json(body): Json<PostCommentBody>,
 ) -> Response {
-    let Some(did) = caller_did(&headers) else {
-        return auth_required();
-    };
     let store = crate::Store::new(state.db.clone());
     match store
         .create_comment(&body.on_id, &body.context_id, &did, &body.text)
@@ -334,12 +339,9 @@ pub struct ReactionBody {
 /// `com.example.wiki.addReaction` (procedure) — the caller reacts to a subject.
 pub async fn add_reaction(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Caller { did }: Caller,
     Json(body): Json<ReactionBody>,
 ) -> Response {
-    let Some(did) = caller_did(&headers) else {
-        return auth_required();
-    };
     let store = crate::Store::new(state.db.clone());
     match store
         .create_reaction(&body.subject, &did, &body.emoji)
@@ -353,12 +355,9 @@ pub async fn add_reaction(
 /// `com.example.wiki.removeReaction` (procedure) — the caller un-reacts.
 pub async fn remove_reaction(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    Caller { did }: Caller,
     Json(body): Json<ReactionBody>,
 ) -> Response {
-    let Some(did) = caller_did(&headers) else {
-        return auth_required();
-    };
     let store = crate::Store::new(state.db.clone());
     match store
         .remove_reaction(&body.subject, &did, &body.emoji)
@@ -423,18 +422,30 @@ mod tests {
         (status, v)
     }
 
+    /// Sign `did` in the way `/callback` does: a user row and a session.
+    async fn token_for(state: &AppState, did: &str) -> String {
+        crate::Store::new(state.db.clone())
+            .upsert_user_min(did)
+            .await
+            .expect("user");
+        crate::session::Sessions::new(state.db.clone())
+            .create(did)
+            .await
+            .expect("session")
+    }
+
     async fn post(
         app: axum::Router,
         uri: &str,
-        did: Option<&str>,
+        token: Option<&str>,
         body: serde_json::Value,
     ) -> (StatusCode, serde_json::Value) {
         let mut b = Request::builder()
             .method("POST")
             .uri(uri)
             .header("content-type", "application/json");
-        if let Some(d) = did {
-            b = b.header("authorization", format!("Bearer {d}"));
+        if let Some(t) = token {
+            b = b.header("authorization", format!("Bearer {t}"));
         }
         let resp = app
             .oneshot(b.body(Body::from(body.to_string())).unwrap())
@@ -578,10 +589,11 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn create_document_by_a_did_then_read_it_back() {
         let state = seeded_state().await;
+        let carol = token_for(&state, "did:plc:carol").await;
         let (status, v) = post(
             router(state.clone()),
             "/xrpc/com.example.wiki.createDocument",
-            Some("did:plc:carol"),
+            Some(&carol),
             serde_json::json!({
                 "context_id": "c1",
                 "kind": "document",
@@ -618,13 +630,113 @@ mod tests {
         assert_eq!(v["error"], "AuthRequired");
     }
 
+    /// The placeholder this replaced read the DID out of the header, so anyone
+    /// could write as anyone by naming them.
+    #[tokio::test(flavor = "current_thread")]
+    async fn naming_a_did_is_not_a_credential() {
+        let state = seeded_state().await;
+        let (status, v) = post(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.postComment",
+            Some("did:plc:alice"),
+            serde_json::json!({"on_id": "d1", "context_id": "c1", "text": "forged"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(v["error"], "InvalidToken");
+        let (_, v) = get(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getComments?on=d1",
+        )
+        .await;
+        assert!(
+            !v["comments"]
+                .as_array()
+                .expect("array")
+                .iter()
+                .any(|c| c["text"] == "forged"),
+            "a forged write landed"
+        );
+    }
+
+    async fn get_as(app: axum::Router, uri: &str, token: &str) -> (StatusCode, serde_json::Value) {
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri(uri)
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("request");
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .expect("body");
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        )
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn get_session_names_the_caller_and_sign_out_ends_it() {
+        let state = seeded_state().await;
+        let token = token_for(&state, "did:plc:alice").await;
+        let session = "/xrpc/com.example.wiki.getSession";
+
+        let (status, v) = get_as(router(state.clone()), session, &token).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["did"], "did:plc:alice");
+        assert_eq!(v["handle"], "alice.test");
+
+        let (status, _) = get(router(state.clone()), session).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "getSession is not public");
+
+        let (status, _) = post(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.deleteSession",
+            Some(&token),
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, v) = get_as(router(state.clone()), session, &token).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(v["error"], "InvalidToken");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn signing_out_one_device_leaves_the_other_signed_in() {
+        let state = seeded_state().await;
+        let laptop = token_for(&state, "did:plc:alice").await;
+        let phone = token_for(&state, "did:plc:alice").await;
+        let (status, _) = post(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.deleteSession",
+            Some(&laptop),
+            serde_json::json!({}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, _) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getSession",
+            &phone,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn post_comment_lands_in_the_thread() {
         let state = seeded_state().await;
+        let dave = token_for(&state, "did:plc:dave").await;
         let (status, _) = post(
             router(state.clone()),
             "/xrpc/com.example.wiki.postComment",
-            Some("did:plc:dave"),
+            Some(&dave),
             serde_json::json!({"on_id": "d1", "context_id": "c1", "text": "Seconded"}),
         )
         .await;
@@ -648,13 +760,15 @@ mod tests {
     async fn add_then_remove_reaction_toggles() {
         let state = seeded_state().await;
         let subject = "at://did:plc:x/com.example.wiki.comment/z";
+        let eve = token_for(&state, "did:plc:eve").await;
         let add = |emoji: &'static str| {
             let s = state.clone();
+            let eve = eve.clone();
             async move {
                 post(
                     router(s),
                     "/xrpc/com.example.wiki.addReaction",
-                    Some("did:plc:eve"),
+                    Some(&eve),
                     serde_json::json!({"subject": subject, "emoji": emoji}),
                 )
                 .await
@@ -674,7 +788,7 @@ mod tests {
         let (status, _) = post(
             router(state.clone()),
             "/xrpc/com.example.wiki.removeReaction",
-            Some("did:plc:eve"),
+            Some(&eve),
             serde_json::json!({"subject": subject, "emoji": "🎉"}),
         )
         .await;

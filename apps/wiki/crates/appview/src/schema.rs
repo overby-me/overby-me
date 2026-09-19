@@ -37,4 +37,14 @@ CREATE TABLE IF NOT EXISTS oauth_session (
   did   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Browser sessions (src/session.rs). token_hash is SHA-256 of the bearer token,
+-- never the token; the two timestamps are Unix seconds.
+CREATE TABLE IF NOT EXISTS session (
+  token_hash TEXT PRIMARY KEY,
+  did        TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_by_did ON session(did);
 "#;

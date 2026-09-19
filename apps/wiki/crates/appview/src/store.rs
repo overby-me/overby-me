@@ -25,7 +25,9 @@
 
 use crate::db::{Db, DbError};
 use turso::Value;
-use wiki_domain_types::{Author, Comment, Context, ContextKind, Document, DocumentKind, Reaction};
+use wiki_domain_types::{
+    Author, Comment, Context, ContextKind, Document, DocumentKind, Reaction, User,
+};
 
 /// Parse a snake_case DB enum value (e.g. `"document"`, `"private"`) into a
 /// `#[serde(rename_all = "snake_case")]` domain enum; `None` on an unknown value.
@@ -544,6 +546,26 @@ impl Store {
             }
         };
         Ok(Some(self.hydrate_document(base).await?))
+    }
+
+    pub async fn read_user(&self, did: &str) -> Result<Option<User>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT did, handle, display_name, avatar_url FROM user WHERE did = ?1",
+                [did],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(User {
+            did: row.get::<String>(0)?,
+            handle: opt_text(&row, 1),
+            display_name: opt_text(&row, 2),
+            avatar_url: opt_text(&row, 3),
+            legacy_id: None,
+        }))
     }
 
     /// A context (group / event) by id. `None` if no such context.
