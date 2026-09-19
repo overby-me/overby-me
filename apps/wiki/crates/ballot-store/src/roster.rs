@@ -10,21 +10,32 @@ use ballot_spec::{Did, EligibilityRoster};
 use turso::{Connection, Value};
 
 /// The private ballot DDL, matching `docs/atproto-domain-model.md`. `poll` is
-/// the FK target the other three reference. `board_entry` is INTENTIONALLY
-/// excluded: the public board lives in `board.rs` in its opaque provisional
-/// form, not these named columns. The `did` columns reference `user(did)` in the
-/// AppView's combined schema; that FK is omitted HERE so this DDL validates
-/// standalone (the `user` table is the separate entity schema).
+/// the FK target the others reference. `board_entry` is INTENTIONALLY excluded:
+/// the public board lives in `board.rs` in its opaque provisional form, not
+/// these named columns. The `did` columns reference `user(did)` in the AppView's
+/// combined schema; that FK is omitted HERE so this DDL validates standalone
+/// (the `user` table is the separate entity schema).
 pub const BALLOT_DDL: &str = r#"
 CREATE TABLE IF NOT EXISTS poll (
-  id            TEXT PRIMARY KEY,
+  id            TEXT PRIMARY KEY,                        -- also the id of its node in the tree
   context_id    TEXT NOT NULL,
   question      TEXT NOT NULL,
   options       TEXT NOT NULL,                           -- JSON array of strings
+  min_choices   INTEGER NOT NULL DEFAULT 1,
+  max_choices   INTEGER NOT NULL DEFAULT 1,
+  blank         INTEGER NOT NULL DEFAULT 0,              -- the LAST option is the abstention
   open          INTEGER NOT NULL DEFAULT 1,
   secret        INTEGER NOT NULL DEFAULT 0,
-  issuer_pubkey TEXT,                                    -- published before open; dropped at close
-  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  hide_tally    INTEGER NOT NULL DEFAULT 0,              -- counts are for the context's owners
+  issuer_pubkey TEXT,                                    -- published before open; kept after close
+  issuer_secret TEXT,                                    -- sealed by the custodian; dropped at close
+  -- The result, written once at close. A poll migrated from the interim has
+  -- only these: its ballots could not be carried, its outcome can.
+  counts        TEXT,                                    -- JSON array, one count per option
+  ballots       INTEGER,
+  issued        INTEGER,                                 -- unit tokens handed out: the bound on `ballots`
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  closed_at     TEXT
 );
 CREATE TABLE IF NOT EXISTS eligibility (
   poll_id         TEXT NOT NULL REFERENCES poll(id),
@@ -40,11 +51,30 @@ CREATE TABLE IF NOT EXISTS delegation (
   assignment_sig TEXT NOT NULL,
   PRIMARY KEY (poll_id, from_did)                        -- one outgoing delegation per voter
 );
+-- THAT a voter was served, and nothing about when or in what order: a row is
+-- written with a random rowid and the poll's opening time as `issued_at`.
+-- Insertion order or a clock here, set beside the board's positions, would pair
+-- voters with ballots.
+-- request_hash is a digest of the BLINDED messages that were signed. It lets a
+-- voter whose reply was lost ask again with the same messages and get the same
+-- signatures, which mints nothing new. A blinded message says nothing about the
+-- token inside it, so the digest links no ballot to this row.
 CREATE TABLE IF NOT EXISTS token_issued (
-  poll_id   TEXT NOT NULL REFERENCES poll(id),
-  did       TEXT NOT NULL,
-  issued_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  poll_id      TEXT NOT NULL REFERENCES poll(id),
+  did          TEXT NOT NULL,
+  request_hash TEXT,
+  issued_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   PRIMARY KEY (poll_id, did)                             -- issuance happens once per voter
+);
+-- A ballot in a poll that is NOT secret: it names its voter, which is what such
+-- a poll means. It weighs what the voter's frozen roster row says.
+CREATE TABLE IF NOT EXISTS open_ballot (
+  poll_id TEXT NOT NULL REFERENCES poll(id),
+  did     TEXT NOT NULL,
+  weight  INTEGER NOT NULL,
+  choices TEXT NOT NULL,                                 -- JSON array of option indices
+  cast_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY (poll_id, did)                             -- one per voter; the first stands
 );
 "#;
 

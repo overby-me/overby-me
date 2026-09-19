@@ -1,0 +1,81 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.castBallot",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "A secret poll, step two: spend one token on one ballot. Send NO session with this call. The token is the right to vote, and the server reads no credential here even if one arrives, so that a ballot cannot be tied to the account that asked for its token. A client should also let some time pass between being issued tokens and casting them. A ballot that breaks the poll's rules does not use its token up; a token is spent by the first ballot it lands, whatever a second one says.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["poll", "token", "signature", "choices"],
+					"properties": {
+						"poll": {
+							"type": "string"
+						},
+						"token": {
+							"type": "string",
+							"description": "The 32 random bytes that were blinded, base64url without padding."
+						},
+						"msg_randomizer": {
+							"type": "string",
+							"description": "The 32-byte message randomizer from blinding, base64url without padding."
+						},
+						"signature": {
+							"type": "string",
+							"description": "The unblinded signature, base64url without padding."
+						},
+						"choices": {
+							"type": "array",
+							"items": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"description": "Indices into the poll's `options`."
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["position"],
+					"properties": {
+						"position": {
+							"type": "integer",
+							"description": "Where on the board the ballot landed. Kept by the voter with the token."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "NotFound",
+					"description": "No such poll, or none the caller may read."
+				},
+				{
+					"name": "PollClosed",
+					"description": "The poll is closed (HTTP 409)."
+				},
+				{
+					"name": "BadToken",
+					"description": "The signature does not verify under this poll's key: forged, or issued for another poll (HTTP 403)."
+				},
+				{
+					"name": "AlreadySpent",
+					"description": "The token has already been spent on a ballot (HTTP 409)."
+				},
+				{
+					"name": "InvalidBallot",
+					"description": "The choices break the poll's rules. The token is still good."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "Not a secret poll, or a field that is not base64url."
+				}
+			]
+		}
+	}
+}

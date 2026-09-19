@@ -144,6 +144,9 @@ pub enum DocumentKind {
     Candidate,
     Change,
     Question,
+    /// A poll's place in the tree. What is voted on, and how it went, is its
+    /// `poll` row (`ballot-store`), which shares this document's id.
+    Poll,
 }
 
 /// A content node: document / folder / file / proposal.

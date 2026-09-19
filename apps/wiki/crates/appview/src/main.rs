@@ -42,8 +42,21 @@ async fn main() {
         }
     };
     appview::blob::sweep_incoming(&config).await;
+    // Fatal, like the OAuth client: a board that is configured to be replicated
+    // and is not is the integrity control silently off.
+    let replica = match appview::ballot::open_replica(&config.ballot_replica_log) {
+        Ok(replica) => replica,
+        Err(e) => {
+            tracing::error!(
+                "failed to open the ballot replica log at {}: {e}",
+                config.ballot_replica_log
+            );
+            std::process::exit(1);
+        }
+    };
     let addr = format!("0.0.0.0:{}", config.port);
-    let state = AppState::new(db, config).with_oauth(oauth);
+    let mut state = AppState::new(db, config).with_oauth(oauth);
+    state.replica = replica;
 
     // The firehose consumer runs for the life of the process, materializing
     // public records into the view and broadcasting deltas to /ws clients. It

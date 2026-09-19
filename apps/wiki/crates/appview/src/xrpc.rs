@@ -917,6 +917,7 @@ pub async fn create_document(
         content: content.as_deref(),
         data: data.as_deref(),
         author_did: &did,
+        credited: true,
     };
     match store.create_document(&new).await {
         Ok(id) => {

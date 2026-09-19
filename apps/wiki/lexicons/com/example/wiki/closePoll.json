@@ -1,0 +1,43 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.closePoll",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "An owner ends the vote. The result is counted once, here, and stored; a secret poll's board is sealed and its issuer key destroyed, so no token can be signed or spent afterwards. Closing a closed poll answers with the same result.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": {
+						"id": {
+							"type": "string"
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "ref",
+					"ref": "com.example.wiki.defs#pollView"
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such poll, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is not an owner of the context."
+				}
+			]
+		}
+	}
+}

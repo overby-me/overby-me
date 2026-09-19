@@ -47,12 +47,12 @@ fn run_sqlite(path: &str) {
         conn.execute_batch("BEGIN IMMEDIATE")
             .expect("begin immediate");
         conn.execute(
-            "INSERT INTO board_nullifier (token, position) VALUES (?1, ?2)",
+            "INSERT INTO board_nullifier (poll_id, token, position) VALUES ('p1', ?1, ?2)",
             [position, position],
         )
         .expect("nullifier insert");
         conn.execute(
-            "INSERT INTO board_body (position, body) VALUES (?1, '[0]')",
+            "INSERT INTO board_body (poll_id, position, body) VALUES ('p1', ?1, '[0]')",
             [position],
         )
         .expect("body insert");
@@ -86,13 +86,13 @@ fn run_turso(path: &str) {
         loop {
             conn.execute("BEGIN IMMEDIATE", ()).await.expect("begin");
             conn.execute(
-                "INSERT INTO board_nullifier (token, position) VALUES (?1, ?2)",
+                "INSERT INTO board_nullifier (poll_id, token, position) VALUES ('p1', ?1, ?2)",
                 (position, position),
             )
             .await
             .expect("nullifier insert");
             conn.execute(
-                "INSERT INTO board_body (position, body) VALUES (?1, '[0]')",
+                "INSERT INTO board_body (poll_id, position, body) VALUES ('p1', ?1, '[0]')",
                 (position,),
             )
             .await

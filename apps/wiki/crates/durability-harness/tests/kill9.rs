@@ -33,7 +33,8 @@ fn assert_atomic(conn: &rusqlite::Connection) -> i64 {
     let orphan_nullifiers: i64 = conn
         .query_row(
             "SELECT count(*) FROM board_nullifier n WHERE NOT EXISTS
-               (SELECT 1 FROM board_body b WHERE b.position = n.position)",
+               (SELECT 1 FROM board_body b
+                WHERE b.poll_id = n.poll_id AND b.position = n.position)",
             [],
             |r| r.get(0),
         )
@@ -41,7 +42,8 @@ fn assert_atomic(conn: &rusqlite::Connection) -> i64 {
     let orphan_bodies: i64 = conn
         .query_row(
             "SELECT count(*) FROM board_body b WHERE NOT EXISTS
-               (SELECT 1 FROM board_nullifier n WHERE n.position = b.position)",
+               (SELECT 1 FROM board_nullifier n
+                WHERE n.poll_id = b.poll_id AND n.position = b.position)",
             [],
             |r| r.get(0),
         )

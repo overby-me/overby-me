@@ -300,6 +300,108 @@
 				},
 				"name": { "type": "string", "maxLength": 255 }
 			}
+		},
+		"pollView": {
+			"type": "object",
+			"description": "A poll as one caller may see it. It is also a node of kind `poll`, at `path`.",
+			"required": [
+				"id",
+				"context_id",
+				"path",
+				"question",
+				"options",
+				"min",
+				"max",
+				"blank",
+				"secret",
+				"hide_tally",
+				"open",
+				"created_at",
+				"ballots",
+				"eligible"
+			],
+			"properties": {
+				"id": { "type": "string" },
+				"context_id": { "type": "string" },
+				"parent_id": { "type": "string" },
+				"path": { "type": "string" },
+				"question": {
+					"type": "string",
+					"description": "The wording voted on. Fixed when the poll opened; renaming the node does not change it."
+				},
+				"options": { "type": "array", "items": { "type": "string" } },
+				"min": { "type": "integer" },
+				"max": { "type": "integer" },
+				"blank": {
+					"type": "boolean",
+					"description": "The last option is the abstention."
+				},
+				"secret": { "type": "boolean" },
+				"hide_tally": { "type": "boolean" },
+				"open": { "type": "boolean" },
+				"created_at": { "type": "string", "format": "datetime" },
+				"closed_at": { "type": "string", "format": "datetime" },
+				"issuer_pubkey": {
+					"type": "string",
+					"description": "A secret poll's RSA key as SubjectPublicKeyInfo DER, base64url without padding. PROVISIONAL with the other ballot encodings (`crates/ballot-spec` DECISIONS.md D7)."
+				},
+				"ballots": {
+					"type": "integer",
+					"description": "Ballots cast so far, by weight. Shown to everyone: a room reads its turnout off this."
+				},
+				"eligible": {
+					"type": "integer",
+					"description": "The sum of the weights frozen at opening: what `ballots` is out of."
+				},
+				"counts": {
+					"type": "array",
+					"items": { "type": "integer" },
+					"description": "One count per option. Absent where the tally is hidden from the caller."
+				},
+				"outcome": {
+					"type": "object",
+					"description": "Absent with `counts`. The abstention never wins; options sharing the top count are a tie.",
+					"required": ["kind"],
+					"properties": {
+						"kind": {
+							"type": "string",
+							"knownValues": ["winner", "tie", "none"]
+						},
+						"option": { "type": "integer" }
+					}
+				},
+				"viewer": {
+					"type": "object",
+					"description": "The caller's standing in the poll. Absent for someone who held no voting rights when it opened.",
+					"required": ["weight", "issued"],
+					"properties": {
+						"weight": {
+							"type": "integer",
+							"description": "Ballots the caller has. 0 when their weight went to a delegate."
+						},
+						"issued": {
+							"type": "boolean",
+							"description": "A secret poll: the caller has collected their tokens. Whether they then cast them the server cannot know."
+						},
+						"choices": {
+							"type": "array",
+							"items": { "type": "integer" },
+							"description": "An open poll: the caller's own ballot, once cast."
+						}
+					}
+				}
+			}
+		},
+		"boardEntryView": {
+			"type": "object",
+			"description": "One spent token on a secret poll's board. It carries no voter, by construction. PROVISIONAL encoding (`crates/ballot-spec/src/provisional.rs`).",
+			"required": ["token", "signature", "choices"],
+			"properties": {
+				"token": { "type": "string" },
+				"msg_randomizer": { "type": "string" },
+				"signature": { "type": "string" },
+				"choices": { "type": "array", "items": { "type": "integer" } }
+			}
 		}
 	}
 }

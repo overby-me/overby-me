@@ -36,9 +36,9 @@ workspace when the rewrite starts.
 - `migration-loader`: writes an extraction into a staging Turso db, parents
   first and idempotently, with foreign keys enforced so a dump that points at
   a row it does not contain fails at the rehearsal.
-- `ballot-store`: the durable half of the ballot scheme: the public board with
-  its kill-9-proven atomic cast, the private roster DDL, and the off-node
-  replica log.
+- `ballot-store`: the durable half of the ballot scheme: every poll's public
+  board in one store, with its kill-9-proven atomic cast and a seal that ends
+  it; the private roster DDL; and the off-node replica log.
 - `appview`: the backend itself. `docs/appview-roadmap.md` says what it does
   today and what is left.
 

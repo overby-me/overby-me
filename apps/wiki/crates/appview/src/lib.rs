@@ -15,6 +15,7 @@ pub mod firehose;
 pub mod http;
 pub mod live;
 pub mod oauth;
+pub mod poll;
 pub mod projector;
 pub mod schema;
 pub mod session;
@@ -52,6 +53,10 @@ pub struct AppState {
     pub oauth: Option<Arc<oauth::WikiOAuth>>,
     /// Live firehose status (updated by the consumer task, read by `/healthz`).
     pub firehose: Arc<firehose::FirehoseStatus>,
+    /// The off-node ballot replica log, when one is configured (`crate::ballot`).
+    pub replica: Option<Arc<ballot_store::ReplicaLog>>,
+    /// What `crate::poll` keeps between requests.
+    pub polls: Arc<poll::Shared>,
 }
 
 impl AppState {
@@ -65,6 +70,8 @@ impl AppState {
             config,
             oauth: None,
             firehose: Arc::new(firehose::FirehoseStatus::default()),
+            replica: None,
+            polls: Arc::default(),
         }
     }
 
@@ -286,6 +293,24 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.removeReaction",
             post(xrpc::remove_reaction),
+        )
+        .route("/xrpc/com.example.wiki.openPoll", post(poll::open_poll))
+        .route("/xrpc/com.example.wiki.closePoll", post(poll::close_poll))
+        .route("/xrpc/com.example.wiki.getPoll", get(poll::get_poll))
+        .route("/xrpc/com.example.wiki.listPolls", get(poll::list_polls))
+        .route("/xrpc/com.example.wiki.getBoard", get(poll::get_board))
+        .route(
+            "/xrpc/com.example.wiki.getBoardEntry",
+            get(poll::get_board_entry),
+        )
+        .route(
+            "/xrpc/com.example.wiki.issueBallotTokens",
+            post(poll::issue_ballot_tokens),
+        )
+        .route("/xrpc/com.example.wiki.castBallot", post(poll::cast_ballot))
+        .route(
+            "/xrpc/com.example.wiki.castOpenBallot",
+            post(poll::cast_open_ballot),
         )
         .route("/blob/{id}", get(blob::serve_blob))
         .route("/xrpc/com.example.wiki.uploadBlob", post(blob::upload_blob))

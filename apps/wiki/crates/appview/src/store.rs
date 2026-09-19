@@ -364,6 +364,9 @@ pub struct NewDocument<'a> {
     pub data: Option<&'a str>,
     /// The creator, and the first author.
     pub author_did: &'a str,
+    /// Whether the creator is also listed as an author. Not for a poll: the
+    /// chair who opens one did not write what is voted on.
+    pub credited: bool,
 }
 
 /// What a change to a document may set. `None` leaves a field as it is. The
@@ -1825,7 +1828,9 @@ impl Store {
         written.map(|()| id)
     }
 
-    async fn insert_document(
+    /// The insert of [`Self::create_document`], for a caller that has more to
+    /// write in the same transaction, which it must already have begun.
+    pub(crate) async fn insert_document(
         &self,
         conn: &turso::Connection,
         id: &str,
@@ -1866,11 +1871,13 @@ impl Store {
             ],
         )
         .await?;
-        conn.execute(
-            "INSERT INTO document_author (document_id, author_did, ord) VALUES (?1, ?2, 0)",
-            [id, new.author_did],
-        )
-        .await?;
+        if new.credited {
+            conn.execute(
+                "INSERT INTO document_author (document_id, author_did, ord) VALUES (?1, ?2, 0)",
+                [id, new.author_did],
+            )
+            .await?;
+        }
         Ok(())
     }
 

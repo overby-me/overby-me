@@ -1,0 +1,35 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.listPolls",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "The polls opened on a node, newest first, leaving out any the caller may not read.",
+			"parameters": {
+				"type": "params",
+				"required": ["parent"],
+				"properties": {
+					"parent": {
+						"type": "string"
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["polls"],
+					"properties": {
+						"polls": {
+							"type": "array",
+							"items": {
+								"type": "ref",
+								"ref": "com.example.wiki.defs#pollView"
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

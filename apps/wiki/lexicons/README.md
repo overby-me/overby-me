@@ -45,7 +45,8 @@ what `com.example.wiki.ballotEntry` describes.
 These describe the AppView's own read/write API (`crates/appview/src/xrpc.rs`), served at
 `/xrpc/{nsid}`. They return the AppView's canonical DOMAIN entities (the reconciled internal shapes),
 NOT the published repo records above; `com.example.wiki.defs` holds the shared view objects
-(`documentView`, `contextView`, `commentView`, `reactionView`, `authorView`) they reference. This is
+(`documentView`, `contextView`, `commentView`, `reactionView`, `authorView`, `memberView`,
+`userView`, `blobView`, `pollView`, `boardEntryView`) they reference. This is
 why a `documentView` exists even though the `document` RECORD is excluded: the served entity shape is
 settled, but its public rich-text record shape is not.
 
@@ -92,6 +93,12 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   `nextSpeaker` and `moveSpeaker` are the chair's; `joinSpeakerList` and `leaveSpeakerList` are any
   member's; `listSpeakerLists` (a query) is what the room follows. `setProjector` and
   `getProjector` are what the projector shows.
+- Voting: `openPoll` and `closePoll` are the chair's. A poll that is not secret takes
+  `castOpenBallot`. A secret one takes two steps that the server cannot join: `issueBallotTokens`
+  (signed in: blind signatures on tokens the server cannot read) and `castBallot` (NO session: a
+  token and a choice). `getPoll` and `listPolls` (queries) are the state and the tally as the
+  caller may see them, `getBoard` is every ballot for whoever may see the counts, and
+  `getBoardEntry` is how a voter finds their own.
 - Files: `uploadBlob` takes the raw bytes (not JSON) into a context, `deleteBlob` removes one, and
   `getBlobLink` (a query) signs a short-lived link for an `<iframe>`, a `<video>` or a document
   viewer, none of which can send a header. The bytes themselves are `GET /blob/<id>`, which is plain

@@ -5,6 +5,7 @@
 //! and stock SQLite both ship it off, `crates/schema/tests/roundtrip.rs`), so
 //! the pragma is set and read back per connection rather than assumed.
 
+use std::sync::Arc;
 use std::time::Duration;
 use turso::{Builder, Connection, Database};
 
@@ -17,13 +18,24 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 #[derive(Clone)]
 pub struct Db {
     inner: Database,
+    writers: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Db {
     /// Open (or create) the Turso database at `path` (`:memory:` for tests).
     pub async fn open(path: &str) -> Result<Self, DbError> {
         let inner = Builder::new_local(path).build().await?;
-        Ok(Self { inner })
+        Ok(Self {
+            inner,
+            writers: Arc::default(),
+        })
+    }
+
+    /// A place in the queue of writers, for a write a whole room makes at once
+    /// (a ballot). The busy timeout alone gets every such write through, but by
+    /// polling, in no order: this waits asleep, first come first served.
+    pub async fn write_turn(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.writers.clone().lock_owned().await
     }
 
     /// A connection with foreign keys enforced. Fails rather than hand out one
@@ -74,14 +86,16 @@ impl Db {
     }
 }
 
-/// The version of the entity schema this binary reads and writes. Bump it with
-/// any change to `wiki_domain_types::DDL` that an existing file would not have.
+/// The version of the schema this binary reads and writes. Bump it with any
+/// change to a table that an existing file would already hold in its old shape:
+/// `wiki_domain_types::DDL`, and the `IF NOT EXISTS` tables too, since that
+/// clause keeps an old table as it is.
 ///
 /// There are no migrations yet, and the entity tables are plain `CREATE TABLE`,
 /// so a file made by an older binary keeps its old columns. Without this the
 /// process would start and then fail one query at a time; with it, it refuses
 /// to start and says why.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 async fn schema_version(conn: &Connection) -> Result<i64, DbError> {
     let mut rows = conn.query("PRAGMA user_version", ()).await?;

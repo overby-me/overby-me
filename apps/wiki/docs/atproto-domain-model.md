@@ -342,24 +342,38 @@ CREATE TABLE comment (
 -- replaces the interim voter_did dedup + cast_bucket design: dedup is now
 -- token-uniqueness on the board, and nothing in the store links a ballot to a
 -- DID. Crypto field encodings (token bytes, signature format) are PROVISIONAL
--- until the ballot-math spec crate pins the message format, and the board's
--- custody (voter-published vs org-published records) is a pending owner call.
+-- (crates/ballot-spec DECISIONS.md D7), and the board's custody (voter-published
+-- vs org-published records) is a pending owner call. These tables are owned by
+-- crates/ballot-store, not by the entity schema.
 CREATE TABLE poll (
-  id            TEXT PRIMARY KEY,
+  id            TEXT PRIMARY KEY,                        -- also the id of its node: a document of kind 'poll'
   context_id    TEXT NOT NULL REFERENCES context(id),
-  question      TEXT NOT NULL,
+  question      TEXT NOT NULL,                           -- the wording voted on, fixed at open
   options       TEXT NOT NULL,                           -- JSON array of strings
+  min_choices   INTEGER NOT NULL DEFAULT 1,
+  max_choices   INTEGER NOT NULL DEFAULT 1,
+  blank         INTEGER NOT NULL DEFAULT 0,              -- the LAST option is the abstention
   open          INTEGER NOT NULL DEFAULT 1,
   secret        INTEGER NOT NULL DEFAULT 0,
-  -- Per-poll RSA issuer keypair: the pubkey is published to the board BEFORE
-  -- the poll opens (verifiability); the private key is dropped at close.
+  hide_tally    INTEGER NOT NULL DEFAULT 0,              -- counts are for the context's owners
+  -- Per-poll RSA issuer keypair: the pubkey is published with the poll, BEFORE
+  -- any ballot (verifiability). The private key is kept sealed under
+  -- APPVIEW_SECRET while the poll is open, and destroyed at close.
   issuer_pubkey TEXT,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  issuer_secret TEXT,
+  -- The result, written once at close. A poll migrated from the interim has
+  -- only these: its ballots could not be carried, its outcome can.
+  counts        TEXT,                                    -- JSON array, one count per option
+  ballots       INTEGER,
+  issued        INTEGER,                                 -- unit tokens handed out: the bound on `ballots`
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  closed_at     TEXT
 );
 
--- WHO MAY vote, org-authoritative and always-private. base_weight is the
+-- WHO MAY vote, org-authoritative and always-private: the members of the
+-- poll's context who held voting rights when it OPENED. base_weight is the
 -- voter's own weight; resolved_weight = base plus incoming delegations, FROZEN
--- when the poll opens (delegation changes after open do not move weight).
+-- when the poll opens (nothing after open moves weight, or adds a voter).
 CREATE TABLE eligibility (
   poll_id         TEXT NOT NULL REFERENCES poll(id),
   did             TEXT NOT NULL REFERENCES user(did),
@@ -371,6 +385,8 @@ CREATE TABLE eligibility (
 -- Delegations: a signed assignment moving a voter's weight to a delegate,
 -- resolved into eligibility.resolved_weight BEFORE the poll opens. Visible to
 -- the org, never on the public board (the delegation-vs-anonymity resolution).
+-- Nothing writes these yet: the interim has no delegation, and what signs an
+-- assignment is undecided.
 CREATE TABLE delegation (
   poll_id        TEXT NOT NULL REFERENCES poll(id),
   from_did       TEXT NOT NULL REFERENCES user(did),
@@ -382,50 +398,80 @@ CREATE TABLE delegation (
 -- THAT a voter was issued their tokens (never the tokens themselves: storing a
 -- token would link its later spend back to the DID and break unlinkability).
 -- A voter with resolved_weight N is blind-issued N identical unit tokens.
+-- Nothing about WHEN or in what ORDER either: a row is written with a random
+-- rowid and the poll's opening time, because insertion order or a clock, set
+-- beside the board's positions, would pair voters with ballots.
+-- request_hash digests the BLINDED messages, so a voter whose reply was lost
+-- can ask again for the same signatures. A blinded message says nothing about
+-- the token inside it.
 CREATE TABLE token_issued (
-  poll_id   TEXT NOT NULL REFERENCES poll(id),
-  did       TEXT NOT NULL REFERENCES user(did),
-  issued_at TEXT NOT NULL DEFAULT (datetime('now')),
+  poll_id      TEXT NOT NULL REFERENCES poll(id),
+  did          TEXT NOT NULL REFERENCES user(did),
+  request_hash TEXT,
+  issued_at    TEXT NOT NULL,
   PRIMARY KEY (poll_id, did)                             -- issuance happens once per voter
 );
 
--- The org-side MIRROR of the public bulletin board, for tally and serving.
--- Append-only; one row per spent unit token; carries NO voter identity. The
--- UNIQUE token IS the double-vote rejection (a reused token collides here and
--- publicly on the board). Every entry weighs exactly 1 (unit tokens), so the
--- tally is a plain count and no weight column exists to shrink the anonymity
--- set. entry_ref points at the public board record once published.
-CREATE TABLE board_entry (
-  poll_id   TEXT NOT NULL REFERENCES poll(id),
-  token     TEXT NOT NULL UNIQUE,                        -- the unblinded unit token
-  token_sig TEXT NOT NULL,                               -- RSA-PSS sig under poll.issuer_pubkey
-  choices   TEXT NOT NULL,                               -- JSON array of option indices
-  entry_ref TEXT                                         -- at-uri/CID of the public record
+-- A ballot in a poll that is NOT secret names its voter, which is what such a
+-- poll means. It weighs what the voter's frozen roster row says.
+CREATE TABLE open_ballot (
+  poll_id TEXT NOT NULL REFERENCES poll(id),
+  did     TEXT NOT NULL REFERENCES user(did),
+  weight  INTEGER NOT NULL,
+  choices TEXT NOT NULL,                                 -- JSON array of option indices
+  cast_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY (poll_id, did)                             -- one per voter; the first stands
 );
-CREATE INDEX board_by_poll ON board_entry(poll_id);
+
+-- The bulletin board of every secret poll. Append-only; one row pair per spent
+-- unit token; carries NO voter identity and NO clock. The UNIQUE token IS the
+-- double-vote rejection. Every entry weighs exactly 1 (unit tokens), so the
+-- tally is a plain count and no weight column exists to shrink the anonymity
+-- set. The body is an opaque provisional blob (message randomizer, signature,
+-- choices) until the record encoding is pinned.
+CREATE TABLE board_nullifier (
+  poll_id  TEXT NOT NULL,
+  token    BLOB NOT NULL,                                -- the unblinded unit token
+  position INTEGER NOT NULL,                             -- monotonic within the poll
+  PRIMARY KEY (poll_id, token),
+  UNIQUE (poll_id, position)
+);
+CREATE TABLE board_body (
+  poll_id  TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  body     BLOB NOT NULL,
+  PRIMARY KEY (poll_id, position)
+);
+-- A row here seals a board: no cast is appended after it.
+CREATE TABLE board_closed (
+  poll_id   TEXT PRIMARY KEY,
+  entries   INTEGER NOT NULL,
+  closed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
 ```
 
-**Casting** (atomic; robust regardless of isolation guarantees). `BEGIN IMMEDIATE` takes the write lock up
-front; the UNIQUE token constraint rejects a double spend in the same statement that records the ballot:
+**Casting** (atomic; robust regardless of isolation guarantees). The signature is verified against
+`poll.issuer_pubkey` and the choices against the poll's rules first, so a forged token never probes the
+spent set and a spoiled ballot does not use its token up. Then `BEGIN IMMEDIATE` takes the write lock up
+front, and inside it: the seal is checked, the token is looked up, and the two rows are written. The
+UNIQUE token rejects a double spend in the same transaction that records the ballot:
 
 ```sql
 BEGIN IMMEDIATE;
+  SELECT 1 FROM board_closed WHERE poll_id = :poll;      -- sealed: refuse
   -- fails on a reused token: that IS the one-vote-per-token rule
-  INSERT INTO board_entry (poll_id, token, token_sig, choices)
-    VALUES (:poll, :token, :sig, :choices);
+  INSERT INTO board_nullifier (poll_id, token, position) VALUES (:poll, :token, :next);
+  INSERT INTO board_body (poll_id, position, body) VALUES (:poll, :next, :body);
 COMMIT;
 ```
 
-(The signature is verified against `poll.issuer_pubkey` before the insert; the transaction shape, a
-unique-constrained dedup insert plus an append-only ballot insert under `BEGIN IMMEDIATE`, is the same one
-the Turso crash harness exercises.)
+The transaction shape, a unique-constrained dedup insert plus an append-only ballot insert under
+`BEGIN IMMEDIATE`, is the one the Turso crash harness exercises. Closing takes the same lock to write
+the seal, so a cast either landed before it and is counted, or finds it and is refused.
 
-**Tally** — always recomputed by aggregation, never a mutable counter; unit tokens make it a plain count,
-and anyone can recompute the same count from the public board (universal verifiability):
-
-```sql
-SELECT choices, count(*) AS n FROM board_entry WHERE poll_id = :poll GROUP BY choices;
-```
+**Tally**: always recomputed by counting the board (or the open ballots, by weight), never a mutable
+counter. Unit tokens make it a plain count, and anyone who may see the board can recompute the same
+count from it (universal verifiability). It is stored once, at close.
 
 **Membership checks** (replace Hasura's `is_context_owner` subqueries with an indexed join):
 

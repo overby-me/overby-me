@@ -55,20 +55,48 @@ fn ballot_ddl_executes_and_enforces_on_sqlite() {
         "issuance marker is one-shot per voter"
     );
 
-    // The board's UNIQUE token is the double-spend guard.
+    // An open ballot is one per voter: the first stands.
     conn.execute(
-        "INSERT INTO board_nullifier (token, position) VALUES (x'01', 0)",
+        "INSERT INTO open_ballot (poll_id, did, weight, choices) VALUES ('p1', 'did:plc:a', 2, '[0]')",
+        [],
+    )
+    .expect("first open ballot");
+    assert!(
+        conn.execute(
+            "INSERT INTO open_ballot (poll_id, did, weight, choices) VALUES ('p1', 'did:plc:a', 2, '[1]')",
+            [],
+        )
+        .is_err(),
+        "a second open ballot from one voter is rejected"
+    );
+
+    // The board's UNIQUE token is the double-spend guard, within a poll.
+    conn.execute(
+        "INSERT INTO board_nullifier (poll_id, token, position) VALUES ('p1', x'01', 0)",
         [],
     )
     .expect("first token");
     assert!(
         conn.execute(
-            "INSERT INTO board_nullifier (token, position) VALUES (x'01', 1)",
+            "INSERT INTO board_nullifier (poll_id, token, position) VALUES ('p1', x'01', 1)",
             [],
         )
         .is_err(),
         "a reused token collides on the board (double-spend rejection)"
     );
+    assert!(
+        conn.execute(
+            "INSERT INTO board_nullifier (poll_id, token, position) VALUES ('p1', x'02', 0)",
+            [],
+        )
+        .is_err(),
+        "two entries cannot hold one position"
+    );
+    conn.execute(
+        "INSERT INTO board_nullifier (poll_id, token, position) VALUES ('p2', x'01', 0)",
+        [],
+    )
+    .expect("another poll's board starts from its own zero");
 
     // resolved_weight starts NULL (frozen only at open).
     let w: Option<i64> = conn
@@ -121,18 +149,31 @@ async fn ballot_ddl_executes_and_rows_round_trip_on_turso() {
     let open: i64 = row.get(0).expect("open");
     assert_eq!(open, 1, "poll.open defaults to 1");
 
-    // The board's UNIQUE token is enforced on turso too.
+    // The board's UNIQUE token is enforced on turso too, as is the position.
     conn.execute(
-        "INSERT INTO board_nullifier (token, position) VALUES (x'02', 0)",
+        "INSERT INTO board_nullifier (poll_id, token, position) VALUES ('p1', x'02', 0)",
         (),
     )
     .await
     .expect("first token");
     let dup = conn
         .execute(
-            "INSERT INTO board_nullifier (token, position) VALUES (x'02', 1)",
+            "INSERT INTO board_nullifier (poll_id, token, position) VALUES ('p1', x'02', 1)",
             (),
         )
         .await;
     assert!(dup.is_err(), "turso enforces the board token UNIQUE");
+    let same_place = conn
+        .execute(
+            "INSERT INTO board_nullifier (poll_id, token, position) VALUES ('p1', x'03', 0)",
+            (),
+        )
+        .await;
+    assert!(same_place.is_err(), "turso enforces one entry per position");
+    conn.execute(
+        "INSERT INTO board_nullifier (poll_id, token, position) VALUES ('p2', x'02', 0)",
+        (),
+    )
+    .await
+    .expect("another poll's board starts from its own zero");
 }

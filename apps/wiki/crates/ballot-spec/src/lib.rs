@@ -246,6 +246,22 @@ impl TokenIssuer {
         &self.kp.pk
     }
 
+    /// The secret key (DER), for a custodian that has to survive a restart while
+    /// the poll is open. Whoever holds it can mint ballots for this poll: it is
+    /// kept sealed and destroyed at close.
+    pub fn secret_der(&self) -> Result<Vec<u8>, blind_rsa_signatures::Error> {
+        self.kp.sk.to_der()
+    }
+
+    /// The issuer a [`Self::secret_der`] was taken from.
+    pub fn from_secret_der(der: &[u8]) -> Result<Self, blind_rsa_signatures::Error> {
+        let sk = IssuerSecretKey::from_der(der)?;
+        let pk = sk.public_key()?;
+        Ok(Self {
+            kp: IssuerKeyPair { pk, sk },
+        })
+    }
+
     /// Blind-sign one blinded token message. The org calls this N times for a
     /// voter with resolved weight N, AFTER recording the one-shot issuance
     /// marker (`token_issued`); it never sees the nullifier inside.

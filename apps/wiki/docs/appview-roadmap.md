@@ -63,7 +63,12 @@ data layer.
   can sit under a folder, which is a `document` here, so that key dangles. The
   node that owns a context without holding a membership row in it (a real case:
   `docs/read-permissions.md`) gets no owner row. Interim public contexts are all
-  extracted as private. Extracted polls are never loaded. M3 and M9.
+  extracted as private. Extracted polls are never loaded, and are extracted
+  wrong: the question is read from `data.question` and the state from
+  `data.open`, neither of which the interim writes (a poll's name is its node's
+  name, and open is `mutable`), and `minVote`, `maxVote`, `hidden`, the place in
+  the tree and the RESULT are not read at all. Ballots cannot be carried; the
+  outcome of every past vote can, and `poll.counts` is where it goes. M3 and M9.
 - **There are no schema migrations.** The entity tables are plain
   `CREATE TABLE`, so a datastore file made by an older binary keeps its old
   columns. Until migrations exist the file records its schema version and a
@@ -242,9 +247,43 @@ ended is of no use to the next one, and a list is one click to make again.
 
 ### M6: voting
 
-- [ ] Open and close a poll; eligibility freeze; per-poll issuer key.
-- [ ] Blind token issuance; cast to the board; tally; status.
-- [ ] Open (non-secret) polls.
+A poll is a node (a document of kind `poll`, so it has a URL, moves with its
+motion and goes to the bin with it) and a `poll` row of the same id
+(`crates/appview/src/poll.rs`, over `crates/ballot-store`).
+
+- [x] Open and close a poll; eligibility freeze; per-poll issuer key. The roster
+  is whoever holds voting rights in the context when the poll opens. The issuer
+  key is kept sealed under `APPVIEW_SECRET` while the poll is open, so a copy
+  of the database forges nothing, and is destroyed at close. Closing seals the
+  board under the write lock a cast takes, so no ballot lands after the count.
+- [x] Blind token issuance; cast to the board; tally; status. Issuance is signed
+  in and records only THAT a voter was served: no token, no time, no order (a
+  random rowid and the poll's opening time), since either would line up with
+  board positions. A cast carries no session. A lost reply can be asked for
+  again, with the same blinded tokens, and mints nothing new.
+- [x] Open (non-secret) polls: one named ballot per voter, at their frozen weight.
+- [x] A board for every poll in one store. `ballot-store` held a single poll.
+- [ ] Publishing the board as atproto records, signed inclusion receipts, and a
+  signed close-out digest. All three wait on the owner's custody call
+  (`docs/ballot-board-custody.md`). Until then the board is served from here:
+  to whoever may see the counts, in token order (board order is the order the
+  room voted in), and one entry at a time to a voter who knows their token.
+- [ ] Delegation. The roster resolves it (`freeze_at_open`) and issuance and
+  counting honour the weights, but nothing writes a delegation: the interim has
+  none, and what signs an assignment is undecided.
+
+Decided here without the owner, and cheap to change now:
+
+- **A hidden tally stays hidden after the close**, for everyone but the owners
+  of the context, and the board with it. That is the interim's rule, and an
+  election is where it is used: who won is announced, not by how much. The cost
+  is that only the owners can recount such a poll. A voter can still check that
+  their own ballot is there and says what they said.
+- **Nobody joins a poll that is already open.** Someone given voting rights
+  after it opened votes in the next one. The interim checked at the moment of
+  casting.
+- **A poll with nobody to vote in it does not open** (`NoVoters`), which is
+  what a chair sees who forgot to hand out voting rights.
 
 ### M7: live updates
 
