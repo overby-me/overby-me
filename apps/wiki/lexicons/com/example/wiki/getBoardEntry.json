@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "The ballot a token was spent on: how a voter checks that theirs is on the board and says what they said. It works where the counts are hidden too, since knowing a token is having cast it.",
+			"description": "The ballot a token was spent on: how a voter checks that theirs is on the board and says what they said. It works where the counts are hidden too, since knowing a token is having cast it. Like `castBallot` it takes no session and reads none: asked as nobody, it does not pair a voter with their token.",
 			"parameters": {
 				"type": "params",
 				"required": ["poll", "token"],
@@ -37,7 +37,7 @@
 			"errors": [
 				{
 					"name": "NotFound",
-					"description": "No such poll, none the caller may read, or no ballot spent that token."
+					"description": "No such poll, or no ballot spent that token."
 				},
 				{
 					"name": "InvalidRequest",

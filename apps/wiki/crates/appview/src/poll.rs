@@ -983,13 +983,15 @@ pub struct BoardEntryParams {
 /// `com.example.wiki.getBoardEntry`: the ballot a token was spent on. How a
 /// voter checks that theirs is on the board and says what they said, which
 /// works where the counts are hidden too: knowing a token is having cast it.
+///
+/// Like a cast it takes no session and reads none: a voter who had to say who
+/// they are to look up their token would be pairing the two for the server.
 pub async fn get_board_entry(
     State(state): State<AppState>,
-    caller: MaybeCaller,
     Query(p): Query<BoardEntryParams>,
 ) -> Response {
     let what = "getBoardEntry";
-    let poll = match load(&state, &p.poll, Reader::Caller(caller.did())).await {
+    let poll = match load(&state, &p.poll, Reader::Anyone).await {
         Ok(Some(poll)) if poll.secret => poll,
         Ok(Some(_)) => return invalid("only a secret poll has a board"),
         Ok(None) => return no_such_poll(),
@@ -1777,10 +1779,9 @@ mod tests {
             get_as(router(state.clone()), &nobodys, &bob).await.0,
             StatusCode::NOT_FOUND
         );
-        assert_eq!(
-            get(router(state.clone()), &mine).await.0,
-            StatusCode::NOT_FOUND
-        );
+        let (status, v) = get(router(state.clone()), &mine).await;
+        assert_eq!(status, StatusCode::OK, "asked as nobody: {v}");
+        assert_eq!(v["entry"]["choices"], json!([1]));
     }
 
     #[tokio::test(flavor = "current_thread")]

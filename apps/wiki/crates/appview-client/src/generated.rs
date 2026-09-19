@@ -2988,7 +2988,7 @@ impl Client {
         answer.json()
     }
 
-    /// The ballot a token was spent on: how a voter checks that theirs is on the board and says what they said. It works where the counts are hidden too, since knowing a token is having cast it.
+    /// The ballot a token was spent on: how a voter checks that theirs is on the board and says what they said. It works where the counts are hidden too, since knowing a token is having cast it. Like `castBallot` it takes no session and reads none: asked as nobody, it does not pair a voter with their token.
     pub async fn get_board_entry(&self, params: &get_board_entry::Params) -> Result<get_board_entry::Output, Error> {
         let answer = self.call(crate::Verb::Get, "com.example.wiki.getBoardEntry", params.pairs(), crate::Body::None).await?;
         answer.json()
