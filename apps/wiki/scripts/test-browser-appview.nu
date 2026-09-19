@@ -118,6 +118,25 @@ def click-at [sid: string, css: string, x: int, y: int] {
     }] } | ignore
 }
 
+# Give the file input `css` finds a file from this machine, as a picker would.
+def pick-file [sid: string, css: string, path: string] {
+    let found = (wd-post $"/session/($sid)/element" { using: "css selector", value: $css })
+    let element = (try { $found | get value | values | first } catch { "" })
+    if ($element | is-not-empty) { wd-post $"/session/($sid)/element/($element)/value" { text: $path } | ignore }
+}
+
+# Add a file to the folder on screen through its dialog, and wait to land on it.
+def add-file [sid: string, path: string] {
+    js $sid 'const b = document.querySelector("button.add-action"); if (b) b.click(); return 1;' | ignore
+    sleep 1sec
+    js $sid 'const f = [...document.querySelectorAll("button")].find(b => b.innerText.replace(/\s+/g, " ").trim() === "upload_file File"); if (f) f.click(); return 1;' | ignore
+    sleep 1sec
+    pick-file $sid "input.file-upload-input" $path
+    sleep 4sec
+    js $sid 'const add = [...document.querySelectorAll("button.btn-primary")].find(b => b.innerText.trim() === "Add"); if (add) add.click(); return 1;' | ignore
+    sleep 7sec
+}
+
 # Type into a text input as a person would: set it, and say so.
 def type-into [sid: string, css: string, text: string] {
     js $sid $"const box = [...document.querySelectorAll\(($css | to json -r)\)].pop\(\); if \(!box\) return 0; Object.getOwnPropertyDescriptor\(HTMLInputElement.prototype, 'value'\).set.call\(box, ($text | to json -r)\); box.dispatchEvent\(new Event\('input', { bubbles: true }\)\); return 1;" | ignore
@@ -374,6 +393,114 @@ def main [
     } else {
         $failed = $failed + 1
         log-fail $"a new page: landed at ($landed), read back: ($read_back), dated hours ago: ($aged)"
+    }
+
+    # A file, and a picture, given to the folder's dialog. The file is kept in the
+    # folder's context, and the picture is shown from there.
+    "Referat af mødet den 1. maj.\n" | save -f $"($logs)/referat.txt"
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGO4oOCAFTEMLQkA1ntMAdxgTn4AAAAASUVORK5CYII=" | decode base64 | save -f $"($logs)/plakat.png"
+    go $sid "/hovedbestyrelsen/bilag"
+    wait-for-text $sid "Dagsorden" 30 | ignore
+    add-file $sid $"($logs)/referat.txt"
+    let filed = (js $sid 'return location.pathname')
+    if $filed == "/hovedbestyrelsen/bilag/referat" and (wait-for-text $sid "Download" 15) {
+        $passed = $passed + 1
+        log-ok "a file given to the folder is kept, and offered back"
+    } else {
+        $failed = $failed + 1
+        log-fail $"an uploaded file: landed at ($filed)"
+    }
+    go $sid "/hovedbestyrelsen/bilag"
+    wait-for-text $sid "Dagsorden" 30 | ignore
+    add-file $sid $"($logs)/plakat.png"
+    sleep 3sec
+    let drawn = (js $sid 'return [...document.querySelectorAll("img")].some(i => i.src.includes("/blob/") && i.naturalWidth === 8)')
+    if $drawn == true {
+        $passed = $passed + 1
+        log-ok "an uploaded picture is drawn from the AppView's storage"
+    } else {
+        $failed = $failed + 1
+        log-fail "an uploaded picture was not drawn"
+    }
+
+    # A reaction given and taken back, read off the server both times.
+    go $sid "/hovedbestyrelsen/bilag/dagsorden"
+    wait-for-text $sid "Enig i dagsordenen" 30 | ignore
+    let thread = (^curl -s -H $"authorization: Bearer ($owner)" $"(api).getComments?on=($ids.page)" | from json | get comments)
+    let reactions = {|| $thread | each {|c| ^curl -s -H $"authorization: Bearer ($owner)" $"(api).getReactions?subject=($c.id)" | from json | get reactions | length } | math sum }
+    js $sid 'const r = [...document.querySelectorAll("button .material-icons")].find(i => i.textContent.trim() === "add_reaction"); if (r) r.closest("button").click(); return 1;' | ignore
+    sleep 1sec
+    js $sid 'const e = document.querySelector(".reaction-picker-item"); if (e) e.click(); return 1;' | ignore
+    sleep 4sec
+    let given = (do $reactions)
+    js $sid 'const c = document.querySelector(".reaction-chip.is-mine"); if (c) c.click(); return 1;' | ignore
+    sleep 4sec
+    let taken_back = (do $reactions)
+    if $given == 1 and $taken_back == 0 {
+        $passed = $passed + 1
+        log-ok "a reaction is given, and taken back"
+    } else {
+        $failed = $failed + 1
+        log-fail $"reactions on the thread: ($given) after giving one, ($taken_back) after taking it back"
+    }
+
+    # A comment deleted goes to the bin, and comes back from it.
+    js $sid '
+        const row = [...document.querySelectorAll(".comment, .comment-row, [class*=comment-item]")].find(r => r.innerText.includes("Skrevet i browseren"));
+        const del = row && [...row.querySelectorAll("button .material-icons")].find(i => i.textContent.trim() === "delete");
+        if (del) del.closest("button").click();
+        return 1;' | ignore
+    sleep 1sec
+    js $sid '
+        const d = [...document.querySelectorAll(".m3-dialog")].find(d => d.innerText.includes("Delete this comment"));
+        const ok = d && [...d.querySelectorAll("button")].find(b => b.innerText.trim() === "Delete");
+        if (ok) ok.click();
+        return 1;' | ignore
+    sleep 4sec
+    let gone = ((js $sid 'return document.body.innerText.includes("Skrevet i browseren")') == false)
+    go $sid "/hovedbestyrelsen?app=bin"
+    let binned = (wait-for-text $sid "Skrevet i browseren" 20)
+    js $sid 'const r = [...document.querySelectorAll("button")].find(b => b.innerText.replace(/\s+/g, " ").trim() === "restore Restore"); if (r) r.click(); return 1;' | ignore
+    sleep 3sec
+    go $sid "/hovedbestyrelsen/bilag/dagsorden"
+    let back = (wait-for-text $sid "Skrevet i browseren" 20)
+    if $gone and $binned and $back {
+        $passed = $passed + 1
+        log-ok "a deleted comment goes to the bin, and comes back from it"
+    } else {
+        $failed = $failed + 1
+        log-fail $"a deleted comment: gone from the thread: ($gone), in the bin: ($binned), back after restoring: ($back)"
+    }
+
+    # Found by a word of its text.
+    js $sid 'const s = [...document.querySelectorAll(".material-icons")].find(i => i.textContent.trim() === "search"); if (s) (s.closest("button") || s).click(); return 1;' | ignore
+    sleep 1sec
+    type-into $sid "input[type=search], .search input, input[placeholder*=earch]" "dirigent"
+    sleep 4sec
+    let found = (js $sid 'return [...document.querySelectorAll("[class*=search] .list-item, .search-results a")].some(e => e.innerText.includes("Dagsorden"))')
+    if $found == true {
+        $passed = $passed + 1
+        log-ok "a page is found by a word of its text"
+    } else {
+        $failed = $failed + 1
+        log-fail "searching for a word of the page's text did not find it"
+    }
+
+    # Signing out, last: it ends the session here and at the AppView.
+    go $sid "/hovedbestyrelsen"
+    wait-for-text $sid "Forslag" 30 | ignore
+    js $sid 'const t = document.querySelector(".drawer-account-trigger"); if (t) t.click(); return 1;' | ignore
+    sleep 1sec
+    js $sid 'const out = [...document.querySelectorAll("button.list-item")].find(b => b.innerText.replace(/\s+/g, " ").trim() === "logout Log out"); if (out) out.click(); return 1;' | ignore
+    let signed_out = (wait-for-text $sid "Log in" 15)
+    sleep 2sec
+    let still = (^curl -s -o /dev/null -w "%{http_code}" -H $"authorization: Bearer ($owner)" $"(api).getSession" | str trim)
+    if $signed_out and $still == "401" {
+        $passed = $passed + 1
+        log-ok "signing out ends the session here and at the AppView"
+    } else {
+        $failed = $failed + 1
+        log-fail $"signing out: back at the door: ($signed_out), the session then answered ($still)"
     }
 
     # The app's own errors, as the browser console heard them.

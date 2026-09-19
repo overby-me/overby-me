@@ -41,9 +41,12 @@ AppView's under the same names (`src/appview/`), so no component changes which
 function it calls; built without it, which is what ships, nothing is different.
 `scripts/test-browser-appview.nu` builds it, starts a dev AppView, and drives
 it in headless Firefox: the screens draw what was seeded, writing through them
-lands (a comment, a page through the editor, a place in the speaker list, a
-cell on the canvas, an open ballot and a secret one, blinded and cast from the
-browser's own wasm), and a change made elsewhere arrives without a reload.
+lands (a comment, a reaction, a page through the editor, a file and a picture,
+a place in the speaker list, a cell on the canvas, an open ballot and a secret
+one, blinded and cast from the browser's own wasm), a deleted comment goes to
+the bin and comes back, search finds a page by its text, a change made
+elsewhere arrives without a reload, and signing out ends the session at the
+AppView too.
 
 Not built: mail to an invited address (M4), and the parts of voting that wait
 on a decision that is the owner's to make (M6). What needs a person and cannot
