@@ -62,6 +62,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "appview-client"
+version = "0.1.0"
+dependencies = [
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4028,6 +4037,7 @@ checksum = "d4ca08e5ef825b65b056d9efbd95c8750683f0a6d0466d02e96dc2e4e360f3d2"
 name = "wiki"
 version = "0.1.0"
 dependencies = [
+ "appview-client",
  "base64",
  "console_error_panic_hook",
  "cynic",

@@ -507,7 +507,10 @@ asks Bluesky's public API itself. The steps:
   anything matching this changes", which is what a `/ws` topic is, so `Wire`
   and its builders keep their names and become topics. Signing in is the one
   part that cannot hide behind the seam: a password form becomes a handle and a
-  redirect.
+  redirect. Done so far: the `appview` feature and the optional dependency on
+  the client (the default build does not compile it), and `src/appview/map.rs`,
+  which dresses the AppView's views as the `model` types, a page's text back
+  inside its `data` and a kind as the mime the components match on.
 - [x] The extractor and the load cover every kind the interim holds: the tree,
   members, comments, reactions, what each poll came to, canvases with their
   cells, reports, which contexts are open to everyone, and the address each

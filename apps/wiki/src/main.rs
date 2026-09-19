@@ -2,6 +2,8 @@
 // all far below 2^52, so usize/i64 -> f64 is exact here. The lint stays on
 // for the decoders and wire formats where truncation is real.
 #![allow(clippy::cast_precision_loss)]
+#[cfg(feature = "appview")]
+mod appview;
 mod backend_api;
 mod build_info;
 mod components;
