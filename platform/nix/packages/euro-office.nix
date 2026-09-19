@@ -1,9 +1,13 @@
-# The Linux DesktopEditors GUI, repackaged from the deb Euro-Office's own CI
-# builds. Same provenance rule as desktop-common.nix: a genuine Euro-Office
-# artifact, never an ONLYOFFICE binary. The recipe mirrors nixpkgs'
+# Euro-Office DesktopEditors, a sovereign AGPL fork of ONLYOFFICE, repackaged
+# from the deb Euro-Office's own CI builds for x86_64 and aarch64. A genuine
+# Euro-Office artifact, never an ONLYOFFICE binary. The recipe mirrors nixpkgs'
 # onlyoffice-desktopeditors: dpkg unpack, autoPatchelf, then an FHS env
 # because the app shells out to /usr/bin/curl for plugin downloads and scans
 # /usr/share/fonts for system fonts.
+#
+# This tree used to build the whole graph from source (core, CEF, desktop-sdk,
+# a Qt app and 13 patches, plus a macOS bundle). That cost hours per build to
+# arrive at what upstream already ships, so it is gone; `jj log` has it.
 #
 # Upstream cuts no releases yet; the deb exists only as an auth-gated CI
 # artifact that expires after ~90 days, hence requireFile instead of fetchurl.

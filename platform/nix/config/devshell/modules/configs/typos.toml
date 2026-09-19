@@ -116,7 +116,7 @@ ODF = "ODF"
 Odf = "Odf"
 # fo = XSL-FO namespace prefix used throughout ODF (xmlns:fo, fo:font-size, ...)
 fo = "fo"
-# "mis-detects" — valid hyphenated prefix in euro-office PLAN.md
+# "mis-detects" and friends: a valid hyphenated prefix, not a misspelling
 mis = "mis"
 # Perl 5 test-suite filename (op/aassign.t — array assign)
 aassign = "aassign"
@@ -240,9 +240,6 @@ extend-exclude = [
   # are proper nouns in a hundred languages and several of them look like
   # English misspellings: Tai Tham, Vai, Cham, Miao.
   "apps/homepage/xscreensaver/src/hacks3d/unicodeblocks.rs",
-  # Euro-Office upstream patches (verbatim upstream code, incl. its own typos
-  # like BUIDLER in build_3rdparty.py context lines).
-  "**/euro-office/patches/*",
   "apps/wiki/src/i18n.rs",
   # Age ciphertext is base64, which reads as dense misspelling. Matched at any
   # depth: anchoring this to one directory made it stop matching the moment

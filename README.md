@@ -262,7 +262,7 @@ Third-party software packaged under `platform/nix/packages/`, grouped by theme.
 |-|-|-|
 | [Cosmic-osk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/cosmic-osk.nix) | [GitHub](https://github.com/pop-os/cosmic-osk) | COSMIC on-screen keyboard |
 | [Cthulock 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/cthulock.nix) | [GitHub](https://github.com/FriederHannenheim/cthulock) | Wayland screen locker focused on customizability |
-| [Euro-Office 💣🇪🇺](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/euro-office/default.nix) | [GitHub](https://github.com/Euro-Office/DesktopEditors) | Sovereign European fork of ONLYOFFICE DesktopEditors |
+| [Euro-Office 💣🇪🇺](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/euro-office.nix) | [GitHub](https://github.com/Euro-Office/DesktopEditors) | Sovereign European fork of ONLYOFFICE DesktopEditors |
 | [Layout 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/layout/default.nix) | [GitHub](https://github.com/nadavrot/layout) | Graphviz dot renderer |
 | [Rustyfications 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/rustyfications.nix) | [GitHub](https://github.com/bzglve/rustyfications) | Rusty notification daemon for Wayland |
 | [Stochos 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/stochos.nix) | [GitHub](https://github.com/museslabs/stochos) | Keyboard-driven mouse control for Wayland and X11 |

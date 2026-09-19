@@ -33,17 +33,12 @@
       kooha
       rustdesk-flutter
     ]
-    # Linux x86_64-only: the app repackages the amd64 deb from Euro-Office's
-    # CI, and upstream ships no other Linux desktop binary.  The
+    # Linux x86_64-only.  The package itself also builds for aarch64, but the
+    # deb is 1.4 GB installed and the only aarch64 hosts here are the tablet
+    # and a phone whose rootfs is flashed whole.  The
     # onlyoffice-desktopeditors it replaces was x86_64-only too, so the office
     # suite stays where it already was.
-    #
-    # `.app` rather than the bare attribute: platform/nix/packages/euro-office/default.nix
-    # resolves the top level to the data bundle (fonts, dictionaries,
-    # templates) so the flake's package set stays green everywhere, and hangs
-    # the real application off passthru.  Installing the bare attribute gets
-    # you no editors at all.
     ++ lib.optionals (pkgs.stdenv.isLinux && pkgs.stdenv.hostPlatform.isx86_64) [
-      euro-office.app
+      euro-office
     ];
 }
