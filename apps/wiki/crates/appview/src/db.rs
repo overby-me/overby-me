@@ -5,7 +5,12 @@
 //! and stock SQLite both ship it off, `crates/schema/tests/roundtrip.rs`), so
 //! the pragma is set and read back per connection rather than assumed.
 
+use std::time::Duration;
 use turso::{Builder, Connection, Database};
+
+/// How long a write waits its turn. A write takes milliseconds, so this is only
+/// reached by a burst far past anything a meeting produces.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A handle to the Turso database. Cloneable and cheap; each `acquire()` opens
 /// a fresh connection.
@@ -25,6 +30,10 @@ impl Db {
     /// that would accept a dangling reference.
     pub async fn acquire(&self) -> Result<Connection, DbError> {
         let conn = self.inner.connect()?;
+        // The engine's default is to fail a write at once while another
+        // connection holds the write lock, which a room tapping together does
+        // to almost every write.
+        conn.busy_timeout(BUSY_TIMEOUT)?;
         conn.execute("PRAGMA foreign_keys=ON", ()).await?;
         if !foreign_keys_enforced(&conn).await {
             return Err(DbError::ForeignKeysOff);
@@ -145,6 +154,50 @@ impl From<turso::Error> for DbError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Without a busy timeout the engine fails a write the moment another
+    /// connection holds the lock: measured here before the fix, 371 of 400.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn writers_on_many_connections_wait_their_turn() {
+        let db = Db::open(":memory:").await.expect("open");
+        let conn = db.acquire().await.expect("conn");
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)", ())
+            .await
+            .expect("ddl");
+
+        let writers = (0..16).map(|_| {
+            let db = db.clone();
+            tokio::spawn(async move {
+                for _ in 0..25 {
+                    let conn = db.acquire().await?;
+                    conn.execute("BEGIN IMMEDIATE", ()).await?;
+                    let mut rows = conn
+                        .query("SELECT coalesce(max(id), 0) + 1 FROM t", ())
+                        .await?;
+                    let next: i64 = rows.next().await?.expect("row").get(0)?;
+                    drop(rows);
+                    // Give the others every chance to collide.
+                    tokio::task::yield_now().await;
+                    conn.execute("INSERT INTO t (id) VALUES (?1)", [next])
+                        .await?;
+                    conn.execute("COMMIT", ()).await?;
+                }
+                Ok::<_, DbError>(())
+            })
+        });
+        for writer in writers.collect::<Vec<_>>() {
+            writer.await.expect("join").expect("a write was refused");
+        }
+        let mut rows = conn.query("SELECT count(*) FROM t", ()).await.expect("q");
+        let written: i64 = rows
+            .next()
+            .await
+            .expect("next")
+            .expect("row")
+            .get(0)
+            .expect("n");
+        assert_eq!(written, 400);
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn a_connection_refuses_a_dangling_reference() {

@@ -90,6 +90,12 @@ data layer.
   `fileId` and `type` as gaps rather than carrying them, which would have
   migrated every attachment as an empty page; and `context.kind` rejected
   `wiki/site`. Reconciled in M3.
+- **Two people writing at once, and one of them failed.** The engine's default
+  is to refuse a write the moment another connection holds the write lock, and
+  every request here has its own connection. Measured with 16 writers: 371 of
+  400 transactions refused with "database is locked". A meeting is exactly
+  that load (a room joining a speaker list, 500 ballots in a minute). Every
+  connection now waits its turn, up to ten seconds.
 - **Speaker lists were classed as ephemeral and dropped by the extractor**, but
   the speak app persists them and an assembly reads them back. M5 gives them
   tables; M9 migrates them or records why not.
@@ -105,6 +111,7 @@ is merged and its tests pass.
   dependency graph; `cargo test --workspace` green in the devshell.
 - [x] turso 0.2.2 to 0.7.2; foreign keys enforced and verified on every
   connection; the two-step upserts collapsed into real ones.
+- [x] Concurrent writers wait for the write lock instead of failing.
 
 ### M1: identity and sessions (replaces NHost auth)
 
