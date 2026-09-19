@@ -8,6 +8,7 @@ resolver = "2"
 members = [
   "appview",
   "appview-client",
+  "appview-dev",
   "ballot-spec",
   "ballot-store",
   "dagcbor-spike",

@@ -510,7 +510,14 @@ asks Bluesky's public API itself. The steps:
   redirect. Done so far: the `appview` feature and the optional dependency on
   the client (the default build does not compile it), and `src/appview/map.rs`,
   which dresses the AppView's views as the `model` types, a page's text back
-  inside its `data` and a kind as the mime the components match on.
+  inside its `data` and a kind as the mime the components match on; reading
+  and writing the tree, and the bin (`nodes.rs`, `bin.rs`). The components
+  write through generic calls, since to the interim everything is one table's
+  row, so a write here asks what kind of thing its id names (`seen.rs`: every
+  read says what it saw) and goes to the method that belongs to it. It is
+  tested for real: `live.rs` starts `crates/appview-dev` and asks a running
+  AppView what the components ask, through the functions they call
+  (`cargo test --features appview appview::`).
 - [x] The extractor and the load cover every kind the interim holds: the tree,
   members, comments, reactions, what each poll came to, canvases with their
   cells, reports, which contexts are open to everyone, and the address each

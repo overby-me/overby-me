@@ -49,6 +49,11 @@ workspace when the rewrite starts.
   there, as does what a lexicon promises and the server does not send, and a
   lexicon added without a call in the tests. The frontend's data layer is to
   be written over this client.
+- `appview-dev`: a DEV server, in no package and on no host: an in-memory
+  AppView with a home, and a session ready for every DID named on its command
+  line, since signing in takes a PDS and a browser. It is what the frontend's
+  data layer is tested against (`apps/wiki/src/appview/live.rs`), and what a
+  frontend on a laptop can talk to.
 - `appview`: the backend itself. `docs/appview-roadmap.md` says what it does
   today and what is left.
 

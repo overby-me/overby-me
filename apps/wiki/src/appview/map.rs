@@ -41,6 +41,22 @@ const HIDDEN: &[&str] = &["poll", "canvas", "comment", "reaction"];
 
 const CONTEXTS: &[&str] = &["home", "group", "event", "site"];
 
+/// Kinds that are documents a member makes with `createDocument`.
+const CONTENT: &[&str] = &[
+    "document",
+    "folder",
+    "file",
+    "policy",
+    "change",
+    "position",
+    "candidate",
+    "question",
+];
+
+pub fn is_content(kind: &str) -> bool {
+    CONTENT.contains(&kind)
+}
+
 /// Whether a listing leaves this kind out, as the interim's `mimes.hidden` does.
 pub fn is_hidden(kind: &str) -> bool {
     HIDDEN.contains(&kind)

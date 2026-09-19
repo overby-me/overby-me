@@ -181,6 +181,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "appview-dev"
+version = "0.1.0"
+dependencies = [
+ "appview",
+ "axum",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

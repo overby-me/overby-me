@@ -9,9 +9,13 @@
 // part before the whole stands in for `crate::graphql`. Goes with the switch.
 #![allow(dead_code)]
 
+mod bin;
 pub mod map;
 mod nodes;
+mod seen;
 
+#[allow(unused_imports)]
+pub use bin::*;
 #[allow(unused_imports)]
 pub use nodes::*;
 
@@ -20,10 +24,23 @@ use appview_client::{Client, Error};
 /// Where the AppView is. Set at build time, as the interim's endpoints are
 /// (`WIKI_APPVIEW_URL`); unset, a dev instance on this machine.
 pub fn appview_url() -> String {
+    #[cfg(test)]
+    if let Some(url) = tests::URL.with(|url| url.borrow().clone()) {
+        return url;
+    }
     option_env!("WIKI_APPVIEW_URL")
         .unwrap_or("http://127.0.0.1:8080")
         .trim_end_matches('/')
         .to_string()
+}
+
+/// Remember the answer to a read, for the tunnel. In a browser only: under
+/// `cargo test` there is no storage to remember it in.
+pub(crate) fn remember<T: serde::Serialize>(key: &str, value: &T) {
+    #[cfg(target_arch = "wasm32")]
+    crate::offline::put(key, value);
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (key, serde_json::to_string(value));
 }
 
 /// The AppView, as whoever holds `access_token`, or as nobody.
@@ -67,9 +84,17 @@ pub(crate) fn offline_copy<T: serde::de::DeserializeOwned>(key: &str, error: &st
     if crate::errors::classify(error) != crate::errors::Failure::Offline {
         return None;
     }
-    let copy = crate::offline::get::<T>(key)?;
-    crate::errors::report_offline_copy();
-    Some(copy)
+    #[cfg(target_arch = "wasm32")]
+    {
+        let copy = crate::offline::get::<T>(key)?;
+        crate::errors::report_offline_copy();
+        Some(copy)
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = key;
+        None
+    }
 }
 
 /// Run one call, and let its failure be known as `graphql::execute` does: noted
@@ -110,20 +135,34 @@ where
 /// Make a failure known, and hand back the words for it.
 pub(crate) fn reported(what: &'static str, error: &Error) -> String {
     let message = said(error);
-    crate::errors::note_failure(format!("[{what}] {message}"));
     let failure = crate::errors::classify(&message);
     match failure {
         crate::errors::Failure::Broken => log::error!("appview error [{what}]: {message}"),
         _ => log::info!("appview {} [{what}]: {message}", failure.label()),
     }
-    crate::errors::report(failure);
+    // The record and the toast are the browser's: a clock and a screen.
+    #[cfg(target_arch = "wasm32")]
+    {
+        crate::errors::note_failure(format!("[{what}] {message}"));
+        crate::errors::report(failure);
+    }
     message
 }
+
+#[cfg(test)]
+mod live;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::errors::{classify, Failure};
+
+    thread_local! {
+        /// Where the AppView is, for the test running on this thread
+        /// (`live.rs` starts one each).
+        pub(crate) static URL: std::cell::RefCell<Option<String>> =
+            const { std::cell::RefCell::new(None) };
+    }
 
     #[test]
     fn a_failure_is_said_in_the_words_it_is_sorted_by() {

@@ -137,6 +137,12 @@ web-sys = { version = "=0.3.98", features = [
 xlsx-parser = { path = "vendor/ooxml/xlsx-parser" }
 zip = { version = "2", default-features = false, features = ["deflate-miniz"] }
 
+[dev-dependencies]
+# For `src/appview/live.rs`, which drives the data layer against a real AppView
+# from `cargo test`. Already in the tree through reqwest; the test macro is the
+# one crate it adds.
+tokio = { version = "1", features = ["macros", "net", "rt", "time"] }
+
 [features]
 default = ["web"]
 # The data layer on the atproto AppView instead of NHost and Hasura (roadmap M9,

@@ -27,6 +27,7 @@
           ./../Cargo.lock
           ./../appview
           ./../appview-client
+          ./../appview-dev
           ./../ballot-spec
           ./../ballot-store
           ./../dagcbor-spike
