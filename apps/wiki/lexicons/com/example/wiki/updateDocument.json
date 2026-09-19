@@ -20,7 +20,7 @@
 						"idx": { "type": "integer" },
 						"created_at": {
 							"type": "string",
-							"description": "The date it is filed under, which an owner of the context may set: minutes are dated by their meeting. `2026-05-01`, or a UTC RFC 3339 timestamp."
+							"description": "The date it is filed under, which an owner of the context may set: minutes are dated by their meeting. `2026-05-01`, or a UTC RFC 3339 timestamp. A day alone that is the day it already has leaves its time of day as it is."
 						}
 					}
 				}

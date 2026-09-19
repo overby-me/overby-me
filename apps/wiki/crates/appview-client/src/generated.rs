@@ -2711,7 +2711,7 @@ pub mod update_context {
         /// What the place says about itself (Slate JSON), replaced whole: a group's front page, the home's welcome.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub content: Option<serde_json::Value>,
-        /// The date it is filed under, such as a meeting's own. `2026-05-01`, or a UTC RFC 3339 timestamp.
+        /// The date it is filed under, such as a meeting's own. `2026-05-01`, or a UTC RFC 3339 timestamp. A day alone that is the day it already has leaves its time of day as it is.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub created_at: Option<String>,
         /// What it holds beside that, replaced whole: `image` (a cover's blob id), `url` (where it redirects).
@@ -2745,7 +2745,7 @@ pub mod update_document {
         pub attachable: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub content: Option<serde_json::Value>,
-        /// The date it is filed under, which an owner of the context may set: minutes are dated by their meeting. `2026-05-01`, or a UTC RFC 3339 timestamp.
+        /// The date it is filed under, which an owner of the context may set: minutes are dated by their meeting. `2026-05-01`, or a UTC RFC 3339 timestamp. A day alone that is the day it already has leaves its time of day as it is.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub created_at: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

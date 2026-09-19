@@ -105,7 +105,23 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Parse a `a=b&c=d` query string (without the leading `?`) into decoded pairs.
+/// Whether a date a person set names a day and no time of it. Setting the day a
+/// node already has must leave its time alone: the editor sends the day back
+/// with every save, and a page made a minute ago would read as made at midnight.
+pub fn names_a_day(input: &str) -> bool {
+    !input.trim().contains(['T', ' '])
+}
+
+/// `column`, re-dated to the timestamp bound at `?at`. With `?day` set, a row
+/// already dated that day keeps its time of day (see [`names_a_day`]).
+pub fn redated_sql(column: &str, at: usize, day: usize) -> String {
+    format!(
+        "CASE WHEN ?{at} IS NULL THEN {column} \
+              WHEN ?{day} = 1 AND substr({column}, 1, 10) = substr(?{at}, 1, 10) THEN {column} \
+              ELSE ?{at} END"
+    )
+}
+
 /// A date a person may set, as timestamps are stored here: ISO-8601, UTC,
 /// milliseconds, so that they compare as text. Takes `2026-05-01`, or a UTC
 /// RFC 3339 timestamp with or without a fraction. `None` for anything else, an
@@ -151,6 +167,7 @@ pub fn stored_timestamp(input: &str) -> Option<String> {
     Some(format!("{date}T{clock}.{millis}Z"))
 }
 
+/// Parse a `a=b&c=d` query string (without the leading `?`) into decoded pairs.
 pub fn parse_query(query: Option<&str>) -> Vec<(String, String)> {
     query
         .unwrap_or("")

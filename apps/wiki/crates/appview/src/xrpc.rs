@@ -1106,6 +1106,10 @@ pub async fn update_document(
         content: content.as_deref(),
         data: data.as_deref(),
         created_at: created_at.as_deref(),
+        day_only: body
+            .created_at
+            .as_deref()
+            .is_some_and(crate::util::names_a_day),
         mutable: body.mutable,
         attachable: body.attachable,
         idx: body.idx,
@@ -2996,6 +3000,21 @@ pub(crate) mod tests {
         );
         let (_, doc) = m.read(&m.dave).await;
         assert_eq!(doc["created_at"], "2026-05-01T00:00:00.000Z");
+        // The editor sends the day back with every save. The day a node already
+        // has leaves its time of day alone; another day, or a time, does not.
+        let exactly = "2026-05-01T18:30:00.000Z";
+        for (given, stands) in [
+            (exactly, exactly),
+            ("2026-05-01", exactly),
+            ("2026-05-02", "2026-05-02T00:00:00.000Z"),
+        ] {
+            assert_eq!(
+                m.call("updateDocument", &m.chair, dated(given)).await,
+                StatusCode::OK
+            );
+            let (_, doc) = m.read(&m.dave).await;
+            assert_eq!(doc["created_at"], stands, "after being dated {given}");
+        }
 
         assert_eq!(
             m.call("updateDocument", &m.dave, edit("Bedre titel")).await,

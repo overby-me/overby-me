@@ -419,6 +419,8 @@ pub struct DocumentPatch<'a> {
     pub data: Option<&'a str>,
     /// The date it is filed under, as `crate::util::stored_timestamp` leaves it.
     pub created_at: Option<&'a str>,
+    /// It was given as a day: see `crate::util::names_a_day`.
+    pub day_only: bool,
     pub mutable: Option<bool>,
     pub attachable: Option<bool>,
     pub idx: Option<i64>,
@@ -2199,9 +2201,6 @@ impl Store {
         if let Some(data) = patch.data {
             set("data", Value::Text(data.to_string()));
         }
-        if let Some(created_at) = patch.created_at {
-            set("created_at", Value::Text(created_at.to_string()));
-        }
         if let Some(mutable) = patch.mutable {
             set("mutable", flag(mutable));
         }
@@ -2210,6 +2209,12 @@ impl Store {
         }
         if let Some(idx) = patch.idx {
             set("idx", Value::Integer(idx));
+        }
+        if let Some(created_at) = patch.created_at {
+            params.push(Value::Text(created_at.to_string()));
+            params.push(Value::Integer(i64::from(patch.day_only)));
+            let redated = crate::util::redated_sql("created_at", params.len() - 1, params.len());
+            sets.push(format!("created_at = {redated}"));
         }
         params.push(Value::Text(id.to_string()));
         let conn = self.db.acquire().await?;

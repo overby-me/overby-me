@@ -260,12 +260,16 @@ pub async fn update_context(
         let text = |v: &Option<String>| v.clone().map_or(Value::Null, Value::Text);
         let changed = conn
             .execute(
-                "UPDATE context SET name = coalesce(?2, name), \
-                   visibility = coalesce(?3, visibility), attachable = coalesce(?4, attachable), \
-                   content = coalesce(?5, content), data = coalesce(?6, data), \
-                   created_at = coalesce(?7, created_at), \
-                   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
-                 WHERE id = ?1 AND deleted_at IS NULL",
+                &format!(
+                    "UPDATE context SET name = coalesce(?2, name), \
+                       visibility = coalesce(?3, visibility), \
+                       attachable = coalesce(?4, attachable), \
+                       content = coalesce(?5, content), data = coalesce(?6, data), \
+                       created_at = {}, \
+                       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+                     WHERE id = ?1 AND deleted_at IS NULL",
+                    crate::util::redated_sql("created_at", 7, 8)
+                ),
                 vec![
                     Value::Text(body.id.clone()),
                     text(&name),
@@ -275,6 +279,11 @@ pub async fn update_context(
                     text(&body.content.as_ref().map(serde_json::Value::to_string)),
                     text(&body.data.as_ref().map(serde_json::Value::to_string)),
                     text(&created_at),
+                    Value::Integer(i64::from(
+                        body.created_at
+                            .as_deref()
+                            .is_some_and(crate::util::names_a_day),
+                    )),
                 ],
             )
             .await?;
