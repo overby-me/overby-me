@@ -100,6 +100,9 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   token and a choice). `getPoll` and `listPolls` (queries) are the state and the tally as the
   caller may see them, `getBoard` is every ballot for whoever may see the counts, and
   `getBoardEntry` is how a voter finds their own.
+- Feedback: `submitFeedback` files a report or a crash, with or without a session; `listFeedback`
+  (a query) is all of them for an owner of the site and one's own for anyone else; `deleteFeedback`
+  is the site owner's.
 - Push: `subscribePush` and `unsubscribePush` are a device's; `notifyContext` is an owner telling a
   context's members something, and `notifyReply` tells an author they were answered. A notification
   only ever links into the app.

@@ -392,6 +392,59 @@
 				}
 			}
 		},
+		"feedbackView": {
+			"type": "object",
+			"description": "A report: a person's account, or a crash folded from every time it was seen.",
+			"required": [
+				"id",
+				"kind",
+				"message",
+				"path",
+				"app_version",
+				"commit",
+				"user_agent",
+				"seen",
+				"reporters",
+				"created_at",
+				"updated_at"
+			],
+			"properties": {
+				"id": { "type": "string" },
+				"kind": {
+					"type": "string",
+					"knownValues": ["bug", "feature", "other", "crash", "error"]
+				},
+				"message": {
+					"type": "string",
+					"description": "With its stack resolved. Of a folded crash, the first sighting's."
+				},
+				"path": { "type": "string" },
+				"app_version": { "type": "string" },
+				"commit": { "type": "string" },
+				"user_agent": { "type": "string" },
+				"image": { "type": "string", "description": "A screenshot's blob id." },
+				"seen": {
+					"type": "integer",
+					"description": "How often a folded crash has been reported. 1 for anything else."
+				},
+				"reporters": {
+					"type": "array",
+					"items": { "type": "string" },
+					"description": "Everyone who has hit a folded crash: DIDs, and `anonymous` at most once for all of those with no account."
+				},
+				"owner_did": {
+					"type": "string",
+					"format": "did",
+					"description": "Whoever sent it first. Absent when they were not signed in."
+				},
+				"created_at": { "type": "string", "format": "datetime" },
+				"updated_at": {
+					"type": "string",
+					"format": "datetime",
+					"description": "When it was last seen."
+				}
+			}
+		},
 		"boardEntryView": {
 			"type": "object",
 			"description": "One spent token on a secret poll's board. It carries no voter, by construction. PROVISIONAL encoding (`crates/ballot-spec/src/provisional.rs`).",

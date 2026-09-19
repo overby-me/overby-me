@@ -330,8 +330,12 @@ asks Bluesky's public API itself. The steps:
   accepted. A notification may link only into the app. The cutover must carry
   the interim's VAPID key pair over: the frontend has the public half compiled
   in, and every browser's subscription is bound to it.
-- [ ] Feedback and crash reports. The interim files them as nodes under the root
-  node; here they need a table of their own.
+- [x] Feedback and crash reports (`crates/appview/src/feedback.rs`). The interim
+  files them as nodes under the root node; here they have a table. A crash seen
+  again is one row with a count and its people, under the interim's digest, so
+  a crash known before the cutover keeps its row once migrated. Reports need no
+  session, so those without one share a budget of ten a minute. Not migrated
+  yet: the interim's existing reports (M9).
 - [ ] Metafile rendering (EMF/WMF figures in Word and PowerPoint files to PNG).
 - [ ] Posting to a member's own PDS.
 

@@ -11,6 +11,7 @@ pub mod ballot;
 pub mod blob;
 pub mod config;
 pub mod db;
+pub mod feedback;
 pub mod firehose;
 pub mod http;
 pub mod live;
@@ -63,6 +64,8 @@ pub struct AppState {
     pub replica: Option<Arc<ballot_store::ReplicaLog>>,
     /// What `crate::poll` keeps between requests.
     pub polls: Arc<poll::Shared>,
+    /// What `crate::feedback` keeps between requests.
+    pub feedback: Arc<feedback::Shared>,
 }
 
 impl AppState {
@@ -85,6 +88,7 @@ impl AppState {
             firehose: Arc::new(firehose::FirehoseStatus::default()),
             replica: None,
             polls: Arc::default(),
+            feedback: Arc::default(),
         }
     }
 
@@ -325,6 +329,18 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.castOpenBallot",
             post(poll::cast_open_ballot),
+        )
+        .route(
+            "/xrpc/com.example.wiki.submitFeedback",
+            post(feedback::submit_feedback),
+        )
+        .route(
+            "/xrpc/com.example.wiki.listFeedback",
+            get(feedback::list_feedback),
+        )
+        .route(
+            "/xrpc/com.example.wiki.deleteFeedback",
+            post(feedback::delete_feedback),
         )
         .route(
             "/xrpc/com.example.wiki.subscribePush",

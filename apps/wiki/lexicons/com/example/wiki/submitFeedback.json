@@ -1,0 +1,72 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.submitFeedback",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "File a report: a person's account of a bug or a wish, or the app's own account of a crash or an error. A session is taken if there is one and not asked for, since someone who cannot sign in has the most to report. A stack in the message has its wasm frames resolved on the way in. A `crash` or an `error` seen before becomes one more sighting on the row already there, known by where it happened and not by the bytes of the report, so it survives a new build.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["message"],
+					"properties": {
+						"kind": {
+							"type": "string",
+							"knownValues": ["bug", "feature", "other", "crash", "error"],
+							"description": "Anything else is `other`."
+						},
+						"message": {
+							"type": "string",
+							"maxLength": 4000,
+							"description": "Cut to 4000 bytes as it arrives."
+						},
+						"path": {
+							"type": "string",
+							"description": "Where in the app it was sent from."
+						},
+						"app": {
+							"type": "string",
+							"description": "The app's version."
+						},
+						"commit": {
+							"type": "string",
+							"description": "The commit the bundle was built from."
+						},
+						"ua": {
+							"type": "string",
+							"description": "The browser, as it describes itself."
+						},
+						"image": {
+							"type": "string",
+							"description": "A screenshot, as the id `uploadBlob` gave it."
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": {
+						"id": {
+							"type": "string",
+							"description": "The row it was filed as: an existing one, for a crash seen before."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "InvalidRequest",
+					"description": "The message is empty."
+				},
+				{
+					"name": "RateLimited",
+					"description": "Too many reports from people who are not signed in (HTTP 429). A signed-in caller is not limited."
+				}
+			]
+		}
+	}
+}
