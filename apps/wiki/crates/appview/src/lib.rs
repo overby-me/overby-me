@@ -8,6 +8,7 @@
 
 pub mod authz;
 pub mod ballot;
+pub mod blob;
 pub mod config;
 pub mod db;
 pub mod firehose;
@@ -29,7 +30,7 @@ pub use db::{Db, DbError};
 pub use store::Store;
 
 use axum::extract::State;
-use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
+use axum::http::header::{ACCEPT_RANGES, AUTHORIZATION, CONTENT_RANGE, CONTENT_TYPE, RANGE};
 use axum::http::{HeaderValue, Method};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -99,7 +100,9 @@ fn cors(config: &Config) -> Option<CorsLayer> {
         CorsLayer::new()
             .allow_origin(origins)
             .allow_methods([Method::GET, Method::POST])
-            .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+            .allow_headers([AUTHORIZATION, CONTENT_TYPE, RANGE])
+            // A player seeking through a video reads these off a ranged reply.
+            .expose_headers([ACCEPT_RANGES, CONTENT_RANGE])
             .max_age(Duration::from_secs(3600)),
     )
 }
@@ -284,6 +287,13 @@ fn build_router(state: AppState) -> Router {
             "/xrpc/com.example.wiki.removeReaction",
             post(xrpc::remove_reaction),
         )
+        .route("/blob/{id}", get(blob::serve_blob))
+        .route("/xrpc/com.example.wiki.uploadBlob", post(blob::upload_blob))
+        .route(
+            "/xrpc/com.example.wiki.getBlobLink",
+            get(blob::get_blob_link),
+        )
+        .route("/xrpc/com.example.wiki.deleteBlob", post(blob::delete_blob))
         .with_state(state)
 }
 

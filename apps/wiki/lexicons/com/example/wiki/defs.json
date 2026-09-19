@@ -276,6 +276,30 @@
 				"avatar_url": { "type": "string", "format": "uri" },
 				"legacy_id": { "type": "string" }
 			}
+		},
+		"blobView": {
+			"type": "object",
+			"description": "A stored file. `id` is what a node refers to; the bytes are at `GET /blob/<id>`.",
+			"required": ["id", "context_id", "sha256", "size", "mime"],
+			"properties": {
+				"id": { "type": "string" },
+				"context_id": {
+					"type": "string",
+					"description": "The context whose readers may read the file."
+				},
+				"owner_did": {
+					"type": "string",
+					"format": "did",
+					"description": "Whoever uploaded it. Absent on a file migrated from an account that was never claimed."
+				},
+				"sha256": { "type": "string", "description": "Lowercase hex." },
+				"size": { "type": "integer" },
+				"mime": {
+					"type": "string",
+					"description": "As the uploader declared it, reduced to `type/subtype`."
+				},
+				"name": { "type": "string", "maxLength": 255 }
+			}
 		}
 	}
 }

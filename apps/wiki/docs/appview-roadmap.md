@@ -197,7 +197,9 @@ The steps:
 - [x] Move: a subtree to a new parent, every stored path in it rewritten, the
   binned ones too so a later restore lands where its parent now is.
 - [ ] Copy and purge. Moving between contexts, which has to change the context
-  of a whole subtree.
+  of a whole subtree, and of the files its nodes point at: a blob is read
+  through its own context, so one left behind would stay readable by the old
+  group and not by the new.
 - [ ] Search, the recent feed, contributions, orphans.
 
 ### M4: membership and roster
@@ -252,8 +254,16 @@ ended is of no use to the next one, and a list is one click to make again.
 
 ### M8: blobs and the carried-over endpoints
 
-- [ ] Upload and download with read authorization; signed links for third-party
-  viewers.
+- [x] Upload and download with read authorization; signed links for third-party
+  viewers (`crates/appview/src/blob.rs`). A file belongs to a context and is
+  read by whoever may read that context. The bytes sit on disk under their
+  SHA-256, streamed both ways, with ranges for a player. Only types that cannot
+  run are shown in place; a page, an SVG or any XML is a download.
+- [ ] A ceiling on what one member or one context may store. A single file is
+  capped; their sum is not, as it is not in the interim.
+- [ ] Copying the interim's files across, each under its old storage id so that
+  `data.fileId` on a node keeps working (a cutover step, listed here because
+  the blob table is its target).
 - [ ] Push (subscribe, notify, reply), feedback, log proxy, symbolication,
   metafile rendering, roster parsing, handle typeahead.
 

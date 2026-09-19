@@ -34,6 +34,8 @@ base64 = "0.22"
 chacha20poly1305 = "0.10"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hkdf = "0.12"
+# Signs the links that let an <img> or a document viewer fetch one blob.
+hmac = "0.12"
 http = "1"
 rand = "0.8"
 # Same 0.12 line atrium resolves, so the two share one connection pool.
@@ -46,6 +48,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = [
+  "fs",
+  "io-util",
   "macros",
   "net",
   "rt-multi-thread",
@@ -56,6 +60,8 @@ tokio = { version = "1", features = [
 # The Jetstream firehose consumer: a WebSocket CLIENT (axum only serves WS) over
 # the public wss endpoint, self-contained TLS via rustls + webpki roots.
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# Streams a blob off disk as a response body.
+tokio-util = { version = "0.7", features = ["io"] }
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", default-features = false, features = ["cors"] }
 tracing = "0.1"

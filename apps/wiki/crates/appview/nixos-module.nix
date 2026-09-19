@@ -10,8 +10,10 @@
 #   };
 #
 # It runs the binary as a hardened, auto-restarting service with a persistent
-# StateDirectory for the Turso file, behind a bundled Ferron reverse proxy that
-# terminates TLS and forwards to 127.0.0.1:<port>. `/healthz` reports DB-reachable
+# StateDirectory, behind a bundled Ferron reverse proxy that terminates TLS and
+# forwards to 127.0.0.1:<port>. The StateDirectory holds the Turso file, the
+# uploaded files (`blobs/`) and the key that signs file links
+# (`appview.db.secret`): a backup takes all three. `/healthz` reports DB-reachable
 # (+ firehose-connected) for the proxy/uptime check. Structured JSON logs go to
 # stdout -> journald; set BETTERSTACK_SOURCE_TOKEN to also ship them to the
 # existing sink.

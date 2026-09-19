@@ -92,6 +92,10 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   `nextSpeaker` and `moveSpeaker` are the chair's; `joinSpeakerList` and `leaveSpeakerList` are any
   member's; `listSpeakerLists` (a query) is what the room follows. `setProjector` and
   `getProjector` are what the projector shows.
+- Files: `uploadBlob` takes the raw bytes (not JSON) into a context, `deleteBlob` removes one, and
+  `getBlobLink` (a query) signs a short-lived link for an `<iframe>`, a `<video>` or a document
+  viewer, none of which can send a header. The bytes themselves are `GET /blob/<id>`, which is plain
+  HTTP with ranges and so has no lexicon.
 - `claimMembership` binds a pending invitation to the caller by its claim token, and
   `getMemberClaimLink` (a query) gives an active owner the token to hand out.
 

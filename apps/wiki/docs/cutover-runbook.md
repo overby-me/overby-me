@@ -35,11 +35,11 @@ tested.
   and `/healthz`). Acceptance (`nixos-rebuild build-vm` behind Ferron, restart
   soak) is the operator step.
 - **PARTLY BUILT**: the AppView itself. `docs/appview-roadmap.md` tracks what it
-  serves (sessions, the read and write gates, the node tree) and what it does
-  not yet (membership, meetings, voting, live updates, blobs, and the
-  frontend's own data layer). Until the roadmap is done the flip target does not
-  answer everything the app asks, so this runbook is rehearsed against staging
-  first.
+  serves (sessions, the read and write gates, the node tree, membership,
+  meetings, live updates, files) and what it does not yet (voting, the
+  carried-over sidecar endpoints, and the frontend's own data layer). Until the
+  roadmap is done the flip target does not answer everything the app asks, so
+  this runbook is rehearsed against staging first.
 
 ## Ordered checklist
 
@@ -56,13 +56,17 @@ tested.
 4. **Load to staging Turso.** Apply `ENTITY_SCHEMA` to a fresh staging Turso db,
    then run the loader over `extraction.json`. The load is idempotent, so a
    partial run can be safely re-run.
-5. **Verification gates** (below) — go/no-go. Any red gate stops the cutover.
-6. **Flip.** Build the frontend with `WIKI_GRAPHQL_URL` / `WIKI_BACKEND_URL`
+5. **Copy the files.** NOT BUILT (`docs/appview-roadmap.md`, M8). Every file in
+   NHost storage goes into the AppView's blob store under its OLD storage id,
+   filed under the context of the node that points at it, so `data.fileId` on a
+   node needs no rewriting. A file no node points at is reported, not copied.
+6. **Verification gates** (below): go/no-go. Any red gate stops the cutover.
+7. **Flip.** Build the frontend with `WIKI_GRAPHQL_URL` / `WIKI_BACKEND_URL`
    pointed at the AppView, and change the `backend_api::file_url` body to the
-   AppView blob path. Deploy the frontend.
-7. **Smoke test** the live app against the AppView: load a group, open a
+   AppView blob path (`/blob/<id>`). Deploy the frontend.
+8. **Smoke test** the live app against the AppView: load a group, open a
    document with multiple authors, post a comment, fetch a file.
-8. **Unfreeze** (or, if a gate or smoke test fails, **roll back**).
+9. **Unfreeze** (or, if a gate or smoke test fails, **roll back**).
 
 ## Verification gates (go/no-go)
 
@@ -89,6 +93,10 @@ All must be green before the flip:
   sample of the interim's most-visited paths resolves through `getNode` to the
   row with the same `legacy_id`. A node the extractor re-rooted appears in
   `report.json` under `nodes.parentId -> <kind>`, and that list is triaged.
+- **Every file came across.** Each `data.fileId` on a loaded document names a
+  `blob` row, whose `size` equals what NHost reported and whose bytes on disk
+  hash to its `sha256`. A sample opens through `/blob/<id>` as a member of its
+  context, and is refused to a stranger.
 - **Authorship preserved.** `document_author` row count ≥ document count and no
   document with a source author chip has zero author rows (the free-text authors
   — ~42% — survived rather than being dropped by the old scalar `author_did`).
@@ -107,6 +115,6 @@ run clean for an agreed soak window.
 If the onboarding walkthrough (`docs/onboarding-walkthrough.md`, a pending
 owner-run step) finds that members cannot self-obtain and link a DID, an
 org-assisted DID-provisioning step (batch account creation, org-run PDS, or an
-in-app signup wizard) enters BETWEEN steps 5 and 6 here. Until that walkthrough
+in-app signup wizard) enters BETWEEN steps 6 and 7 here. Until that walkthrough
 runs, this branch stays a placeholder; the window to decide it closes when the
 interim app retires at cutover.

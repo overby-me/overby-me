@@ -57,6 +57,7 @@ impl Db {
         conn.execute_batch(crate::schema::RUNTIME_DDL).await?;
         conn.execute_batch(crate::speak::SPEAK_DDL).await?;
         conn.execute_batch(crate::projector::PROJECTOR_DDL).await?;
+        conn.execute_batch(crate::blob::BLOB_DDL).await?;
         // The ballot service's durable tables (public board + private roster),
         // both IF NOT EXISTS, so they live in the same datastore as the entities.
         crate::ballot::init_ballot_schema(self).await?;

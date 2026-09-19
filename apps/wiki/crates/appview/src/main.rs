@@ -41,6 +41,7 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    appview::blob::sweep_incoming(&config).await;
     let addr = format!("0.0.0.0:{}", config.port);
     let state = AppState::new(db, config).with_oauth(oauth);
 
