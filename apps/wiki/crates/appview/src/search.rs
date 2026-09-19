@@ -302,7 +302,7 @@ pub async fn search(
     let documents = format!(
         "SELECT d.id, d.kind, d.title, d.path, d.context_id, d.parent_id, d.created_at, {rank} \
          FROM search_index s JOIN document d ON d.id = s.node_id \
-         WHERE d.deleted_at IS NULL AND d.kind <> 'poll' AND {} AND {anywhere} \
+         WHERE d.deleted_at IS NULL AND d.kind NOT IN ('poll', 'canvas') AND {} AND {anywhere} \
            AND (?4 IS NULL OR d.context_id = ?4) \
          ORDER BY 8, d.created_at DESC LIMIT {MAX_HITS}",
         readable_document("d", 1)
