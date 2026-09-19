@@ -33,12 +33,10 @@
       kooha
       rustdesk-flutter
     ]
-    # Linux x86_64-only.  The package itself also builds for aarch64, but the
-    # deb is 1.4 GB installed and the only aarch64 hosts here are the tablet
-    # and a phone whose rootfs is flashed whole.  The
-    # onlyoffice-desktopeditors it replaces was x86_64-only too, so the office
-    # suite stays where it already was.
-    ++ lib.optionals (pkgs.stdenv.isLinux && pkgs.stdenv.hostPlatform.isx86_64) [
+    # Every Linux host, both arches: upstream's CI ships an amd64 and an arm64
+    # deb, so the tablet gets the office suite too.  It costs the phone's
+    # flashed rootfs about 1.4 GB, which make-ext4-fs sizes to fit.
+    ++ lib.optionals pkgs.stdenv.isLinux [
       euro-office
     ];
 }
