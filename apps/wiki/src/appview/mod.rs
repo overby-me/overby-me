@@ -5,15 +5,11 @@
 //! (`appview_client`) and handed over as the same `crate::model` types. Only
 //! built under the `appview` feature; what ships is unchanged until the cutover.
 
-// Until the switch: the layer is written a part at a time, and nothing calls a
-// part before the whole stands in for `crate::graphql`. Goes with the switch.
-#![allow(dead_code)]
-
+pub mod account;
 pub mod api;
 mod ballot;
 mod bin;
 mod canvas;
-#[cfg(target_arch = "wasm32")]
 pub(crate) mod hub;
 pub mod map;
 mod nodes;
@@ -203,6 +199,12 @@ where
             result = call().await;
         }
     }
+    // The AppView no longer knows this session: signed out elsewhere, or a
+    // month old. The session loop asks it and signs out here if that is so,
+    // rather than leaving every page to read as refused until tomorrow.
+    if matches!(result, Err(Error::Api { status: 401, .. })) {
+        crate::session::nudge_refresh();
+    }
     result
 }
 
@@ -218,6 +220,18 @@ pub(crate) fn reported(what: &'static str, error: &Error) -> String {
     #[cfg(target_arch = "wasm32")]
     {
         crate::errors::note_failure(format!("[{what}] {message}"));
+        // A fault reaches the feedback app as well as the log sink: the reader
+        // is only told "something went wrong", and someone has to be told what.
+        if failure == crate::errors::Failure::Broken {
+            let summary = format!("appview error [{what}]: {message}");
+            let path = web_sys::window()
+                .and_then(|w| w.location().pathname().ok())
+                .unwrap_or_default();
+            wasm_bindgen_futures::spawn_local(async move {
+                let token = crate::session::current_token();
+                api::report_error(token.as_deref(), &summary, &path).await;
+            });
+        }
         crate::errors::report(failure);
     }
     message

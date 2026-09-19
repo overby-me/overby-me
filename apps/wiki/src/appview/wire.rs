@@ -56,8 +56,9 @@ pub enum Shape {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NodesBoolExp {
     pub or: Option<Vec<NodesBoolExp>>,
-    scope: Option<Scope>,
-    matches: Vec<Match>,
+    // Reachable crate-wide only so that `..Default::default()` works there.
+    pub(crate) scope: Option<Scope>,
+    pub(crate) matches: Vec<Match>,
 }
 
 impl NodesBoolExp {
@@ -221,10 +222,6 @@ pub fn relations_like(parent_id: &str, _pattern: &str) -> RelationsBoolExp {
 }
 
 /// What the projector of a context shows, changing.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "the interim's signature, which the call sites are written to"
-)]
 pub fn relations_changed(where_clause: RelationsBoolExp) -> Wire {
     Wire {
         matches: vec![on("screen", &where_clause.context)],

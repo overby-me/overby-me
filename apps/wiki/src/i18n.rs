@@ -283,7 +283,14 @@ const EN_JSON: &str = r#"{
         "checkSpam": "Check if the email ended up in spam.",
         "checkEmail": "Check your email",
         "passwordResetSent": "You should have received an email.",
-        "useToResetPassword": "Use it to reset your password."
+        "useToResetPassword": "Use it to reset your password.",
+        "handle": "Your handle",
+        "missingHandle": "Handle required",
+        "handleHint": "Sign in with your atproto account, for example a Bluesky one. You approve it with your own provider and are sent back here.",
+        "noAccountYet": "An account here is an atproto account, for example a Bluesky one. If you have none, make one first, then sign in with its handle.",
+        "createAccount": "Create an account",
+        "passwordAtProvider": "Your password is kept by your account's provider, not by this site. Change or reset it there, then sign in here.",
+        "signInFailed": "The sign-in could not be completed. Try again."
     },
     "content": {
         "addContent": "Add content",
@@ -955,7 +962,14 @@ const DA_JSON: &str = r#"{
         "checkSpam": "Tjek om emailen er havnet i spam.",
         "checkEmail": "Tjek din email",
         "passwordResetSent": "Du burde have modtaget en email.",
-        "useToResetPassword": "Brug den til at nulstille din adgangskode."
+        "useToResetPassword": "Brug den til at nulstille din adgangskode.",
+        "handle": "Dit håndtag",
+        "missingHandle": "Håndtag påkrævet",
+        "handleHint": "Log ind med din atproto-konto, for eksempel en Bluesky-konto. Du godkender det hos din egen udbyder og bliver sendt tilbage hertil.",
+        "noAccountYet": "En konto her er en atproto-konto, for eksempel en Bluesky-konto. Har du ingen, så opret en først, og log derefter ind med dens håndtag.",
+        "createAccount": "Opret en konto",
+        "passwordAtProvider": "Din adgangskode ligger hos din kontos udbyder, ikke her. Skift eller nulstil den dér, og log så ind her.",
+        "signInFailed": "Login kunne ikke gennemføres. Prøv igen."
     },
     "content": {
         "addContent": "Tilf\u00f8j indhold",

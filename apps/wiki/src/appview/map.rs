@@ -101,7 +101,7 @@ pub fn data_with_content(
     if let Some(content) = content {
         merged.insert("content".to_string(), content.clone());
     }
-    (!merged.is_empty()).then(|| Jsonb(serde_json::Value::Object(merged)))
+    (!merged.is_empty()).then_some(Jsonb(serde_json::Value::Object(merged)))
 }
 
 /// The reverse, for a write: `data.content` lifted out into its own field.

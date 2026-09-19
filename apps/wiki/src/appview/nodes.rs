@@ -603,3 +603,20 @@ pub fn deep_copy_node(
         Ok(())
     })
 }
+
+/// The `/error` page's probe: a call the AppView is sure to refuse, so that how
+/// a failure is reported can be seen. The query is the interim's and means
+/// nothing here.
+pub async fn execute_raw(
+    access_token: Option<&str>,
+    _query: &str,
+) -> Result<serde_json::Value, String> {
+    let client = client(access_token);
+    let neither = get_node::Params {
+        id: None,
+        path: None,
+    };
+    ask("getNode", true, || client.get_node(&neither))
+        .await
+        .map(|_| serde_json::Value::Null)
+}

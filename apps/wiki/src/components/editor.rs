@@ -724,6 +724,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
 
     // Upload a chosen cover image to storage, then remember its id + filename so
     // the next save writes `data.image`. Mirrors the folder file uploader.
+    let cover_context = node.context_id.as_ref().map(|c| c.0.clone());
     let on_pick_image = move |evt: FormEvent| {
         let files = evt.files();
         let Some(fd) = files.into_iter().next() else {
@@ -732,6 +733,7 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
         let name = fd.name();
         let ctype = fd.content_type().unwrap_or_default();
         let token = session.read().access_token.clone();
+        let context = cover_context.clone();
         image_uploading.set(true);
         spawn(async move {
             match fd.read_bytes().await {
@@ -752,9 +754,15 @@ pub fn EditorApp(node: NodeWithChildren) -> Element {
                             picked_preview.set(Some(url));
                         }
                     }
-                    match crate::nhost::upload_file(token.as_deref(), bytes.to_vec(), &name, &ctype)
-                        .await
-                    {
+                    let kept = crate::nhost::upload_file(
+                        token.as_deref(),
+                        context.as_deref(),
+                        bytes.to_vec(),
+                        &name,
+                        &ctype,
+                    )
+                    .await;
+                    match kept {
                         Ok(up) => {
                             image_id.set(Some(up.id));
                             image_name.set(name);
