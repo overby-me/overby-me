@@ -41,7 +41,9 @@ AppView's under the same names (`src/appview/`), so no component changes which
 function it calls; built without it, which is what ships, nothing is different.
 `scripts/test-browser-appview.nu` builds it, starts a dev AppView, and drives
 it in headless Firefox: the screens draw what was seeded, writing through them
-lands, and a change made elsewhere arrives without a reload.
+lands (a comment, a page through the editor, a place in the speaker list, a
+cell on the canvas, an open ballot and a secret one, blinded and cast from the
+browser's own wasm), and a change made elsewhere arrives without a reload.
 
 Not built: mail to an invited address (M4), and the parts of voting that wait
 on a decision that is the owner's to make (M6). What needs a person and cannot
@@ -120,6 +122,11 @@ it, and has not been ported; the AppView's is the smaller one named above.
   long as the page was open. No test below a browser could see it: the data
   layer's answers were right. The layer now hands a row's key back as its
   component chose it (`src/appview/seen.rs`).
+- **Saving a page re-dated it to midnight.** The editor sends a page's day back
+  with every save an owner makes, and a day alone is stored as its midnight, so
+  a page made a minute ago read "19 hours ago" after its first save. The interim
+  does the same. Here the day a node already has leaves its time of day alone.
+  Seen in the browser run, where a page is made and saved as a person would.
 - **Looking a ballot up named the voter.** `getBoardEntry` asked that the
   caller be able to read the poll, so in a closed group a voter could only check
   their ballot with their session on the request: their name and their token in

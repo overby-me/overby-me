@@ -99,7 +99,28 @@ def seed [owner: string, member: string] {
     xrpc $member joinSpeakerList { list_id: $list } | ignore
     let canvas = (xrpc $owner createCanvas { parent_id: $group, name: "Tavle", width: 16, height: 16, cooldown: 0 } | get id)
     xrpc $member paintCell { canvas: $canvas, x: 3, y: 4, colour: 5 } | ignore
-    { group: $group, folder: $folder, page: $page }
+    { group: $group, folder: $folder, page: $page, motion: $motion, poll: $poll }
+}
+
+# A real pointer click at an offset from the middle of the element `css` finds.
+def click-at [sid: string, css: string, x: int, y: int] {
+    let found = (wd-post $"/session/($sid)/element" { using: "css selector", value: $css })
+    let element = (try { $found | get value | values | first } catch { "" })
+    if ($element | is-empty) { return }
+    let origin = { "element-6066-11e4-a52e-4f735466cecf": $element }
+    wd-post $"/session/($sid)/actions" { actions: [{
+        type: "pointer", id: "mouse", parameters: { pointerType: "mouse" },
+        actions: [
+            { type: "pointerMove", duration: 0, origin: $origin, x: $x, y: $y }
+            { type: "pointerDown", button: 0 }
+            { type: "pointerUp", button: 0 }
+        ]
+    }] } | ignore
+}
+
+# Type into a text input as a person would: set it, and say so.
+def type-into [sid: string, css: string, text: string] {
+    js $sid $"const box = [...document.querySelectorAll\(($css | to json -r)\)].pop\(\); if \(!box\) return 0; Object.getOwnPropertyDescriptor\(HTMLInputElement.prototype, 'value'\).set.call\(box, ($text | to json -r)\); box.dispatchEvent\(new Event\('input', { bubbles: true }\)\); return 1;" | ignore
 }
 
 def main [
@@ -267,6 +288,92 @@ def main [
     } else {
         $failed = $failed + 1
         log-fail "the vote screen never said the ballot was in"
+    }
+
+    # A secret ballot. The blinding and the RSA run in the browser's wasm, and the
+    # ballot goes in with no session, so the server's count is the proof.
+    xrpc $owner closePoll { id: $ids.poll } | ignore
+    let secret = (xrpc $owner openPoll { parent_id: $ids.motion, title: "Hemmelig afstemning", options: ["for", "imod", "blank"], blank: true, secret: true } | get id)
+    xrpc $owner setProjector { context_id: $ids.group, active_id: $secret } | ignore
+    go $sid "/hovedbestyrelsen?app=vote"
+    wait-for-text $sid "Hemmelig afstemning" 30 | ignore
+    js $sid 'const o = [...document.querySelectorAll(".ballot-option")].find(e => e.innerText.trim() === "For"); if (o) o.click(); return 1;' | ignore
+    sleep 500ms
+    js $sid 'const v = document.querySelector("button.btn-cast"); if (v) v.click(); return 1;' | ignore
+    let said_so = (wait-for-text $sid "You have voted" 30)
+    # The screen says so at once, before the ballot is in, so the count is what
+    # is waited for: leaving the page sooner would take the request with it.
+    mut counted = { ballots: 0, counts: [] }
+    mut waited = 0
+    while $waited < 60 and $counted.ballots != 1 {
+        $counted = (^curl -s -H $"authorization: Bearer ($owner)" $"(api).getPoll?id=($secret)" | from json | select ballots counts)
+        sleep 500ms
+        $waited = $waited + 1
+    }
+    let counted = $counted
+    if $said_so and ($counted.ballots == 1) and ($counted.counts == [1 0 0]) {
+        $passed = $passed + 1
+        log-ok "a secret ballot is blinded, signed and cast from the browser, and counted"
+    } else {
+        $failed = $failed + 1
+        log-fail $"a secret ballot: the screen said so: ($said_so), the server counts ($counted.ballots) ballots as ($counted.counts)"
+    }
+
+    # Joining the queue: shown at once, and the row shown early goes away.
+    go $sid "/hovedbestyrelsen?app=speak"
+    wait-for-text $sid "Talerliste" 30 | ignore
+    js $sid 'const f = document.querySelector(".speak-join-fab"); if (f) f.click(); return 1;' | ignore
+    sleep 1sec
+    js $sid 'const i = [...document.querySelectorAll(".speak-join-item")].pop(); if (i) i.click(); return 1;' | ignore
+    let queued = (wait-for-text $sid "Owner" 15)
+    sleep 4sec
+    let early = (js $sid 'return document.querySelectorAll(".list-item.is-pending").length')
+    if $queued and $early == 0 {
+        $passed = $passed + 1
+        log-ok "joining the speaker list lands, once"
+    } else {
+        $failed = $failed + 1
+        log-fail $"joining the speaker list: in the queue: ($queued), rows still pending: ($early)"
+    }
+
+    # A cell painted with a real click.
+    go $sid "/hovedbestyrelsen?app=canvas"
+    wait-for-text $sid "1 / 256" 30 | ignore
+    js $sid 'const s = document.querySelectorAll(".pixel-swatch"); if (s[2]) s[2].click(); return 1;' | ignore
+    sleep 500ms
+    click-at $sid "canvas.pixel-board" 100 60
+    if (wait-for-text $sid "2 / 256" 15) {
+        $passed = $passed + 1
+        log-ok "a tap on the canvas paints a cell"
+    } else {
+        $failed = $failed + 1
+        log-fail "the canvas never counted a second cell"
+    }
+
+    # A page made from the folder, written in the editor, saved, and read back.
+    go $sid "/hovedbestyrelsen/bilag"
+    wait-for-text $sid "Dagsorden" 30 | ignore
+    js $sid 'const b = document.querySelector("button.add-action"); if (b) b.click(); return 1;' | ignore
+    sleep 1sec
+    type-into $sid "[role=dialog] input[type=text], dialog input[type=text], .dialog input[type=text]" "Beretning 2026"
+    sleep 500ms
+    js $sid 'const add = [...document.querySelectorAll("button.btn-primary")].find(b => b.innerText.trim() === "Add"); if (add) add.click(); return 1;' | ignore
+    sleep 6sec
+    let landed = (js $sid 'return location.pathname + location.search')
+    js $sid 'const ed = document.querySelector("[contenteditable=true]"); if (!ed) return 0; ed.focus(); document.execCommand("insertText", false, "Aaret gik godt."); return 1;' | ignore
+    sleep 1sec
+    js $sid 'const save = [...document.querySelectorAll("button")].find(b => b.innerText.replace(/\s+/g, " ").trim() === "save Save"); if (save) save.click(); return 1;' | ignore
+    sleep 4sec
+    go $sid "/hovedbestyrelsen/bilag/beretning_2026"
+    let read_back = (wait-for-text $sid "Aaret gik godt." 30)
+    # An owner's save sends the page's day back; it must not reset its time.
+    let aged = (js $sid 'return /\d+ hours? ago/.test(document.body.innerText)')
+    if ($landed | str contains "beretning_2026") and $read_back and $aged == false {
+        $passed = $passed + 1
+        log-ok "a page is made, written, saved and read back, dated when it was made"
+    } else {
+        $failed = $failed + 1
+        log-fail $"a new page: landed at ($landed), read back: ($read_back), dated hours ago: ($aged)"
     }
 
     # The app's own errors, as the browser console heard them.
