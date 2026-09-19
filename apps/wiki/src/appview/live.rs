@@ -365,3 +365,177 @@ async fn a_thread_is_written_read_and_taken_back_as_the_comments_component_does_
         .expect("orphans")
         .is_empty());
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_roster_is_kept_and_an_invitation_answered_as_the_member_screens_do_it() {
+    use crate::model::{MemberPageFilter, MembersSetInput};
+    let server = Server::start();
+    let (carol, alice) = (server.session(CAROL), server.session(ALICE));
+    let (group, page) = a_group_with_a_page(&carol).await;
+
+    assert!(
+        super::invite_member_by_node(Some(&carol), &group, ALICE, "Alice")
+            .await
+            .expect("invite")
+    );
+    let roster = [
+        ("Bo".to_string(), "bo@wiki.example".to_string()),
+        ("Bo".to_string(), "BO@wiki.example ".to_string()),
+    ];
+    let imported = super::invite_members(Some(&carol), &group, &roster)
+        .await
+        .expect("a roster");
+    assert_eq!(
+        (imported.inserted, imported.skipped),
+        (1, 1),
+        "the same address twice is one seat"
+    );
+
+    let waiting = super::query_invitations(Some(&alice), ALICE, "")
+        .await
+        .expect("invitations");
+    assert_eq!(waiting.len(), 1);
+    assert_eq!(waiting[0].parent.as_ref().expect("to what").name, "HB");
+    assert_eq!(
+        super::is_active_member(Some(&alice), &group, ALICE).await,
+        Some(true)
+    );
+    assert!(
+        super::accept_invitation(Some(&alice), &waiting[0].id.0, ALICE)
+            .await
+            .expect("accept")
+    );
+    let hers = super::query_contexts(Some(&alice), ALICE, "wiki/group")
+        .await
+        .expect("her groups");
+    assert_eq!(hers.len(), 1);
+
+    let everyone = MemberPageFilter::default();
+    let (seats, total) = super::query_members_page(Some(&carol), &group, &everyone, 10, 0)
+        .await
+        .expect("the roster");
+    assert_eq!((seats.len(), total), (3, 3));
+    let owners = MemberPageFilter {
+        owner: Some(true),
+        ..Default::default()
+    };
+    let (seats, _) = super::query_members_page(Some(&carol), &group, &owners, 10, 0)
+        .await
+        .expect("owners");
+    assert_eq!(seats.len(), 1);
+    assert_eq!(seats[0].node_id, Some(Uuid(CAROL.into())));
+    let (hers_seat, _) = super::query_members_page(
+        Some(&carol),
+        &group,
+        &MemberPageFilter {
+            search: "alice".into(),
+            ..Default::default()
+        },
+        10,
+        0,
+    )
+    .await
+    .expect("by name");
+    let no_vote = MembersSetInput {
+        active: Some(false),
+        ..Default::default()
+    };
+    assert!(
+        super::update_member(Some(&carol), &hers_seat[0].id.0, no_vote)
+            .await
+            .expect("update")
+    );
+    assert_eq!(
+        super::count_active_members(Some(&carol), &group).await,
+        2,
+        "carol and bo"
+    );
+    assert_eq!(
+        super::is_active_member(Some(&alice), &group, ALICE).await,
+        Some(false)
+    );
+
+    // Author chips: an account, a group, and a name with no account behind it.
+    let chips = [
+        crate::model::Author {
+            name: "Alice".into(),
+            node_id: Some(ALICE.into()),
+            avatar_url: String::new(),
+            user_id: Some(ALICE.into()),
+        },
+        crate::model::Author {
+            name: "HB".into(),
+            node_id: Some(group.clone()),
+            avatar_url: String::new(),
+            user_id: None,
+        },
+        crate::model::Author {
+            name: "Sekretariatet".into(),
+            node_id: None,
+            avatar_url: String::new(),
+            user_id: None,
+        },
+    ];
+    assert!(super::set_node_authors(Some(&carol), &page, &chips)
+        .await
+        .expect("authors"));
+    let read = super::query_node_by_id(Some(&carol), &page, CAROL)
+        .await
+        .expect("read")
+        .expect("the page");
+    let labels: Vec<String> = read
+        .members
+        .iter()
+        .map(crate::model::MemberFields::label)
+        .collect();
+    assert_eq!(labels.len(), 3);
+    assert_eq!(&labels[1..], ["HB", "Sekretariatet"]);
+
+    let picked = super::search_authors(Some(&carol), "hb").await;
+    assert!(
+        picked
+            .iter()
+            .any(|a| a.node_id.as_deref() == Some(group.as_str())),
+        "{picked:?}"
+    );
+    assert!(super::query_user(Some(&carol), ALICE).await.is_some());
+    assert_eq!(
+        super::query_users_by_ids(Some(&carol), &[CAROL.into(), ALICE.into()])
+            .await
+            .len(),
+        2
+    );
+
+    // Open to everyone, as the permissions screen's switch reads and sets it.
+    let is_public = |rows: &[crate::model::PermissionFields]| {
+        rows.iter()
+            .any(|p| p.role == "public" && p.select && p.active)
+    };
+    assert!(!is_public(
+        &super::query_permissions(Some(&carol), &group)
+            .await
+            .expect("rules")
+    ));
+    super::set_context_public(Some(&carol), &group, "wiki/group", true)
+        .await
+        .expect("open");
+    assert!(is_public(
+        &super::query_permissions(Some(&carol), &group)
+            .await
+            .expect("rules")
+    ));
+    let open = super::query_public_places(None).await.expect("signed out");
+    assert_eq!(open.len(), 1);
+    assert_eq!(
+        (open[0].path.as_str(), open[0].mime_id.as_str()),
+        ("hb", "wiki/group")
+    );
+
+    assert!(super::decline_invitation(Some(&alice), &hers_seat[0].id.0)
+        .await
+        .expect("leave"));
+    assert!(super::query_contexts(Some(&alice), ALICE, "wiki/group")
+        .await
+        .expect("her groups")
+        .is_empty());
+}

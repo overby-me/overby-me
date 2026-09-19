@@ -12,6 +12,7 @@
 mod bin;
 pub mod map;
 mod nodes;
+mod people;
 mod seen;
 mod talk;
 
@@ -19,6 +20,8 @@ mod talk;
 pub use bin::*;
 #[allow(unused_imports)]
 pub use nodes::*;
+#[allow(unused_imports)]
+pub use people::*;
 #[allow(unused_imports)]
 pub use talk::*;
 
