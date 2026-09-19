@@ -12,6 +12,7 @@ pub mod config;
 pub mod db;
 pub mod firehose;
 pub mod http;
+pub mod live;
 pub mod oauth;
 pub mod schema;
 pub mod session;
@@ -19,7 +20,6 @@ pub mod slug;
 pub mod statecookie;
 pub mod store;
 pub mod util;
-pub mod ws;
 pub mod xrpc;
 
 pub use config::Config;
@@ -41,8 +41,8 @@ use tower_http::cors::CorsLayer;
 #[derive(Clone)]
 pub struct AppState {
     pub db: Db,
-    /// Authoritative deltas broadcast to all connected clients over `/ws`.
-    pub deltas: broadcast::Sender<String>,
+    /// What changed, for the `/ws` listeners allowed to hear it (`crate::live`).
+    pub changes: broadcast::Sender<live::Change>,
     pub config: Config,
     /// The atproto OAuth client, present when the AppView is built with identity
     /// wired (the default in tests is `None`, so `/callback` reports 503).
@@ -55,14 +55,23 @@ impl AppState {
     /// Build state around an open database, with a fresh broadcast channel and
     /// no OAuth client (see [`AppState::with_oauth`]).
     pub fn new(db: Db, config: Config) -> Self {
-        let (deltas, _rx) = broadcast::channel::<String>(1024);
+        let (changes, _rx) = broadcast::channel(1024);
         Self {
             db,
-            deltas,
+            changes,
             config,
             oauth: None,
             firehose: Arc::new(firehose::FirehoseStatus::default()),
         }
+    }
+
+    /// Tell the listeners something changed. Nobody listening is not an error.
+    pub fn publish(&self, topic: live::Topic, kind: &'static str, id: &str) {
+        let _ = self.changes.send(live::Change {
+            topic,
+            kind,
+            id: id.to_string(),
+        });
     }
 
     /// Attach the atproto OAuth client (enables the `/callback` slice).
@@ -107,7 +116,7 @@ pub fn router(state: AppState) -> Router {
 fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
-        .route("/ws", get(ws::ws_handler))
+        .route("/ws", get(live::ws_handler))
         .route("/login", get(oauth::login_handler))
         .route("/callback", get(oauth::callback_handler))
         .route(
@@ -246,7 +255,7 @@ async fn healthz(State(state): State<AppState>) -> Json<serde_json::Value> {
         // firehose is connected-but-not-advancing).
         "firehose_connected": state.firehose.connected.load(Ordering::Relaxed),
         "firehose_events": state.firehose.events_seen.load(Ordering::Relaxed),
-        "clients": state.deltas.receiver_count(),
+        "clients": state.changes.receiver_count(),
     }))
 }
 

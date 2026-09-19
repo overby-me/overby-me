@@ -18,6 +18,7 @@
 
 use crate::AppState;
 use crate::authz::Authz;
+use crate::live::Topic;
 use crate::session::{Caller, MaybeCaller, Sessions};
 use axum::Json;
 use axum::extract::{Query, State};
@@ -506,7 +507,10 @@ pub async fn claim_membership(
         Err(e) => return write_failed("claimMembership", e),
     }
     match store.bind_member_to_user(&member.id, &did).await {
-        Ok(true) => claimed(),
+        Ok(true) => {
+            state.publish(Topic::Context(context_id.clone()), "member", &member.id);
+            claimed()
+        }
         // Guarded on the row still being unbound, so a racing claim lost.
         Ok(false) => conflict("AlreadyClaimed", "this invitation has been claimed"),
         Err(e) => write_failed("claimMembership", e),
@@ -637,7 +641,18 @@ pub async fn invite_members(
         .invite(&body.context_id, &body.invites)
         .await
     {
-        Ok(outcome) => (StatusCode::OK, Json(outcome)).into_response(),
+        Ok(outcome) => {
+            state.publish(
+                Topic::Context(body.context_id.clone()),
+                "member",
+                &body.context_id,
+            );
+            // An invited account hears of it on its own feed, where its home lists it.
+            for did in body.invites.iter().filter_map(|i| i.did.as_deref()) {
+                state.publish(Topic::User(did.to_string()), "invitation", &body.context_id);
+            }
+            (StatusCode::OK, Json(outcome)).into_response()
+        }
         Err(e) => write_failed("inviteMembers", e),
     }
 }
@@ -699,11 +714,11 @@ pub async fn update_member(
     Caller { did }: Caller,
     Json(body): Json<UpdateMemberBody>,
 ) -> Response {
-    match member_row(&state, &body.id, &did, "updateMember").await {
-        Ok((_, true)) => {}
+    let meta = match member_row(&state, &body.id, &did, "updateMember").await {
+        Ok((meta, true)) => meta,
         Ok((_, false)) => return forbidden("only an owner of the context may do that"),
         Err(refusal) => return refusal,
-    }
+    };
     let patch = crate::store::MemberPatch {
         name: body.name.as_deref(),
         email: body.email.as_deref(),
@@ -715,7 +730,10 @@ pub async fn update_member(
         .update_member(&body.id, &patch)
         .await
     {
-        Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Ok(_) => {
+            state.publish(Topic::Context(meta.context_id), "member", &body.id);
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+        }
         Err(refused) => refused_write("updateMember", refused),
     }
 }
@@ -733,16 +751,22 @@ pub async fn remove_member(
     Caller { did }: Caller,
     Json(body): Json<MemberIdBody>,
 ) -> Response {
-    match member_row(&state, &body.id, &did, "removeMember").await {
-        Ok((meta, is_owner)) if is_owner || meta.user_did.as_deref() == Some(did.as_str()) => {}
+    let meta = match member_row(&state, &body.id, &did, "removeMember").await {
+        Ok((meta, is_owner)) if is_owner || meta.user_did.as_deref() == Some(did.as_str()) => meta,
         Ok(_) => return forbidden("only an owner may remove someone else"),
         Err(refusal) => return refusal,
-    }
+    };
     match crate::Store::new(state.db.clone())
         .remove_member(&body.id)
         .await
     {
-        Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Ok(_) => {
+            state.publish(Topic::Context(meta.context_id.clone()), "member", &body.id);
+            if let Some(removed) = meta.user_did {
+                state.publish(Topic::User(removed), "invitation", &meta.context_id);
+            }
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+        }
         Err(refused) => refused_write("removeMember", refused),
     }
 }
@@ -775,7 +799,10 @@ pub async fn accept_invitation(
         .accept_invitation(&body.id, &did)
         .await
     {
-        Ok(true) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Ok(true) => {
+            state.publish(Topic::User(did), "invitation", &body.id);
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+        }
         Ok(false) => err(StatusCode::NOT_FOUND, "NotFound", "no such invitation"),
         Err(e) => write_failed("acceptInvitation", e),
     }
@@ -892,7 +919,10 @@ pub async fn create_document(
         author_did: &did,
     };
     match store.create_document(&new).await {
-        Ok(id) => wrote(id),
+        Ok(id) => {
+            state.publish(Topic::Context(body.context_id.clone()), "node", &id);
+            wrote(id)
+        }
         Err(crate::store::WriteError::Db(e)) => write_failed("createDocument", e),
         Err(refused) => err(
             StatusCode::BAD_REQUEST,
@@ -984,7 +1014,10 @@ pub async fn update_document(
         .update_document(&body.id, &patch)
         .await
     {
-        Ok(true) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Ok(true) => {
+            state.publish(Topic::Context(meta.context_id), "node", &body.id);
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+        }
         Ok(false) => err(StatusCode::NOT_FOUND, "NotFound", "no such document"),
         Err(e) => write_failed("updateDocument", e),
     }
@@ -1024,7 +1057,10 @@ pub async fn set_document_authors(
         .set_document_authors(&body.id, &body.authors)
         .await
     {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Ok(()) => {
+            state.publish(Topic::Context(meta.context_id), "node", &body.id);
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+        }
         Err(e) => write_failed("setDocumentAuthors", e),
     }
 }
@@ -1042,7 +1078,7 @@ pub async fn move_document(
     Caller { did }: Caller,
     Json(body): Json<MoveDocumentBody>,
 ) -> Response {
-    let (_, standing) = match standing_towards(&state, &body.id, &did, "moveDocument").await {
+    let (meta, standing) = match standing_towards(&state, &body.id, &did, "moveDocument").await {
         Ok(found) => found,
         Err(refusal) => return refusal,
     };
@@ -1053,7 +1089,10 @@ pub async fn move_document(
         .move_document(&body.id, &body.parent_id)
         .await
     {
-        Ok(path) => (StatusCode::OK, Json(serde_json::json!({ "path": path }))).into_response(),
+        Ok(path) => {
+            state.publish(Topic::Context(meta.context_id), "node", &body.id);
+            (StatusCode::OK, Json(serde_json::json!({ "path": path }))).into_response()
+        }
         Err(crate::store::WriteError::Db(e)) => write_failed("moveDocument", e),
         Err(refused) => invalid(&refused.to_string()),
     }
@@ -1082,11 +1121,14 @@ pub async fn delete_document(
         .bin_subtree(&body.id, &meta.path)
         .await
     {
-        Ok(binned) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "binned": binned })),
-        )
-            .into_response(),
+        Ok(binned) => {
+            state.publish(Topic::Context(meta.context_id), "node", &body.id);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "binned": binned })),
+            )
+                .into_response()
+        }
         Err(e) => write_failed("deleteDocument", e),
     }
 }
@@ -1131,11 +1173,14 @@ pub async fn restore_document(
         Err(e) => return write_failed("restoreDocument", e),
     }
     match store.restore_subtree(&body.id, &meta.path).await {
-        Ok(restored) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "restored": restored })),
-        )
-            .into_response(),
+        Ok(restored) => {
+            state.publish(Topic::Context(meta.context_id), "node", &body.id);
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "restored": restored })),
+            )
+                .into_response()
+        }
         Err(crate::store::WriteError::Db(e)) => write_failed("restoreDocument", e),
         Err(refused) => conflict("PathTaken", &refused.to_string()),
     }
@@ -1216,7 +1261,10 @@ pub async fn post_comment(
         .create_comment(&body.on_id, &context_id, &did, &body.text)
         .await
     {
-        Ok(id) => wrote(id),
+        Ok(id) => {
+            state.publish(Topic::Context(context_id), "comment", &body.on_id);
+            wrote(id)
+        }
         Err(e) => write_failed("postComment", e),
     }
 }
@@ -1238,7 +1286,10 @@ pub async fn add_reaction(
         .create_reaction(&body.subject, &did, &body.emoji)
         .await
     {
-        Ok(id) => wrote(id),
+        Ok(id) => {
+            state.publish(Topic::Public, "reaction", &body.subject);
+            wrote(id)
+        }
         Err(e) => write_failed("addReaction", e),
     }
 }
@@ -1254,7 +1305,10 @@ pub async fn remove_reaction(
         .remove_reaction(&body.subject, &did, &body.emoji)
         .await
     {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Ok(()) => {
+            state.publish(Topic::Public, "reaction", &body.subject);
+            (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
+        }
         Err(e) => write_failed("removeReaction", e),
     }
 }

@@ -68,5 +68,10 @@ Stated as observations, not a decision:
 - No frozen topic taxonomy or broadcast API is proposed (see the header).
 - No read/write contract table: `src/model.rs` already IS the code-derived
   read/write surface; duplicating it here would be redundant.
-- The actual code swap onto topics waits on the AppView multiplexed-`/ws` topic
-  API, which does not exist yet.
+- The AppView's topic API now exists (`crates/appview/src/live.rs`, 2026-09-19):
+  topics are `context:<id>`, `user:<did>` and `public`, granted per listener, and
+  a change carries a `kind` (`node`, `comment`, `member`, `speak`, ...) and an
+  `id`. That covers the three scope keys above: a node and a context both map to
+  `context:<id>` (the interim's own `context_touch` made the same trade), and
+  site 1 is `user:<did>`. The discriminator became `kind`. The code swap itself
+  is the frontend's, at M9.

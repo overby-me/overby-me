@@ -295,9 +295,7 @@ pub async fn run(state: AppState) {
                     state.firehose.events_seen.fetch_add(1, Ordering::Relaxed);
                     match ingest(&store, &text).await {
                         Ok(Some(delta)) => {
-                            if let Ok(json) = serde_json::to_string(&delta) {
-                                let _ = state.deltas.send(json);
-                            }
+                            state.publish(crate::live::Topic::Public, "record", &delta.uri);
                         }
                         Ok(None) => {}
                         Err(e) => tracing::warn!("firehose ingest error: {e}"),

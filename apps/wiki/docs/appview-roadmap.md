@@ -231,9 +231,16 @@ The steps:
 
 ### M7: live updates
 
-- [ ] `/ws` topic protocol: subscribe by scope key and discriminator
-  (`docs/use-live-topic-inventory.md`), authorized per topic.
-- [ ] Every write path publishes its delta.
+- [x] `/ws` topic protocol (`crates/appview/src/live.rs`): a listener
+  authenticates with its first frame, subscribes to `context:<id>`,
+  `user:<did>` or `public`, and is granted a topic only if it may read it. A
+  change names what changed and never what it changed to, so a client refetches
+  through the gated reads. The relay it replaces sent every delta to every
+  connection, unauthenticated.
+- [x] Every write path built so far publishes its change.
+- [ ] Re-checking a standing subscription when its listener's membership ends.
+  Until then a removed member keeps hearing THAT their old context changed, and
+  nothing of what.
 
 ### M8: blobs and the carried-over endpoints
 
