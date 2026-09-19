@@ -231,7 +231,10 @@ The steps:
 - [ ] Reaching an invited address. Nothing sends mail yet, so an owner hands out
   claim links by hand; binding by the account's confirmed address (M2) would
   make most of that unnecessary.
-- [x] Author chips (`setDocumentAuthors`): accounts, or names with no account.
+- [x] Author chips (`setDocumentAuthors`): accounts, names with no account, or a
+  group. The interim lets a group be named as an author, and the extractor read
+  every chip that pointed at a node as a person, so a branch that put a motion
+  forward was migrated as an account with the group's id.
 
 ### M5: meetings
 

@@ -114,6 +114,39 @@ fn document_collects_multiple_authors_including_free_text() {
     assert!(doc.content.is_some());
 }
 
+/// A chip points at a node, and a group is a node too. Read as a person, a
+/// branch that put a motion forward became an account with the group's id, which
+/// the loader then made a user row for.
+#[test]
+fn a_group_named_as_an_author_stays_a_group() {
+    let mut nodes = vec![node(
+        "d1",
+        "vote/policy",
+        json!({"content": {"blocks": []}}),
+    )];
+    nodes.push(
+        serde_json::from_value::<InterimNode>(json!({
+            "id": "branch", "name": "Aarhus", "key": "aarhus", "mimeId": "wiki/group",
+            "parentId": "root", "contextId": null, "ownerId": null, "data": null,
+            "createdAt": "2026-01-01T00:00:00Z"
+        }))
+        .unwrap(),
+    );
+    let members = vec![
+        member("a1", "d1", Some("branch"), None),
+        member("a2", "d1", Some("did:bound"), None),
+    ];
+    let ex = extract(&nodes, &members, &[]);
+
+    let authors = &ex.documents[0].authors;
+    assert_eq!(authors[0].context(), Some("branch"), "{authors:?}");
+    assert_eq!(authors[1].did(), Some("did:bound"));
+    assert!(
+        ex.users.iter().all(|u| u.did != "branch"),
+        "the group was made an account"
+    );
+}
+
 #[test]
 fn non_content_data_is_carried_and_unknown_mimes_hit_the_report() {
     let nodes = vec![

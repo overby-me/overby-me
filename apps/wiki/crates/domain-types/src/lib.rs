@@ -29,6 +29,16 @@ pub enum Author {
     /// A free-text author name with no account (the 42 percent). Kept as a
     /// display string so authorship is not silently dropped at import.
     FreeText { display: String },
+    /// A group or an event named as the author, which is how a local branch
+    /// puts a motion forward. `name` and `path` are filled in when it is read,
+    /// and ignored when it is written.
+    Context {
+        context_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+    },
 }
 
 impl Author {
@@ -36,17 +46,25 @@ impl Author {
     pub fn did(&self) -> Option<&str> {
         match self {
             Author::User { did } => Some(did),
-            Author::FreeText { .. } => None,
+            _ => None,
         }
     }
 
     /// The author's free-text display, if they have no account (maps to
-    /// `author_text`). Exactly one of `did()`/`text()` is `Some`, matching the
-    /// `author_did IS NOT NULL OR author_text IS NOT NULL` CHECK.
+    /// `author_text`). Exactly one of `did()`, `text()` and `context()` is
+    /// `Some`, which is what the table's CHECK asks for.
     pub fn text(&self) -> Option<&str> {
         match self {
             Author::FreeText { display } => Some(display),
-            Author::User { .. } => None,
+            _ => None,
+        }
+    }
+
+    /// The group or event, if that is who the author is (`author_context`).
+    pub fn context(&self) -> Option<&str> {
+        match self {
+            Author::Context { context_id, .. } => Some(context_id),
+            _ => None,
         }
     }
 }

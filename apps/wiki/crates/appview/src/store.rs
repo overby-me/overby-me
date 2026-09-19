@@ -1116,14 +1116,17 @@ impl Store {
     // -- Read side of the native serving layer (returns the canonical domain
     //    types, which the XRPC handlers serve as JSON). Identity-free reads. --
 
-    /// The authors of a document (from the `document_author` join, in `ord`),
-    /// each a DID (an account) or a free-text display name.
+    /// The authors of a document (from the `document_author` join, in `ord`):
+    /// an account, a name with no account, or a group, which comes with the name
+    /// and path a chip is drawn from. A group's name on something the caller may
+    /// read is part of what they are reading, whoever may read the group.
     async fn document_authors(&self, document_id: &str) -> Result<Vec<Author>, DbError> {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
-                "SELECT author_did, author_text FROM document_author \
-                 WHERE document_id = ?1 ORDER BY ord",
+                "SELECT a.author_did, a.author_text, a.author_context, c.name, c.path \
+                 FROM document_author a LEFT JOIN context c ON c.id = a.author_context \
+                 WHERE a.document_id = ?1 ORDER BY a.ord",
                 [document_id],
             )
             .await?;
@@ -1133,6 +1136,12 @@ impl Store {
                 out.push(Author::User { did });
             } else if let Some(text) = opt_text(&row, 1) {
                 out.push(Author::FreeText { display: text });
+            } else if let Some(context_id) = opt_text(&row, 2) {
+                out.push(Author::Context {
+                    context_id,
+                    name: opt_text(&row, 3),
+                    path: opt_text(&row, 4),
+                });
             }
         }
         Ok(out)
@@ -1422,12 +1431,14 @@ impl Store {
                         .await?;
                 }
                 conn.execute(
-                    "INSERT INTO document_author (document_id, author_did, author_text, ord) \
-                     VALUES (?1, ?2, ?3, ?4)",
+                    "INSERT INTO document_author \
+                       (document_id, author_did, author_text, author_context, ord) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
                     vec![
                         Value::Text(id.to_string()),
                         opt_str_val(author.did()),
                         opt_str_val(author.text()),
+                        opt_str_val(author.context()),
                         Value::Integer(i64::try_from(ord).unwrap_or(i64::MAX)),
                     ],
                 )

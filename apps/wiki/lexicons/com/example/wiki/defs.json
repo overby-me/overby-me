@@ -5,13 +5,13 @@
 	"defs": {
 		"authorView": {
 			"type": "object",
-			"description": "An author: either a resolved account (a DID) or a free-text name with no account (the census found ~42% of author chips are free-text). Exactly one of `did`/`display` is present, discriminated by `kind`.",
+			"description": "An author: a resolved account (a DID), a free-text name with no account (the census found ~42% of author chips are free-text), or a group or event, which is how a branch puts a motion forward. Exactly one of `did`, `display` and `context_id` is present, discriminated by `kind`.",
 			"required": ["kind"],
 			"properties": {
 				"kind": {
 					"type": "string",
-					"enum": ["user", "free_text"],
-					"description": "`user` when the author is a resolved account, `free_text` otherwise."
+					"enum": ["user", "free_text", "context"],
+					"description": "`user` when the author is a resolved account, `context` when it is a group or event, `free_text` otherwise."
 				},
 				"did": {
 					"type": "string",
@@ -21,6 +21,18 @@
 				"display": {
 					"type": "string",
 					"description": "The free-text author name (present only when `kind` is `free_text`)."
+				},
+				"context_id": {
+					"type": "string",
+					"description": "The group or event (present only when `kind` is `context`). Written with this alone; it has to be one the caller may read."
+				},
+				"name": {
+					"type": "string",
+					"description": "That group's name, when read. Ignored when written."
+				},
+				"path": {
+					"type": "string",
+					"description": "That group's path, when read. Ignored when written."
 				}
 			}
 		},

@@ -1023,8 +1023,8 @@ pub struct SetDocumentAuthorsBody {
 }
 
 /// `com.example.wiki.setDocumentAuthors` (procedure): replace the author chips
-/// on a document, in order. Whoever may edit it may. An author is an account or
-/// a name with no account behind it, which is what 42 percent of them are.
+/// on a document, in order. Whoever may edit it may. An author is an account, a
+/// name with no account behind it (42 percent of them), or a group.
 pub async fn set_document_authors(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -1041,10 +1041,26 @@ pub async fn set_document_authors(
     if body.authors.len() > crate::store::MAX_AUTHORS {
         return invalid("too many authors");
     }
-    let blank =
-        |a: &wiki_domain_types::Author| a.did().or(a.text()).is_none_or(|s| s.trim().is_empty());
+    let blank = |a: &wiki_domain_types::Author| {
+        a.did()
+            .or(a.text())
+            .or(a.context())
+            .is_none_or(|s| s.trim().is_empty())
+    };
     if body.authors.iter().any(blank) {
-        return invalid("an author needs a DID or a name");
+        return invalid("an author needs a DID, a name or a group");
+    }
+    // A group named as the author has to be one the caller can see: the chip
+    // will show its name to everyone who reads the document.
+    for context_id in body.authors.iter().filter_map(|a| a.context()) {
+        match crate::Store::new(state.db.clone())
+            .read_context(context_id, Some(&did))
+            .await
+        {
+            Ok(Some(_)) => {}
+            Ok(None) => return invalid("no such group to name as an author"),
+            Err(e) => return write_failed("setDocumentAuthors", e),
+        }
     }
     match crate::Store::new(state.db.clone())
         .set_document_authors(&body.id, &body.authors)
@@ -1443,6 +1459,44 @@ pub(crate) mod tests {
             .expect("body");
         let v = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
         (status, v)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_group_can_be_named_as_the_author_of_a_motion() {
+        let state = seeded_state().await;
+        let alice = token_for(&state, "did:plc:alice").await;
+        let set = "/xrpc/com.example.wiki.setDocumentAuthors";
+        let by = |group: &str| {
+            serde_json::json!({"id": "s1", "authors": [
+                {"kind": "context", "context_id": group},
+                {"kind": "free_text", "display": "Gæst"},
+            ]})
+        };
+        let (status, v) = post(router(state.clone()), set, Some(&alice), by("c9")).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+
+        let bob = token_for(&state, "did:plc:bob").await;
+        let (_, doc) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getDocument?id=s1",
+            &bob,
+        )
+        .await;
+        assert_eq!(
+            doc["authors"][0],
+            serde_json::json!({
+                "kind": "context", "context_id": "c9", "name": "Closed Group", "path": "closed"
+            }),
+            "the chip is drawn from the group's name: {doc}"
+        );
+        assert_eq!(doc["authors"][1]["display"], "Gæst");
+
+        let (status, v) = post(router(state.clone()), set, Some(&alice), by("no-such")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+        let blank =
+            serde_json::json!({"id": "s1", "authors": [{"kind": "context", "context_id": " "}]});
+        let (status, _) = post(router(state.clone()), set, Some(&alice), blank).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test(flavor = "current_thread")]

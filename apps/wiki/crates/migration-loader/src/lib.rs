@@ -335,11 +335,18 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
             insert(
                 conn,
                 "document_author",
-                &["document_id", "author_did", "author_text", "ord"],
+                &[
+                    "document_id",
+                    "author_did",
+                    "author_text",
+                    "author_context",
+                    "ord",
+                ],
                 vec![
                     text(&d.id),
                     opt_str(a.did()),
                     opt_str(a.text()),
+                    opt_str(a.context()),
                     Value::Integer(ord as i64),
                 ],
             )
@@ -478,6 +485,11 @@ mod tests {
                     Author::FreeText {
                         display: "Guest".into(),
                     },
+                    Author::Context {
+                        context_id: "c1".into(),
+                        name: None,
+                        path: None,
+                    },
                 ],
                 visibility: Visibility::Private,
                 published_uri: None,
@@ -543,7 +555,7 @@ mod tests {
                 users: 1,
                 contexts: 1,
                 documents: 1,
-                document_authors: 2,
+                document_authors: 3,
                 members: 1,
                 comments: 1,
             },
@@ -562,7 +574,7 @@ mod tests {
         assert_eq!(count(&conn, "user").await, 1);
         assert_eq!(count(&conn, "context").await, 1);
         assert_eq!(count(&conn, "document").await, 1);
-        assert_eq!(count(&conn, "document_author").await, 2);
+        assert_eq!(count(&conn, "document_author").await, 3);
         assert_eq!(count(&conn, "member").await, 1);
         assert_eq!(count(&conn, "comment").await, 1);
 
@@ -585,6 +597,21 @@ mod tests {
             free_text, 1,
             "the free-text author is stored as author_text"
         );
+        let mut rows = conn
+            .query(
+                "SELECT author_context FROM document_author WHERE document_id = 'd1' AND ord = 2",
+                (),
+            )
+            .await
+            .expect("q");
+        let group: String = rows
+            .next()
+            .await
+            .expect("row")
+            .expect("some")
+            .get(0)
+            .expect("text");
+        assert_eq!(group, "c1", "the group named as an author is stored as one");
     }
 
     async fn staging() -> Connection {

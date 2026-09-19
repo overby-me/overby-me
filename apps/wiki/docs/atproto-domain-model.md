@@ -271,15 +271,19 @@ CREATE UNIQUE INDEX document_path_live ON document(path) WHERE deleted_at IS NUL
 CREATE INDEX document_children ON document(parent_id, idx);
 
 -- A document's authors: many per document (census: up to 8), each a DID (an
--- account) OR a free-text display name (no account), never a scalar author_did.
+-- account), a free-text display name (no account), or a group or event (a
+-- branch putting a motion forward), never a scalar author_did.
 CREATE TABLE document_author (
-  document_id TEXT NOT NULL REFERENCES document(id),
-  author_did  TEXT REFERENCES user(did),
-  author_text TEXT,                                      -- free-text name (no account)
-  ord         INTEGER NOT NULL DEFAULT 0,
-  CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
+  document_id    TEXT NOT NULL REFERENCES document(id),
+  author_did     TEXT REFERENCES user(did),
+  author_text    TEXT,                                   -- free-text name (no account)
+  author_context TEXT REFERENCES context(id),            -- a group or event as the author
+  ord            INTEGER NOT NULL DEFAULT 0,
+  CHECK (author_did IS NOT NULL OR author_text IS NOT NULL OR author_context IS NOT NULL)
 );
 CREATE INDEX document_author_by_doc ON document_author(document_id);
+CREATE INDEX document_author_by_did ON document_author(author_did);
+CREATE INDEX document_author_by_context ON document_author(author_context);
 
 -- Feed posts: the social unit. visibility='public' -> mirrored to a repo.
 CREATE TABLE post (

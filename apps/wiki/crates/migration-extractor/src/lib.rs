@@ -222,6 +222,13 @@ pub fn extract(
         let parent = m.parent_id.as_deref().unwrap_or_default();
         if content_ids.contains(parent) {
             let author = match &m.node_id {
+                // A chip points at a node, and a group is a node too: a branch
+                // that put a motion forward is not a person with that id.
+                Some(id) if context_ids.contains(id.as_str()) => Author::Context {
+                    context_id: id.clone(),
+                    name: None,
+                    path: None,
+                },
                 Some(uid) => Author::User { did: uid.clone() },
                 None => Author::FreeText {
                     display: m.name.clone().unwrap_or_default(),

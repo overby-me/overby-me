@@ -92,13 +92,16 @@ CREATE INDEX document_context ON document(context_id);
 -- A document's authors: many per document, each a DID (an account) OR a
 -- free-text display name (no account), never a single scalar author_did.
 CREATE TABLE document_author (
-  document_id TEXT NOT NULL REFERENCES document(id),
-  author_did  TEXT REFERENCES user(did),
-  author_text TEXT,
-  ord         INTEGER NOT NULL DEFAULT 0,
-  CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
+  document_id    TEXT NOT NULL REFERENCES document(id),
+  author_did     TEXT REFERENCES user(did),
+  author_text    TEXT,
+  author_context TEXT REFERENCES context(id),             -- a group or event as the author
+  ord            INTEGER NOT NULL DEFAULT 0,
+  CHECK (author_did IS NOT NULL OR author_text IS NOT NULL OR author_context IS NOT NULL)
 );
 CREATE INDEX document_author_by_doc ON document_author(document_id);
+CREATE INDEX document_author_by_did ON document_author(author_did);
+CREATE INDEX document_author_by_context ON document_author(author_context);
 
 -- Feed posts: the social unit. Authorship is free-text-capable (a migrated post
 -- may have a free-text author with no account).
