@@ -63,9 +63,6 @@ const DEFAULT_SIDE: i64 = 32;
 const DEFAULT_COOLDOWN: i64 = 60;
 const MAX_COOLDOWN: i64 = 24 * 60 * 60;
 
-/// What a canvas may sit in: the interim's rule.
-const PLACES: &[&str] = &[crate::authz::CONTEXT, "folder"];
-
 /// How long a painted cell waits to be announced, so a room painting at once is
 /// told a few times a second and not once a cell.
 const BEAT: Duration = if cfg!(test) {
@@ -184,7 +181,7 @@ pub async fn create_canvas(
     if let Err(refusal) = owner_of(&state, &parent.context_id, &did, what).await {
         return refusal;
     }
-    if !PLACES.contains(&parent.kind.as_str()) {
+    if !crate::authz::PLACES.contains(&parent.kind.as_str()) {
         return invalid("a canvas sits in a context, or in a folder");
     }
     let name = body.name.trim();

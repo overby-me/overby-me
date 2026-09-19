@@ -148,6 +148,40 @@ pub fn may_create(
     Ok(())
 }
 
+/// What a group, an event or a canvas may sit in: a context, or a folder in one.
+pub const PLACES: &[&str] = CONTAINERS;
+
+/// What a poll may be opened on: the interim's rule for `vote/poll`.
+pub const POLLABLE: &[&str] = &["policy", "change", "position"];
+
+/// Everything `membership` may make under a node of `parent_kind`, so that a
+/// screen offers what the server will accept and nothing it will refuse. Beside
+/// the document kinds: `comment`, and the things an owner makes by their own
+/// procedure (`group`, `event`, `canvas`, `poll`).
+pub fn creatable(
+    parent_kind: &str,
+    parent_attachable: bool,
+    membership: Membership,
+) -> Vec<&'static str> {
+    let mut kinds: Vec<&'static str> = CREATE_RULES
+        .iter()
+        .map(|(kind, _, _)| *kind)
+        .filter(|kind| may_create(kind, parent_kind, parent_attachable, membership).is_ok())
+        .collect();
+    if COMMENTABLE.contains(&parent_kind) {
+        kinds.push("comment");
+    }
+    if membership.role == Role::Owner {
+        if PLACES.contains(&parent_kind) {
+            kinds.extend(["group", "event", "canvas"]);
+        }
+        if POLLABLE.contains(&parent_kind) {
+            kinds.push("poll");
+        }
+    }
+    kinds
+}
+
 /// A caller's standing towards one node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Standing {
@@ -394,6 +428,40 @@ mod tests {
         assert_eq!(
             may_create("position", "folder", true, MEMBER),
             Err(Refusal::NeedsOwner)
+        );
+    }
+
+    #[test]
+    fn a_screen_is_told_what_the_server_will_accept() {
+        let member = Membership {
+            role: Role::Member,
+            active: false,
+        };
+        assert_eq!(creatable("folder", true, member), ["policy"]);
+        assert_eq!(
+            creatable("folder", false, member),
+            Vec::<&str>::new(),
+            "locked"
+        );
+        assert_eq!(creatable("policy", true, member), ["change", "comment"]);
+        assert_eq!(
+            creatable("position", false, member),
+            ["question", "comment"],
+            "a lock leaves questions"
+        );
+        assert_eq!(
+            creatable("folder", false, OWNER),
+            [
+                "folder", "document", "file", "position", "policy", "group", "event", "canvas"
+            ]
+        );
+        assert_eq!(
+            creatable("policy", true, OWNER),
+            ["change", "comment", "poll"]
+        );
+        assert_eq!(
+            creatable(CONTEXT, true, OWNER),
+            ["folder", "document", "file", "group", "event", "canvas"]
         );
     }
 

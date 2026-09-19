@@ -185,7 +185,18 @@ pub async fn get_node(
         Ok(profiles) => profiles,
         Err(e) => return failed(e),
     };
+    let kind_as_parent = match &node {
+        crate::store::Node::Context(_) => crate::authz::CONTEXT.to_string(),
+        crate::store::Node::Document(doc) => serde_json::to_value(&doc.kind)
+            .ok()
+            .and_then(|k| k.as_str().map(str::to_string))
+            .unwrap_or_default(),
+    };
+    let can_create = membership.map_or_else(Vec::new, |membership| {
+        crate::authz::creatable(&kind_as_parent, node.place().attachable, membership)
+    });
     let viewer = serde_json::json!({
+        "can_create": can_create,
         "is_owner": caller.did().is_some() && caller.did() == node.place().owner_did.as_deref(),
         "is_member": membership.is_some(),
         "is_context_owner": membership.is_some_and(|m| m.role == wiki_domain_types::Role::Owner),
@@ -227,10 +238,33 @@ pub async fn list_children(
     }
 }
 
-/// `com.example.wiki.listContexts`: the top-level groups/events.
-pub async fn list_contexts(State(state): State<AppState>, caller: MaybeCaller) -> Response {
+#[derive(Debug, Deserialize)]
+pub struct ListContextsParams {
+    /// `roots` (the default), `mine` or `public`.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// With `mine`: `group` or `event`.
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+/// `com.example.wiki.listContexts`: the contexts at the top of the tree that the
+/// caller may read; or with `scope=mine` the groups and events the caller has a
+/// seat in, wherever they sit; or with `scope=public` every place open to all.
+pub async fn list_contexts(
+    State(state): State<AppState>,
+    caller: MaybeCaller,
+    Query(p): Query<ListContextsParams>,
+) -> Response {
     let store = crate::Store::new(state.db.clone());
-    match store.list_root_contexts(caller.did()).await {
+    let listed = match (p.scope.as_deref().unwrap_or("roots"), caller.did()) {
+        ("roots", did) => store.list_root_contexts(did).await,
+        ("mine", Some(did)) => store.list_my_contexts(did, p.kind.as_deref()).await,
+        ("mine", None) => Ok(Vec::new()),
+        ("public", _) => store.list_public_contexts().await,
+        _ => return invalid("scope is roots, mine or public"),
+    };
+    match listed {
         Ok(ctxs) => (
             StatusCode::OK,
             Json(serde_json::json!({ "contexts": ctxs })),
@@ -1640,6 +1674,54 @@ pub(crate) mod tests {
         // c1 is a root; c2 has a parent and is excluded.
         assert!(ctxs.iter().any(|c| c["id"] == "c1"));
         assert!(!ctxs.iter().any(|c| c["id"] == "c2"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_home_screen_lists_my_groups_and_a_stranger_lists_what_is_open() {
+        let state = seeded_state().await;
+        let names = |v: &serde_json::Value| -> Vec<String> {
+            v["contexts"]
+                .as_array()
+                .expect("contexts")
+                .iter()
+                .map(|c| c["name"].as_str().expect("name").to_string())
+                .collect()
+        };
+        let conn = state.db.acquire().await.expect("conn");
+        conn.execute(
+            "UPDATE member SET accepted = 1 WHERE user_did = 'did:plc:zoe'",
+            (),
+        )
+        .await
+        .expect("zoe said yes");
+        let zoe = token_for(&state, "did:plc:zoe").await;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let list = "/xrpc/com.example.wiki.listContexts";
+
+        // Zoe's one seat is in a meeting two levels down, which `roots` never shows.
+        let (_, mine) = get_as(router(state.clone()), &format!("{list}?scope=mine"), &zoe).await;
+        assert_eq!(names(&mine), ["Closed Meeting"]);
+        let (_, groups) = get_as(
+            router(state.clone()),
+            &format!("{list}?scope=mine&kind=group"),
+            &zoe,
+        )
+        .await;
+        assert_eq!(names(&groups), Vec::<String>::new());
+        // Bob is on c9's roster and has not said yes to it: invited is not joined.
+        let (_, bobs) = get_as(router(state.clone()), &format!("{list}?scope=mine"), &bob).await;
+        assert_eq!(names(&bobs), Vec::<String>::new());
+        let (_, nobody) = get(router(state.clone()), &format!("{list}?scope=mine")).await;
+        assert_eq!(names(&nobody), Vec::<String>::new());
+
+        let (_, open) = get(router(state.clone()), &format!("{list}?scope=public")).await;
+        assert_eq!(
+            names(&open),
+            ["Group One", "Sub Event"],
+            "at any depth, and nothing closed"
+        );
+        let (status, _) = get(router(state.clone()), &format!("{list}?scope=everything")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -3057,10 +3139,13 @@ pub(crate) mod tests {
             open["viewer"],
             serde_json::json!({
                 "is_owner": false, "is_member": false,
-                "is_context_owner": false, "can_vote": false
+                "is_context_owner": false, "can_vote": false, "can_create": []
             }),
             "a signed-out reader"
         );
+        // s1 is a document in a group alice owns: she may comment on it, and
+        // nothing is created under a document.
+        assert_eq!(alice["can_create"], serde_json::json!(["comment"]));
     }
 
     #[tokio::test(flavor = "current_thread")]

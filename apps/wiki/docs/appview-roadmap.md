@@ -393,8 +393,14 @@ asks Bluesky's public API itself. The steps:
 
 ### M9: frontend swap, migration, cutover rehearsal
 
+- [x] Every data call the frontend makes, set against the method that replaces
+  it (`docs/appview-api-coverage.md`). Going through them found four things the
+  plan had missed: no way to start a group, reactions nobody gated, the canvas,
+  and the people pickers. All four are built; nothing in the table is left
+  without an answer.
 - [ ] An AppView client behind `src/model.rs`, replacing `src/graphql/*` and
-  `src/nhost.rs`; the session module on AppView tokens.
+  `src/nhost.rs`; the session module on AppView tokens. Written from that
+  table.
 - [ ] Extractor and loader cover every migrated kind; field-gap report empty.
 - [ ] Staging rehearsal of the runbook; browser suite green against the AppView.
 

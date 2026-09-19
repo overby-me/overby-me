@@ -22,6 +22,7 @@ pub mod logs;
 pub mod metafile;
 pub mod metafile_svg;
 pub mod oauth;
+pub mod people;
 pub mod poll;
 pub mod profile;
 pub mod projector;
@@ -192,6 +193,14 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.listOrphans",
             get(feed::list_orphans),
+        )
+        .route(
+            "/xrpc/com.example.wiki.getProfile",
+            get(people::get_profile),
+        )
+        .route(
+            "/xrpc/com.example.wiki.searchPeople",
+            get(people::search_people),
         )
         .route("/xrpc/com.example.wiki.search", get(search::search))
         .route(

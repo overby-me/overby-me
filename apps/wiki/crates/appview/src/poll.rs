@@ -47,9 +47,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use turso::Value;
 
-/// What a poll may be opened on: the interim's rule for `vote/poll`.
-pub const POLLABLE: &[&str] = &["policy", "change", "position"];
-
 const MAX_OPTIONS: usize = 100;
 const MAX_TEXT_CHARS: usize = 300;
 
@@ -623,7 +620,7 @@ pub async fn open_poll(
     if let Err(refusal) = owner_of(&state, &parent.context_id, &did, what).await {
         return refusal;
     }
-    if !POLLABLE.contains(&parent.kind.as_str()) {
+    if !crate::authz::POLLABLE.contains(&parent.kind.as_str()) {
         return invalid("a poll is opened on a motion, an amendment or a position");
     }
     let (options, title, question) = match rules_of(&body) {
@@ -870,24 +867,37 @@ pub async fn get_poll(
 
 #[derive(Debug, Deserialize)]
 pub struct ParentParam {
-    pub parent: String,
+    /// The polls opened on this node.
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// Every poll in this context: the chair's overview of a meeting.
+    #[serde(default)]
+    pub context: Option<String>,
 }
 
-/// `com.example.wiki.listPolls`: the polls opened on a node, newest first.
+/// `com.example.wiki.listPolls`: the polls opened on a node, or all of a
+/// context's, newest first.
 pub async fn list_polls(
     State(state): State<AppState>,
     caller: MaybeCaller,
     Query(p): Query<ParentParam>,
 ) -> Response {
     let what = "listPolls";
+    let (column, of) = match (&p.parent, &p.context) {
+        (Some(parent), None) => ("d.parent_id", parent.clone()),
+        (None, Some(context)) => ("p.context_id", context.clone()),
+        _ => return invalid("give a parent or a context, and not both"),
+    };
     let ids = async {
         let conn = state.db.acquire().await?;
         let mut rows = conn
             .query(
-                "SELECT p.id FROM poll p JOIN document d ON d.id = p.id \
-                 WHERE d.parent_id = ?1 AND d.deleted_at IS NULL \
-                 ORDER BY p.created_at DESC, p.id",
-                [p.parent.as_str()],
+                &format!(
+                    "SELECT p.id FROM poll p JOIN document d ON d.id = p.id \
+                     WHERE {column} = ?1 AND d.deleted_at IS NULL \
+                     ORDER BY p.created_at DESC, p.id"
+                ),
+                [of.as_str()],
             )
             .await?;
         let mut ids = Vec::new();
@@ -1948,12 +1958,22 @@ mod tests {
         let (_, v) = get_as(router(state.clone()), list, &bob).await;
         assert_eq!(v["polls"].as_array().expect("polls").len(), 1);
         assert_eq!(v["polls"][0]["id"], id);
+        let of_context = "/xrpc/com.example.wiki.listPolls?context=c9";
+        let (_, v) = get_as(router(state.clone()), of_context, &alice).await;
+        assert_eq!(v["polls"][0]["id"], id, "the chair's overview: {v}");
         let mallory = token_for(&state, "did:plc:mallory").await;
-        let (_, v) = get_as(router(state.clone()), list, &mallory).await;
+        for uri in [list, of_context] {
+            let (_, v) = get_as(router(state.clone()), uri, &mallory).await;
+            assert_eq!(
+                v["polls"],
+                json!([]),
+                "a stranger was shown a closed group's poll"
+            );
+        }
+        let neither = "/xrpc/com.example.wiki.listPolls";
         assert_eq!(
-            v["polls"],
-            json!([]),
-            "a stranger was shown a closed group's poll"
+            get_as(router(state.clone()), neither, &alice).await.0,
+            StatusCode::BAD_REQUEST
         );
 
         // The motion goes to the bin, and the poll with it.

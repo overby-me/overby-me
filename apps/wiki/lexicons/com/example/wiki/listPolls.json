@@ -4,12 +4,14 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "The polls opened on a node, newest first, leaving out any the caller may not read.",
+			"description": "The polls opened on a node (`parent`), or every poll of a context (`context`, the chair's overview of a meeting), newest first, leaving out any the caller may not read. Give one of the two.",
 			"parameters": {
 				"type": "params",
-				"required": ["parent"],
 				"properties": {
 					"parent": {
+						"type": "string"
+					},
+					"context": {
 						"type": "string"
 					}
 				}
@@ -29,7 +31,13 @@
 						}
 					}
 				}
-			}
+			},
+			"errors": [
+				{
+					"name": "InvalidRequest",
+					"description": "Neither `parent` nor `context`, or both."
+				}
+			]
 		}
 	}
 }

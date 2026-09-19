@@ -22,9 +22,6 @@ use turso::Value;
 
 const MAX_NAME_CHARS: usize = 200;
 
-/// What a group or an event may sit in: a context, or a folder inside one.
-const PLACES: &[&str] = &[crate::authz::CONTEXT, "folder"];
-
 #[derive(Debug, Deserialize)]
 pub struct CreateContextBody {
     /// `group` or `event`. A site is not made this way.
@@ -113,7 +110,7 @@ pub async fn create_context(
     if let Err(refusal) = owner_of(&state, &parent.context_id, &did, what).await {
         return refusal;
     }
-    if !PLACES.contains(&parent.kind.as_str()) {
+    if !crate::authz::PLACES.contains(&parent.kind.as_str()) {
         return invalid("a group or an event sits in a context, or in a folder");
     }
     let created = async {

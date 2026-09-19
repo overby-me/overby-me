@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "List the top-level (root) group/event contexts. Serves only what the caller may read.",
+			"description": "Contexts, by name. `roots` (the default): those at the top of the tree that the caller may read. `mine`: the groups and events the caller has a seat in and has said yes to, wherever they sit, which is what a home screen lists. `public`: every place open to everyone, at any depth, less the site itself.",
 			"output": {
 				"encoding": "application/json",
 				"schema": {
@@ -20,7 +20,28 @@
 						}
 					}
 				}
-			}
+			},
+			"parameters": {
+				"type": "params",
+				"properties": {
+					"scope": {
+						"type": "string",
+						"enum": ["roots", "mine", "public"],
+						"default": "roots"
+					},
+					"kind": {
+						"type": "string",
+						"enum": ["group", "event"],
+						"description": "With `mine`: one of the two."
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "InvalidRequest",
+					"description": "No such scope."
+				}
+			]
 		}
 	}
 }

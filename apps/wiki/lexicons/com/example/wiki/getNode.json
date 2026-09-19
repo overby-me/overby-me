@@ -170,9 +170,20 @@
 		},
 		"viewerView": {
 			"type": "object",
-			"description": "What the caller may do here. All false for a signed-out reader.",
-			"required": ["is_owner", "is_member", "is_context_owner", "can_vote"],
+			"description": "What the caller may do here. All false, and nothing to create, for a signed-out reader.",
+			"required": [
+				"is_owner",
+				"is_member",
+				"is_context_owner",
+				"can_vote",
+				"can_create"
+			],
 			"properties": {
+				"can_create": {
+					"type": "array",
+					"items": { "type": "string" },
+					"description": "What they may make under this node, so a screen offers what the server will accept: document kinds for `createDocument`, and `comment`, `group`, `event`, `canvas` and `poll`, each made by its own procedure. It replaces reading the interim's permission rows."
+				},
 				"is_owner": {
 					"type": "boolean",
 					"description": "They created this node."

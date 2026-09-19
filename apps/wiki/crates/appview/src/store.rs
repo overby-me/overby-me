@@ -1587,6 +1587,54 @@ impl Store {
         Ok(out)
     }
 
+    /// The contexts `caller` has a seat in and has said yes to, at any depth, by
+    /// name: their groups and their events. `kind` narrows it to one of the two.
+    pub async fn list_my_contexts(
+        &self,
+        caller: &str,
+        kind: Option<&str>,
+    ) -> Result<Vec<Context>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT {CTX_COLS} FROM context c \
+                     WHERE c.{LIVE} AND (?2 IS NULL OR c.kind = ?2) AND EXISTS \
+                       (SELECT 1 FROM member m WHERE m.context_id = c.id \
+                          AND m.user_did = ?1 AND m.accepted = 1) \
+                     ORDER BY c.name"
+                ),
+                vec![Value::Text(caller.to_string()), opt_str_val(kind)],
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(ctx_from_row(&row)?);
+        }
+        Ok(out)
+    }
+
+    /// Every place open to the public, at any depth, by name. Not a site: that
+    /// is the front page, and listing it among the places to go is furniture.
+    pub async fn list_public_contexts(&self) -> Result<Vec<Context>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT {CTX_COLS} FROM context c \
+                     WHERE c.{LIVE} AND c.visibility = 'public' AND c.kind <> 'site' \
+                     ORDER BY c.name"
+                ),
+                (),
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(ctx_from_row(&row)?);
+        }
+        Ok(out)
+    }
+
     /// The top-level contexts (groups/events with no parent) `caller` may read,
     /// by name.
     pub async fn list_root_contexts(&self, caller: Option<&str>) -> Result<Vec<Context>, DbError> {
