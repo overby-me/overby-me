@@ -54,6 +54,23 @@ async fn main() {
             .upsert_user_min(did)
             .await
             .expect("a user");
+        // A real account's name comes from its PDS, which a dev one has not got:
+        // `did:plc:carol` is Carol, `carol.test`, so that a page shows who wrote it.
+        let name = did.rsplit(':').next().unwrap_or(did);
+        let shown: String = name
+            .chars()
+            .enumerate()
+            .map(|(i, c)| if i == 0 { c.to_ascii_uppercase() } else { c })
+            .collect();
+        db.acquire()
+            .await
+            .expect("a connection")
+            .execute(
+                "UPDATE user SET display_name = ?2, handle = ?3 WHERE did = ?1",
+                [did.as_str(), shown.as_str(), &format!("{name}.test")],
+            )
+            .await
+            .expect("a name");
         let session = appview::session::Sessions::new(db.clone())
             .create(did)
             .await

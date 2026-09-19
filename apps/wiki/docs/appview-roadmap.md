@@ -35,11 +35,20 @@ interim sidecar served, search and the feeds, and `appview import`, which loads
 a migrated wiki. `docs/appview-api-coverage.md` sets every data call the
 frontend makes against the method that answers it, and none is left without.
 
-Not built: the frontend's own data layer (M9), mail to an invited address (M4),
-and the parts of voting that wait on a decision that is the owner's to make
-(M6). What needs a person and cannot
+The frontend runs on it. Built with the `appview` feature, the three modules
+that speak to the interim's backend (`graphql`, `backend_api`, `nhost`) are the
+AppView's under the same names (`src/appview/`), so no component changes which
+function it calls; built without it, which is what ships, nothing is different.
+`scripts/test-browser-appview.nu` builds it, starts a dev AppView, and drives
+it in headless Firefox: the screens draw what was seeded, writing through them
+lands, and a change made elsewhere arrives without a reload.
+
+Not built: mail to an invited address (M4), and the parts of voting that wait
+on a decision that is the owner's to make (M6). What needs a person and cannot
 be tested from here: one real browser login, and with it the token exchange,
-the profile read and posting to a PDS.
+the profile read and posting to a PDS. The interim's own browser suite
+(`test-browser.nu`) is written against the interim's backend and an account on
+it, and has not been ported; the AppView's is the smaller one named above.
 
 ## Findings that shape the plan
 
@@ -104,6 +113,33 @@ the profile read and posting to a PDS.
   and an answer was news of nothing, so the feed left answers out and the list
   of what has gone astray listed every one of them. A comment now knows the
   document its thread is on (`root_id`), which is what all three go by.
+- **A row shown before the server has it never went away.** The components
+  show a comment or a speaker at once under a key they choose, and drop that row
+  when a fetched one carries the same key. The AppView names rows itself, so in
+  a real browser a posted comment sat as "Sending…" beside its own copy for as
+  long as the page was open. No test below a browser could see it: the data
+  layer's answers were right. The layer now hands a row's key back as its
+  component chose it (`src/appview/seen.rs`).
+- **Looking a ballot up named the voter.** `getBoardEntry` asked that the
+  caller be able to read the poll, so in a closed group a voter could only check
+  their ballot with their session on the request: their name and their token in
+  one call, which is the pairing the blind signature exists to keep from the
+  server. It takes no session now, as a cast does.
+- **A lost reply would have cost a vote.** The AppView signs a voter's tokens
+  once, and again only for the same blinded tokens. A browser that blinded
+  fresh ones after a dropped answer would have been refused for good. The
+  frontend keeps what it blinded before it asks, and a retry that finds its
+  token already spent asks the board what that ballot said instead of assuming.
+- **A change said where, and a feed needs to know what.** A change named the
+  page a comment was on and not the comment, so a feed hearing of one had
+  nothing to fetch. A change now also carries the row it made.
+- **The clock came off the JWT.** Countdowns and cooldowns are reckoned against
+  rows the server stamped, and the interim read the difference between the two
+  clocks out of its token. A session here is no JWT, so every answer carries
+  the server's clock (`x-server-time`) and the client measures the difference.
+- **A report's screenshot was for nobody.** It is filed in a context of its
+  sender's, which whoever reads the reports is usually no member of. They may
+  open it now, and a report takes only a screenshot its sender uploaded.
 - **The site had no home.** The interim's root is a context like any other: its
   members run the site, its content is the welcome page, and what sits at the
   top of the tree is made in it. The extractor skipped it as "the root every
@@ -496,28 +532,28 @@ asks Bluesky's public API itself. The steps:
   rows of both kinds for the drawer to expand by; a reaction was stamped to the
   second and so sorted ahead of the comment it was to; and clearing the
   projector took a `null` that a typed client had no way to say.
-- [ ] An AppView client behind `src/model.rs`, replacing `src/graphql/*` and
-  `src/nhost.rs`; the session module on AppView tokens. Written from that
-  table. The approach: the components call the data layer as `graphql::*` and
-  read `model::*`, so the client is a second implementation of that same
-  surface (105 functions, types and constants, listed by
-  `grep -rhoE "graphql::[a-zA-Z_]+" src`), chosen by a cargo feature that
-  switches which file the `graphql` module is. The default build, which is what
-  `main` ships, is untouched by it. A live query there is "refetch when
-  anything matching this changes", which is what a `/ws` topic is, so `Wire`
-  and its builders keep their names and become topics. Signing in is the one
-  part that cannot hide behind the seam: a password form becomes a handle and a
-  redirect. Done so far: the `appview` feature and the optional dependency on
-  the client (the default build does not compile it), and `src/appview/map.rs`,
-  which dresses the AppView's views as the `model` types, a page's text back
-  inside its `data` and a kind as the mime the components match on; reading
-  and writing the tree, and the bin (`nodes.rs`, `bin.rs`). The components
-  write through generic calls, since to the interim everything is one table's
-  row, so a write here asks what kind of thing its id names (`seen.rs`: every
-  read says what it saw) and goes to the method that belongs to it. It is
-  tested for real: `live.rs` starts `crates/appview-dev` and asks a running
-  AppView what the components ask, through the functions they call
-  (`cargo test --features appview appview::`).
+- [x] An AppView client behind `src/model.rs`, standing in for `src/graphql/*`,
+  `src/backend_api.rs` and `src/nhost.rs` (`src/appview/`). The components call
+  the data layer as `graphql::*` and read `model::*`, so this is a second
+  implementation of that surface, switched in by the `appview` cargo feature
+  under the names every caller already uses. The default build, which is what
+  `main` ships, is untouched. The components write through generic calls,
+  since to the interim everything is one table's row, so a write asks what kind
+  of thing its id names (`seen.rs`: every read says what it saw) and goes to
+  the method that belongs to it. A live query is "refetch when anything
+  matching this changes", which is what a `/ws` topic is, so `Wire` and its
+  builders keep their names and say which context to listen to and which
+  changes there are the view's own (`wire.rs`, `watch.rs`, `hub.rs`). Signing
+  in is the one part that cannot hide behind the seam: a password form became
+  a handle and a redirect (`components/auth_atproto.rs`), and a session lasts a
+  month with nothing to refresh. A secret ballot is blinded, signed and cast
+  from the browser (`ballot.rs`). Tested three ways: `live.rs` starts
+  `crates/appview-dev` and asks a running AppView what the components ask,
+  through the functions they call, over a real socket where that matters
+  (`cargo test --features appview`); both builds pass the wasm clippy gate; and
+  `scripts/test-browser-appview.nu` drives the built app in headless Firefox.
+  Left as it was: the interim asks an identical read already in the air only
+  once, and this layer does not, which is a request or two more per page.
 - [x] The extractor and the load cover every kind the interim holds: the tree,
   members, comments, reactions, what each poll came to, canvases with their
   cells, reports, which contexts are open to everyone, and the address each
@@ -537,7 +573,11 @@ asks Bluesky's public API itself. The steps:
   read-only bind, and stops the service while it loads. The VM test loads a
   made-up wiki this way and reads it back over HTTP.
 - [ ] The field-gap report empty on a real dump, which is the owner's to take.
-- [ ] Staging rehearsal of the runbook; browser suite green against the AppView.
+- [x] A browser run against the AppView (`just test-browser-appview`): small,
+  and its own, since the interim's suite is written against the interim's
+  backend and an account on it.
+- [ ] Staging rehearsal of the runbook, and the interim's browser suite ported
+  to run against an AppView.
 
 ## Working rules
 

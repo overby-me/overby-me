@@ -49,13 +49,11 @@ impl Hub {
         HUB.with(|hub| f(&mut hub.borrow_mut()))
     }
 
-    /// Run `work` on the Dioxus runtime from a browser callback, which is
-    /// outside it.
+    /// Run `work` beside the renderer, not as a task of any scope: what it
+    /// ends in is a write to a view's signal, which a task of the root scope
+    /// is warned off making. The runtime is entered only where it is needed.
     fn spawn(work: impl std::future::Future<Output = ()> + 'static) {
-        if let Some(runtime) = Self::with(|st| st.runtime.clone()) {
-            let _guard = RuntimeGuard::new(runtime);
-            dioxus::core::spawn_forever(work);
-        }
+        wasm_bindgen_futures::spawn_local(work);
     }
 
     fn token() -> Option<String> {
@@ -281,10 +279,13 @@ impl Hub {
                 return;
             };
             // Asked for again: the view may have gone while the AppView answered.
-            let sinks = Self::with(|st| {
+            let (sinks, runtime) = Self::with(|st| {
                 st.watches.moved_on(watch, cursor);
-                st.watches.parts(watch).map(|(_, _, sinks)| sinks)
+                let sinks = st.watches.parts(watch).map(|(_, _, sinks)| sinks);
+                (sinks, st.runtime.clone())
             });
+            let Some(runtime) = runtime else { return };
+            let _guard = RuntimeGuard::new(runtime);
             for mut sink in sinks.into_iter().flatten() {
                 sink.set(Some(pushed.clone()));
             }

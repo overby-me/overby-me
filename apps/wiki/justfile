@@ -126,10 +126,20 @@ test:
     # deploy ships — so its tests never ran in the default run.
     cargo test --features remote-logging
 
+# The same tests with the data layer on the AppView. Its own recipe because the
+# end-to-end ones build and start `crates/appview-dev`, which `test` need not.
+test-appview:
+    cargo test --features appview
+
 # Browser smoke tests: build, serve, and drive the app in headless Servo.
 # Set WIKI_EMAIL / WIKI_PASSWORD to also run the authenticated tests.
 test-browser *ARGS:
     nu test-browser.nu {{ARGS}}
+
+# The same, for the build on the AppView (`--features appview`), against a dev
+# AppView it starts itself: needs no account and nothing outside this machine.
+test-browser-appview *ARGS:
+    nu scripts/test-browser-appview.nu {{ARGS}}
 
 # Drive assets/sw.js against stubbed Cache/fetch and assert every path answers
 # with a Response. The service worker only matters when the network is failing,

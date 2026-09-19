@@ -47,13 +47,18 @@ workspace when the rewrite starts.
   against the real router over HTTP with unknown fields refused. That holds
   the three to one another: what the server sends and no lexicon names fails
   there, as does what a lexicon promises and the server does not send, and a
-  lexicon added without a call in the tests. The frontend's data layer is to
-  be written over this client.
+  lexicon added without a call in the tests. The frontend's data layer is
+  written over this client (`apps/wiki/src/appview/`). It also reads the
+  server's clock off every answer, for a frontend on a device whose own is off.
 - `appview-dev`: a DEV server, in no package and on no host: an in-memory
   AppView with a home, and a session ready for every DID named on its command
-  line, since signing in takes a PDS and a browser. It is what the frontend's
-  data layer is tested against (`apps/wiki/src/appview/live.rs`), and what a
-  frontend on a laptop can talk to.
+  line, since signing in takes a PDS and a browser. `did:plc:carol` is Carol,
+  `carol.test`. It is what the frontend's data layer is tested against
+  (`apps/wiki/src/appview/live.rs`), what its browser run is driven against
+  (`apps/wiki/scripts/test-browser-appview.nu`), and what a frontend on a
+  laptop can talk to:
+  `APPVIEW_FRONTEND_ORIGINS=http://127.0.0.1:8080 appview-dev --port 8136 did:plc:me`,
+  then `WIKI_APPVIEW_URL=http://127.0.0.1:8136 dx serve --features appview`.
 - `appview`: the backend itself. `docs/appview-roadmap.md` says what it does
   today and what is left.
 

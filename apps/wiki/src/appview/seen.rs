@@ -61,6 +61,25 @@ pub(crate) fn place_of(id: &str) -> Option<String> {
     PLACES.with(|places| places.borrow().get(id).cloned())
 }
 
+thread_local! {
+    /// The key a component chose for a row it shows before the server has it.
+    /// It drops that row when a fetched one carries the same key, and the
+    /// AppView names rows itself, so the key is kept here and handed back.
+    static KEYS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn keyed(id: &str, key: &str) {
+    if !key.is_empty() {
+        KEYS.with(|keys| keys.borrow_mut().insert(id.to_string(), key.to_string()));
+    }
+}
+
+/// A row's key as its component knows it: the one it chose, else the row's id.
+pub(crate) fn key_of(id: &str) -> String {
+    KEYS.with(|keys| keys.borrow().get(id).cloned())
+        .unwrap_or_else(|| id.to_string())
+}
+
 /// A node of the tree, by the `node` and `kind` a view carries.
 pub(crate) fn saw_node(id: &str, node: &str, kind: &str) {
     saw(

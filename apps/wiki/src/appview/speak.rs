@@ -85,7 +85,7 @@ pub(crate) async fn list_node(
             ChildNodeFields {
                 id: Uuid(entry.id.clone()),
                 name: owner.display_name.clone(),
-                key: entry.id.clone(),
+                key: super::seen::key_of(&entry.id),
                 mime_id: Some("speak/speak".to_string()),
                 mutable: false,
                 index: i32::try_from(place).unwrap_or(i32::MAX),

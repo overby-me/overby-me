@@ -15,6 +15,12 @@ The frontend's data layer is `src/graphql/*.rs` (Hasura), `src/backend_api.rs`
 (the sidecar) and `src/nhost.rs` (auth and storage). Live queries are
 `src/graphql/subscriptions.rs`.
 
+The client is written: `src/appview/` is every function below under the name it
+has today, on the method beside it, switched in by the `appview` cargo feature.
+Running it in a browser was a third pass of its own, and found what neither
+reading could: a row the screen shows before the server has it is dropped by a
+key the screen chose, which the AppView's own ids never matched.
+
 ## Reading the tree
 
 | Frontend | AppView |

@@ -242,6 +242,10 @@ async fn a_thread_is_written_read_and_taken_back_as_the_comments_component_does_
     let first = &thread[0];
     assert_eq!(first.mime_id.as_deref(), Some("vote/comment"));
     assert_eq!(
+        first.key, "k",
+        "the composer drops its optimistic row when a fetched one has its key"
+    );
+    assert_eq!(
         first.data.as_ref().expect("data").0["text"],
         "Punkt 3 mangler"
     );

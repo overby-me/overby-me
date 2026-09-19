@@ -73,5 +73,12 @@ Stated as observations, not a decision:
   a change carries a `kind` (`node`, `comment`, `member`, `speak`, ...) and an
   `id`. That covers the three scope keys above: a node and a context both map to
   `context:<id>` (the interim's own `context_touch` made the same trade), and
-  site 1 is `user:<did>`. The discriminator became `kind`. The code swap itself
-  is the frontend's, at M9.
+  site 1 is `user:<did>`. The discriminator became `kind`.
+- The swap is done (`src/appview/wire.rs`): every builder in the table keeps its
+  name and arguments and says which context to listen to and which kinds of
+  change, naming which id, are the view's own. The `relations` sites (2, 5, 6,
+  7, 9) all became the one `screen` change of their context, since the
+  projector is one row there. Streams that carried rows (the feed's ids, a
+  thread's parents, a canvas's cells, a poll's open state) are handed the same
+  shapes, made from the change and, for the last two, by asking the AppView
+  what changed (`src/appview/watch.rs`).

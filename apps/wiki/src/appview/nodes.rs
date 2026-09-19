@@ -335,9 +335,11 @@ pub async fn insert_node(
         };
         let joined = ask("joinSpeakerList", false, || client.join_speaker_list(&join)).await?;
         super::seen::saw(&joined.id, Seen::SpeakerEntry);
+        let key = input.key.unwrap_or_default();
+        super::seen::keyed(&joined.id, &key);
         return Ok(Some(InsertedNode {
             id: Uuid(joined.id),
-            key: input.key.unwrap_or_default(),
+            key,
         }));
     }
     let Some(kind) = map::kind_of(&mime).filter(|kind| map::is_content(kind)) else {

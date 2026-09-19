@@ -60,7 +60,7 @@ fn comment_node(
     ChildNodeFields {
         id: Uuid(comment.id.clone()),
         name: name.clone(),
-        key: comment.id.clone(),
+        key: super::seen::key_of(&comment.id),
         mime_id: Some("vote/comment".to_string()),
         mutable: false,
         index: 0,
@@ -102,12 +102,13 @@ pub async fn query_comments(
 }
 
 /// Post a comment under `parent_id`. The AppView knows who is writing and which
-/// context the thread is in, so the name, the key and the context are not sent.
+/// context the thread is in, so the name and the context are not sent. `key` is
+/// the composer's for its optimistic row, which the thread hands back to it.
 pub async fn insert_comment(
     access_token: Option<&str>,
     parent_id: &str,
     _context_id: Option<&str>,
-    _key: &str,
+    key: &str,
     _author: &str,
     text: &str,
     image: Option<&str>,
@@ -121,6 +122,7 @@ pub async fn insert_comment(
     };
     let said = ask("postComment", false, || client.post_comment(&say)).await?;
     saw(&said.id, Seen::Comment);
+    super::seen::keyed(&said.id, key);
     Ok(true)
 }
 
