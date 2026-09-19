@@ -31,6 +31,9 @@ ballot-store = { path = "../ballot-store" }
 # Transferred backend infra: URL-safe base64 + CSRNG (util), and the state-cookie
 # seal (HKDF-SHA256 key + XChaCha20-Poly1305) that survives the OAuth redirect.
 base64 = "0.22"
+# Reads the bulk member-import .xlsx here, so the xlsx/zip/inflate stack stays
+# out of the wasm bundle every phone downloads.
+calamine = "0.36"
 chacha20poly1305 = "0.10"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hkdf = "0.12"
@@ -73,3 +76,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 turso = "0.7"
 wiki-domain-types = { path = "../domain-types" }
 wiki-schema = { path = "../schema" }
+
+[dev-dependencies]
+# Builds the .xlsx a roster test parses. calamine's own zip, so nothing new.
+zip = { version = "8", default-features = false }

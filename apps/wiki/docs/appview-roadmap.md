@@ -310,8 +310,20 @@ Decided here without the owner, and cheap to change now:
 - [ ] Copying the interim's files across, each under its old storage id so that
   `data.fileId` on a node keeps working (a cutover step, listed here because
   the blob table is its target).
-- [ ] Push (subscribe, notify, reply), feedback, log proxy, symbolication,
-  metafile rendering, roster parsing, handle typeahead.
+
+#### The interim sidecar's other endpoints
+
+Carried over one at a time. Handle typeahead is not among them: the browser
+asks Bluesky's public API itself. The steps:
+
+- [x] Roster parsing (`parseRoster`): the office's .xlsx into the rows
+  `inviteMembers` takes.
+- [ ] The log proxy, with symbolication of the wasm frames passing through.
+- [ ] Push: subscribe, unsubscribe, notify, reply.
+- [ ] Feedback and crash reports. The interim files them as nodes under the root
+  node; here they need a table of their own.
+- [ ] Metafile rendering (EMF/WMF figures in Word and PowerPoint files to PNG).
+- [ ] Posting to a member's own PDS.
 
 ### M9: frontend swap, migration, cutover rehearsal
 

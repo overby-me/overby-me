@@ -17,6 +17,7 @@ pub mod live;
 pub mod oauth;
 pub mod poll;
 pub mod projector;
+pub mod roster;
 pub mod schema;
 pub mod session;
 pub mod slug;
@@ -311,6 +312,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.castOpenBallot",
             post(poll::cast_open_ballot),
+        )
+        .route(
+            "/xrpc/com.example.wiki.parseRoster",
+            post(roster::parse_roster),
         )
         .route("/blob/{id}", get(blob::serve_blob))
         .route("/xrpc/com.example.wiki.uploadBlob", post(blob::upload_blob))

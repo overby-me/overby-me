@@ -88,7 +88,8 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
 - `inviteMembers` puts people on a roster (one invitation or a whole spreadsheet, skipping whoever is
   already there), `updateMember` and `removeMember` administer it, and a context always keeps an
   owner who can sign in. `listInvitations` and `acceptInvitation` are the caller's own; declining and
-  leaving are `removeMember` on one's own row.
+  leaving are `removeMember` on one's own row. `parseRoster` reads the office's .xlsx into the rows
+  `inviteMembers` takes, so that the spreadsheet stack stays out of the browser.
 - A meeting: `createSpeakerList`, `updateSpeakerList`, `deleteSpeakerList`, `clearSpeakerList`,
   `nextSpeaker` and `moveSpeaker` are the chair's; `joinSpeakerList` and `leaveSpeakerList` are any
   member's; `listSpeakerLists` (a query) is what the room follows. `setProjector` and
