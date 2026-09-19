@@ -69,7 +69,18 @@
   version = "9.3.1-dev.1";
   # DesktopEditors CI run 35195021163 (feature/macos-build, 2026-09-17).
   runId = "35195021163";
-  debName = "euro-office-desktopeditors_${version}_amd64.deb";
+  debs = {
+    x86_64-linux = {
+      arch = "amd64";
+      hash = "sha256-OfNEdCmx6VAScQBVVcPLFeIH9c1JkSV1OUTKvosX2y8=";
+    };
+    aarch64-linux = {
+      arch = "arm64";
+      hash = "sha256-5BwK4dLf5tgAIFsJckV4usQeKAZeQr5GF3sLpicJeLU=";
+    };
+  };
+  deb = debs.${stdenv.hostPlatform.system};
+  debName = "euro-office-desktopeditors_${version}_${deb.arch}.deb";
 
   # curl and glibc are dlopened/execed at runtime, so autoPatchelf never sees
   # them; the rest cover the bundled CEF's lazy loads.
@@ -87,7 +98,7 @@
 
     src = requireFile {
       name = debName;
-      hash = "sha256-OfNEdCmx6VAScQBVVcPLFeIH9c1JkSV1OUTKvosX2y8=";
+      inherit (deb) hash;
       message = ''
         Euro-Office publishes no desktop release binaries yet; this deb is the
         export of CI run ${runId}. Seed it into the store once per machine:
@@ -136,6 +147,9 @@
       glib
       gsettings-desktop-schemas
       gst_all_1.gst-plugins-base
+      # The arm64 deb bundles Qt's gstreamer media backend, which wants the
+      # photography and play helper libraries shipped in -bad.
+      gst_all_1.gst-plugins-bad
       gst_all_1.gstreamer
       gtk3
       libnotify
@@ -237,7 +251,7 @@ in
       license = lib.licenses.agpl3Plus;
       sourceProvenance = with lib.sourceTypes; [binaryNativeCode binaryBytecode];
       maintainers = with lib.maintainers; [overby-me];
-      platforms = ["x86_64-linux"];
+      platforms = lib.attrNames debs;
       mainProgram = "euro-office-desktopeditors";
     };
   }
