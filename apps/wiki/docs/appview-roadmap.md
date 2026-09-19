@@ -64,6 +64,12 @@ data layer.
   node that owns a context without holding a membership row in it (a real case:
   `docs/read-permissions.md`) gets no owner row. Interim public contexts are all
   extracted as private. Extracted polls are never loaded. M3 and M9.
+- **There are no schema migrations.** The entity tables are plain
+  `CREATE TABLE`, so a datastore file made by an older binary keeps its old
+  columns. Until migrations exist the file records its schema version and a
+  binary refuses to start on another one, rather than failing a query at a
+  time. Pre-cutover that costs nothing, since the view is rebuilt from the
+  migration pipeline; after it, migrations become real work (M9).
 - **Reads were ungated.** Every read served private content to anyone. Gated in
   M2 on visibility and membership.
 - **`active` is voting rights, not a read gate.** The interim reads by

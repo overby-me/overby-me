@@ -41,14 +41,41 @@ impl Db {
     /// are `IF NOT EXISTS` regardless.
     pub async fn init_schema(&self) -> Result<(), DbError> {
         let conn = self.acquire().await?;
-        if !table_exists(&conn, "context").await {
+        if table_exists(&conn, "context").await {
+            let found = schema_version(&conn).await?;
+            if found != SCHEMA_VERSION {
+                return Err(DbError::SchemaVersion {
+                    found,
+                    expected: SCHEMA_VERSION,
+                });
+            }
+        } else {
             conn.execute_batch(wiki_schema::ENTITY_SCHEMA).await?;
+            conn.execute(&format!("PRAGMA user_version = {SCHEMA_VERSION}"), ())
+                .await?;
         }
         conn.execute_batch(crate::schema::RUNTIME_DDL).await?;
         // The ballot service's durable tables (public board + private roster),
         // both IF NOT EXISTS, so they live in the same datastore as the entities.
         crate::ballot::init_ballot_schema(self).await?;
         Ok(())
+    }
+}
+
+/// The version of the entity schema this binary reads and writes. Bump it with
+/// any change to `wiki_domain_types::DDL` that an existing file would not have.
+///
+/// There are no migrations yet, and the entity tables are plain `CREATE TABLE`,
+/// so a file made by an older binary keeps its old columns. Without this the
+/// process would start and then fail one query at a time; with it, it refuses
+/// to start and says why.
+pub const SCHEMA_VERSION: i64 = 1;
+
+async fn schema_version(conn: &Connection) -> Result<i64, DbError> {
+    let mut rows = conn.query("PRAGMA user_version", ()).await?;
+    match rows.next().await? {
+        Some(row) => Ok(row.get::<i64>(0)?),
+        None => Ok(0),
     }
 }
 
@@ -83,6 +110,11 @@ pub enum DbError {
     Turso(turso::Error),
     /// The engine would not turn foreign-key enforcement on.
     ForeignKeysOff,
+    /// The file was made for another version of the entity schema.
+    SchemaVersion {
+        found: i64,
+        expected: i64,
+    },
 }
 
 impl std::fmt::Display for DbError {
@@ -90,6 +122,11 @@ impl std::fmt::Display for DbError {
         match self {
             DbError::Turso(e) => write!(f, "turso error: {e}"),
             DbError::ForeignKeysOff => write!(f, "foreign keys are not enforced"),
+            DbError::SchemaVersion { found, expected } => write!(
+                f,
+                "the datastore holds schema version {found}, this binary needs {expected}; \
+                 there are no migrations yet, so rebuild it from the migration pipeline"
+            ),
         }
     }
 }
@@ -126,5 +163,32 @@ mod tests {
             dangling.is_err(),
             "a document in a context that does not exist was accepted"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_file_from_another_schema_version_is_refused_not_served() {
+        let dir = std::env::temp_dir().join(format!("appview-{}", crate::util::random_token(8)));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("old.db");
+        let path = path.to_str().expect("utf-8 path");
+
+        let db = Db::open(path).await.expect("open");
+        db.init_schema().await.expect("a fresh file initializes");
+        db.init_schema()
+            .await
+            .expect("and the same binary reopens it");
+
+        let conn = db.acquire().await.expect("conn");
+        conn.execute("PRAGMA user_version = 0", ())
+            .await
+            .expect("age the file");
+        drop(conn);
+        match db.init_schema().await {
+            Err(DbError::SchemaVersion { found: 0, expected }) => {
+                assert_eq!(expected, SCHEMA_VERSION);
+            }
+            other => panic!("an old file was accepted: {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
