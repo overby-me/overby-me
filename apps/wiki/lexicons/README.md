@@ -53,7 +53,7 @@ settled, but its public rich-text record shape is not.
 Queries (GET). Every read serves only what the caller may read (`crates/appview/src/authz.rs`): a
 row is readable when it or its context is public, when the caller is a member of its context, or when
 the caller wrote it. A row the caller may not read answers exactly as a missing one does.
-`getReactions` alone is ungated, because reactions only ever mirror public records.
+`getReactions` answers what the caller may not read with an empty list rather than an error.
 
 - `getNode` is what a screen loads: a node by path or id with its children of either kind, its
   breadcrumbs, the profile behind every DID it names, the letter a submitted motion carries, and

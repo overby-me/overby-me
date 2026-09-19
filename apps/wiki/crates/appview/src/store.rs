@@ -2236,6 +2236,19 @@ impl Store {
         self.exists("post", id).await
     }
 
+    /// Whether `id` is a post anyone may read: one mirrored from the public
+    /// network. Nothing serves a private post yet, so nothing may act on one.
+    pub async fn public_post_exists(&self, id: &str) -> Result<bool, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM post WHERE id = ?1 AND visibility = 'public'",
+                [id],
+            )
+            .await?;
+        Ok(rows.next().await?.is_some())
+    }
+
     /// The context a subject at-uri belongs to, resolved through the view (a
     /// materialized document, comment, or post). `None` if the subject is not (yet)
     /// materialized, in which case a comment on it stays broadcast-only.

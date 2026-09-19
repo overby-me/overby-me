@@ -83,6 +83,11 @@ data layer.
   owner only.
 - **Reads were ungated.** Every read served private content to anyone. Gated in
   M2 on visibility and membership.
+- **Reactions stayed ungated until an audit of the whole API found them.** The
+  kickoff had classed reactions as mirrors of public records, so anyone signed
+  in could react to any string with any string, and who had reacted to a closed
+  group's comment was served to the signed out. The interim's reactions are a
+  member's, on content and comments. They are now held to that.
 - **`active` is voting rights, not a read gate.** The interim reads by
   membership alone, and `migrations/0024` records what reinterpreting a write
   model as a read model cost: a context went dark for its own members. The

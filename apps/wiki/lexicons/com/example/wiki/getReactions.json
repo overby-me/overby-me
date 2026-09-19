@@ -4,15 +4,14 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "Fetch the emoji reactions on a subject, addressed by the subject's at-uri. Identity-free.",
+			"description": "The reactions on something the caller may read. Who reacted to a closed group's comment is that group's business, so what the caller may not read has, to them, no reactions: an empty list, not an error, since a thread asks this once per comment.",
 			"parameters": {
 				"type": "params",
 				"required": ["subject"],
 				"properties": {
 					"subject": {
 						"type": "string",
-						"format": "at-uri",
-						"description": "The at-uri of the reacted-to record."
+						"description": "A document's or a comment's id, or a mirrored post's at-uri."
 					}
 				}
 			},

@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "procedure",
-			"description": "Add an emoji reaction to a subject. Idempotent: re-adding the same (caller, subject, emoji) is a no-op. Requires authentication; the caller's DID is the reactor.",
+			"description": "React to a document, a comment, or a post mirrored from the public network. A member of the subject's context may (the interim's rule for a reaction); anyone signed in may react to a public post. Once per emoji: a second tap changes nothing.",
 			"input": {
 				"encoding": "application/json",
 				"schema": {
@@ -13,14 +13,12 @@
 					"properties": {
 						"subject": {
 							"type": "string",
-							"format": "at-uri",
-							"description": "The at-uri of the record being reacted to."
+							"description": "A document's or a comment's id, or a mirrored post's at-uri."
 						},
 						"emoji": {
 							"type": "string",
-							"maxGraphemes": 1,
-							"maxLength": 64,
-							"description": "A single emoji grapheme cluster."
+							"maxLength": 32,
+							"description": "An emoji: short, not plain text."
 						}
 					}
 				}
@@ -42,6 +40,18 @@
 				{
 					"name": "AuthRequired",
 					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "Nothing there to react to, or nothing the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller may read the subject and is not a member of its context."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "Not an emoji."
 				}
 			]
 		}

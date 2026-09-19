@@ -269,19 +269,44 @@ pub async fn get_comments(
     }
 }
 
-/// `?subject=<at-uri>`.
+/// `?subject=<a node's id, or a mirrored post's at-uri>`.
 #[derive(Debug, Deserialize)]
 pub struct SubjectParam {
     pub subject: String,
 }
 
-/// `com.example.wiki.getReactions`: the reactions on a subject (by at-uri).
+/// Where reactions to `subject` are told of, if `did` may read it: its context,
+/// or `None` for a post mirrored from the public network. Unreadable and missing
+/// are one answer, as everywhere.
+async fn reactable(
+    state: &AppState,
+    subject: &str,
+    did: Option<&str>,
+) -> Result<Option<Option<String>>, crate::DbError> {
+    let store = crate::Store::new(state.db.clone());
+    if let Some((context_id, _)) = store.readable_subject(subject, did).await? {
+        return Ok(Some(Some(context_id)));
+    }
+    Ok(store.public_post_exists(subject).await?.then_some(None))
+}
+
+/// `com.example.wiki.getReactions`: the reactions on something the caller may
+/// read. Who reacted to a closed group's comment is part of that group's
+/// business, so what the caller may not read has, to them, no reactions.
 pub async fn get_reactions(
     State(state): State<AppState>,
+    caller: MaybeCaller,
     Query(p): Query<SubjectParam>,
 ) -> Response {
-    let store = crate::Store::new(state.db.clone());
-    match store.get_reactions(&p.subject).await {
+    let listed = async {
+        if reactable(&state, &p.subject, caller.did()).await?.is_none() {
+            return Ok(Vec::new());
+        }
+        crate::Store::new(state.db.clone())
+            .get_reactions(&p.subject)
+            .await
+    };
+    match listed.await {
         Ok(reactions) => (
             StatusCode::OK,
             Json(serde_json::json!({ "reactions": reactions })),
@@ -1243,38 +1268,90 @@ pub struct ReactionBody {
     pub emoji: String,
 }
 
-/// `com.example.wiki.addReaction` (procedure): the caller reacts to a subject.
+/// An emoji, more or less: short, not plain text, nothing a terminal or a
+/// layout would choke on. It is shown to everyone who reads the subject.
+fn is_emoji(emoji: &str) -> bool {
+    !emoji.is_empty()
+        && emoji.len() <= 32
+        && !emoji.is_ascii()
+        && !emoji
+            .chars()
+            .any(|c| c.is_control() || c.is_whitespace() || c.is_ascii_alphabetic())
+}
+
+/// The subject's context topic, or the public one for a mirrored post, once the
+/// caller is known to be allowed: a member of the subject's context (the
+/// interim's rule for a reaction), or anyone signed in for a public post.
+async fn may_react(
+    state: &AppState,
+    subject: &str,
+    did: &str,
+    what: &str,
+) -> Result<Topic, Response> {
+    let missing = || {
+        err(
+            StatusCode::NOT_FOUND,
+            "NotFound",
+            "nothing there to react to",
+        )
+    };
+    match reactable(state, subject, Some(did)).await {
+        Ok(Some(Some(context_id))) => {
+            member_of(state, &context_id, did, what).await?;
+            Ok(Topic::Context(context_id))
+        }
+        Ok(Some(None)) => Ok(Topic::Public),
+        Ok(None) => Err(missing()),
+        Err(e) => Err(write_failed(what, e)),
+    }
+}
+
+/// `com.example.wiki.addReaction` (procedure): the caller reacts to a document,
+/// a comment or a mirrored post. Once per emoji: a second tap changes nothing.
 pub async fn add_reaction(
     State(state): State<AppState>,
     Caller { did }: Caller,
     Json(body): Json<ReactionBody>,
 ) -> Response {
+    if !is_emoji(&body.emoji) {
+        return invalid("a reaction is an emoji");
+    }
+    let topic = match may_react(&state, &body.subject, &did, "addReaction").await {
+        Ok(topic) => topic,
+        Err(refusal) => return refusal,
+    };
     let store = crate::Store::new(state.db.clone());
     match store
         .create_reaction(&body.subject, &did, &body.emoji)
         .await
     {
         Ok(id) => {
-            state.publish(Topic::Public, "reaction", &body.subject);
+            state.publish(topic, "reaction", &body.subject);
             wrote(id)
         }
         Err(e) => write_failed("addReaction", e),
     }
 }
 
-/// `com.example.wiki.removeReaction` (procedure): the caller un-reacts.
+/// `com.example.wiki.removeReaction` (procedure): the caller takes their own
+/// reaction back. Not gated on still being a member: leaving a group must not
+/// strand what one left in it.
 pub async fn remove_reaction(
     State(state): State<AppState>,
     Caller { did }: Caller,
     Json(body): Json<ReactionBody>,
 ) -> Response {
     let store = crate::Store::new(state.db.clone());
+    let topic = match reactable(&state, &body.subject, Some(&did)).await {
+        Ok(Some(Some(context_id))) => Topic::Context(context_id),
+        _ => Topic::Public,
+    };
     match store
         .remove_reaction(&body.subject, &did, &body.emoji)
         .await
     {
         Ok(()) => {
-            state.publish(Topic::Public, "reaction", &body.subject);
+            state.publish(topic, "reaction", &body.subject);
             (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response()
         }
         Err(e) => write_failed("removeReaction", e),
@@ -1344,6 +1421,13 @@ pub(crate) mod tests {
         )
         .await
         .expect("seed");
+        conn.execute(
+            "INSERT INTO post (id, author_did, group_id, text, visibility) \
+             VALUES (?1, 'did:plc:alice', 'c1', 'Hello', 'public')",
+            [POST_URI],
+        )
+        .await
+        .expect("seed post");
         conn.execute(
             "INSERT INTO reaction (id, subject_uri, reactor_did, emoji) \
              VALUES (?1, ?2, 'did:plc:bob', '👍')",
@@ -1809,8 +1893,9 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn add_then_remove_reaction_toggles() {
         let state = seeded_state().await;
-        let subject = "at://did:plc:x/com.example.wiki.comment/z";
-        let eve = token_for(&state, "did:plc:eve").await;
+        // A comment in the closed group, which bob is a member of.
+        let subject = "ks";
+        let eve = token_for(&state, "did:plc:bob").await;
         let add = |emoji: &'static str| {
             let s = state.clone();
             let eve = eve.clone();
@@ -1827,12 +1912,23 @@ pub(crate) mod tests {
         assert_eq!(add("🎉").await.0, StatusCode::OK);
         // Re-adding the same emoji is idempotent (unique triple), still one row.
         assert_eq!(add("🎉").await.0, StatusCode::OK);
-        let (_, v) = get(
+        let (_, v) = get_as(
+            router(state.clone()),
+            &format!("/xrpc/com.example.wiki.getReactions?subject={subject}"),
+            &eve,
+        )
+        .await;
+        assert_eq!(v["reactions"].as_array().unwrap().len(), 1);
+        let (_, outside) = get(
             router(state.clone()),
             &format!("/xrpc/com.example.wiki.getReactions?subject={subject}"),
         )
         .await;
-        assert_eq!(v["reactions"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            outside["reactions"],
+            serde_json::json!([]),
+            "who reacted inside a closed group was told to the signed out"
+        );
 
         // Remove it.
         let (status, _) = post(
@@ -1843,12 +1939,57 @@ pub(crate) mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        let (_, v) = get(
+        let (_, v) = get_as(
             router(state.clone()),
             &format!("/xrpc/com.example.wiki.getReactions?subject={subject}"),
+            &eve,
         )
         .await;
         assert_eq!(v["reactions"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_reaction_is_a_members_and_an_emoji() {
+        let state = seeded_state().await;
+        let react = |who: String, subject: &'static str, emoji: &'static str| {
+            let state = state.clone();
+            async move {
+                post(
+                    router(state),
+                    "/xrpc/com.example.wiki.addReaction",
+                    Some(&who),
+                    serde_json::json!({"subject": subject, "emoji": emoji}),
+                )
+                .await
+                .0
+            }
+        };
+        let bob = token_for(&state, "did:plc:bob").await;
+        let mallory = token_for(&state, "did:plc:mallory").await;
+        assert_eq!(
+            react(mallory.clone(), "ks", "🎉").await,
+            StatusCode::NOT_FOUND
+        );
+        // d1 is in a public group: she may read it, and is still not a member.
+        assert_eq!(
+            react(mallory.clone(), "d1", "🎉").await,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(react(mallory, "nothing", "🎉").await, StatusCode::NOT_FOUND);
+        for not_emoji in ["", "lol", "<b>", "🎉 🎉", "\u{7}🎉"] {
+            assert_eq!(
+                react(bob.clone(), "ks", not_emoji).await,
+                StatusCode::BAD_REQUEST,
+                "{not_emoji:?}"
+            );
+        }
+        for emoji in ["🎉", "👍🏽", "1️⃣", "👩‍👩‍👧‍👦", "❤️"] {
+            assert_eq!(
+                react(bob.clone(), "ks", emoji).await,
+                StatusCode::OK,
+                "{emoji}"
+            );
+        }
     }
 
     // -- The read gate. `s1` and `ks` are in the private group c9 (alice owns it,

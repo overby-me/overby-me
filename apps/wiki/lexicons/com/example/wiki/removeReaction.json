@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "procedure",
-			"description": "Remove the caller's emoji reaction from a subject (the toggle-off). Idempotent: removing an absent reaction succeeds. Requires authentication; the caller's DID is the reactor.",
+			"description": "Take one's own reaction back. Not asked about membership: leaving a group must not strand what one left in it. Removing what is not there changes nothing.",
 			"input": {
 				"encoding": "application/json",
 				"schema": {
@@ -31,7 +31,10 @@
 					"type": "object",
 					"required": ["ok"],
 					"properties": {
-						"ok": { "type": "boolean", "const": true }
+						"ok": {
+							"type": "boolean",
+							"const": true
+						}
 					}
 				}
 			},
