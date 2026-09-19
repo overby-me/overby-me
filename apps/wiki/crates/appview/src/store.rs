@@ -170,6 +170,71 @@ pub enum Node {
     Document(Document),
 }
 
+impl Node {
+    pub fn id(&self) -> &str {
+        match self {
+            Node::Context(c) => &c.id,
+            Node::Document(d) => &d.id,
+        }
+    }
+
+    /// The context it is in. A context is in itself.
+    pub fn context_id(&self) -> &str {
+        match self {
+            Node::Context(c) => &c.id,
+            Node::Document(d) => &d.context_id,
+        }
+    }
+
+    pub fn place(&self) -> &Place {
+        match self {
+            Node::Context(c) => &c.place,
+            Node::Document(d) => &d.place,
+        }
+    }
+}
+
+/// A child as a folder view, the drawer and a breadcrumb need it: the same few
+/// fields whichever table it lives in, and no content.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Child {
+    /// `context` or `document`.
+    pub node: &'static str,
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub slug: String,
+    pub path: String,
+    pub idx: i64,
+    pub mutable: bool,
+    pub attachable: bool,
+    pub owner_did: Option<String>,
+    pub created_at: Option<String>,
+    /// A file's id and type, a cover image: what a row needs to draw itself.
+    pub data: Option<serde_json::Value>,
+    /// Live children, so the drawer offers to expand only what has some.
+    pub child_count: i64,
+}
+
+/// One segment of the way down to a node.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Crumb {
+    pub slug: String,
+    pub path: String,
+    /// Absent where the caller may not read the node the segment names. They
+    /// hold the slug already, in the URL, and are told nothing more.
+    #[serde(flatten)]
+    pub named: Option<CrumbName>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct CrumbName {
+    pub id: String,
+    pub node: &'static str,
+    pub kind: String,
+    pub name: String,
+}
+
 /// A document to create. The store picks its slug and path.
 pub struct NewDocument<'a> {
     pub context_id: &'a str,
@@ -817,6 +882,132 @@ impl Store {
             }
         };
         Ok(Some(Node::Document(self.hydrate_document(found).await?)))
+    }
+
+    /// Everything directly under `parent_id` that `caller` may read, of either
+    /// kind, in the manual order and then by age.
+    pub async fn children(
+        &self,
+        parent_id: &str,
+        caller: Option<&str>,
+    ) -> Result<Vec<Child>, DbError> {
+        // A context is locked from the day it is made, as in the interim.
+        let counted = |alias: &str| {
+            format!(
+                "(SELECT count(*) FROM document x WHERE x.parent_id = {alias}.id AND x.{LIVE}) + \
+                 (SELECT count(*) FROM context y WHERE y.parent_id = {alias}.id AND y.{LIVE})"
+            )
+        };
+        let queries = [
+            (
+                "context",
+                format!(
+                    "SELECT c.id, c.kind, c.name, c.slug, c.path, c.idx, 0, c.attachable, \
+                            c.owner_did, c.created_at, NULL, {} \
+                     FROM context c WHERE c.parent_id = ?1 AND c.{LIVE} AND {}",
+                    counted("c"),
+                    readable_context("c", 2)
+                ),
+            ),
+            (
+                "document",
+                format!(
+                    "SELECT d.id, d.kind, d.title, d.slug, d.path, d.idx, d.mutable, d.attachable, \
+                            d.owner_did, d.created_at, d.data, {} \
+                     FROM document d WHERE d.parent_id = ?1 AND d.{LIVE} AND {}",
+                    counted("d"),
+                    readable_document("d", 2)
+                ),
+            ),
+        ];
+        let conn = self.db.acquire().await?;
+        let mut out = Vec::new();
+        for (node, sql) in queries {
+            let mut rows = conn
+                .query(
+                    &sql,
+                    vec![Value::Text(parent_id.to_string()), opt_str_val(caller)],
+                )
+                .await?;
+            while let Some(row) = rows.next().await? {
+                out.push(Child {
+                    node,
+                    id: row.get::<String>(0)?,
+                    kind: row.get::<String>(1)?,
+                    name: row.get::<String>(2)?,
+                    slug: row.get::<String>(3)?,
+                    path: row.get::<String>(4)?,
+                    idx: row.get::<i64>(5)?,
+                    mutable: row.get::<i64>(6)? != 0,
+                    attachable: row.get::<i64>(7)? != 0,
+                    owner_did: opt_text(&row, 8),
+                    created_at: opt_text(&row, 9),
+                    data: opt_text(&row, 10).and_then(|s| serde_json::from_str(&s).ok()),
+                    child_count: row.get::<i64>(11)?,
+                });
+            }
+        }
+        out.sort_by(|a, b| (a.idx, &a.created_at, &a.id).cmp(&(b.idx, &b.created_at, &b.id)));
+        Ok(out)
+    }
+
+    /// The way down to `path`, a crumb per segment. A segment the caller may not
+    /// read keeps its slug and loses its name.
+    pub async fn crumbs(&self, path: &str, caller: Option<&str>) -> Result<Vec<Crumb>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut out = Vec::new();
+        let mut prefix = String::new();
+        for slug in path.split('/').filter(|s| !s.is_empty()) {
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(slug);
+            let params = || vec![Value::Text(prefix.clone()), opt_str_val(caller)];
+            let mut named = None;
+            for (node, sql) in [
+                (
+                    "context",
+                    format!(
+                        "SELECT c.id, c.kind, c.name FROM context c \
+                         WHERE c.path = ?1 AND c.{LIVE} AND {}",
+                        readable_context("c", 2)
+                    ),
+                ),
+                (
+                    "document",
+                    format!(
+                        "SELECT d.id, d.kind, d.title FROM document d \
+                         WHERE d.path = ?1 AND d.{LIVE} AND {}",
+                        readable_document("d", 2)
+                    ),
+                ),
+            ] {
+                let mut rows = conn.query(&sql, params()).await?;
+                if let Some(row) = rows.next().await? {
+                    named = Some(CrumbName {
+                        id: row.get::<String>(0)?,
+                        node,
+                        kind: row.get::<String>(1)?,
+                        name: row.get::<String>(2)?,
+                    });
+                    break;
+                }
+            }
+            out.push(Crumb {
+                slug: slug.to_string(),
+                path: prefix.clone(),
+                named,
+            });
+        }
+        Ok(out)
+    }
+
+    /// The live node `id` names that `caller` may read, of either kind.
+    pub async fn read_node(&self, id: &str, caller: Option<&str>) -> Result<Option<Node>, DbError> {
+        if let Some(ctx) = self.read_context(id, caller).await? {
+            return Ok(Some(Node::Context(ctx)));
+        }
+        Ok(self.read_document(id, caller).await?.map(Node::Document))
     }
 
     /// The child content nodes directly under `parent_id` (a context or folder)

@@ -106,6 +106,78 @@ pub async fn resolve_node(
     }
 }
 
+/// `?path=a/b/c` or `?id=<id>`.
+#[derive(Debug, Deserialize)]
+pub struct NodeParam {
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+}
+
+/// `com.example.wiki.getNode` — a node with what every screen draws around it:
+/// its children of either kind, the way down to it, and what the caller may do
+/// here. One call where the interim makes several.
+pub async fn get_node(
+    State(state): State<AppState>,
+    caller: MaybeCaller,
+    Query(p): Query<NodeParam>,
+) -> Response {
+    let store = crate::Store::new(state.db.clone());
+    let failed = |e: crate::DbError| {
+        tracing::error!("getNode failed: {e}");
+        err(StatusCode::BAD_GATEWAY, "InternalError", "read failed")
+    };
+    let found = match (&p.path, &p.id) {
+        (Some(path), None) => {
+            let path = path
+                .split('/')
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join("/");
+            store.resolve_path(&path, caller.did()).await
+        }
+        (None, Some(id)) => store.read_node(id, caller.did()).await,
+        _ => return invalid("give a path or an id, not both"),
+    };
+    let node = match found {
+        Ok(Some(node)) => node,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "NotFound", "no such node"),
+        Err(e) => return failed(e),
+    };
+    let children = match store.children(node.id(), caller.did()).await {
+        Ok(children) => children,
+        Err(e) => return failed(e),
+    };
+    let crumbs = match store.crumbs(&node.place().path, caller.did()).await {
+        Ok(crumbs) => crumbs,
+        Err(e) => return failed(e),
+    };
+    let membership = match caller.did() {
+        Some(did) => match Authz::new(state.db.clone())
+            .membership(node.context_id(), did)
+            .await
+        {
+            Ok(membership) => membership,
+            Err(e) => return failed(e),
+        },
+        None => None,
+    };
+    let viewer = serde_json::json!({
+        "is_owner": caller.did().is_some() && caller.did() == node.place().owner_did.as_deref(),
+        "is_member": membership.is_some(),
+        "is_context_owner": membership.is_some_and(|m| m.role == wiki_domain_types::Role::Owner),
+        "can_vote": membership.is_some_and(|m| m.active),
+    });
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "node": node, "children": children, "crumbs": crumbs, "viewer": viewer
+        })),
+    )
+        .into_response()
+}
+
 /// `?parent=<id>`.
 #[derive(Debug, Deserialize)]
 pub struct ParentParam {
@@ -2235,5 +2307,178 @@ mod tests {
             .await,
             StatusCode::NOT_FOUND
         );
+    }
+
+    // -- getNode: what a screen draws, in one call. --
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_node_comes_with_its_children_of_both_kinds_in_order() {
+        let state = with_a_folder(1).await;
+        let conn = state.db.acquire().await.expect("conn");
+        conn.execute_batch(
+            "UPDATE context SET idx = 2 WHERE id = 'c2';
+             UPDATE document SET idx = 1 WHERE id = 'fold';
+             UPDATE document SET idx = 3, data = '{\"image\":\"f1\"}' WHERE id = 'd1';
+             UPDATE document SET idx = 4 WHERE id = 'd2';
+             INSERT INTO document (id, context_id, parent_id, kind, title, slug, path) \
+               VALUES ('in-fold', 'c1', 'fold', 'policy', 'Inde', 'inde', \
+                       'group-one/resolutioner/inde');",
+        )
+        .await
+        .expect("arrange");
+
+        let (status, v) = get(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getNode?path=group-one",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["node"]["node"], "context");
+        assert_eq!(v["node"]["id"], "c1");
+        let children = v["children"].as_array().expect("children");
+        let seen: Vec<(&str, &str)> = children
+            .iter()
+            .map(|c| (c["id"].as_str().unwrap(), c["node"].as_str().unwrap()))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("fold", "document"),
+                ("c2", "context"),
+                ("d1", "document"),
+                ("d2", "document")
+            ],
+            "one list, in the manual order, whichever table a child is in"
+        );
+        assert_eq!(
+            children[0]["child_count"], 1,
+            "the folder has something in it"
+        );
+        assert_eq!(children[1]["child_count"], 0);
+        assert_eq!(children[2]["data"]["image"], "f1");
+        assert!(
+            children[2].get("content").is_none(),
+            "a listing must not carry every child's whole text"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_node_is_found_by_id_as_well_as_by_path() {
+        let state = seeded_state().await;
+        let by = |query: &'static str| {
+            let state = state.clone();
+            async move {
+                get(
+                    router(state),
+                    &format!("/xrpc/com.example.wiki.getNode?{query}"),
+                )
+                .await
+            }
+        };
+        let (_, by_path) = by("path=group-one/motion").await;
+        let (_, by_id) = by("id=d1").await;
+        assert_eq!(by_path, by_id);
+        assert_eq!(by_id["node"]["node"], "document");
+        assert_eq!(by("id=c2").await.1["node"]["node"], "context");
+        assert_eq!(by("id=nope").await.0, StatusCode::NOT_FOUND);
+        assert_eq!(by("path=a&id=b").await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(by("").await.0, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn crumbs_name_what_the_caller_may_read_and_only_that() {
+        let state = seeded_state().await;
+        let zoe = token_for(&state, "did:plc:zoe").await;
+        let (status, v) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getNode?path=closed/meeting",
+            &zoe,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        let crumbs = v["crumbs"].as_array().expect("crumbs");
+        assert_eq!(crumbs.len(), 2);
+        // Zoe belongs to the meeting, not to the closed group it sits in.
+        assert_eq!(crumbs[0]["slug"], "closed");
+        assert_eq!(crumbs[0]["path"], "closed");
+        assert!(
+            crumbs[0].get("name").is_none() && crumbs[0].get("id").is_none(),
+            "a crumb named a group its reader may not see: {}",
+            crumbs[0]
+        );
+        assert_eq!(crumbs[1]["name"], "Closed Meeting");
+        assert_eq!(crumbs[1]["id"], "c10");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_viewer_is_told_what_they_may_do_here() {
+        let state = seeded_state().await;
+        let node = "/xrpc/com.example.wiki.getNode?path=closed/secret_minutes";
+        let conn = state.db.acquire().await.expect("conn");
+        conn.execute(
+            "UPDATE document SET owner_did = 'did:plc:bob' WHERE id = 's1'",
+            (),
+        )
+        .await
+        .expect("owner");
+
+        let viewer = |did: &'static str| {
+            let state = state.clone();
+            async move {
+                let token = token_for(&state, did).await;
+                get_as(router(state), node, &token).await.1["viewer"].clone()
+            }
+        };
+        let alice = viewer("did:plc:alice").await;
+        assert_eq!(alice["is_context_owner"], true);
+        assert_eq!(alice["is_owner"], false);
+        let bob = viewer("did:plc:bob").await;
+        assert_eq!(bob["is_owner"], true);
+        assert_eq!(bob["is_context_owner"], false);
+        assert_eq!(bob["can_vote"], true);
+        let ivan = viewer("did:plc:ivan").await;
+        assert_eq!(ivan["is_member"], true);
+        assert_eq!(ivan["can_vote"], false, "ivan holds no voting rights");
+
+        let (_, open) = get(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getNode?path=group-one",
+        )
+        .await;
+        assert_eq!(
+            open["viewer"],
+            serde_json::json!({
+                "is_owner": false, "is_member": false,
+                "is_context_owner": false, "can_vote": false
+            }),
+            "a signed-out reader"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn children_the_caller_may_not_read_are_not_listed() {
+        let state = seeded_state().await;
+        let conn = state.db.acquire().await.expect("conn");
+        // A private group placed INSIDE the public one.
+        conn.execute(
+            "UPDATE context SET parent_id = 'c1', path = 'group-one/closed' WHERE id = 'c9'",
+            (),
+        )
+        .await
+        .expect("nest");
+        let ids = |v: &serde_json::Value| -> Vec<String> {
+            v["children"]
+                .as_array()
+                .expect("children")
+                .iter()
+                .map(|c| c["id"].as_str().unwrap().to_string())
+                .collect()
+        };
+        let node = "/xrpc/com.example.wiki.getNode?path=group-one";
+        let (_, anonymous) = get(router(state.clone()), node).await;
+        assert!(!ids(&anonymous).contains(&"c9".to_string()), "{anonymous}");
+        let bob = token_for(&state, "did:plc:bob").await;
+        let (_, member) = get_as(router(state.clone()), node, &bob).await;
+        assert!(ids(&member).contains(&"c9".to_string()), "{member}");
     }
 }

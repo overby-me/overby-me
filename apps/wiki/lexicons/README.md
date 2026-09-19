@@ -54,6 +54,8 @@ row is readable when it or its context is public, when the caller is a member of
 the caller wrote it. A row the caller may not read answers exactly as a missing one does.
 `getReactions` alone is ungated, because reactions only ever mirror public records.
 
+- `getNode` is what a screen loads: a node by path or id with its children of either kind, its
+  breadcrumbs, and what the caller may do there.
 - `getDocument` / `getContext` return a single entity; `resolveNode` returns the context or document
   a path names. Every node stores its path, so that is one lookup at any depth.
 - `listChildren`, `listContexts`, `listRecent`, `search`, `getComments`, `getReactions` return an

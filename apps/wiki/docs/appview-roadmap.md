@@ -163,13 +163,15 @@ The steps:
 - [x] Path resolution across contexts and documents, in one lookup.
 - [x] The server picks a new document's slug, in one write transaction, across
   both tables' namespace.
-- [ ] Crumbs for a path; path from an id.
+- [x] `getNode`: a node by path or id with its children of both kinds in one
+  ordered list, a crumb per segment (nameless where the caller may not read
+  it), and the viewer's standing. One call where the interim makes several.
 - [x] The write model: which kind a role may create under which parent, and the
   folder lock with its owner and discussion exemptions. One static table,
   carried over from the interim's per-context template. (A closed poll refusing
   votes belongs to M6.)
-- [ ] Node read model in the `src/model.rs` shape (node with children, members,
-  permission flags).
+- [ ] The rest of the `src/model.rs` node shape: the members and author chips
+  on a node, the parent reference, `get_index` (the A/B/C of a policy).
 - [x] Update, with the interim's edit rule (an author edits a draft, an owner of
   the context edits and arranges anything); reorder and the lock with it.
 - [x] The bin: soft delete of a subtree, restore of exactly what went together,

@@ -123,6 +123,7 @@ fn build_router(state: AppState) -> Router {
             get(xrpc::get_document),
         )
         .route("/xrpc/com.example.wiki.getContext", get(xrpc::get_context))
+        .route("/xrpc/com.example.wiki.getNode", get(xrpc::get_node))
         .route(
             "/xrpc/com.example.wiki.resolveNode",
             get(xrpc::resolve_node),
