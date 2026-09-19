@@ -34,7 +34,7 @@ async fn main() {
     // The atproto OAuth client (durable SQLite stores). A build failure here is
     // fatal: identity is load-bearing, so the process must not serve `/callback`
     // silently misconfigured.
-    let oauth = match WikiOAuth::new(db.clone()) {
+    let oauth = match WikiOAuth::new(db.clone(), &config) {
         Ok(o) => Arc::new(o),
         Err(e) => {
             tracing::error!("failed to build the OAuth client: {e}");

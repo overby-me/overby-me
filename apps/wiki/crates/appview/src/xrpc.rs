@@ -229,6 +229,40 @@ pub async fn get_reactions(
 // The session itself.
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Deserialize)]
+pub struct CreateSessionBody {
+    pub code: String,
+}
+
+/// `com.example.wiki.createSession` (procedure) — redeem the one-time code
+/// `/callback` handed the browser for a session. The only unauthenticated
+/// procedure: the code is the credential.
+pub async fn create_session(
+    State(state): State<AppState>,
+    Json(body): Json<CreateSessionBody>,
+) -> Response {
+    let sessions = Sessions::new(state.db.clone());
+    let did = match sessions.redeem_code(&body.code).await {
+        Ok(Some(did)) => did,
+        Ok(None) => {
+            return err(
+                StatusCode::BAD_REQUEST,
+                "InvalidCode",
+                "the login code is unknown, expired, or already used",
+            );
+        }
+        Err(e) => return write_failed("createSession", e),
+    };
+    match sessions.create(&did).await {
+        Ok(session) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "session": session, "did": did })),
+        )
+            .into_response(),
+        Err(e) => write_failed("createSession", e),
+    }
+}
+
 /// `com.example.wiki.getSession` — who the presented session belongs to.
 pub async fn get_session(State(state): State<AppState>, caller: Caller) -> Response {
     let store = crate::Store::new(state.db.clone());
@@ -705,6 +739,53 @@ mod tests {
         let (status, v) = get_as(router(state.clone()), session, &token).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(v["error"], "InvalidToken");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_login_code_buys_one_session() {
+        let state = seeded_state().await;
+        crate::Store::new(state.db.clone())
+            .upsert_user_min("did:plc:frank")
+            .await
+            .expect("user");
+        let code = crate::session::Sessions::new(state.db.clone())
+            .issue_code("did:plc:frank")
+            .await
+            .expect("code");
+        let create = "/xrpc/com.example.wiki.createSession";
+
+        let (status, v) = post(
+            router(state.clone()),
+            create,
+            None,
+            serde_json::json!({ "code": code }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["did"], "did:plc:frank");
+        let session = v["session"].as_str().expect("session").to_string();
+        let (status, v) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getSession",
+            &session,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["did"], "did:plc:frank");
+
+        let (status, v) = post(
+            router(state.clone()),
+            create,
+            None,
+            serde_json::json!({ "code": code }),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a code must not work twice"
+        );
+        assert_eq!(v["error"], "InvalidCode");
     }
 
     #[tokio::test(flavor = "current_thread")]

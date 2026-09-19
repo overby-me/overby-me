@@ -45,8 +45,13 @@ data layer.
   rustls-only decision (`docs/atproto-stack-decisions.md`, Rust server
   libraries). Fixed in M0 by supplying the one rustls client the decision asks
   for.
-- **Writes trust the caller.** `xrpc::caller_did` reads the DID straight out of
-  the `Authorization` header. It is labelled a placeholder; M1 replaces it.
+- **Writes trusted the caller.** `xrpc::caller_did` read the DID straight out of
+  the `Authorization` header, so anyone could write as anyone by naming them.
+  Replaced in M1 by sessions.
+- **`/login` is an SSRF primitive unless guarded.** It is unauthenticated and
+  fetches whatever host the caller names. The outbound client now refuses
+  non-https and non-public addresses, at resolution time, so DNS rebinding gains
+  nothing. A dev instance (no public URL) stays unrestricted for a local PDS.
 - **Reads are ungated.** Every read serves private content to anyone. M2 gates
   them on visibility and membership.
 - **A document cannot be addressed by path.** The entity schema gives `context`
@@ -72,15 +77,23 @@ is merged and its tests pass.
 
 ### M1: identity and sessions (replaces NHost auth)
 
-- [ ] `session` table; opaque bearer tokens, stored hashed, with expiry.
-- [ ] `GET /login` (handle to authorization URL), `/callback` mints a session and
-  returns to an allow-listed frontend origin.
-- [ ] `getSession` and `deleteSession`; `Caller` and `MaybeCaller` extractors;
+- [x] `session` table; opaque bearer tokens, stored hashed, with expiry.
+- [x] `GET /login` (handle to authorization URL), bound to the browser by a
+  cookie against login CSRF; `/callback` returns a one-time code to an
+  allow-listed frontend origin, and `createSession` redeems it, so no credential
+  is ever in a URL.
+- [x] `getSession` and `deleteSession`; `Caller` and `MaybeCaller` extractors;
   the placeholder `caller_did` deleted.
-- [ ] CORS for the configured frontend origins.
-- [ ] Production client metadata (`/client-metadata.json`) when a public URL is
+- [x] CORS for the configured frontend origins.
+- [x] Production client metadata (`/client-metadata.json`) when a public URL is
   configured; the loopback profile otherwise.
+- [x] Outbound requests confined to public https addresses.
 - [ ] Profile hydration on login (handle, display name, avatar into `user`).
+- [ ] A confidential client (`private_key_jwt` and a served JWKS). Not needed
+  until the publish seam writes to members' repos and wants long-lived PDS
+  tokens; the AppView's own sessions do not depend on them.
+- [ ] One full login in a real browser against a real PDS. Everything around
+  the token exchange is covered; the exchange itself needs a human.
 
 ### M2: authorization core
 

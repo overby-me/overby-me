@@ -20,9 +20,29 @@ pub struct Config {
     /// appended here and shipped to an independent node (the E2E-V integrity
     /// control); empty disables replication (dev/tests). See `crate::ballot`.
     pub ballot_replica_log: String,
+    /// Where a browser reaches this AppView, without a trailing slash
+    /// (`APPVIEW_PUBLIC_URL`). Empty means a loopback dev instance, which
+    /// selects the OAuth loopback client profile.
+    pub public_url: String,
+    /// Browser origins that may call the API (CORS) and receive a login
+    /// redirect (`APPVIEW_FRONTEND_ORIGINS`, comma-separated). Empty keeps the
+    /// API same-origin.
+    pub frontend_origins: Vec<String>,
 }
 
 impl Config {
+    /// Whether a login may hand control back to `url`. An open redirect here
+    /// would deliver a fresh login code to whoever crafted the link.
+    pub fn allows_return(&self, url: &str) -> bool {
+        if !url.bytes().all(|b| b.is_ascii_graphic()) {
+            return false;
+        }
+        self.frontend_origins.iter().any(|origin| {
+            url.strip_prefix(origin.as_str())
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with(['/', '?', '#']))
+        })
+    }
+
     pub fn from_env() -> Self {
         let env = |k: &str| std::env::var(k).unwrap_or_default();
         Config {
@@ -37,8 +57,17 @@ impl Config {
                 .unwrap_or_else(|_| "in.logs.betterstack.com".to_string()),
             betterstack_token: env("BETTERSTACK_SOURCE_TOKEN"),
             ballot_replica_log: env("BALLOT_REPLICA_LOG"),
+            public_url: env("APPVIEW_PUBLIC_URL").trim_end_matches('/').to_string(),
+            frontend_origins: parse_origins(&env("APPVIEW_FRONTEND_ORIGINS")),
         }
     }
+}
+
+fn parse_origins(list: &str) -> Vec<String> {
+    list.split(',')
+        .map(|o| o.trim().trim_end_matches('/').to_string())
+        .filter(|o| !o.is_empty())
+        .collect()
 }
 
 impl Default for Config {
@@ -50,6 +79,51 @@ impl Default for Config {
             betterstack_host: "in.logs.betterstack.com".to_string(),
             betterstack_token: String::new(),
             ballot_replica_log: String::new(),
+            public_url: String::new(),
+            frontend_origins: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(origins: &str) -> Config {
+        Config {
+            frontend_origins: parse_origins(origins),
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn a_return_url_must_sit_on_an_allowed_origin() {
+        let c = config("https://wiki.example/, http://localhost:8080");
+        for ok in [
+            "https://wiki.example",
+            "https://wiki.example/",
+            "https://wiki.example/a/b?app=vote",
+            "https://wiki.example?x=1",
+            "http://localhost:8080/#top",
+        ] {
+            assert!(c.allows_return(ok), "{ok} should be allowed");
+        }
+        for bad in [
+            "https://wiki.example.evil.example/",
+            "https://wiki.example@evil.example/",
+            "https://wiki.example\\@evil.example/",
+            "https://wiki.example:8443/",
+            "http://wiki.example/",
+            "https://evil.example/?https://wiki.example/",
+            "https://wiki.example/\r\nSet-Cookie: x=1",
+            "",
+        ] {
+            assert!(!c.allows_return(bad), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn no_configured_origin_allows_no_return() {
+        assert!(!config("").allows_return("https://wiki.example/"));
     }
 }

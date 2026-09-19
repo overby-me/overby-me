@@ -57,9 +57,11 @@ Queries (GET, identity-free public reads):
   wrapped, never a bare top-level array, because a bare array is not a valid lexicon `output.schema`
   and the wrapper leaves room for a future `cursor`.
 
-The session (`crates/appview/src/session.rs`): `getSession` returns the caller as a `userView`;
-`deleteSession` (a procedure) signs out the presented session and no other. A session is an opaque
-bearer token minted by `/callback` after an atproto OAuth login.
+The session (`crates/appview/src/session.rs`): a login is `GET /login?handle=&return=`, which sends
+the browser through the member's own PDS and back to `return#code=<one-time code>`; `createSession`
+redeems that code for an opaque bearer token. `getSession` returns the caller as a `userView`, and
+`deleteSession` signs out the presented session and no other. `/login` and `/callback` are browser
+navigations, not XRPC, so they have no lexicon.
 
 Procedures (POST, authenticated; the caller's DID comes from the session, never the body):
 

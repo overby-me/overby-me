@@ -1,0 +1,40 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.createSession",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Redeem the one-time login code that /callback appended to the frontend's return URL (`#code=...`) for a session. Unauthenticated: the code is the credential. A code works once and for one minute.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["code"],
+					"properties": {
+						"code": { "type": "string" }
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["session", "did"],
+					"properties": {
+						"session": {
+							"type": "string",
+							"description": "The bearer token to send as `Authorization: Bearer` from now on."
+						},
+						"did": { "type": "string", "format": "did" }
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "InvalidCode",
+					"description": "The code is unknown, expired, or already used."
+				}
+			]
+		}
+	}
+}

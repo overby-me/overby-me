@@ -17,6 +17,10 @@ use turso::Value;
 
 pub const TTL_SECS: u64 = 30 * 24 * 60 * 60;
 
+/// Long enough for a redirect and one POST, short enough that a code read out
+/// of browser history later is already dead.
+pub const CODE_TTL_SECS: u64 = 60;
+
 #[derive(Clone)]
 pub struct Sessions {
     db: Db,
@@ -87,16 +91,77 @@ impl Sessions {
         Ok(())
     }
 
-    /// Drop every expired session. `resolve` already drops the ones it meets;
-    /// this clears those nobody presents again.
+    /// Drop every expired session and login code. `resolve` and `redeem_code`
+    /// already drop the ones they meet; this clears those nobody presents again.
     pub async fn purge_expired(&self) -> Result<u64, DbError> {
         let conn = self.db.acquire().await?;
-        Ok(conn
+        let now = secs(crate::util::now_secs());
+        let sessions = conn
             .execute(
                 "DELETE FROM session WHERE expires_at <= ?1",
-                vec![secs(crate::util::now_secs())],
+                vec![now.clone()],
             )
-            .await?)
+            .await?;
+        let codes = conn
+            .execute("DELETE FROM login_code WHERE expires_at <= ?1", vec![now])
+            .await?;
+        Ok(sessions + codes)
+    }
+
+    /// A one-time code a completed login can be redeemed with, once, within
+    /// [`CODE_TTL_SECS`].
+    pub async fn issue_code(&self, did: &str) -> Result<String, DbError> {
+        self.issue_code_at(did, crate::util::now_secs()).await
+    }
+
+    async fn issue_code_at(&self, did: &str, now: u64) -> Result<String, DbError> {
+        let code = crate::util::random_token(32);
+        let conn = self.db.acquire().await?;
+        conn.execute(
+            "INSERT INTO login_code (code_hash, did, expires_at) VALUES (?1, ?2, ?3)",
+            vec![
+                Value::Text(token_hash(&code)),
+                Value::Text(did.to_string()),
+                secs(now.saturating_add(CODE_TTL_SECS)),
+            ],
+        )
+        .await?;
+        Ok(code)
+    }
+
+    /// Spend a login code: the DID it was issued for, or `None` if it is unknown,
+    /// expired, or already spent.
+    pub async fn redeem_code(&self, code: &str) -> Result<Option<String>, DbError> {
+        self.redeem_code_at(code, crate::util::now_secs()).await
+    }
+
+    async fn redeem_code_at(&self, code: &str, now: u64) -> Result<Option<String>, DbError> {
+        let hash = token_hash(code);
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT did, expires_at FROM login_code WHERE code_hash = ?1",
+                [hash.as_str()],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        let did = row.get::<String>(0)?;
+        let expires_at = row.get::<i64>(1)?;
+        drop(rows);
+        // The DELETE is what spends the code: of two racing redeemers only one
+        // deletes a row, and only that one is given the DID.
+        let spent = conn
+            .execute(
+                "DELETE FROM login_code WHERE code_hash = ?1",
+                [hash.as_str()],
+            )
+            .await?;
+        if spent == 0 || expires_at <= secs_i64(now) {
+            return Ok(None);
+        }
+        Ok(Some(did))
     }
 }
 
@@ -255,6 +320,47 @@ mod tests {
         assert_eq!(s.purge_expired().await.expect("purge"), 1);
         assert!(s.resolve(&dead).await.expect("resolve").is_none());
         assert!(s.resolve(&live).await.expect("resolve").is_some());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_login_code_is_spent_by_its_first_use() {
+        let s = sessions().await;
+        let code = s.issue_code("did:plc:alice").await.expect("issue");
+        assert_eq!(
+            s.redeem_code(&code).await.expect("redeem").as_deref(),
+            Some("did:plc:alice")
+        );
+        assert!(
+            s.redeem_code(&code).await.expect("redeem").is_none(),
+            "a login code must not be redeemable twice"
+        );
+        assert!(
+            s.redeem_code("not-a-code").await.expect("redeem").is_none(),
+            "an unknown code must not redeem"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_login_code_dies_with_its_minute_and_is_still_spent() {
+        let s = sessions().await;
+        let code = s
+            .issue_code_at("did:plc:alice", 1_000)
+            .await
+            .expect("issue");
+        assert!(
+            s.redeem_code_at(&code, 1_000 + CODE_TTL_SECS)
+                .await
+                .expect("redeem")
+                .is_none(),
+            "an expired code must not redeem"
+        );
+        assert!(
+            s.redeem_code_at(&code, 1_000)
+                .await
+                .expect("redeem")
+                .is_none(),
+            "a late attempt must still spend the code"
+        );
     }
 
     #[test]

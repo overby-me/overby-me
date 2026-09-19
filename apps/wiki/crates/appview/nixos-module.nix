@@ -73,6 +73,31 @@ in {
       '';
     };
 
+    publicUrl = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default =
+        if cfg.proxyDomain == null
+        then null
+        else "https://${cfg.proxyDomain}";
+      defaultText = lib.literalExpression ''"https://''${proxyDomain}" when proxyDomain is set, else null'';
+      description = ''
+        Where a browser reaches the AppView. Setting it selects the production
+        OAuth client (whose `client_id` is `<publicUrl>/client-metadata.json`,
+        which a member's PDS must be able to fetch) and confines outbound
+        requests to public addresses. `null` runs a loopback dev client.
+      '';
+    };
+
+    frontendOrigins = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      example = ["https://radikal.wiki"];
+      description = ''
+        Browser origins that may call the API (CORS) and that a login may
+        return to. Empty keeps the API same-origin.
+      '';
+    };
+
     firehoseUrl = lib.mkOption {
       type = lib.types.str;
       default = "wss://jetstream2.us-east.bsky.network/subscribe";
@@ -110,6 +135,8 @@ in {
         APPVIEW_DB = "/var/lib/wiki-appview/appview.db";
         JETSTREAM_URL = cfg.firehoseUrl;
         RUST_LOG = cfg.logFilter;
+        APPVIEW_PUBLIC_URL = lib.optionalString (cfg.publicUrl != null) cfg.publicUrl;
+        APPVIEW_FRONTEND_ORIGINS = lib.concatStringsSep "," cfg.frontendOrigins;
       };
 
       serviceConfig = {

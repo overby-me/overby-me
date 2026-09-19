@@ -47,4 +47,12 @@ CREATE TABLE IF NOT EXISTS session (
   expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_by_did ON session(did);
+
+-- One-time login codes: what /callback hands the browser in place of a session
+-- token, so no credential ever sits in a URL. Hashed like the session tokens.
+CREATE TABLE IF NOT EXISTS login_code (
+  code_hash  TEXT PRIMARY KEY,
+  did        TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
 "#;

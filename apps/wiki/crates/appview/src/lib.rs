@@ -28,11 +28,15 @@ pub use db::{Db, DbError};
 pub use store::Store;
 
 use axum::extract::State;
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
+use axum::http::{HeaderValue, Method};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tokio::sync::broadcast;
+use tower_http::cors::CorsLayer;
 
 /// Shared application state handed to every handler.
 #[derive(Clone)]
@@ -69,13 +73,48 @@ impl AppState {
     }
 }
 
-/// The AppView router: liveness, the multiplexed client WebSocket, and the
-/// atproto OAuth callback.
+/// CORS for the configured frontend origins, or none, which keeps the API
+/// same-origin. No credentials mode: a session travels in a header the page
+/// sets, never in a cookie.
+fn cors(config: &Config) -> Option<CorsLayer> {
+    let origins: Vec<HeaderValue> = config
+        .frontend_origins
+        .iter()
+        .filter_map(|origin| origin.parse().ok())
+        .collect();
+    if origins.is_empty() {
+        return None;
+    }
+    Some(
+        CorsLayer::new()
+            .allow_origin(origins)
+            .allow_methods([Method::GET, Method::POST])
+            .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+            .max_age(Duration::from_secs(3600)),
+    )
+}
+
+/// The AppView router: liveness, the multiplexed client WebSocket, the atproto
+/// OAuth login, and the XRPC surface.
 pub fn router(state: AppState) -> Router {
+    let cors = cors(&state.config);
+    let router = build_router(state);
+    match cors {
+        Some(layer) => router.layer(layer),
+        None => router,
+    }
+}
+
+fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/ws", get(ws::ws_handler))
+        .route("/login", get(oauth::login_handler))
         .route("/callback", get(oauth::callback_handler))
+        .route(
+            oauth::CLIENT_METADATA_PATH,
+            get(oauth::client_metadata_handler),
+        )
         // The native XRPC read surface (identity-free content lookups).
         .route(
             "/xrpc/com.example.wiki.getDocument",
@@ -103,6 +142,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.getReactions",
             get(xrpc::get_reactions),
+        )
+        .route(
+            "/xrpc/com.example.wiki.createSession",
+            post(xrpc::create_session),
         )
         .route("/xrpc/com.example.wiki.getSession", get(xrpc::get_session))
         .route(
@@ -174,5 +217,58 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
         assert_eq!(v["ok"], true);
         assert_eq!(v["db"], true);
+    }
+
+    async fn preflight(app: Router, origin: &str) -> axum::http::HeaderMap {
+        app.oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/xrpc/com.example.wiki.createSession")
+                .header("origin", origin)
+                .header("access-control-request-method", "POST")
+                .header(
+                    "access-control-request-headers",
+                    "authorization,content-type",
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("request")
+        .headers()
+        .clone()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cors_answers_the_configured_frontend_and_nobody_else() {
+        let db = Db::open(":memory:").await.expect("open");
+        let config = Config {
+            frontend_origins: vec!["https://wiki.example".to_string()],
+            ..Config::default()
+        };
+        let app = router(AppState::new(db, config));
+
+        let ours = preflight(app.clone(), "https://wiki.example").await;
+        assert_eq!(
+            ours.get("access-control-allow-origin")
+                .and_then(|v| v.to_str().ok()),
+            Some("https://wiki.example")
+        );
+        let allowed = ours
+            .get("access-control-allow-headers")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        assert!(allowed.contains("authorization"), "{allowed}");
+        assert!(
+            ours.get("access-control-allow-credentials").is_none(),
+            "sessions are header-borne; cookies must not be invited"
+        );
+
+        let theirs = preflight(app, "https://evil.example").await;
+        assert!(
+            theirs.get("access-control-allow-origin").is_none(),
+            "a foreign origin was granted CORS"
+        );
     }
 }
