@@ -18,6 +18,9 @@
 //!   alone, and `public` to anyone.
 //! - `{"op":"unsub","topic":"..."}`.
 //! - From the server: `{"topic":"...","kind":"...","id":"..."}`.
+//! - From the server, unasked: `{"op":"unsub","topic":"...","revoked":true}`. A
+//!   grant is checked again whenever the context's membership changes, and a
+//!   listener who may no longer read it hears this once and then nothing more.
 //!
 //! A listener that falls behind the broadcast buffer is disconnected; it
 //! reconnects and refetches, which is the only honest recovery from a gap.
@@ -107,6 +110,27 @@ impl Listener {
         }
     }
 
+    /// What to send for a change, if anything.
+    ///
+    /// A `member` change is when a grant can have ended: whoever was removed is
+    /// told so, and is not told of anything in that context again.
+    async fn hear(&mut self, change: &Change) -> Option<serde_json::Value> {
+        let topic = change.topic.wire();
+        if !self.topics.contains(&topic) {
+            return None;
+        }
+        if change.kind == "member" && !self.may_watch(&change.topic).await {
+            self.topics.remove(&topic);
+            return Some(serde_json::json!({ "op": "unsub", "topic": topic, "revoked": true }));
+        }
+        serde_json::to_value(ChangeFrame {
+            topic: &topic,
+            kind: change.kind,
+            id: &change.id,
+        })
+        .ok()
+    }
+
     /// Act on a frame from the client, and say what to answer.
     async fn handle(&mut self, text: &str) -> serde_json::Value {
         let Ok(frame) = serde_json::from_str::<ClientFrame>(text) else {
@@ -154,17 +178,10 @@ async fn listen(mut socket: WebSocket, state: AppState) {
     loop {
         let outgoing = tokio::select! {
             change = changes.recv() => match change {
-                Ok(change) => {
-                    let topic = change.topic.wire();
-                    if !listener.topics.contains(&topic) {
-                        continue;
-                    }
-                    let frame = ChangeFrame { topic: &topic, kind: change.kind, id: &change.id };
-                    match serde_json::to_string(&frame) {
-                        Ok(json) => Message::Text(json.into()),
-                        Err(_) => continue,
-                    }
-                }
+                Ok(change) => match listener.hear(&change).await {
+                    Some(frame) => Message::Text(frame.to_string().into()),
+                    None => continue,
+                },
                 // Lagged or closed: a gap cannot be papered over.
                 Err(_) => break,
             },
@@ -265,6 +282,44 @@ mod tests {
         assert_eq!(l.handle(&auth("forged")).await["ok"], false);
         assert!(l.topics.is_empty());
         assert!(!sub(&mut l, "context:shut").await);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn someone_put_out_of_a_group_stops_hearing_about_it() {
+        let mut l = listener().await;
+        let token = Sessions::new(l.state.db.clone())
+            .create("did:plc:bob")
+            .await
+            .expect("session");
+        l.handle(&serde_json::json!({ "op": "auth", "session": token }).to_string())
+            .await;
+        assert!(sub(&mut l, "context:shut").await);
+        let change = |kind: &'static str| Change {
+            topic: Topic::Context("shut".into()),
+            kind,
+            id: "x".into(),
+        };
+        // Someone else joining or leaving changes nothing for bob.
+        let heard = l.hear(&change("member")).await.expect("a frame");
+        assert_eq!(heard["kind"], "member");
+
+        let conn = l.state.db.acquire().await.expect("conn");
+        conn.execute("DELETE FROM member WHERE id = 'm'", ())
+            .await
+            .expect("bob is put out");
+        let heard = l.hear(&change("member")).await.expect("a frame");
+        assert_eq!(
+            heard,
+            serde_json::json!({ "op": "unsub", "topic": "context:shut", "revoked": true })
+        );
+        assert!(
+            l.hear(&change("node")).await.is_none(),
+            "still told that the group he was put out of is changing"
+        );
+        assert!(
+            !sub(&mut l, "context:shut").await,
+            "and let straight back in"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

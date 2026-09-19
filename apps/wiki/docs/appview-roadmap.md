@@ -294,9 +294,10 @@ Decided here without the owner, and cheap to change now:
   through the gated reads. The relay it replaces sent every delta to every
   connection, unauthenticated.
 - [x] Every write path built so far publishes its change.
-- [ ] Re-checking a standing subscription when its listener's membership ends.
-  Until then a removed member keeps hearing THAT their old context changed, and
-  nothing of what.
+- [x] Re-checking a standing subscription when its listener's membership ends.
+  Every change to a context's membership has each of its listeners checked
+  again; one who may no longer read it is told so once
+  (`{"op":"unsub",...,"revoked":true}`) and hears nothing of it after.
 
 ### M8: blobs and the carried-over endpoints
 
