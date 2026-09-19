@@ -104,6 +104,21 @@ the profile read and posting to a PDS.
   and an answer was news of nothing, so the feed left answers out and the list
   of what has gone astray listed every one of them. A comment now knows the
   document its thread is on (`root_id`), which is what all three go by.
+- **The site had no home.** The interim's root is a context like any other: its
+  members run the site, its content is the welcome page, and what sits at the
+  top of the tree is made in it. The extractor skipped it as "the root every
+  path starts under", and the AppView had nothing in its place. After a cutover
+  nobody could have started a group at the top level, since a context is made
+  under one the caller owns and at the top there was none to own; nobody could
+  have read a report or put right what had gone astray, which were held to
+  "whoever owns a site", and that meant any blog; and the welcome was gone. The
+  home is a row now (`kind = 'home'`, the empty path), carried with its owners
+  and its welcome, and made at start where a datastore has none.
+- **A place said nothing about itself.** A group's front page, its cover and a
+  redirect are the context's own `data`, as a page's are. `context` had no
+  column for any of it and the extractor dropped it without a line in the
+  report: every group's front page was to be lost. The public list also left
+  out every site, where the interim leaves out the root.
 - **Nothing could run a load.** The loader was a library with no binary, and
   what a poll came to, a canvas and the reports live in tables it cannot know.
   `appview import` is the load step: one transaction, the same twice, and
@@ -274,6 +289,13 @@ The steps:
   file rows of its own over the same bytes; a purge takes the files nothing
   else points at. A purge refuses a bin entry that holds a poll, and a running
   poll does not change groups.
+- [x] The home, and what a place says about itself
+  (`crates/appview/src/context.rs`). `getNode` of the empty path is the home;
+  `createContext` makes what sits at the top under it, a site included;
+  `updateContext` takes a place's content and its data, which a read of the
+  place serves and a search finds. `APPVIEW_SITE_OWNER` seats a DID as an owner
+  of the home at every start: the operator's way in, to a new site or to a
+  loaded one none of whose owners can sign in.
 - [x] A comment's whole life (`crates/appview/src/comment.rs`): posted with a
   picture of its author's from the same context; deleted by its author or an
   owner, which empties it where it stands if it has been answered and bins it

@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "The nodes whose parent no longer exists, for an owner of the site to put right. A parent is a plain reference, since it may be a document or a context, so nothing else notices one going missing.",
+			"description": "The nodes whose parent no longer exists, for an owner of the home, who runs the site, to put right. A parent is a plain reference, since it may be a document or a context, so nothing else notices one going missing.",
 			"output": {
 				"encoding": "application/json",
 				"schema": {

@@ -159,7 +159,7 @@ async fn copy_in(
             // It may land beside its source, so its slug is found afresh.
             let mut taken = (String::new(), String::new());
             for candidate in crate::slug::candidates(&source.title) {
-                taken = (format!("{}/{candidate}", parent.path), candidate);
+                taken = (parent.child_path(&candidate), candidate);
                 if !store.path_taken(conn, &taken.0).await? {
                     break;
                 }

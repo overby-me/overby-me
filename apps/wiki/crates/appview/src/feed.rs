@@ -314,7 +314,7 @@ pub struct Orphan {
 /// be of either kind, so nothing but this notices one going missing.
 pub async fn list_orphans(State(state): State<AppState>, Caller { did }: Caller) -> Response {
     let what = "listOrphans";
-    match Authz::new(state.db.clone()).owns_a_site(&did).await {
+    match Authz::new(state.db.clone()).owns_the_site(&did).await {
         Ok(true) => {}
         Ok(false) => return forbidden("only an owner of the site sees what has gone astray"),
         Err(e) => return write_failed(what, e),
@@ -547,7 +547,7 @@ mod tests {
         let state = state().await;
         let conn = state.db.acquire().await.expect("conn");
         conn.execute_batch(
-            "INSERT INTO context (id, kind, name, slug, path) VALUES ('home', 'site', 'Home', 'home', 'home');
+            "INSERT INTO context (id, kind, name, slug, path) VALUES ('home', 'home', 'Home', '', '');
              INSERT INTO document (id, context_id, parent_id, kind, title, slug, path) \
                VALUES ('lost', 'c1', 'gone', 'document', 'Lost Page', 'lost', 'group-one/lost');
              INSERT INTO comment (id, on_id, root_id, context_id, author_did, text) \

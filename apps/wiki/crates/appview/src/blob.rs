@@ -362,6 +362,7 @@ pub(crate) async fn forget_if_unreferenced(state: &AppState, id: &str) -> Result
             .query(
                 "SELECT 1 FROM document \
                  WHERE json_extract(data, '$.fileId') = ?1 OR json_extract(data, '$.image') = ?1 \
+                 UNION ALL SELECT 1 FROM context WHERE json_extract(data, '$.image') = ?1 \
                  UNION ALL SELECT 1 FROM feedback WHERE image = ?1 \
                  UNION ALL SELECT 1 FROM comment WHERE image = ?1 LIMIT 1",
                 [id],

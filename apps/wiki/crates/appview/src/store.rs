@@ -47,8 +47,18 @@ const DOC_COLS: &str = concat!(
     "id, context_id, kind, title, mutable, content, data, visibility, published_uri, ",
     place_cols!()
 );
-/// The `context` columns the read side selects (order matches [`ctx_from_row`]).
-const CTX_COLS: &str = concat!("id, kind, name, visibility, published_uri, ", place_cols!());
+/// The `context` columns a listing selects (order matches [`ctx_from_row`]).
+const CTX_COLS: &str = concat!(
+    "id, kind, name, visibility, published_uri, ",
+    place_cols!(),
+    ", data"
+);
+/// And with what the place says about itself, for a read of that one place.
+const CTX_FULL: &str = concat!(
+    "id, kind, name, visibility, published_uri, ",
+    place_cols!(),
+    ", data, content"
+);
 
 /// The present, as every timestamp here is written: ISO-8601, UTC, milliseconds.
 /// Matches the DDL's defaults and the migrated rows, so timestamps compare as
@@ -106,7 +116,14 @@ fn doc_base(row: &turso::Row) -> Result<DocBase, DbError> {
     })
 }
 
+/// A row of [`CTX_COLS`] or of [`CTX_FULL`].
 fn ctx_from_row(row: &turso::Row) -> Result<Context, DbError> {
+    let json = |idx: usize| {
+        (idx < row.column_count())
+            .then(|| opt_text(row, idx))
+            .flatten()
+            .and_then(|text| serde_json::from_str(&text).ok())
+    };
     Ok(Context {
         id: row.get::<String>(0)?,
         kind: parse_enum(&row.get::<String>(1)?).unwrap_or(ContextKind::Group),
@@ -116,6 +133,8 @@ fn ctx_from_row(row: &turso::Row) -> Result<Context, DbError> {
             .unwrap_or_default(),
         published_uri: opt_text(row, 4),
         place: place_at(row, 5)?,
+        data: json(15),
+        content: json(16),
         legacy_id: None,
     })
 }
@@ -501,6 +520,19 @@ pub struct Parent {
     /// [`crate::authz::CONTEXT`] for any context, else the document's kind.
     pub kind: String,
     pub attachable: bool,
+    /// It is the home, which only a group, an event or a site sits in.
+    pub home: bool,
+}
+
+impl Parent {
+    /// The path of a child with `slug`. The home's own path is the empty one,
+    /// and what is in it is at `slug`, not at `/slug`.
+    pub fn child_path(&self, slug: &str) -> String {
+        match self.path.as_str() {
+            "" => slug.to_string(),
+            path => format!("{path}/{slug}"),
+        }
+    }
 }
 
 impl Store {
@@ -519,10 +551,12 @@ impl Store {
         let context = crate::authz::CONTEXT;
         for sql in [
             format!(
-                "SELECT path, id, '{context}', attachable FROM context WHERE id = ?1 AND {LIVE}"
+                "SELECT path, id, '{context}', attachable, kind = 'home' \
+                 FROM context WHERE id = ?1 AND {LIVE}"
             ),
             format!(
-                "SELECT path, context_id, kind, attachable FROM document WHERE id = ?1 AND {LIVE}"
+                "SELECT path, context_id, kind, attachable, 0 \
+                 FROM document WHERE id = ?1 AND {LIVE}"
             ),
         ] {
             let mut rows = conn.query(&sql, [id]).await?;
@@ -532,6 +566,7 @@ impl Store {
                     context_id: row.get::<String>(1)?,
                     kind: row.get::<String>(2)?,
                     attachable: row.get::<i64>(3)? != 0,
+                    home: row.get::<i64>(4)? != 0,
                 }));
             }
         }
@@ -1304,7 +1339,7 @@ impl Store {
         let mut rows = conn
             .query(
                 &format!(
-                    "SELECT {CTX_COLS} FROM context c WHERE c.id = ?1 AND c.{LIVE} AND {}",
+                    "SELECT {CTX_FULL} FROM context c WHERE c.id = ?1 AND c.{LIVE} AND {}",
                     readable_context("c", 2)
                 ),
                 vec![Value::Text(id.to_string()), opt_str_val(caller)],
@@ -1331,7 +1366,7 @@ impl Store {
             let mut rows = conn
                 .query(
                     &format!(
-                        "SELECT {CTX_COLS} FROM context c \
+                        "SELECT {CTX_FULL} FROM context c \
                          WHERE c.path = ?1 AND c.{LIVE} AND {}",
                         readable_context("c", 2)
                     ),
@@ -1643,7 +1678,7 @@ impl Store {
             .query(
                 &format!(
                     "SELECT {CTX_COLS} FROM context c \
-                     WHERE c.{LIVE} AND (?2 IS NULL OR c.kind = ?2) AND EXISTS \
+                     WHERE c.{LIVE} AND c.kind <> 'home' AND (?2 IS NULL OR c.kind = ?2) AND EXISTS \
                        (SELECT 1 FROM member m WHERE m.context_id = c.id \
                           AND m.user_did = ?1 AND m.accepted = 1) \
                      ORDER BY c.name"
@@ -1658,7 +1693,7 @@ impl Store {
         Ok(out)
     }
 
-    /// Every place open to the public, at any depth, by name. Not a site: that
+    /// Every place open to the public, at any depth, by name. Not the home: that
     /// is the front page, and listing it among the places to go is furniture.
     pub async fn list_public_contexts(&self) -> Result<Vec<Context>, DbError> {
         let conn = self.db.acquire().await?;
@@ -1666,7 +1701,7 @@ impl Store {
             .query(
                 &format!(
                     "SELECT {CTX_COLS} FROM context c \
-                     WHERE c.{LIVE} AND c.visibility = 'public' AND c.kind <> 'site' \
+                     WHERE c.{LIVE} AND c.visibility = 'public' AND c.kind <> 'home' \
                      ORDER BY c.name"
                 ),
                 (),
@@ -1679,15 +1714,18 @@ impl Store {
         Ok(out)
     }
 
-    /// The top-level contexts (groups/events with no parent) `caller` may read,
-    /// by name.
+    /// The top-level contexts `caller` may read, by name: those directly under
+    /// the home, and in a datastore that has no home, those under nothing.
     pub async fn list_root_contexts(&self, caller: Option<&str>) -> Result<Vec<Context>, DbError> {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
                 &format!(
                     "SELECT {CTX_COLS} FROM context c \
-                     WHERE c.parent_id IS NULL AND c.{LIVE} AND {} ORDER BY c.name",
+                     WHERE c.kind <> 'home' AND c.{LIVE} AND {} \
+                       AND (c.parent_id IS NULL OR c.parent_id IN \
+                            (SELECT h.id FROM context h WHERE h.kind = 'home')) \
+                     ORDER BY c.name",
                     readable_context("c", 1)
                 ),
                 vec![opt_str_val(caller)],
@@ -1815,7 +1853,7 @@ impl Store {
         let mut slug = String::new();
         let mut path = String::new();
         for candidate in crate::slug::candidates(new.title) {
-            path = format!("{}/{candidate}", parent.path);
+            path = parent.child_path(&candidate);
             slug = candidate;
             if !self.path_taken(conn, &path).await? {
                 break;
@@ -1921,10 +1959,10 @@ impl Store {
         }
 
         let mut new_slug = slug.clone();
-        let mut new_path = format!("{}/{new_slug}", parent.path);
+        let mut new_path = parent.child_path(&new_slug);
         for candidate in std::iter::once(slug.clone()).chain(crate::slug::candidates(&slug).skip(1))
         {
-            new_path = format!("{}/{candidate}", parent.path);
+            new_path = parent.child_path(&candidate);
             new_slug = candidate;
             if new_path == old_path || !self.path_taken(conn, &new_path).await? {
                 break;
@@ -2461,7 +2499,7 @@ impl Store {
         let conn = self.db.acquire().await?;
         let path = match parent_uri {
             Some(parent) => match self.parent(&conn, parent).await? {
-                Some(parent) => format!("{}/{slug}", parent.path),
+                Some(parent) => parent.child_path(slug),
                 None => return Ok(()),
             },
             None => slug.to_string(),
@@ -2607,7 +2645,7 @@ impl Store {
         // The record key, not the title: a mirrored record's place must not
         // depend on what else happens to be in the view when it arrives.
         let slug = uri.rsplit('/').next().unwrap_or(uri);
-        let path = format!("{}/{slug}", parent.path);
+        let path = parent.child_path(slug);
         conn.execute(
             &format!(
                 "INSERT INTO document \

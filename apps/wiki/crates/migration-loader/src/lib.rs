@@ -98,6 +98,13 @@ fn opt_str(s: Option<&str>) -> Value {
     }
 }
 
+fn json(v: &Option<serde_json::Value>) -> Result<Value, LoadError> {
+    Ok(match v {
+        Some(v) => Value::Text(serde_json::to_string(v)?),
+        None => Value::Null,
+    })
+}
+
 fn boolv(b: bool) -> Value {
     Value::Integer(if b { 1 } else { 0 })
 }
@@ -276,6 +283,8 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
             "id",
             "kind",
             "name",
+            "content",
+            "data",
             "visibility",
             "published_uri",
             "legacy_id",
@@ -284,6 +293,8 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
             text(&c.id),
             enum_val(&c.kind)?,
             text(&c.name),
+            json(&c.content)?,
+            json(&c.data)?,
             enum_val(&c.visibility)?,
             opt(&c.published_uri),
             opt(&c.legacy_id),
@@ -298,14 +309,7 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
         if exists(conn, "document", "id", &d.id).await? {
             continue;
         }
-        let content = match &d.content {
-            Some(v) => Value::Text(serde_json::to_string(v)?),
-            None => Value::Null,
-        };
-        let data = match &d.data {
-            Some(v) => Value::Text(serde_json::to_string(v)?),
-            None => Value::Null,
-        };
+        let (content, data) = (json(&d.content)?, json(&d.data)?);
         let mut cols = vec![
             "id",
             "context_id",
@@ -499,6 +503,8 @@ mod tests {
                 kind: ContextKind::Group,
                 name: "Group One".into(),
                 place: place("group-one", "group-one", None),
+                content: Some(serde_json::json!([{"children": [{"text": "Velkommen"}]}])),
+                data: Some(serde_json::json!({"image": "file-2"})),
                 visibility: Visibility::Private,
                 published_uri: None,
                 legacy_id: Some("c1".into()),
@@ -669,6 +675,23 @@ mod tests {
             "a reaction by an account the dump does not hold keeps no reactor"
         );
 
+        let mut rows = conn
+            .query(
+                "SELECT json_extract(data, '$.image') || '|' || \
+                        json_extract(content, '$[0].children[0].text') FROM context WHERE id = 'c1'",
+                (),
+            )
+            .await
+            .expect("q");
+        let about: String = rows
+            .next()
+            .await
+            .expect("row")
+            .expect("the context")
+            .get(0)
+            .expect("text");
+        assert_eq!(about, "file-2|Velkommen", "what a place says of itself");
+
         // Spot-check the free-text-vs-DID authorship landed correctly.
         let mut rows = conn
             .query(
@@ -723,6 +746,8 @@ mod tests {
             kind: ContextKind::Event,
             name: id.into(),
             place: place(id, id, parent),
+            content: None,
+            data: None,
             visibility: Visibility::Private,
             published_uri: None,
             legacy_id: Some(id.into()),

@@ -82,7 +82,8 @@ tested.
 All must be green before the flip:
 
 - **Row counts.** Per-table counts in staging Turso equal the expected mapped
-  counts from the dump (contexts = group+event nodes; documents = content nodes;
+  counts from the dump (contexts = group+event+site nodes and the one home;
+  documents = content nodes, polls and canvases;
   members = roster rows; users = interim users; comments = `vote/comment` nodes).
 - **`legacy_id` coverage.** Every loaded entity row has a non-NULL `legacy_id`,
   and the count of distinct `legacy_id`s per table equals the source uuid count
@@ -118,6 +119,15 @@ All must be green before the flip:
   document with a source author chip has zero author rows (the free-text authors,
   about 42 percent, survived rather than being dropped by the old scalar
   `author_did`).
+
+## Who runs the site afterwards
+
+The interim's root comes across as the home, with its owners as the owners of
+the home: they start what sits at the top, and the reports are theirs. If none
+of them can sign in (no verified address, no claim link anyone can hand them,
+since a link is an owner's to give), set `APPVIEW_SITE_OWNER` (the NixOS
+module's `siteOwner`) to a DID you hold and restart: it is seated as an owner of
+the home, and hands out the claim links from there.
 
 ## Who people are afterwards
 

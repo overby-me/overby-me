@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "procedure",
-			"description": "An owner of the site clears a report away.",
+			"description": "An owner of the home, who runs the site, clears a report away.",
 			"input": {
 				"encoding": "application/json",
 				"schema": {
@@ -36,7 +36,7 @@
 				},
 				{
 					"name": "Forbidden",
-					"description": "The caller does not own the site."
+					"description": "The caller does not own the home."
 				},
 				{
 					"name": "NotFound",

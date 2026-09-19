@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "procedure",
-			"description": "Make a group or an event under a context, or under a folder in one, that the caller owns. It is its own context from the start: the caller is its first owner, with voting rights, and nobody else is in it. It starts closed. One step, where the interim needed four writes from the browser.",
+			"description": "Make a group or an event under a context, or under a folder in one, that the caller owns; or a site, a place that publishes, directly under the home. What sits at the top of the tree is made under the home, by those who own it. It is its own context from the start: the caller is its first owner, with voting rights, and nobody else is in it. It starts closed. One step, where the interim needed four writes from the browser.",
 			"input": {
 				"encoding": "application/json",
 				"schema": {
@@ -13,7 +13,7 @@
 					"properties": {
 						"kind": {
 							"type": "string",
-							"enum": ["group", "event"]
+							"enum": ["group", "event", "site"]
 						},
 						"name": {
 							"type": "string",

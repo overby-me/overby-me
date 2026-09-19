@@ -14,7 +14,7 @@ use crate::{Db, DbError};
 use migration_extractor::Extraction;
 use migration_loader::{LoadError, LoadStats};
 use turso::{Connection, Value};
-use wiki_domain_types::{Canvas, Feedback, Poll};
+use wiki_domain_types::{Canvas, ContextKind, Feedback, Poll};
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ImportStats {
@@ -35,6 +35,8 @@ pub enum ImportError {
     Db(DbError),
     /// Somebody has signed in to this datastore.
     LivedIn,
+    /// The datastore has a home that things have been put in.
+    HomeTaken,
 }
 
 impl std::fmt::Display for ImportError {
@@ -48,6 +50,11 @@ impl std::fmt::Display for ImportError {
                 f,
                 "this datastore has been signed in to, and loading over it would bring back \
                  what was deleted there since; load into a fresh one"
+            ),
+            ImportError::HomeTaken => write!(
+                f,
+                "this datastore already has a home with things in it, and a wiki has one home; \
+                 load into a fresh one"
             ),
         }
     }
@@ -105,6 +112,9 @@ async fn load_all(conn: &Connection, ex: &Extraction) -> Result<ImportStats, Imp
         return Err(ImportError::LivedIn);
     }
     drop(sessions);
+    if ex.contexts.iter().any(|c| c.kind == ContextKind::Home) {
+        make_way_for_the_home(conn).await?;
+    }
     let mut stats = ImportStats {
         entities: migration_loader::load(conn, ex).await?,
         ..ImportStats::default()
@@ -134,6 +144,38 @@ async fn load_all(conn: &Connection, ex: &Extraction) -> Result<ImportStats, Imp
         }
     }
     Ok(stats)
+}
+
+/// The service gives a datastore a home the first time it starts. Started once
+/// before the load, that empty home is in the way of the one being loaded, and
+/// goes. One that has been used is not this command's to remove.
+async fn make_way_for_the_home(conn: &Connection) -> Result<(), ImportError> {
+    let mut rows = conn
+        .query(
+            // A loaded home has a `legacy_id`, and is this same load run again.
+            "SELECT id, EXISTS (SELECT 1 FROM context k WHERE k.parent_id = h.id) \
+                     OR EXISTS (SELECT 1 FROM document d WHERE d.context_id = h.id) \
+                     OR EXISTS (SELECT 1 FROM blob b WHERE b.context_id = h.id) \
+             FROM context h WHERE h.kind = 'home' AND h.legacy_id IS NULL",
+            (),
+        )
+        .await?;
+    let Some(row) = rows.next().await? else {
+        return Ok(());
+    };
+    let (id, used): (String, bool) = (row.get(0)?, row.get::<i64>(1)? != 0);
+    drop(rows);
+    if used {
+        return Err(ImportError::HomeTaken);
+    }
+    for sql in [
+        "DELETE FROM member WHERE context_id = ?1",
+        "DELETE FROM search_index WHERE node_id = ?1",
+        "DELETE FROM context WHERE id = ?1",
+    ] {
+        conn.execute(sql, [id.as_str()]).await?;
+    }
+    Ok(())
 }
 
 async fn exists(conn: &Connection, table: &str, id: &str) -> Result<bool, turso::Error> {
@@ -323,10 +365,14 @@ mod tests {
                  "active": true, "accepted": true, "email": "alice@x.dk", "claimToken": "spent"},
                 {"id": "m-carl", "parentId": "hb", "name": "Carl", "email": "carl@x.dk",
                  "active": true, "claimToken": "tok-carl"},
+                {"id": "m-site", "nodeId": "u-alice", "parentId": "home", "owner": true,
+                 "active": true, "accepted": true},
             ],
             "permissions": [],
             "nodes": [
-                {"id": "home", "key": "", "mimeId": "wiki/home"},
+                {"id": "home", "key": "", "mimeId": "wiki/home", "name": "Radikal Ungdom",
+                 "contextId": "home",
+                 "data": {"content": [{"children": [{"text": "Velkommen"}]}]}},
                 node("hb", "wiki/group", "hb", "home", json!({"name": "Hovedbestyrelsen"})),
                 node("mo", "vote/policy", "forslag_1", "hb", json!({"name": "Forslag 1"})),
                 node("p1", "vote/poll", "afstemning", "mo", json!({
@@ -377,10 +423,10 @@ mod tests {
             ImportStats {
                 entities: LoadStats {
                     users: 2,
-                    contexts: 1,
+                    contexts: 2,
                     documents: 3,
                     document_authors: 0,
-                    members: 2,
+                    members: 3,
                     comments: 2,
                     reactions: 1,
                 },
@@ -403,12 +449,22 @@ mod tests {
         let session =
             json!({"handle": "alice.example", "email": "alice@x.dk", "emailConfirmed": true});
         let account = account_from(ALICE, "https://bsky.social", &session, None);
-        assert_eq!(apply(&state, ALICE, &account).await.expect("apply"), 1);
+        assert_eq!(apply(&state, ALICE, &account).await.expect("apply"), 2);
 
         let read = |uri: &'static str| get_as(router(state.clone()), uri, &alice);
         let (status, v) = read("/xrpc/com.example.wiki.getNode?path=hb/forslag_1").await;
         assert_eq!(status, StatusCode::OK, "{v}");
         assert_eq!(v["viewer"]["is_context_owner"], true, "{v}");
+
+        // She runs the site, as she did: its welcome is hers to read and change,
+        // and the reports are hers to see.
+        let (status, v) = read("/xrpc/com.example.wiki.getNode?path=").await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["node"]["name"], "Radikal Ungdom");
+        assert_eq!(v["node"]["content"][0]["children"][0]["text"], "Velkommen");
+        assert_eq!(v["children"][0]["path"], "hb", "{v}");
+        let (status, v) = read("/xrpc/com.example.wiki.listFeedback").await;
+        assert_eq!(status, StatusCode::OK, "{v}");
 
         let (status, v) = read("/xrpc/com.example.wiki.getPoll?id=p1").await;
         assert_eq!(status, StatusCode::OK, "{v}");
@@ -461,6 +517,52 @@ mod tests {
         assert!(matches!(
             import(&state.db, &ex).await,
             Err(ImportError::LivedIn)
+        ));
+    }
+
+    /// The service gives a datastore a home the first time it starts, and an
+    /// operator may well start it once before loading.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_home_made_at_start_makes_way_for_the_one_loaded() {
+        let state = fresh().await;
+        crate::context::ensure_home(&state.db, &state.config)
+            .await
+            .expect("home");
+        import(&state.db, &interim()).await.expect("import");
+        let conn = state.db.acquire().await.expect("conn");
+        let mut rows = conn
+            .query("SELECT name FROM context WHERE kind = 'home'", ())
+            .await
+            .expect("q");
+        let name: String = rows
+            .next()
+            .await
+            .expect("next")
+            .expect("a home")
+            .get(0)
+            .expect("name");
+        assert_eq!(name, "Radikal Ungdom");
+        assert!(
+            rows.next().await.expect("next").is_none(),
+            "a wiki has one home"
+        );
+
+        // One that has been used is not quietly replaced.
+        let used = fresh().await;
+        crate::context::ensure_home(&used.db, &used.config)
+            .await
+            .expect("home");
+        let conn = used.db.acquire().await.expect("conn");
+        conn.execute(
+            "INSERT INTO context (id, kind, name, slug, path, parent_id) \
+             VALUES ('g', 'group', 'Ny gruppe', 'ny', 'ny', 'home')",
+            (),
+        )
+        .await
+        .expect("a group");
+        assert!(matches!(
+            import(&used.db, &interim()).await,
+            Err(ImportError::HomeTaken)
         ));
     }
 

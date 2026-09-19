@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "procedure",
-			"description": "An owner renames a context, opens it to the public or closes it, or locks it against direct additions. An absent field stays as it is. A rename keeps the address: the slug is what links point at. `public` opens the context and what is in it to everyone, signed in or not.",
+			"description": "An owner renames a context, opens it to the public or closes it, locks it against direct additions, or changes what it says about itself. An absent field stays as it is. A rename keeps the address: the slug is what links point at. `public` opens the context and what is in it to everyone, signed in or not.",
 			"input": {
 				"encoding": "application/json",
 				"schema": {
@@ -24,6 +24,14 @@
 						},
 						"attachable": {
 							"type": "boolean"
+						},
+						"content": {
+							"type": "unknown",
+							"description": "What the place says about itself (Slate JSON), replaced whole: a group's front page, the home's welcome."
+						},
+						"data": {
+							"type": "unknown",
+							"description": "What it holds beside that, replaced whole: `image` (a cover's blob id), `url` (where it redirects)."
 						}
 					}
 				}

@@ -129,7 +129,7 @@ pub async fn search_people(
                     &format!(
                         "SELECT c.id, c.kind, c.name, c.path FROM search_index s \
                          JOIN context c ON c.id = s.node_id \
-                         WHERE c.deleted_at IS NULL AND c.kind <> 'site' AND {} \
+                         WHERE c.deleted_at IS NULL AND c.kind IN ('group', 'event') AND {} \
                            AND instr(s.title, ?2) > 0 ORDER BY c.name LIMIT {MAX_MATCHES}",
                         crate::authz::readable_context("c", 1)
                     ),

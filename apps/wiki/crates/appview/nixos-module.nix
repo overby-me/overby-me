@@ -100,6 +100,29 @@ in {
       '';
     };
 
+    siteName = lib.mkOption {
+      type = lib.types.str;
+      default = "Wiki";
+      description = ''
+        What the home is called when the service makes one, which it does the
+        first time it starts on a datastore that has none. A wiki loaded with
+        `appview import` brings its own home and keeps its own name.
+      '';
+    };
+
+    siteOwner = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "did:plc:exampleexampleexample00";
+      description = ''
+        A DID seated as an owner of the home at every start. The home's owners
+        run the site: they start what sits at the top of it, and see the reports.
+        This is the operator's way in, to a new site that nobody owns yet, or to
+        a loaded one none of whose owners can sign in. It is as good as root on
+        the wiki's administration, so name an account you hold.
+      '';
+    };
+
     trustedEmailPds = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [];
@@ -186,6 +209,8 @@ in {
         APPVIEW_PUBLIC_URL = lib.optionalString (cfg.publicUrl != null) cfg.publicUrl;
         APPVIEW_FRONTEND_ORIGINS = lib.concatStringsSep "," cfg.frontendOrigins;
         APPVIEW_TRUSTED_EMAIL_PDS = lib.concatStringsSep "," cfg.trustedEmailPds;
+        APPVIEW_SITE_NAME = cfg.siteName;
+        APPVIEW_SITE_OWNER = lib.optionalString (cfg.siteOwner != null) cfg.siteOwner;
         VAPID_PUBLIC_KEY = cfg.vapidPublicKey;
         VAPID_SUBJECT = cfg.vapidSubject;
       };

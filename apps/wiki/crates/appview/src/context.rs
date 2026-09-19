@@ -1,6 +1,12 @@
-//! Making and keeping a group or an event. Everything else in the tree is a
-//! document inside one of these; a context is what people are members OF, and
-//! what decides who may read what is in it.
+//! Making and keeping a group, an event or a site. Everything else in the tree
+//! is a document inside one of these; a context is what people are members OF,
+//! and what decides who may read what is in it.
+//!
+//! All of them are under the home, the one context whose path is the empty one.
+//! Its owners run the site: they start what sits at the top level, and the
+//! reports and what has gone astray are theirs to see. A datastore loaded from
+//! the interim has its home from there; any other is given one at start
+//! ([`ensure_home`]).
 //!
 //! The interim makes one in four writes from the browser: a node in the parent's
 //! context, then the node turned into its own context, then a permission
@@ -22,9 +28,55 @@ use turso::Value;
 
 const MAX_NAME_CHARS: usize = 200;
 
+/// Give a datastore that has no home one, put under it what sat under nothing,
+/// and seat the configured owner there. Run at every start: all of it is a
+/// no-op once done, and the owner is how an operator gets in to a site none of
+/// whose owners can.
+pub async fn ensure_home(db: &crate::Db, config: &crate::Config) -> Result<(), DbError> {
+    let _turn = db.write_turn().await;
+    let conn = db.acquire().await?;
+    conn.execute(
+        "INSERT INTO context (id, kind, name, slug, path) \
+         SELECT 'home', 'home', ?1, '', '' \
+         WHERE NOT EXISTS (SELECT 1 FROM context WHERE kind = 'home')",
+        [config.site_name.as_str()],
+    )
+    .await?;
+    conn.execute(
+        "UPDATE context SET parent_id = (SELECT id FROM context WHERE kind = 'home') \
+         WHERE parent_id IS NULL AND kind <> 'home'",
+        (),
+    )
+    .await?;
+    let Some(owner) = config.site_owner.as_deref() else {
+        return Ok(());
+    };
+    conn.execute("INSERT OR IGNORE INTO user (did) VALUES (?1)", [owner])
+        .await?;
+    let seated = conn
+        .execute(
+            "UPDATE member SET role = 'owner' WHERE user_did = ?1 \
+               AND context_id = (SELECT id FROM context WHERE kind = 'home')",
+            [owner],
+        )
+        .await?;
+    if seated == 0 {
+        conn.execute(
+            "INSERT INTO member (id, user_did, context_id, role, active, accepted) \
+             SELECT ?1, ?2, id, 'owner', 1, 1 FROM context WHERE kind = 'home'",
+            [
+                format!("m-{}", crate::util::random_token(16)).as_str(),
+                owner,
+            ],
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateContextBody {
-    /// `group` or `event`. A site is not made this way.
+    /// `group`, `event`, or directly under the home a `site`.
     pub kind: String,
     pub name: String,
     pub parent_id: String,
@@ -50,7 +102,7 @@ async fn create_in(
     let id = format!("c-{}", crate::util::random_token(16));
     let (mut slug, mut path) = (String::new(), String::new());
     for candidate in crate::slug::candidates(name) {
-        path = format!("{}/{candidate}", parent.path);
+        path = parent.child_path(&candidate);
         slug = candidate;
         if !store.path_taken(conn, &path).await? {
             break;
@@ -85,16 +137,17 @@ async fn create_in(
 }
 
 /// `com.example.wiki.createContext` (procedure): make a group or an event under
-/// a context, or a folder in one, that the caller owns. The caller is its first
-/// owner, with voting rights. It starts closed to everyone else.
+/// a context, or a folder in one, that the caller owns; or a site, a place that
+/// publishes, directly under the home. The caller is its first owner, with
+/// voting rights. It starts closed to everyone else.
 pub async fn create_context(
     State(state): State<AppState>,
     Caller { did }: Caller,
     Json(body): Json<CreateContextBody>,
 ) -> Response {
     let what = "createContext";
-    if !matches!(body.kind.as_str(), "group" | "event") {
-        return invalid("a context is a group or an event");
+    if !matches!(body.kind.as_str(), "group" | "event" | "site") {
+        return invalid("a context is a group, an event or a site");
     }
     let Some(name) = named(&body.name) else {
         return invalid("a context needs a name, of at most 200 characters");
@@ -112,6 +165,9 @@ pub async fn create_context(
     }
     if !crate::authz::PLACES.contains(&parent.kind.as_str()) {
         return invalid("a group or an event sits in a context, or in a folder");
+    }
+    if body.kind == "site" && !parent.home {
+        return invalid("a site sits directly under the home");
     }
     let created = async {
         let _turn = state.db.write_turn().await;
@@ -155,11 +211,17 @@ pub struct UpdateContextBody {
     /// Whether members may add to it directly.
     #[serde(default)]
     pub attachable: Option<bool>,
+    /// What the place says about itself (Slate JSON), replaced whole.
+    #[serde(default)]
+    pub content: Option<serde_json::Value>,
+    /// What it holds beside that (a cover image, a redirect), replaced whole.
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
 }
 
 /// `com.example.wiki.updateContext` (procedure): an owner renames a context,
-/// opens or closes it to the public, or locks it. A rename keeps the address:
-/// the slug is what links point at.
+/// opens or closes it to the public, locks it, or changes what it says about
+/// itself. A rename keeps the address: the slug is what links point at.
 pub async fn update_context(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -188,6 +250,7 @@ pub async fn update_context(
             .execute(
                 "UPDATE context SET name = coalesce(?2, name), \
                    visibility = coalesce(?3, visibility), attachable = coalesce(?4, attachable), \
+                   content = coalesce(?5, content), data = coalesce(?6, data), \
                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
                  WHERE id = ?1 AND deleted_at IS NULL",
                 vec![
@@ -196,11 +259,13 @@ pub async fn update_context(
                     text(&body.visibility),
                     body.attachable
                         .map_or(Value::Null, |b| Value::Integer(i64::from(b))),
+                    text(&body.content.as_ref().map(serde_json::Value::to_string)),
+                    text(&body.data.as_ref().map(serde_json::Value::to_string)),
                 ],
             )
             .await?;
-        if let Some(name) = &name {
-            crate::search::index(&conn, &body.id, name, None).await?;
+        if changed > 0 && (name.is_some() || body.content.is_some()) {
+            reindex(&conn, &body.id).await?;
         }
         Ok::<_, DbError>(changed)
     };
@@ -212,6 +277,23 @@ pub async fn update_context(
         }
         Err(e) => write_failed(what, e),
     }
+}
+
+/// A place is found by its name and by what it says about itself.
+async fn reindex(conn: &turso::Connection, id: &str) -> Result<(), DbError> {
+    let mut rows = conn
+        .query("SELECT name, content FROM context WHERE id = ?1", [id])
+        .await?;
+    let Some(row) = rows.next().await? else {
+        return Ok(());
+    };
+    let name: String = row.get(0)?;
+    let content = match row.get_value(1)? {
+        Value::Text(content) => Some(content),
+        _ => None,
+    };
+    drop(rows);
+    Ok(crate::search::index(conn, id, &name, content.as_deref()).await?)
 }
 
 struct ContextMeta {
@@ -296,8 +378,8 @@ pub async fn delete_context(
         Ok(_) => return err(StatusCode::NOT_FOUND, "NotFound", "no such context"),
         Err(e) => return write_failed(what, e),
     };
-    if meta.kind == "site" {
-        return invalid("a site is not deleted from inside it");
+    if meta.kind == "home" {
+        return invalid("the home is not deleted");
     }
     match may_remove(&state, &body.id, &meta, &did).await {
         Ok(true) => {}
@@ -400,6 +482,203 @@ mod tests {
 
     const CREATE: &str = "/xrpc/com.example.wiki.createContext";
     const UPDATE: &str = "/xrpc/com.example.wiki.updateContext";
+
+    /// The seeded wiki, given a home that carol runs.
+    async fn with_home() -> (crate::AppState, String) {
+        let mut state = seeded_state().await;
+        state.config.site_name = "Radikal Ungdom".to_string();
+        state.config.site_owner = Some("did:plc:carol".to_string());
+        super::ensure_home(&state.db, &state.config)
+            .await
+            .expect("home");
+        let carol = token_for(&state, "did:plc:carol").await;
+        (state, carol)
+    }
+
+    /// Without a home nobody could start anything at the top level: a context is
+    /// made under one the caller owns, and at the top there was none to own.
+    #[tokio::test(flavor = "current_thread")]
+    async fn whoever_runs_the_site_starts_what_sits_at_the_top_of_it() {
+        let (state, carol) = with_home().await;
+        let alice = token_for(&state, "did:plc:alice").await;
+        super::ensure_home(&state.db, &state.config)
+            .await
+            .expect("twice");
+
+        let (status, v) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getNode?path=",
+            &carol,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(
+            (&v["node"]["kind"], &v["node"]["name"]),
+            (&json!("home"), &json!("Radikal Ungdom"))
+        );
+        assert_eq!(v["viewer"]["is_context_owner"], true, "{v}");
+        let under: Vec<&str> = v["children"]
+            .as_array()
+            .expect("children")
+            .iter()
+            .map(|c| c["id"].as_str().expect("id"))
+            .collect();
+        assert_eq!(
+            under,
+            ["c1"],
+            "what sat under nothing sits under it, and she sees what she may read: {v}"
+        );
+        let offered = v["viewer"]["can_create"].as_array().expect("can_create");
+        assert!(offered.contains(&json!("site")), "{v}");
+        let (status, _) = get(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getNode?path=",
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "it opens closed, like any place"
+        );
+
+        let make = |kind: &'static str, name: &'static str, parent: &'static str| json!({"kind": kind, "name": name, "parent_id": parent});
+        let (status, v) = post(
+            router(state.clone()),
+            CREATE,
+            Some(&alice),
+            make("group", "Ny", "home"),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "alice runs a group, not the site: {v}"
+        );
+        let (status, v) = post(
+            router(state.clone()),
+            CREATE,
+            Some(&carol),
+            make("group", "Aarhus", "home"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["path"], "aarhus", "at the top, and not at /aarhus");
+        let (status, v) = post(
+            router(state.clone()),
+            CREATE,
+            Some(&carol),
+            make("site", "Bloggen", "home"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["path"], "bloggen");
+        let (status, v) = post(
+            router(state.clone()),
+            CREATE,
+            Some(&alice),
+            make("site", "Min", "c9"),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a site sits under the home only: {v}"
+        );
+
+        let (_, v) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.listContexts?scope=roots",
+            &carol,
+        )
+        .await;
+        let roots: Vec<&str> = v["contexts"]
+            .as_array()
+            .expect("contexts")
+            .iter()
+            .map(|c| c["path"].as_str().expect("path"))
+            .collect();
+        assert_eq!(roots, ["aarhus", "bloggen", "group-one"], "{v}");
+
+        let gone = json!({"id": "home"});
+        let (status, v) = post(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.deleteContext",
+            Some(&carol),
+            gone,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    }
+
+    /// A group's front page and its cover are its own, as a page's are. The
+    /// table had no column for either, so every one of them was to be lost.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_place_says_something_about_itself() {
+        let state = seeded_state().await;
+        let alice = token_for(&state, "did:plc:alice").await;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let about = json!({
+            "id": "c9",
+            "content": [{"type": "paragraph", "children": [{"text": "Velkommen til årsmødet"}]}],
+            "data": {"image": "file-1"}
+        });
+        let (status, v) = post(router(state.clone()), UPDATE, Some(&bob), about.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "a member is no owner: {v}");
+        let (status, v) = post(router(state.clone()), UPDATE, Some(&alice), about).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+
+        let (_, v) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getNode?path=closed",
+            &bob,
+        )
+        .await;
+        assert_eq!(v["node"]["data"]["image"], "file-1", "{v}");
+        assert_eq!(
+            v["node"]["content"][0]["children"][0]["text"],
+            "Velkommen til årsmødet"
+        );
+        assert_eq!(
+            v["node"]["name"], "Closed Group",
+            "what was not sent is as it was"
+        );
+
+        let (_, v) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.listContexts?scope=roots",
+            &bob,
+        )
+        .await;
+        let listed = v["contexts"].as_array().expect("contexts");
+        let listed = listed.iter().find(|c| c["id"] == "c9").expect("c9");
+        assert_eq!(
+            listed["data"]["image"], "file-1",
+            "a list shows the cover: {v}"
+        );
+        assert!(
+            listed.get("content").is_none(),
+            "and not the whole front page"
+        );
+
+        let (_, v) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.search?q=ÅRSMØDET",
+            &bob,
+        )
+        .await;
+        assert_eq!(
+            v["hits"][0]["id"], "c9",
+            "a place is found by what it says: {v}"
+        );
+        let zoe = token_for(&state, "did:plc:zoe").await;
+        let (_, v) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.search?q=årsmødet",
+            &zoe,
+        )
+        .await;
+        assert_eq!(v["hits"], json!([]), "by those who may read it");
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn an_owner_makes_an_event_in_their_group_and_owns_it() {

@@ -73,8 +73,7 @@ pub fn plain_text(content: &serde_json::Value) -> String {
     out.trim_end().to_string()
 }
 
-/// Index a node, replacing what was there. `content` is a document's JSON as
-/// stored; a context has none.
+/// Index a node, replacing what was there. `content` is its JSON as stored.
 pub async fn index(
     conn: &Connection,
     node_id: &str,
@@ -116,9 +115,15 @@ pub async fn index_document(conn: &Connection, id: &str) -> Result<(), turso::Er
 pub async fn rebuild(db: &Db) -> Result<usize, DbError> {
     let conn = db.acquire().await?;
     let mut nodes: Vec<(String, String, Option<String>)> = Vec::new();
-    let mut rows = conn.query("SELECT id, name FROM context", ()).await?;
+    let mut rows = conn
+        .query("SELECT id, name, content FROM context", ())
+        .await?;
     while let Some(row) = rows.next().await? {
-        nodes.push((row.get(0)?, row.get(1)?, None));
+        let content = match row.get_value(2)? {
+            Value::Text(json) => Some(json),
+            _ => None,
+        };
+        nodes.push((row.get(0)?, row.get(1)?, content));
     }
     let mut rows = conn
         .query("SELECT id, title, content FROM document", ())
@@ -302,15 +307,14 @@ pub async fn search(
          ORDER BY 8, d.created_at DESC LIMIT {MAX_HITS}",
         readable_document("d", 1)
     );
-    // A context is found by its name, and only when nothing narrows the search
-    // to the inside of one.
+    // A context is found by its name and by what it says about itself, and only
+    // when nothing narrows the search to the inside of one.
     let contexts = format!(
         "SELECT c.id, c.kind, c.name, c.path, c.id, c.parent_id, c.created_at, {rank} \
          FROM search_index s JOIN context c ON c.id = s.node_id \
-         WHERE c.deleted_at IS NULL AND {} AND {} AND ?4 IS NULL \
+         WHERE c.deleted_at IS NULL AND {} AND {anywhere} AND ?4 IS NULL \
          ORDER BY 8, c.created_at DESC LIMIT {MAX_HITS}",
-        readable_context("c", 1),
-        every("s.title")
+        readable_context("c", 1)
     );
     let mut prefix = pattern(&whole);
     prefix.remove(0);

@@ -86,6 +86,9 @@ pub struct User {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextKind {
+    /// The one place everything else is under: its owners run the site, and its
+    /// path is the empty one.
+    Home,
     Group,
     Event,
     Site,
@@ -142,6 +145,12 @@ pub struct Context {
     pub name: String,
     #[serde(flatten)]
     pub place: Place,
+    /// What the place says about itself (Slate JSON). Left out of listings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<serde_json::Value>,
+    /// What it holds beside that: a cover image's file id, a redirect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
     #[serde(default)]
     pub visibility: Visibility,
     pub published_uri: Option<String>,

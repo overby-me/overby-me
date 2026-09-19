@@ -126,6 +126,9 @@ pub struct InterimPermission {
 }
 
 const CONTEXT_MIMES: &[&str] = &["wiki/group", "wiki/event", "wiki/site"];
+/// The root every path starts under. A context like any other in the interim:
+/// its members are who runs the site, and its content is the welcome page.
+const HOME_MIME: &str = "wiki/home";
 /// Nodes that become a document for their place in the tree, and a row of their
 /// own for what they are.
 const POLL_MIME: &str = "vote/poll";
@@ -311,7 +314,14 @@ pub fn extract(
             .collect()
     };
     let content_ids = mimes_of(CONTENT_MIMES);
-    let context_ids = mimes_of(CONTEXT_MIMES);
+    // The one home: a root by mime AND by having nothing above it. Any other
+    // node of that mime is reported with the unknown kinds.
+    let home = nodes
+        .iter()
+        .find(|n| n.mime_id.as_deref() == Some(HOME_MIME) && n.parent_id.is_none())
+        .map(|n| n.id.as_str());
+    let mut context_ids = mimes_of(CONTEXT_MIMES);
+    context_ids.extend(home);
     let mut authors_by_node: BTreeMap<String, Vec<Author>> = BTreeMap::new();
 
     for m in members {
@@ -389,11 +399,13 @@ pub fn extract(
                 || [POLL_MIME, CANVAS_MIME].contains(&mime)
         })
         .map(|n| n.id.as_str())
+        .chain(home)
         .collect();
 
     for n in nodes {
         let mime = n.mime_id.as_deref().unwrap_or("");
-        if CONTEXT_MIMES.contains(&mime) {
+        let is_home = home == Some(n.id.as_str());
+        if CONTEXT_MIMES.contains(&mime) || is_home {
             let name = match &n.name {
                 Some(name) => name.clone(),
                 None => {
@@ -401,15 +413,24 @@ pub fn extract(
                     String::new()
                 }
             };
+            let (content, data) = content_and_rest(n);
+            let mut place = place_of(n, &tree, &migrated, &mut out.report);
+            if is_home {
+                // Whatever key the interim gave its root, it is in no path.
+                (place.slug, place.path) = (String::new(), String::new());
+            }
             out.contexts.push(Context {
                 id: n.id.clone(),
                 kind: match mime {
+                    HOME_MIME => ContextKind::Home,
                     "wiki/event" => ContextKind::Event,
                     "wiki/site" => ContextKind::Site,
                     _ => ContextKind::Group,
                 },
                 name,
-                place: place_of(n, &tree, &migrated, &mut out.report),
+                place,
+                content,
+                data,
                 visibility: Visibility::Private,
                 published_uri: None,
                 legacy_id: Some(n.id.clone()),
@@ -481,8 +502,6 @@ pub fn extract(
                 "vote/vote" | "canvas/pixel" => {}
                 // What a projector showed while a meeting ran, and nothing after.
                 "speak/list" | "speak/speak" => out.report.note_left_behind(mime),
-                // The root every path starts under, which has no row of its own.
-                "wiki/home" => {}
                 other => out.report.note_mime(other),
             }
         }
@@ -864,9 +883,9 @@ fn realize_context_owners(
 /// Where a node sits: its key, its path and its parent.
 ///
 /// A parent that is not itself migrated cannot be kept, or the row would hang
-/// off something the new tree does not have. The interim root (`wiki/home`) is
-/// the expected case, and makes its children roots; any other is reported,
-/// because that subtree is about to come loose.
+/// off something the new tree does not have. It is reported, because that
+/// subtree is about to come loose. A dump with no home is the one exception:
+/// there the top level hangs off nothing, as it did.
 fn place_of(
     n: &InterimNode,
     tree: &BTreeMap<&str, &InterimNode>,
@@ -939,13 +958,22 @@ fn map_content(
         "vote/question" => DocumentKind::Question,
         _ => DocumentKind::Document,
     };
+    let (content, data) = content_and_rest(n);
+    (content, data, kind)
+}
+
+/// A node's Slate `content`, and whatever else its `data` holds, carried as it
+/// is: a file's id and type, a cover image, a redirect.
+fn content_and_rest(n: &InterimNode) -> (Option<serde_json::Value>, Option<serde_json::Value>) {
     let Some(serde_json::Value::Object(map)) = &n.data else {
-        return (None, None, kind);
+        return (None, None);
     };
     let mut rest = map.clone();
     let content = rest.remove("content");
-    let data = (!rest.is_empty()).then_some(serde_json::Value::Object(rest));
-    (content, data, kind)
+    (
+        content,
+        (!rest.is_empty()).then_some(serde_json::Value::Object(rest)),
+    )
 }
 
 /// A comment node's text lives in `data.text` (census: vote/comment shape).

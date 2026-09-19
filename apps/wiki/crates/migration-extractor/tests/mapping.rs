@@ -660,14 +660,90 @@ fn tree() -> Vec<InterimNode> {
     ]
 }
 
+/// The interim's root is a context like any other: its members run the site, and
+/// its content is the welcome page. It was skipped as "the root every path
+/// starts under", which left a site nobody ran, with nothing at the top of it
+/// for anyone to start a group in, and no welcome.
+#[test]
+fn the_root_comes_across_as_the_home_with_who_runs_it_and_what_it_says() {
+    let mut nodes = tree();
+    nodes[0] = serde_json::from_value(json!({
+        "id": "home", "name": "Radikal Ungdom", "key": "whatever", "mimeId": "wiki/home",
+        "parentId": null, "contextId": "home",
+        "data": {"content": [{"children": [{"text": "Velkommen"}]}], "image": "file-1"}
+    }))
+    .expect("the root");
+    nodes.push(node_with("stray", "wiki/home", json!({"parentId": "g"})));
+    let mut runs_it = member("m-home", "home", Some("u-gs"), None);
+    runs_it.owner = true;
+    let ex = extract(&nodes, &[runs_it], &[]);
+
+    let home = ex
+        .contexts
+        .iter()
+        .find(|c| c.id == "home")
+        .expect("the home");
+    assert_eq!(home.kind, ContextKind::Home);
+    assert_eq!(
+        (home.place.slug.as_str(), home.place.path.as_str()),
+        ("", "")
+    );
+    assert_eq!(home.place.parent_id, None);
+    assert_eq!(home.name, "Radikal Ungdom");
+    assert_eq!(
+        home.content.as_ref().expect("welcome")[0]["children"][0]["text"],
+        "Velkommen"
+    );
+    assert_eq!(home.data.as_ref().expect("data")["image"], "file-1");
+
+    let seat = ex
+        .members
+        .iter()
+        .find(|m| m.id == "m-home")
+        .expect("the seat");
+    assert_eq!((seat.context_id.as_str(), seat.role), ("home", Role::Owner));
+    assert_eq!(
+        ex.report.unmapped_mimes.get("wiki/home"),
+        Some(&1),
+        "a second one, inside the tree, is not a home: {:?}",
+        ex.report
+    );
+    assert!(ex.report.unmapped_source.is_empty(), "{:?}", ex.report);
+}
+
+/// A group's front page and cover are its own. A context's `data` was dropped
+/// whole, without a line in the report.
+#[test]
+fn a_place_keeps_what_it_says_about_itself() {
+    let nodes = vec![node_with(
+        "ctx1",
+        "wiki/group",
+        json!({
+            "parentId": null,
+            "data": {"content": [{"children": [{"text": "Om os"}]}], "image": "file-2", "url": "https://x.dk"}
+        }),
+    )];
+    let ex = extract(&nodes, &[], &[]);
+    let group = &ex.contexts[0];
+    assert_eq!(
+        group.content.as_ref().expect("content")[0]["children"][0]["text"],
+        "Om os"
+    );
+    assert_eq!(
+        group.data,
+        Some(json!({"image": "file-2", "url": "https://x.dk"}))
+    );
+}
+
 #[test]
 fn every_node_keeps_its_place_in_the_tree() {
     let ex = extract(&tree(), &[], &[]);
     let ctx = |id: &str| ex.contexts.iter().find(|c| c.id == id).expect("context");
     let doc = |id: &str| ex.documents.iter().find(|d| d.id == id).expect("document");
 
-    // The root is not a row, so its children are roots and its key is no segment.
-    assert_eq!(ctx("g").place.parent_id, None);
+    // The root is the home: what is at the top sits in it, and its key is no
+    // segment of any path.
+    assert_eq!(ctx("g").place.parent_id.as_deref(), Some("home"));
     assert_eq!(ctx("g").place.path, "ungdom");
     assert_eq!(ctx("s").kind, ContextKind::Site);
 

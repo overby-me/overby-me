@@ -81,9 +81,11 @@ navigations, not XRPC, so they have no lexicon.
 
 Procedures (POST, authenticated; the caller's DID comes from the session, never the body):
 
-- `createContext` makes a group or an event, with the caller as its first owner; `updateContext`
-  renames it, opens it to the public or locks it; `deleteContext` and `restoreContext` are its way
-  in and out of the bin.
+- `createContext` makes a group or an event, or directly under the home a site, with the caller as
+  its first owner; `updateContext` renames it, opens it to the public, locks it, or changes what it
+  says about itself (`content`, `data`); `deleteContext` and `restoreContext` are its way in and out
+  of the bin. Everything is under the home, the one context whose path is the empty one: its owners
+  run the site, so what sits at the top is theirs to start, and the reports are theirs to read.
 - `createDocument` and `postComment` return `{ id }` and need membership of the context written to;
   `addReaction` returns `{ id }` (idempotent) and `removeReaction` returns `{ ok: true }` (idempotent
   toggle-off). A comment may show a picture its author uploaded to the same context.

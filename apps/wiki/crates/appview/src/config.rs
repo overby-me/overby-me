@@ -86,6 +86,13 @@ pub struct Config {
     /// Keys the signed blob links (`APPVIEW_SECRET`). Unset, one is made on
     /// first start and kept beside the database file.
     pub secret: Secret,
+    /// What a home made at start is called (`APPVIEW_SITE_NAME`). One loaded
+    /// from the interim keeps its own name.
+    pub site_name: String,
+    /// A DID seated as an owner of the home at every start
+    /// (`APPVIEW_SITE_OWNER`): the operator's way in, to a new site or to one
+    /// none of whose owners can get in.
+    pub site_owner: Option<String>,
 }
 
 /// Room for scanned minutes or a short video.
@@ -95,6 +102,8 @@ const DEFAULT_MAX_BLOB_BYTES: u64 = 64 * 1024 * 1024;
 /// files in all), and short of what would fill a small host's disk unnoticed.
 const DEFAULT_MAX_MEMBER_BLOB_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const DEFAULT_MAX_CONTEXT_BLOB_BYTES: u64 = 20 * 1024 * 1024 * 1024;
+
+const DEFAULT_SITE_NAME: &str = "Wiki";
 
 impl Config {
     /// Whether a login may hand control back to `url`. An open redirect here
@@ -148,6 +157,12 @@ impl Config {
                 .parse()
                 .unwrap_or(DEFAULT_MAX_CONTEXT_BLOB_BYTES),
             secret,
+            site_name: match env("APPVIEW_SITE_NAME") {
+                name if name.trim().is_empty() => DEFAULT_SITE_NAME.to_string(),
+                name => name.trim().to_string(),
+            },
+            site_owner: Some(env("APPVIEW_SITE_OWNER").trim().to_string())
+                .filter(|did| did.starts_with("did:")),
             db_path,
             firehose_url: std::env::var("JETSTREAM_URL")
                 .unwrap_or_else(|_| "wss://jetstream2.us-east.bsky.network/subscribe".to_string()),
@@ -252,6 +267,8 @@ impl Default for Config {
             max_member_blob_bytes: DEFAULT_MAX_MEMBER_BLOB_BYTES,
             max_context_blob_bytes: DEFAULT_MAX_CONTEXT_BLOB_BYTES,
             secret: Secret::new(crate::util::random_token(32)),
+            site_name: DEFAULT_SITE_NAME.to_string(),
+            site_owner: None,
         }
     }
 }

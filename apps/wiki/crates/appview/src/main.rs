@@ -42,6 +42,10 @@ async fn main() {
             std::process::exit(2);
         }
     }
+    if let Err(e) = appview::context::ensure_home(&db, &config).await {
+        tracing::error!("failed to make sure the site has a home: {e}");
+        std::process::exit(1);
+    }
     // The atproto OAuth client (durable SQLite stores). A build failure here is
     // fatal: identity is load-bearing, so the process must not serve `/callback`
     // silently misconfigured.

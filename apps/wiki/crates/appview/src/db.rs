@@ -100,7 +100,7 @@ impl Db {
 /// so a file made by an older binary keeps its old columns. Without this the
 /// process would start and then fail one query at a time; with it, it refuses
 /// to start and says why.
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 async fn schema_version(conn: &Connection) -> Result<i64, DbError> {
     let mut rows = conn.query("PRAGMA user_version", ()).await?;

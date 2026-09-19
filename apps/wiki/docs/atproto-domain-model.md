@@ -243,16 +243,20 @@ CREATE TABLE user (
 -- is not a foreign key on either; the write path keeps it honest. A path is
 -- unique among LIVE rows only, so a binned node does not hold its URL hostage.
 
--- Contexts: groups, events & sites (the org's structures).
+-- Contexts: groups, events & sites (the org's structures), and the one home they
+-- are all under: its path is the empty one, and its owners run the site.
 CREATE TABLE context (
   id            TEXT PRIMARY KEY,
-  kind          TEXT NOT NULL CHECK (kind IN ('group','event','site')),
+  kind          TEXT NOT NULL CHECK (kind IN ('home','group','event','site')),
   name          TEXT NOT NULL,
   -- ...the place columns...
+  content       TEXT,                                    -- what the place says about itself (Slate JSON)
+  data          TEXT,                                    -- a cover image, a redirect
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
   published_uri TEXT                                     -- the at-uri, if the context is public
 );
 CREATE UNIQUE INDEX context_path_live ON context(path) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX context_one_home ON context(kind) WHERE kind = 'home';
 
 -- Content: documents / folders / files / proposals (kind-tagged).
 CREATE TABLE document (

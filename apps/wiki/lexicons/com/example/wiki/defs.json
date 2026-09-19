@@ -141,15 +141,23 @@
 		},
 		"contextView": {
 			"type": "object",
-			"description": "A context: a group, an event or a site, the org's organizing structure, with its place in the tree.",
+			"description": "A context: a group, an event or a site, the org's organizing structure, with its place in the tree; or the home they are all under, whose path is the empty one and whose owners run the site.",
 			"required": ["id", "kind", "name", "slug", "path", "visibility"],
 			"properties": {
 				"id": { "type": "string" },
 				"kind": {
 					"type": "string",
-					"enum": ["group", "event", "site"]
+					"enum": ["home", "group", "event", "site"]
 				},
 				"name": { "type": "string" },
+				"content": {
+					"type": "unknown",
+					"description": "What the place says about itself (Slate JSON). Served with the place itself, and left out of listings."
+				},
+				"data": {
+					"type": "unknown",
+					"description": "What it holds beside that: `image` (a cover's blob id), `url` (where it redirects)."
+				},
 				"slug": {
 					"type": "string",
 					"description": "The URL segment, unique among live siblings. The server picks it from the name."
@@ -160,7 +168,7 @@
 				},
 				"parent_id": {
 					"type": "string",
-					"description": "The parent node, a context or a document. Absent for a root."
+					"description": "The parent node, a context or a document. Absent for the home."
 				},
 				"idx": {
 					"type": "integer",

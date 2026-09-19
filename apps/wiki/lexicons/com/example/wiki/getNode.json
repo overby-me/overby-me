@@ -10,7 +10,7 @@
 				"properties": {
 					"path": {
 						"type": "string",
-						"description": "The slugs from the root, slash-joined; empty segments are ignored."
+						"description": "The slugs from the root, slash-joined; empty segments are ignored. The empty path is the home."
 					},
 					"id": {
 						"type": "string"

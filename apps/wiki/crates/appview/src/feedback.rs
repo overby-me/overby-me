@@ -291,7 +291,7 @@ pub struct FeedbackView {
 pub async fn list_feedback(State(state): State<AppState>, Caller { did }: Caller) -> Response {
     let what = "listFeedback";
     let all = match crate::authz::Authz::new(state.db.clone())
-        .owns_a_site(&did)
+        .owns_the_site(&did)
         .await
     {
         Ok(all) => all,
@@ -375,7 +375,7 @@ pub async fn delete_feedback(
 ) -> Response {
     let what = "deleteFeedback";
     match crate::authz::Authz::new(state.db.clone())
-        .owns_a_site(&did)
+        .owns_the_site(&did)
         .await
     {
         Ok(true) => {}
@@ -417,7 +417,7 @@ mod tests {
         let conn = state.db.acquire().await.expect("conn");
         conn.execute(
             "INSERT INTO context (id, kind, name, slug, path) \
-             VALUES ('home', 'site', 'Home', 'home', 'home')",
+             VALUES ('home', 'home', 'Home', '', '')",
             (),
         )
         .await

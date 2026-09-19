@@ -192,9 +192,15 @@ pub async fn get_node(
             .and_then(|k| k.as_str().map(str::to_string))
             .unwrap_or_default(),
     };
-    let can_create = membership.map_or_else(Vec::new, |membership| {
+    let mut can_create = membership.map_or_else(Vec::new, |membership| {
         crate::authz::creatable(&kind_as_parent, node.place().attachable, membership)
     });
+    // A site sits directly under the home, and nowhere else.
+    let is_home = matches!(&node, crate::store::Node::Context(c)
+        if c.kind == wiki_domain_types::ContextKind::Home);
+    if is_home && can_create.contains(&"group") {
+        can_create.push("site");
+    }
     let viewer = serde_json::json!({
         "can_create": can_create,
         "is_owner": caller.did().is_some() && caller.did() == node.place().owner_did.as_deref(),

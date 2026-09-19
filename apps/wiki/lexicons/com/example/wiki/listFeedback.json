@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "Every report, for an owner of the site; for anyone else, the ones they sent. Latest sighting first, with the profile behind every DID named.",
+			"description": "Every report, for an owner of the home, who runs the site; for anyone else, the ones they sent. Latest sighting first, with the profile behind every DID named.",
 			"output": {
 				"encoding": "application/json",
 				"schema": {

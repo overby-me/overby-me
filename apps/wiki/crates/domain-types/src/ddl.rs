@@ -36,12 +36,13 @@ CREATE TABLE user (
   legacy_id    TEXT UNIQUE
 );
 
--- Contexts: groups, events and sites (the org's structures). parent_id names a
--- context OR a document (a group can sit in a folder), so it is not a foreign
--- key; the write path keeps it honest.
+-- Contexts: groups, events and sites (the org's structures), and the one home
+-- they are all under, whose path is the empty one and whose owners run the
+-- site. parent_id names a context OR a document (a group can sit in a folder),
+-- so it is not a foreign key; the write path keeps it honest.
 CREATE TABLE context (
   id            TEXT PRIMARY KEY,
-  kind          TEXT NOT NULL CHECK (kind IN ('group','event','site')),
+  kind          TEXT NOT NULL CHECK (kind IN ('home','group','event','site')),
   name          TEXT NOT NULL,
   slug          TEXT NOT NULL,
   path          TEXT NOT NULL,
@@ -49,6 +50,8 @@ CREATE TABLE context (
   idx           INTEGER NOT NULL DEFAULT 0,
   attachable    INTEGER NOT NULL DEFAULT 1,
   owner_did     TEXT REFERENCES user(did),
+  content       TEXT,                                      -- what the place says about itself
+  data          TEXT,                                      -- a cover image, a redirect
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
   published_uri TEXT,
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
@@ -59,6 +62,7 @@ CREATE TABLE context (
 );
 -- Live rows only: a node in the bin does not hold its URL hostage.
 CREATE UNIQUE INDEX context_path_live ON context(path) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX context_one_home ON context(kind) WHERE kind = 'home';
 CREATE INDEX context_children ON context(parent_id, idx);
 
 -- Content: documents / folders / files / proposals (kind-tagged). Authorship is

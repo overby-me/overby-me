@@ -5,6 +5,12 @@ replaces it. This is what the client behind `src/model.rs` is written from
 (roadmap M9), and it is how four things the plan had missed came to light: no
 way to start a group, reactions nobody gated, the canvas, and the pickers.
 
+That first pass read the data layer and not its callers. The components call
+the generic `update_node`, `bin_node` and `delete_node` on every kind of node,
+so a second pass went through those call sites by the kind they touch, and
+found what the rows marked below cover: a comment's picture, deletion and bin;
+a place's own content; and the root as something that is owned and edited.
+
 The frontend's data layer is `src/graphql/*.rs` (Hasura), `src/backend_api.rs`
 (the sidecar) and `src/nhost.rs` (auth and storage). Live queries are
 `src/graphql/subscriptions.rs`.
@@ -15,7 +21,7 @@ The frontend's data layer is `src/graphql/*.rs` (Hasura), `src/backend_api.rs`
 |-|-|
 | `resolve_path`, `node_path`, `path_from_id`, `path_crumbs` | `getNode` (a node by path or id, with crumbs), `resolveNode` |
 | `query_node_by_id`, `query_children`, `query_drawer_children` | `getNode`, `listChildren` |
-| `query_root_node` | `listContexts` (the site is the root) |
+| `query_root_node` (the welcome page, who runs the site) | `getNode` of the empty path, which is the home; `listContexts` for what is under it |
 | `query_contexts` (my groups, my events) | `listContexts?scope=mine&kind=` |
 | `query_public_places` | `listContexts?scope=public` |
 | `node_insert_mimes`, `query_permissions` | `getNode`'s `viewer.can_create` |
@@ -33,7 +39,7 @@ The frontend's data layer is `src/graphql/*.rs` (Hasura), `src/backend_api.rs`
 |-|-|
 | `insert_node`, `insert_node_named` | `createDocument` |
 | `create_context` (four writes) | `createContext` |
-| `update_node` | `updateDocument`, `updateContext` |
+| `update_node` (a page's title, content and data; and the same on a group, an event or the root, from the editor and the redirect app) | `updateDocument`, `updateContext` (`content`, `data`) |
 | `set_context_attachable`, `set_context_public` | `updateContext` |
 | `bin_node`, `delete_node`, `delete_node_deep` | `deleteDocument`, `deleteContext` |
 | `restore_node`, `purge_node`, `query_deleted` | `restoreDocument`, `restoreContext`, `purgeDocument`, `listDeleted` |
