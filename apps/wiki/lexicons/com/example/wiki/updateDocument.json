@@ -17,7 +17,11 @@
 						"data": { "type": "unknown" },
 						"mutable": { "type": "boolean" },
 						"attachable": { "type": "boolean" },
-						"idx": { "type": "integer" }
+						"idx": { "type": "integer" },
+						"created_at": {
+							"type": "string",
+							"description": "The date it is filed under, which an owner of the context may set: minutes are dated by their meeting. `2026-05-01`, or a UTC RFC 3339 timestamp."
+						}
 					}
 				}
 			},

@@ -972,6 +972,10 @@ pub struct UpdateDocumentBody {
     pub attachable: Option<bool>,
     #[serde(default)]
     pub idx: Option<i64>,
+    /// The date it is filed under: minutes are dated by their meeting, not by
+    /// the day somebody typed them up. An owner's to set.
+    #[serde(default)]
+    pub created_at: Option<String>,
 }
 
 /// A live document the caller may read, with their standing towards it. A
@@ -1014,10 +1018,20 @@ pub async fn update_document(
     };
     let arranges = body.attachable.is_some()
         || body.idx.is_some()
+        || body.created_at.is_some()
         || (body.mutable == Some(true) && !meta.mutable);
     if arranges && !standing.may_arrange() {
-        return forbidden("only an owner of the context may reorder, lock or reopen");
+        return forbidden("only an owner of the context may reorder, lock, reopen or redate");
     }
+    let created_at = match body
+        .created_at
+        .as_deref()
+        .map(crate::util::stored_timestamp)
+    {
+        Some(None) => return invalid("a date is 2026-05-01, or a UTC timestamp"),
+        Some(at) => at,
+        None => None,
+    };
     if !standing.may_edit(meta.mutable) {
         return forbidden(if meta.mutable {
             "not yours to edit"
@@ -1031,6 +1045,7 @@ pub async fn update_document(
         title: body.title.as_deref(),
         content: content.as_deref(),
         data: data.as_deref(),
+        created_at: created_at.as_deref(),
         mutable: body.mutable,
         attachable: body.attachable,
         idx: body.idx,
@@ -2823,6 +2838,25 @@ pub(crate) mod tests {
         let m = meeting().await;
         let id = &m.motion;
         let edit = |title: &'static str| serde_json::json!({"id": id, "title": title});
+
+        // Minutes are dated by their meeting, which is the chair's to say.
+        let dated = |at: &'static str| serde_json::json!({"id": id, "created_at": at});
+        assert_eq!(
+            m.call("updateDocument", &m.dave, dated("2026-05-01")).await,
+            StatusCode::FORBIDDEN,
+            "an author redated their own motion"
+        );
+        assert_eq!(
+            m.call("updateDocument", &m.chair, dated("1. maj")).await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            m.call("updateDocument", &m.chair, dated("2026-05-01"))
+                .await,
+            StatusCode::OK
+        );
+        let (_, doc) = m.read(&m.dave).await;
+        assert_eq!(doc["created_at"], "2026-05-01T00:00:00.000Z");
 
         assert_eq!(
             m.call("updateDocument", &m.dave, edit("Bedre titel")).await,

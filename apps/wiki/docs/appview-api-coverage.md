@@ -29,7 +29,7 @@ The frontend's data layer is `src/graphql/*.rs` (Hasura), `src/backend_api.rs`
 | `search_nodes` | `search` |
 | `query_recent_nodes`, `thread_host`, `thread_host_id` | `listRecent` (each row carries what it is about) |
 | `query_user_contributions`, `query_group_contributions` | `listContributions?did=` and `?context=` |
-| `query_orphans` | `listOrphans` |
+| `query_orphans`, and `delete_node_deep` on one from the missing-parent view | `listOrphans`, `purgeOrphan` |
 | `query_nodes_by_ids` | none: the feed refetches a page |
 | `count_nodes` | unused in the frontend |
 

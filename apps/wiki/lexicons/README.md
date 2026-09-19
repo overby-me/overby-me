@@ -66,7 +66,7 @@ the caller wrote it. A row the caller may not read answers exactly as a missing 
   a path names. Every node stores its path, so that is one lookup at any depth.
 - `search` finds documents and contexts by what they are called and what they say; `listRecent` is
   the feed; `listContributions` is what a person or a group has put forward; `listOrphans` (the site
-  owner's) is what has lost its parent. Their rows are light: a name, a path and what the row is
+  owner's) is what has lost its parent, and `purgeOrphan` clears one of those away. Their rows are light: a name, a path and what the row is
   about, never a document's content.
 - `listChildren`, `listContexts`, `listRecent`, `search`, `getComments`, `getReactions` return an
   object wrapping a named array (`{ documents: [...] }`, `{ contexts: [...] }`, ...). Lists are

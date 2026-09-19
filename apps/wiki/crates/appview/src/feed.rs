@@ -309,6 +309,16 @@ pub struct Orphan {
     pub parent_id: String,
 }
 
+/// SQL that holds where the node `id` names is neither a document nor a context:
+/// what makes an orphan of whatever points at it.
+pub(crate) fn nowhere(id: &str) -> String {
+    format!(
+        "{id} IS NOT NULL \
+         AND NOT EXISTS (SELECT 1 FROM document p WHERE p.id = {id}) \
+         AND NOT EXISTS (SELECT 1 FROM context p WHERE p.id = {id})"
+    )
+}
+
 /// `com.example.wiki.listOrphans`: the nodes whose parent no longer exists, for
 /// an owner of the site to put right. A parent is a plain column, since it may
 /// be of either kind, so nothing but this notices one going missing.
@@ -319,13 +329,6 @@ pub async fn list_orphans(State(state): State<AppState>, Caller { did }: Caller)
         Ok(false) => return forbidden("only an owner of the site sees what has gone astray"),
         Err(e) => return write_failed(what, e),
     }
-    let nowhere = |id: &str| {
-        format!(
-            "{id} IS NOT NULL \
-             AND NOT EXISTS (SELECT 1 FROM document p WHERE p.id = {id}) \
-             AND NOT EXISTS (SELECT 1 FROM context p WHERE p.id = {id})"
-        )
-    };
     let found = async {
         let conn = state.db.acquire().await?;
         let mut orphans = Vec::new();

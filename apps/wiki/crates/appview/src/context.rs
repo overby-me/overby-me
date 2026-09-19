@@ -217,6 +217,9 @@ pub struct UpdateContextBody {
     /// What it holds beside that (a cover image, a redirect), replaced whole.
     #[serde(default)]
     pub data: Option<serde_json::Value>,
+    /// The date it is filed under: a meeting's own date.
+    #[serde(default)]
+    pub created_at: Option<String>,
 }
 
 /// `com.example.wiki.updateContext` (procedure): an owner renames a context,
@@ -243,6 +246,15 @@ pub async fn update_context(
     {
         return invalid("visibility is public or private");
     }
+    let created_at = match body
+        .created_at
+        .as_deref()
+        .map(crate::util::stored_timestamp)
+    {
+        Some(None) => return invalid("a date is 2026-05-01, or a UTC timestamp"),
+        Some(at) => at,
+        None => None,
+    };
     let changed = async {
         let conn = state.db.acquire().await?;
         let text = |v: &Option<String>| v.clone().map_or(Value::Null, Value::Text);
@@ -251,6 +263,7 @@ pub async fn update_context(
                 "UPDATE context SET name = coalesce(?2, name), \
                    visibility = coalesce(?3, visibility), attachable = coalesce(?4, attachable), \
                    content = coalesce(?5, content), data = coalesce(?6, data), \
+                   created_at = coalesce(?7, created_at), \
                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
                  WHERE id = ?1 AND deleted_at IS NULL",
                 vec![
@@ -261,6 +274,7 @@ pub async fn update_context(
                         .map_or(Value::Null, |b| Value::Integer(i64::from(b))),
                     text(&body.content.as_ref().map(serde_json::Value::to_string)),
                     text(&body.data.as_ref().map(serde_json::Value::to_string)),
+                    text(&created_at),
                 ],
             )
             .await?;

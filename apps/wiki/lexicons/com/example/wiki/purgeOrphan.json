@@ -1,0 +1,53 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.purgeOrphan",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "An owner of the home, who runs the site, deletes for good a node that `listOrphans` lists, and what is under it: a page as `purgeDocument` takes one, a comment with the answers and the reactions to it. A group or an event does not go this way: it holds people's seats, and it still opens by its path.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": {
+						"id": {
+							"type": "string"
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["purged"],
+					"properties": {
+						"purged": {
+							"type": "integer",
+							"description": "How many pages, or how many comments, went."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller does not own the home."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such node, or one that is in its place."
+				},
+				{
+					"name": "NotPurgeable",
+					"description": "A poll or a group is under it. A vote's record and a group are nobody's to purge."
+				}
+			]
+		}
+	}
+}

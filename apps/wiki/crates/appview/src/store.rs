@@ -417,6 +417,8 @@ pub struct DocumentPatch<'a> {
     pub title: Option<&'a str>,
     pub content: Option<&'a str>,
     pub data: Option<&'a str>,
+    /// The date it is filed under, as `crate::util::stored_timestamp` leaves it.
+    pub created_at: Option<&'a str>,
     pub mutable: Option<bool>,
     pub attachable: Option<bool>,
     pub idx: Option<i64>,
@@ -2184,6 +2186,9 @@ impl Store {
         }
         if let Some(data) = patch.data {
             set("data", Value::Text(data.to_string()));
+        }
+        if let Some(created_at) = patch.created_at {
+            set("created_at", Value::Text(created_at.to_string()));
         }
         if let Some(mutable) = patch.mutable {
             set("mutable", flag(mutable));

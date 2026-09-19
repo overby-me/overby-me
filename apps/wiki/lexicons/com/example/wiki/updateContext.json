@@ -32,6 +32,10 @@
 						"data": {
 							"type": "unknown",
 							"description": "What it holds beside that, replaced whole: `image` (a cover's blob id), `url` (where it redirects)."
+						},
+						"created_at": {
+							"type": "string",
+							"description": "The date it is filed under, such as a meeting's own. `2026-05-01`, or a UTC RFC 3339 timestamp."
 						}
 					}
 				}

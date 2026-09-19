@@ -198,6 +198,10 @@ fn build_router(state: AppState) -> Router {
             get(feed::list_orphans),
         )
         .route(
+            "/xrpc/com.example.wiki.purgeOrphan",
+            post(tree::purge_orphan),
+        )
+        .route(
             "/xrpc/com.example.wiki.getProfile",
             get(people::get_profile),
         )

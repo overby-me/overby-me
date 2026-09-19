@@ -88,6 +88,51 @@ fn percent_decode(s: &str) -> String {
 }
 
 /// Parse a `a=b&c=d` query string (without the leading `?`) into decoded pairs.
+/// A date a person may set, as timestamps are stored here: ISO-8601, UTC,
+/// milliseconds, so that they compare as text. Takes `2026-05-01`, or a UTC
+/// RFC 3339 timestamp with or without a fraction. `None` for anything else, an
+/// offset other than UTC included: converting one takes a calendar.
+pub fn stored_timestamp(input: &str) -> Option<String> {
+    let input = input.trim();
+    let digits = |s: &str, max: u32| {
+        (s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| s.parse::<u32>().ok())
+            .flatten()
+            .filter(|n| *n <= max)
+    };
+    let (date, time) = match input.split_once(['T', ' ']) {
+        Some((date, time)) => (date, Some(time)),
+        None => (input, None),
+    };
+    let mut parts = date.split('-');
+    let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
+    let year_ok = year.len() == 4 && year.bytes().all(|b| b.is_ascii_digit());
+    let in_range = digits(month, 12)? >= 1 && digits(day, 31)? >= 1;
+    if parts.next().is_some() || !year_ok || !in_range {
+        return None;
+    }
+    let Some(time) = time else {
+        return Some(format!("{date}T00:00:00.000Z"));
+    };
+    let time = time
+        .strip_suffix('Z')
+        .or_else(|| time.strip_suffix("+00:00"))?;
+    let (clock, fraction) = time.split_once('.').unwrap_or((time, "0"));
+    let mut parts = clock.split(':');
+    let (hour, minute, second) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some()
+        || fraction.is_empty()
+        || !fraction.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    digits(hour, 23)?;
+    digits(minute, 59)?;
+    digits(second, 60)?;
+    let millis: String = fraction.chars().chain("000".chars()).take(3).collect();
+    Some(format!("{date}T{clock}.{millis}Z"))
+}
+
 pub fn parse_query(query: Option<&str>) -> Vec<(String, String)> {
     query
         .unwrap_or("")
@@ -103,6 +148,37 @@ pub fn parse_query(query: Option<&str>) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_date_is_stored_as_every_timestamp_is() {
+        for (given, stored) in [
+            ("2026-05-01", "2026-05-01T00:00:00.000Z"),
+            (" 2026-05-01T18:30:00Z ", "2026-05-01T18:30:00.000Z"),
+            ("2026-05-01T18:30:00.5Z", "2026-05-01T18:30:00.500Z"),
+            (
+                "2026-05-01T18:30:00.123456+00:00",
+                "2026-05-01T18:30:00.123Z",
+            ),
+            ("2026-05-01 18:30:00Z", "2026-05-01T18:30:00.000Z"),
+        ] {
+            assert_eq!(stored_timestamp(given).as_deref(), Some(stored), "{given}");
+        }
+        for not in [
+            "",
+            "1. maj",
+            "2026-13-01",
+            "2026-05-00",
+            "26-05-01",
+            "2026-05-01T25:00:00Z",
+            "2026-05-01T18:30:00+02:00",
+            "2026-05-01T18:30:00",
+            "2026-05-01T18:30:00.Z",
+            "2026-05-01-01",
+            "2026-05-01T18:30Z",
+        ] {
+            assert_eq!(stored_timestamp(not), None, "{not}");
+        }
+    }
 
     #[test]
     fn parse_query_decodes_pairs() {

@@ -296,6 +296,11 @@ The steps:
   place serves and a search finds. `APPVIEW_SITE_OWNER` seats a DID as an owner
   of the home at every start: the operator's way in, to a new site or to a
   loaded one none of whose owners can sign in.
+- [x] What the second pass over the frontend's callers turned up beside that:
+  `purgeOrphan`, since the view that lists what has gone astray exists to clear
+  it away and the AppView could only list; and an owner redating a page or a
+  meeting (`created_at` on `updateDocument` and `updateContext`), which is how
+  minutes come to be filed under the day of the meeting.
 - [x] A comment's whole life (`crates/appview/src/comment.rs`): posted with a
   picture of its author's from the same context; deleted by its author or an
   owner, which empties it where it stands if it has been answered and bins it

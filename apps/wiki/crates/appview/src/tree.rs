@@ -425,6 +425,146 @@ pub async fn purge_document(
     }
 }
 
+/// The most comments one orphaned thread is followed through.
+const MAX_THREAD: usize = 10_000;
+
+/// Delete the comment `id` and every answer under it, with the reactions to
+/// them. Level by level: the engine has no recursive query. Returns how many
+/// comments went, and the pictures they held.
+async fn purge_thread(conn: &Connection, id: &str) -> Result<(u64, Vec<String>), WriteError> {
+    let mut all: Vec<String> = Vec::new();
+    let mut level = vec![id.to_string()];
+    while !level.is_empty() && all.len() < MAX_THREAD {
+        let marks = (1..=level.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut rows = conn
+            .query(
+                &format!("SELECT id FROM comment WHERE on_id IN ({marks})"),
+                level.iter().cloned().map(Value::Text).collect::<Vec<_>>(),
+            )
+            .await?;
+        let mut next = Vec::new();
+        while let Some(row) = rows.next().await? {
+            next.push(row.get::<String>(0)?);
+        }
+        all.append(&mut level);
+        level = next;
+    }
+    let (mut purged, mut images) = (0, Vec::new());
+    for comment in &all {
+        let mut rows = conn
+            .query(
+                "SELECT image FROM comment WHERE id = ?1",
+                [comment.as_str()],
+            )
+            .await?;
+        if let Some(row) = rows.next().await? {
+            images.extend(text(&row, 0));
+        }
+        drop(rows);
+        conn.execute(
+            "DELETE FROM reaction WHERE subject_uri = ?1",
+            [comment.as_str()],
+        )
+        .await?;
+        purged += conn
+            .execute("DELETE FROM comment WHERE id = ?1", [comment.as_str()])
+            .await?;
+    }
+    Ok((purged, images))
+}
+
+/// `com.example.wiki.purgeOrphan` (procedure): whoever runs the site deletes for
+/// good a node `listOrphans` lists, and what is under it. A page goes as a purge
+/// from the bin takes it, a comment with the answers to it. A group does not go
+/// this way: it holds people's seats and a record of its own, and it still opens
+/// by its path.
+pub async fn purge_orphan(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Json(body): Json<PurgeBody>,
+) -> Response {
+    let what = "purgeOrphan";
+    match Authz::new(state.db.clone()).owns_the_site(&did).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return forbidden("only an owner of the site clears away what has gone astray");
+        }
+        Err(e) => return write_failed(what, e),
+    }
+    let purged = async {
+        let _turn = state.db.write_turn().await;
+        let conn = state.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let purged = purge_orphan_in(&conn, &body.id).await;
+        conn.execute(if purged.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())
+            .await?;
+        purged
+    };
+    match purged.await {
+        Ok((nodes, blobs)) => {
+            for blob in blobs {
+                if let Err(e) = crate::blob::forget_if_unreferenced(&state, &blob).await {
+                    tracing::warn!("purging an orphan left blob {blob} behind: {e}");
+                }
+            }
+            (StatusCode::OK, Json(serde_json::json!({ "purged": nodes }))).into_response()
+        }
+        Err(WriteError::Db(e)) => write_failed(what, e),
+        Err(WriteError::NotBinned) => err(StatusCode::NOT_FOUND, "NotFound", "no such orphan"),
+        Err(refused) => crate::xrpc::conflict("NotPurgeable", &refused.to_string()),
+    }
+}
+
+async fn purge_orphan_in(conn: &Connection, id: &str) -> Result<(u64, Vec<String>), WriteError> {
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT d.path FROM document d WHERE d.id = ?1 AND {}",
+                crate::feed::nowhere("d.parent_id")
+            ),
+            [id],
+        )
+        .await?;
+    if let Some(row) = rows.next().await? {
+        let path: String = row.get(0)?;
+        drop(rows);
+        // In the bin under itself, whatever bin it was in: what a purge takes.
+        conn.execute(
+            "UPDATE document SET deleted_root = ?1, \
+               deleted_at = coalesce(deleted_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')) \
+             WHERE id = ?1 OR substr(path, 1, length(?2) + 1) = ?2 || '/'",
+            [id, path.as_str()],
+        )
+        .await?;
+        conn.execute(
+            "UPDATE context SET deleted_root = ?1 \
+             WHERE substr(path, 1, length(?2) + 1) = ?2 || '/'",
+            [id, path.as_str()],
+        )
+        .await?;
+        return purge_in(conn, id).await;
+    }
+    drop(rows);
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT 1 FROM comment k WHERE k.id = ?1 AND {} \
+                   AND NOT EXISTS (SELECT 1 FROM post p WHERE p.id = k.root_id)",
+                crate::feed::nowhere("k.root_id")
+            ),
+            [id],
+        )
+        .await?;
+    if rows.next().await?.is_none() {
+        return Err(WriteError::NotBinned);
+    }
+    drop(rows);
+    purge_thread(conn, id).await
+}
+
 #[cfg(test)]
 mod tests {
     use crate::AppState;
@@ -843,6 +983,92 @@ mod tests {
         let picture = answers[0]["image"].as_str().expect("its picture");
         let (status, _, _) = fetch(&state, &format!("/blob/{picture}"), Some(&carol), None).await;
         assert_eq!(status, StatusCode::OK, "the picture in it went along");
+    }
+
+    /// The view that lists what has gone astray is there so that it can be
+    /// cleared away, which the AppView could list and not do.
+    #[tokio::test(flavor = "current_thread")]
+    async fn whoever_runs_the_site_clears_away_what_has_gone_astray() {
+        let (mut state, _) = state().await;
+        state.config.site_owner = Some("did:plc:carol".to_string());
+        crate::context::ensure_home(&state.db, &state.config)
+            .await
+            .expect("home");
+        let alice = token_for(&state, "did:plc:alice").await;
+        let carol = token_for(&state, "did:plc:carol").await;
+        let conn = state.db.acquire().await.expect("conn");
+        conn.execute_batch(
+            "INSERT INTO document (id, context_id, parent_id, kind, title, slug, path) \
+               VALUES ('lost', 'c9', 'gone', 'folder', 'Lost', 'lost', 'closed/gone/lost');
+             INSERT INTO document (id, context_id, parent_id, kind, title, slug, path) \
+               VALUES ('lost-page', 'c9', 'lost', 'document', 'Side', 'side', 'closed/gone/lost/side');
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, text) \
+               VALUES ('k-lost', 'lost-page', 'lost-page', 'c9', 'did:plc:bob', 'Hvor blev den af?');
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, text) \
+               VALUES ('k-astray', 'nothing', 'nothing', 'c9', 'did:plc:bob', 'On nothing');
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, text) \
+               VALUES ('k-answer', 'k-astray', 'nothing', 'c9', 'did:plc:alice', 'An answer to it');
+             INSERT INTO reaction (id, subject_uri, reactor_did, emoji) \
+               VALUES ('r-astray', 'k-answer', 'did:plc:bob', '👍');",
+        )
+        .await
+        .expect("seed");
+        let purge = |who: &str, id: &'static str| {
+            let (state, who) = (state.clone(), who.to_string());
+            async move {
+                let uri = "/xrpc/com.example.wiki.purgeOrphan";
+                post(router(state), uri, Some(&who), json!({"id": id})).await
+            }
+        };
+
+        let (status, v) = purge(&alice, "lost").await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "she runs a group, not the site: {v}"
+        );
+        let (status, v) = purge(&carol, "pg").await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "a page in its place is no orphan: {v}"
+        );
+        let (status, v) = purge(&carol, "kp").await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "nor is a comment on one: {v}"
+        );
+
+        let (status, v) = purge(&carol, "lost").await;
+        assert_eq!((status, &v["purged"]), (StatusCode::OK, &json!(2)), "{v}");
+        let (status, v) = purge(&carol, "k-astray").await;
+        assert_eq!((status, &v["purged"]), (StatusCode::OK, &json!(2)), "{v}");
+        for (what, sql) in [
+            (
+                "pages",
+                "SELECT count(*) FROM document WHERE id IN ('lost', 'lost-page')",
+            ),
+            (
+                "comments",
+                "SELECT count(*) FROM comment WHERE id IN ('k-lost', 'k-astray', 'k-answer')",
+            ),
+            (
+                "reactions",
+                "SELECT count(*) FROM reaction WHERE id = 'r-astray'",
+            ),
+        ] {
+            assert_eq!(count(&state, sql).await, 0, "{what} outlived the purge");
+        }
+        assert_eq!(
+            count(
+                &state,
+                "SELECT count(*) FROM comment WHERE id IN ('kp', 'kr')"
+            )
+            .await,
+            2,
+            "what is in its place was left alone"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
