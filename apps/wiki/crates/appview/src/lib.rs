@@ -16,6 +16,8 @@ pub mod firehose;
 pub mod http;
 pub mod live;
 pub mod logs;
+pub mod metafile;
+pub mod metafile_svg;
 pub mod oauth;
 pub mod poll;
 pub mod projector;
@@ -357,6 +359,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.notifyReply",
             post(push::notify_reply),
+        )
+        .route(
+            "/xrpc/com.example.wiki.renderMetafile",
+            post(metafile::render_metafile),
         )
         .route(
             "/xrpc/com.example.wiki.parseRoster",

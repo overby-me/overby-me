@@ -44,6 +44,18 @@ base64 = "0.22"
 # out of the wasm bundle every phone downloads.
 calamine = "0.36"
 chacha20poly1305 = "0.10"
+# Renders Word/PowerPoint metafile figures (EMF/EMF+/WMF), which no browser can
+# draw. Here rather than in the wasm: the renderer is ~400 KB gzipped.
+#
+# The interim backend's FORK of the v0.2.0 tag, carrying one fix (`dib_to_png`
+# decoded only 24- and 32-bit bitmaps, so a figure holding a palettised one
+# failed outright). Not upstream main, which fixes the same bug but also
+# changed font selection to the family the metafile NAMES, and metafiles name
+# Windows fonts. `backend/Cargo.toml` has the whole story. Pinned to a rev so
+# the Nix `outputHashes` in default.nix cannot go stale under `cargo update`.
+emfsdk = { git = "https://github.com/overby-me/emfsdk", rev = "4e4269f9ed35d2a204dba9880060ea17cf0fc9e4", default-features = false, features = [
+  "render"
+] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hkdf = "0.12"
 # Signs the links that let an <img> or a document viewer fetch one blob.

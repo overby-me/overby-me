@@ -336,7 +336,10 @@ asks Bluesky's public API itself. The steps:
   a crash known before the cutover keeps its row once migrated. Reports need no
   session, so those without one share a budget of ten a minute. Not migrated
   yet: the interim's existing reports (M9).
-- [ ] Metafile rendering (EMF/WMF figures in Word and PowerPoint files to PNG).
+- [x] Metafile rendering (`renderMetafile`): EMF and WMF figures in Word and
+  PowerPoint files to SVG, or PNG where the SVG emitter declines. The PNG path
+  draws text with whatever generic sans the host has, so a host with no fonts
+  installed renders those figures without their text.
 - [ ] Posting to a member's own PDS.
 
 ### M9: frontend swap, migration, cutover rehearsal

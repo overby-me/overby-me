@@ -38,7 +38,14 @@
         ];
       };
 
-      cargoLock.lockFile = ./../Cargo.lock;
+      cargoLock = {
+        lockFile = ./../Cargo.lock;
+        # The one git dependency (the metafile renderer's fork, pinned to a rev
+        # in appview/Cargo.toml). The interim backend pins the same rev.
+        outputHashes = {
+          "emfsdk-0.2.0" = "sha256-UvdZXTczvGL2vRl4CWfTXKiFjLBaM5Uvup9+62YJ8O8=";
+        };
+      };
 
       # Build (and install) ONLY the appview binary out of the workspace.
       cargoBuildFlags = ["--package" "appview"];
