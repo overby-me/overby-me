@@ -150,7 +150,12 @@ pub async fn ingest(store: &Store, raw: &str) -> Result<Option<Delta>, FirehoseE
 }
 
 /// Materialize a create/update record into the view (best-effort; a record whose
-/// required fields or context are missing is skipped, leaving it broadcast-only).
+/// required fields are missing is skipped, leaving it broadcast-only).
+///
+/// So is a record that points at something the view does not hold: the firehose
+/// promises no order across repos, so a reply can arrive before its post and a
+/// resolution before its group. Those references are foreign keys. Until
+/// backfill-on-gap exists, such a record waits for a rebuild of the view.
 async fn materialize(
     store: &Store,
     did: &str,
@@ -168,9 +173,21 @@ async fn materialize(
     match collection {
         POST_COLLECTION => {
             if let (Some(text), Some(created)) = (s("text"), s("createdAt")) {
+                let group = s("group");
+                let reply = ref_uri("reply");
+                if let Some(group) = group
+                    && !store.context_exists(group).await?
+                {
+                    return Ok(());
+                }
+                if let Some(reply) = reply
+                    && !store.post_exists(reply).await?
+                {
+                    return Ok(());
+                }
                 store.upsert_user_min(did).await?;
                 store
-                    .upsert_public_post(uri, did, text, s("group"), ref_uri("reply"), created)
+                    .upsert_public_post(uri, did, text, group, reply, created)
                     .await?;
             }
         }
@@ -192,6 +209,11 @@ async fn materialize(
                 } else {
                     "group"
                 };
+                if let Some(parent) = ref_uri("parent")
+                    && !store.context_exists(parent).await?
+                {
+                    return Ok(());
+                }
                 store
                     .upsert_public_context(uri, kind, name, slug, ref_uri("parent"), created)
                     .await?;
@@ -214,6 +236,9 @@ async fn materialize(
             if let (Some(title), Some(status), Some(created), Some(context)) =
                 (s("title"), s("status"), s("createdAt"), s("context"))
             {
+                if !store.context_exists(context).await? {
+                    return Ok(());
+                }
                 store.upsert_user_min(did).await?;
                 store
                     .upsert_public_resolution(uri, context, title, s("body"), status, did, created)
@@ -564,9 +589,28 @@ mod tests {
     async fn resolution_materializes_as_a_document() {
         let (store, db) = store_with_db().await;
         let raw = r#"{"did":"did:plc:org","kind":"commit","commit":{"operation":"create","collection":"com.example.wiki.resolution","rkey":"r1","record":{"title":"Vedtaegt","status":"carried","context":"at://did:plc:org/com.example.wiki.group/g1","body":"the text","createdAt":"2026-07-16T12:00:00.000Z"}}}"#;
-        ingest(&store, raw).await.unwrap();
         let uri = "at://did:plc:org/com.example.wiki.resolution/r1";
         let conn = db.acquire().await.unwrap();
+
+        // Its group is not in the view yet: broadcast, not materialized.
+        let delta = ingest(&store, raw)
+            .await
+            .expect("an orphan is not an error");
+        assert!(delta.is_some(), "an orphan resolution is still broadcast");
+        let mut orphan = conn
+            .query("SELECT count(*) FROM document", ())
+            .await
+            .unwrap();
+        assert_eq!(
+            orphan.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
+            0,
+            "a resolution was filed under a group the view has never seen"
+        );
+        drop(orphan);
+
+        let group = r#"{"did":"did:plc:org","kind":"commit","commit":{"operation":"create","collection":"com.example.wiki.group","rkey":"g1","record":{"name":"Org","slug":"org","createdAt":"2026-07-16T11:00:00.000Z"}}}"#;
+        ingest(&store, group).await.unwrap();
+        ingest(&store, raw).await.unwrap();
         let mut rows = conn
             .query(
                 "SELECT kind, title, context_id FROM document WHERE id = ?1",

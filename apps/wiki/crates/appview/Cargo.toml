@@ -64,6 +64,6 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
   "fmt",
   "json"
 ] }
-turso = "0.2"
+turso = "0.7"
 wiki-domain-types = { path = "../domain-types" }
 wiki-schema = { path = "../schema" }

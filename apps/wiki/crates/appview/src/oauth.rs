@@ -116,27 +116,16 @@ impl JsonKv {
     async fn set_json<V: Serialize>(&self, key: &str, value: &V) -> Result<(), StoreError> {
         let json = serde_json::to_string(value)?;
         let conn = self.db.acquire().await?;
-        // turso 0.2.2 has no upsert (ON CONFLICT/OR REPLACE unsupported), so
-        // UPDATE-then-INSERT (same as the push seam in `store.rs`).
-        let updated = conn
-            .execute(
-                &format!(
-                    "UPDATE {} SET value = ?1 WHERE {} = ?2",
-                    self.table, self.key_col
-                ),
-                [json.clone(), key.to_string()],
-            )
-            .await?;
-        if updated == 0 {
-            conn.execute(
-                &format!(
-                    "INSERT INTO {} ({}, value) VALUES (?1, ?2)",
-                    self.table, self.key_col
-                ),
-                [key.to_string(), json],
-            )
-            .await?;
-        }
+        conn.execute(
+            &format!(
+                "INSERT INTO {table} ({key}, value) VALUES (?1, ?2) \
+                 ON CONFLICT({key}) DO UPDATE SET value = excluded.value",
+                table = self.table,
+                key = self.key_col
+            ),
+            [key.to_string(), json],
+        )
+        .await?;
         Ok(())
     }
 
@@ -625,7 +614,7 @@ mod tests {
         };
         kv.set_json("k", &v).await.expect("set");
         assert_eq!(kv.get_json::<Probe>("k").await.expect("get").unwrap(), v);
-        // Upsert overwrites (no ON CONFLICT: UPDATE path).
+        // Upsert overwrites.
         kv.set_json(
             "k",
             &Probe {

@@ -270,11 +270,6 @@ async fn ddl_executes_and_rows_round_trip_on_turso() {
         .await
         .expect("DDL executes on turso");
 
-    // FINDING (turso 0.2.2): an INSERT that OMITS a nullable UNIQUE column is
-    // rejected at parse time ("column X is not nullable"), while an explicit
-    // NULL works and SQLite NULL-uniqueness semantics hold (multiple NULLs
-    // fine). Dialect gap to re-test at the 1.0 gate; inserts below therefore
-    // pass explicit NULLs where stock SQLite would allow omission.
     conn.execute(
         "INSERT INTO user (did, handle, display_name, legacy_id) VALUES ('did:plc:alice', 'alice.test', 'Alice', NULL)",
         (),
@@ -318,5 +313,115 @@ async fn ddl_executes_and_rows_round_trip_on_turso() {
     assert!(
         dup.is_err(),
         "turso enforces the member_pending partial unique"
+    );
+}
+
+/// What the AppView's SQL assumes of turso, and the one thing it still cannot
+/// assume. turso 0.2.2 had none of the first group: no `EXISTS`, no
+/// `IN (subquery)`, no upsert, no omitted nullable-UNIQUE column, and it ignored
+/// the foreign-key pragma. Each assertion is a tripwire for a future bump.
+#[tokio::test(flavor = "current_thread")]
+async fn turso_dialect_the_appview_relies_on() {
+    let db = turso::Builder::new_local(":memory:")
+        .build()
+        .await
+        .expect("build");
+    let conn = db.connect().expect("connect");
+    conn.execute_batch(ENTITY_SCHEMA).await.expect("DDL");
+
+    // Foreign keys are OFF until asked for, as on stock SQLite, so every
+    // connection must set the pragma and read it back.
+    let dangling = "INSERT INTO post (id, author_did, text) VALUES (?1, 'did:plc:ghost', 'x')";
+    conn.execute(dangling, ["p-off"])
+        .await
+        .expect("a dangling reference is accepted while enforcement is off");
+    conn.execute("PRAGMA foreign_keys=ON", ())
+        .await
+        .expect("the pragma is recognized");
+    let mut on = conn
+        .query("PRAGMA foreign_keys", ())
+        .await
+        .expect("readback");
+    let row = on.next().await.expect("next").expect("a row");
+    assert_eq!(row.get::<i64>(0).expect("int"), 1, "pragma readback");
+    drop(on);
+    assert!(
+        conn.execute(dangling, ["p-on"]).await.is_err(),
+        "turso enforces foreign keys once the pragma is on"
+    );
+
+    // An omitted nullable UNIQUE column, and both kinds of upsert.
+    conn.execute("INSERT INTO user (did) VALUES ('did:plc:alice')", ())
+        .await
+        .expect("legacy_id may be omitted");
+    conn.execute(
+        "INSERT OR IGNORE INTO user (did) VALUES ('did:plc:alice')",
+        (),
+    )
+    .await
+    .expect("INSERT OR IGNORE");
+    conn.execute(
+        "INSERT INTO user (did, handle) VALUES ('did:plc:alice', 'alice.test') \
+         ON CONFLICT(did) DO UPDATE SET handle = excluded.handle",
+        (),
+    )
+    .await
+    .expect("ON CONFLICT DO UPDATE");
+    let mut rows = conn
+        .query("SELECT handle FROM user WHERE did = 'did:plc:alice'", ())
+        .await
+        .expect("query");
+    let handle: String = rows
+        .next()
+        .await
+        .expect("next")
+        .expect("row")
+        .get(0)
+        .expect("handle");
+    assert_eq!(handle, "alice.test", "the upsert updated in place");
+    drop(rows);
+
+    // Subqueries, which the read gate is written in.
+    conn.execute_batch(
+        "INSERT INTO context (id, kind, name, slug, visibility) VALUES ('open', 'group', 'O', 'o', 'public');
+         INSERT INTO context (id, kind, name, slug) VALUES ('shut', 'group', 'S', 's');
+         INSERT INTO document (id, context_id, kind, title) VALUES ('d-open', 'open', 'document', 'A');
+         INSERT INTO document (id, context_id, kind, title) VALUES ('d-shut', 'shut', 'document', 'B');",
+    )
+    .await
+    .expect("seed");
+    for gated in [
+        "SELECT d.id FROM document d WHERE EXISTS \
+           (SELECT 1 FROM context c WHERE c.id = d.context_id AND c.visibility = 'public')",
+        "SELECT d.id FROM document d WHERE d.context_id IN \
+           (SELECT id FROM context WHERE visibility = 'public')",
+    ] {
+        let mut rows = conn.query(gated, ()).await.expect("a subquery in WHERE");
+        let id: String = rows
+            .next()
+            .await
+            .expect("next")
+            .expect("one row")
+            .get(0)
+            .expect("id");
+        assert_eq!(id, "d-open", "{gated}");
+        assert!(rows.next().await.expect("next").is_none(), "{gated}");
+    }
+
+    // Still missing: a tree cannot be walked in one query, so a path is resolved
+    // a segment at a time. When this starts passing, that can be revisited.
+    let recursive = conn
+        .query(
+            "WITH RECURSIVE up(id, parent_id) AS ( \
+               SELECT id, parent_id FROM context WHERE id = 'shut' \
+               UNION ALL \
+               SELECT c.id, c.parent_id FROM context c JOIN up ON c.id = up.parent_id) \
+             SELECT id FROM up",
+            (),
+        )
+        .await;
+    assert!(
+        recursive.is_err(),
+        "turso gained recursive CTEs: path resolution can become one query"
     );
 }

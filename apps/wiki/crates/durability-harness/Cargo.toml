@@ -9,4 +9,4 @@ edition = "2024"
 ballot-store = { path = "../ballot-store" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 tokio = { version = "1", features = ["macros", "rt"] }
-turso = "0.2"
+turso = "0.7"

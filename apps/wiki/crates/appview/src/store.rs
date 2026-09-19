@@ -268,12 +268,6 @@ impl Store {
 
     /// Upsert a device's Web Push subscription by endpoint (a device
     /// re-subscribing keeps one row with fresh keys).
-    ///
-    /// FINDING (turso 0.2.2): neither `INSERT ... ON CONFLICT` nor `INSERT OR
-    /// REPLACE` parse ("ON CONFLICT clause is not supported"), so the interim's
-    /// single upsert statement cannot port verbatim. This does the portable
-    /// two-step instead: UPDATE by the endpoint key, and INSERT only if no row
-    /// matched. Revisit when turso gains upsert support.
     pub async fn upsert_push_subscription(
         &self,
         user_did: &str,
@@ -283,21 +277,14 @@ impl Store {
         auth: &str,
     ) -> Result<(), DbError> {
         let conn = self.db.acquire().await?;
-        let updated = conn
-            .execute(
-                "UPDATE push_subscription SET user_did = ?1, email = ?2, p256dh = ?3, auth = ?4 \
-                 WHERE endpoint = ?5",
-                [user_did, email, p256dh, auth, endpoint],
-            )
-            .await?;
-        if updated == 0 {
-            conn.execute(
-                "INSERT INTO push_subscription \
-                 (endpoint, user_did, email, p256dh, auth) VALUES (?1, ?2, ?3, ?4, ?5)",
-                [endpoint, user_did, email, p256dh, auth],
-            )
-            .await?;
-        }
+        conn.execute(
+            "INSERT INTO push_subscription (endpoint, user_did, email, p256dh, auth) \
+             VALUES (?1, ?2, ?3, ?4, ?5) \
+             ON CONFLICT(endpoint) DO UPDATE SET user_did = excluded.user_did, \
+               email = excluded.email, p256dh = excluded.p256dh, auth = excluded.auth",
+            [endpoint, user_did, email, p256dh, auth],
+        )
+        .await?;
         Ok(())
     }
 
@@ -356,27 +343,19 @@ impl Store {
 
     // -- Firehose materialization (public records mirrored into the view) --
 
-    /// Upsert a MINIMAL user row (just the DID) so an author FK target exists for
-    /// a firehose-materialized public record. No-op if the user already exists.
-    /// The nullable-UNIQUE `legacy_id` is passed as an explicit NULL (turso
-    /// rejects omitting it).
+    /// A user row for `did` if there is none yet, so the foreign keys that point
+    /// at a person have something to point at. Leaves an existing profile alone.
     pub async fn upsert_user_min(&self, did: &str) -> Result<(), DbError> {
         let conn = self.db.acquire().await?;
-        let mut rows = conn
-            .query("SELECT 1 FROM user WHERE did = ?1 LIMIT 1", [did])
-            .await?;
-        if rows.next().await?.is_some() {
-            return Ok(());
-        }
-        conn.execute("INSERT INTO user (did, legacy_id) VALUES (?1, NULL)", [did])
+        conn.execute("INSERT OR IGNORE INTO user (did) VALUES (?1)", [did])
             .await?;
         Ok(())
     }
 
     /// Materialize a public `com.example.wiki.post` record into the `post` view,
-    /// keyed by its at-uri (also its `published_uri` and `legacy_id`). Upsert via
-    /// UPDATE-then-INSERT (turso has no `ON CONFLICT`). `group`/`reply` are the
-    /// record's at-uris, stored as-is (resolving them to local ids is depth-3).
+    /// keyed by its at-uri (also its `published_uri` and `legacy_id`). `group` and
+    /// `reply` are at-uris and foreign keys, so the caller must have checked that
+    /// both are in the view.
     pub async fn upsert_public_post(
         &self,
         uri: &str,
@@ -387,38 +366,23 @@ impl Store {
         created_at: &str,
     ) -> Result<(), DbError> {
         let conn = self.db.acquire().await?;
-        let group = opt_str_val(group);
-        let reply = opt_str_val(reply);
-        let updated = conn
-            .execute(
-                "UPDATE post SET author_did = ?1, text = ?2, group_id = ?3, reply_to = ?4, \
-                 visibility = 'public', published_uri = ?5, created_at = ?6 WHERE id = ?5",
-                vec![
-                    Value::Text(author_did.to_string()),
-                    Value::Text(text.to_string()),
-                    group.clone(),
-                    reply.clone(),
-                    Value::Text(uri.to_string()),
-                    Value::Text(created_at.to_string()),
-                ],
-            )
-            .await?;
-        if updated == 0 {
-            conn.execute(
-                "INSERT INTO post \
-                 (id, author_did, text, group_id, reply_to, visibility, published_uri, created_at, legacy_id) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'public', ?1, ?6, ?1)",
-                vec![
-                    Value::Text(uri.to_string()),
-                    Value::Text(author_did.to_string()),
-                    Value::Text(text.to_string()),
-                    group,
-                    reply,
-                    Value::Text(created_at.to_string()),
-                ],
-            )
-            .await?;
-        }
+        conn.execute(
+            "INSERT INTO post \
+             (id, author_did, text, group_id, reply_to, visibility, published_uri, created_at, legacy_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 'public', ?1, ?6, ?1) \
+             ON CONFLICT(id) DO UPDATE SET author_did = excluded.author_did, \
+               text = excluded.text, group_id = excluded.group_id, \
+               reply_to = excluded.reply_to, created_at = excluded.created_at",
+            vec![
+                Value::Text(uri.to_string()),
+                Value::Text(author_did.to_string()),
+                Value::Text(text.to_string()),
+                opt_str_val(group),
+                opt_str_val(reply),
+                Value::Text(created_at.to_string()),
+            ],
+        )
+        .await?;
         Ok(())
     }
 
@@ -779,7 +743,7 @@ impl Store {
     //    DID-binding flow; these inserts are unconditional given a caller DID. --
 
     /// Create a document authored by `author_did` (the sole author). Returns the
-    /// new document id. Nullable-UNIQUE `legacy_id` is passed as explicit NULL.
+    /// new document id.
     pub async fn create_document(
         &self,
         context_id: &str,
@@ -792,8 +756,8 @@ impl Store {
         let id = format!("d-{}", crate::util::random_token(16));
         let conn = self.db.acquire().await?;
         conn.execute(
-            "INSERT INTO document (id, context_id, parent_id, kind, title, content, legacy_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            "INSERT INTO document (id, context_id, parent_id, kind, title, content) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             vec![
                 Value::Text(id.clone()),
                 Value::Text(context_id.to_string()),
@@ -805,8 +769,7 @@ impl Store {
         )
         .await?;
         conn.execute(
-            "INSERT INTO document_author (document_id, author_did, author_text, ord) \
-             VALUES (?1, ?2, NULL, 0)",
+            "INSERT INTO document_author (document_id, author_did, ord) VALUES (?1, ?2, 0)",
             [id.as_str(), author_did],
         )
         .await?;
@@ -824,8 +787,8 @@ impl Store {
         let id = format!("k-{}", crate::util::random_token(16));
         let conn = self.db.acquire().await?;
         conn.execute(
-            "INSERT INTO comment (id, on_id, context_id, author_did, author_text, text, legacy_id) \
-             VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL)",
+            "INSERT INTO comment (id, on_id, context_id, author_did, text) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             [id.as_str(), on_id, context_id, author_did, text],
         )
         .await?;
@@ -867,6 +830,8 @@ impl Store {
     //    event), comments, and resolutions, keyed by the record's at-uri. --
 
     /// Materialize a public `group`/`event` record into the `context` view.
+    /// `parent_uri` is a foreign key, so the caller must have checked it is in
+    /// the view.
     pub async fn upsert_public_context(
         &self,
         uri: &str,
@@ -877,36 +842,23 @@ impl Store {
         created_at: &str,
     ) -> Result<(), DbError> {
         let conn = self.db.acquire().await?;
-        let updated = conn
-            .execute(
-                "UPDATE context SET kind = ?1, name = ?2, slug = ?3, parent_id = ?4, \
-                 visibility = 'public', published_uri = ?5, created_at = ?6 WHERE id = ?5",
-                vec![
-                    Value::Text(kind.to_string()),
-                    Value::Text(name.to_string()),
-                    Value::Text(slug.to_string()),
-                    opt_str_val(parent_uri),
-                    Value::Text(uri.to_string()),
-                    Value::Text(created_at.to_string()),
-                ],
-            )
-            .await?;
-        if updated == 0 {
-            conn.execute(
-                "INSERT INTO context \
-                 (id, kind, name, slug, parent_id, visibility, published_uri, created_at, legacy_id) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'public', ?1, ?6, NULL)",
-                vec![
-                    Value::Text(uri.to_string()),
-                    Value::Text(kind.to_string()),
-                    Value::Text(name.to_string()),
-                    Value::Text(slug.to_string()),
-                    opt_str_val(parent_uri),
-                    Value::Text(created_at.to_string()),
-                ],
-            )
-            .await?;
-        }
+        conn.execute(
+            "INSERT INTO context \
+             (id, kind, name, slug, parent_id, visibility, published_uri, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 'public', ?1, ?6) \
+             ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, \
+               slug = excluded.slug, parent_id = excluded.parent_id, \
+               created_at = excluded.created_at",
+            vec![
+                Value::Text(uri.to_string()),
+                Value::Text(kind.to_string()),
+                Value::Text(name.to_string()),
+                Value::Text(slug.to_string()),
+                opt_str_val(parent_uri),
+                Value::Text(created_at.to_string()),
+            ],
+        )
+        .await?;
         Ok(())
     }
 
@@ -916,6 +868,24 @@ impl Store {
         conn.execute("DELETE FROM context WHERE id = ?1", [uri])
             .await?;
         Ok(())
+    }
+
+    /// Whether `id` is a row of `table`. `table` is one of this crate's own table
+    /// names, never caller input.
+    async fn exists(&self, table: &'static str, id: &str) -> Result<bool, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(&format!("SELECT 1 FROM {table} WHERE id = ?1"), [id])
+            .await?;
+        Ok(rows.next().await?.is_some())
+    }
+
+    pub async fn context_exists(&self, id: &str) -> Result<bool, DbError> {
+        self.exists("context", id).await
+    }
+
+    pub async fn post_exists(&self, id: &str) -> Result<bool, DbError> {
+        self.exists("post", id).await
     }
 
     /// The context a subject at-uri belongs to, resolved through the view (a
@@ -952,22 +922,15 @@ impl Store {
         created_at: &str,
     ) -> Result<(), DbError> {
         let conn = self.db.acquire().await?;
-        let updated = conn
-            .execute(
-                "UPDATE comment SET on_id = ?1, context_id = ?2, author_did = ?3, text = ?4, \
-                 created_at = ?5 WHERE id = ?6",
-                [on_id, context_id, author_did, text, created_at, uri],
-            )
-            .await?;
-        if updated == 0 {
-            conn.execute(
-                "INSERT INTO comment \
-                 (id, on_id, context_id, author_did, author_text, text, created_at, legacy_id) \
-                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL)",
-                [uri, on_id, context_id, author_did, text, created_at],
-            )
-            .await?;
-        }
+        conn.execute(
+            "INSERT INTO comment (id, on_id, context_id, author_did, text, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+             ON CONFLICT(id) DO UPDATE SET on_id = excluded.on_id, \
+               context_id = excluded.context_id, author_did = excluded.author_did, \
+               text = excluded.text, created_at = excluded.created_at",
+            [uri, on_id, context_id, author_did, text, created_at],
+        )
+        .await?;
         Ok(())
     }
 
@@ -981,7 +944,8 @@ impl Store {
 
     /// Materialize a public `resolution` record as a `document` (kind
     /// `resolution`), its body + status folded into the content JSON, authored by
-    /// the org DID. `context_id` is the resolution's context at-uri.
+    /// the org DID. `context_id` is the resolution's context at-uri and a foreign
+    /// key, so the caller must have checked it is in the view.
     #[allow(clippy::too_many_arguments)]
     pub async fn upsert_public_resolution(
         &self,
@@ -995,29 +959,23 @@ impl Store {
     ) -> Result<(), DbError> {
         let content = serde_json::json!({ "body": body, "status": status }).to_string();
         let conn = self.db.acquire().await?;
-        let updated = conn
-            .execute(
-                "UPDATE document SET context_id = ?1, kind = 'resolution', title = ?2, \
-                 content = ?3, visibility = 'public', published_uri = ?4, created_at = ?5 \
-                 WHERE id = ?4",
-                [context_id, title, content.as_str(), uri, created_at],
-            )
+        conn.execute(
+            "INSERT INTO document \
+             (id, context_id, kind, title, content, visibility, published_uri, created_at) \
+             VALUES (?1, ?2, 'resolution', ?3, ?4, 'public', ?1, ?5) \
+             ON CONFLICT(id) DO UPDATE SET context_id = excluded.context_id, \
+               title = excluded.title, content = excluded.content, \
+               created_at = excluded.created_at",
+            [uri, context_id, title, content.as_str(), created_at],
+        )
+        .await?;
+        conn.execute("DELETE FROM document_author WHERE document_id = ?1", [uri])
             .await?;
-        if updated == 0 {
-            conn.execute(
-                "INSERT INTO document \
-                 (id, context_id, parent_id, kind, title, content, visibility, published_uri, created_at, legacy_id) \
-                 VALUES (?1, ?2, NULL, 'resolution', ?3, ?4, 'public', ?1, ?5, NULL)",
-                [uri, context_id, title, content.as_str(), created_at],
-            )
-            .await?;
-            conn.execute(
-                "INSERT INTO document_author (document_id, author_did, author_text, ord) \
-                 VALUES (?1, ?2, NULL, 0)",
-                [uri, author_did],
-            )
-            .await?;
-        }
+        conn.execute(
+            "INSERT INTO document_author (document_id, author_did, ord) VALUES (?1, ?2, 0)",
+            [uri, author_did],
+        )
+        .await?;
         Ok(())
     }
 
@@ -1136,6 +1094,8 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn bind_member_to_user_is_guarded_and_idempotent() {
         let store = Store::new(seeded().await);
+        // Binding follows a login, which has already written the user row.
+        store.upsert_user_min("did:plc:bob").await.expect("user");
         // First bind of the pending invite succeeds.
         assert!(
             store

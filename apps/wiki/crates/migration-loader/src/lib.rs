@@ -4,10 +4,11 @@
 //! properties the schema was designed for:
 //!
 //! - **FK ORDER**: users and contexts are inserted before the documents /
-//!   members / comments that reference them, and a document before its
-//!   author-join rows. turso 0.2.2 does NOT enforce foreign keys (a recorded
-//!   gap; see `crates/appview/src/db.rs`), so this ordering is the
-//!   application-layer referential integrity the loader upholds regardless.
+//!   members / comments that reference them, a parent context before its
+//!   children, and a document before its author-join rows. The load turns
+//!   foreign-key enforcement on and checks that it took, so a dump that points
+//!   at a row it does not contain fails here, at the rehearsal, rather than
+//!   loading quietly and surfacing as a page with a piece missing.
 //! - **IDEMPOTENCY**: every entity is keyed by its primary key (checked before
 //!   insert) and carries `legacy_id UNIQUE`, so re-running the big-bang load
 //!   never duplicates a row. A document's author-join rows load only when the
@@ -15,11 +16,11 @@
 //!
 //! What this does NOT do: apply the DDL (the caller runs `ENTITY_SCHEMA` once)
 //! and the voting entities (excluded from the content/membership migration).
-//! Intra-table parent ordering (a child context before its parent) relies on
-//! turso not enforcing FKs; when turso gains FK support, add a topological sort.
 
 use migration_extractor::Extraction;
+use std::collections::BTreeSet;
 use turso::{Connection, Value};
+use wiki_domain_types::Context;
 
 /// What a load inserted (new rows only; already-present rows are skipped), per
 /// table. A second load of the same `Extraction` yields all zeros.
@@ -37,6 +38,15 @@ pub struct LoadStats {
 pub enum LoadError {
     Turso(turso::Error),
     Json(serde_json::Error),
+    /// The engine would not turn foreign-key enforcement on, so the load would
+    /// have checked nothing.
+    ForeignKeysOff,
+    /// A context names a parent that is neither in the extraction nor already
+    /// loaded (or the contexts form a cycle).
+    DanglingParent {
+        context: String,
+        parent: String,
+    },
 }
 
 impl std::fmt::Display for LoadError {
@@ -44,6 +54,10 @@ impl std::fmt::Display for LoadError {
         match self {
             LoadError::Turso(e) => write!(f, "load query error: {e}"),
             LoadError::Json(e) => write!(f, "load json error: {e}"),
+            LoadError::ForeignKeysOff => write!(f, "foreign keys are not enforced"),
+            LoadError::DanglingParent { context, parent } => {
+                write!(f, "context {context} has no loadable parent {parent}")
+            }
         }
     }
 }
@@ -138,10 +152,65 @@ async fn insert(
     Ok(())
 }
 
+async fn enforce_foreign_keys(conn: &Connection) -> Result<(), LoadError> {
+    conn.execute("PRAGMA foreign_keys=ON", ()).await?;
+    let mut rows = conn.query("PRAGMA foreign_keys", ()).await?;
+    match rows.next().await? {
+        Some(row) if row.get::<i64>(0)? == 1 => Ok(()),
+        _ => Err(LoadError::ForeignKeysOff),
+    }
+}
+
+/// The contexts not yet in the database, parents before children. A dump lists
+/// them in no particular order, and `context.parent_id` is a foreign key.
+async fn contexts_parents_first<'a>(
+    conn: &Connection,
+    contexts: &'a [Context],
+) -> Result<Vec<&'a Context>, LoadError> {
+    let mut pending = Vec::new();
+    for c in contexts {
+        if !exists(conn, "context", "id", &c.id).await? {
+            pending.push(c);
+        }
+    }
+    let mut placed: BTreeSet<&str> = BTreeSet::new();
+    let mut ordered = Vec::with_capacity(pending.len());
+    while !pending.is_empty() {
+        let placed_before = ordered.len();
+        let mut waiting = Vec::new();
+        for c in pending {
+            let ready = match c.parent_id.as_deref() {
+                None => true,
+                Some(parent) => {
+                    placed.contains(parent) || exists(conn, "context", "id", parent).await?
+                }
+            };
+            if ready {
+                placed.insert(c.id.as_str());
+                ordered.push(c);
+            } else {
+                waiting.push(c);
+            }
+        }
+        // A pass that places nothing will never place the rest.
+        if ordered.len() == placed_before
+            && let Some(stuck) = waiting.first()
+        {
+            return Err(LoadError::DanglingParent {
+                context: stuck.id.clone(),
+                parent: stuck.parent_id.clone().unwrap_or_default(),
+            });
+        }
+        pending = waiting;
+    }
+    Ok(ordered)
+}
+
 /// Load an `Extraction` into `conn` (which must already have `ENTITY_SCHEMA`
 /// applied), in FK order and idempotently by primary key. Returns the count of
 /// newly inserted rows per table.
 pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadError> {
+    enforce_foreign_keys(conn).await?;
     let mut stats = LoadStats::default();
 
     // 1. Users: the FK target every author / member / comment references.
@@ -166,10 +235,7 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
     }
 
     // 2. Contexts (groups/events): before the documents/members/comments in them.
-    for c in &ex.contexts {
-        if exists(conn, "context", "id", &c.id).await? {
-            continue;
-        }
+    for c in contexts_parents_first(conn, &ex.contexts).await? {
         let mut cols = vec![
             "id",
             "kind",
@@ -457,6 +523,76 @@ mod tests {
         assert_eq!(
             free_text, 1,
             "the free-text author is stored as author_text"
+        );
+    }
+
+    async fn staging() -> Connection {
+        let db = turso::Builder::new_local(":memory:")
+            .build()
+            .await
+            .expect("build");
+        let conn = db.connect().expect("connect");
+        conn.execute_batch(wiki_schema::ENTITY_SCHEMA)
+            .await
+            .expect("DDL");
+        conn
+    }
+
+    fn context(id: &str, parent: Option<&str>) -> Context {
+        Context {
+            id: id.into(),
+            kind: ContextKind::Event,
+            name: id.into(),
+            slug: id.into(),
+            parent_id: parent.map(str::to_string),
+            visibility: Visibility::Private,
+            published_uri: None,
+            created_at: None,
+            legacy_id: Some(id.into()),
+        }
+    }
+
+    /// A dump lists rows in whatever order the database returned them.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_child_context_listed_before_its_parent_still_loads() {
+        let conn = staging().await;
+        let ex = Extraction {
+            contexts: vec![
+                context("grandchild", Some("child")),
+                context("child", Some("root")),
+                context("root", None),
+            ],
+            ..Default::default()
+        };
+        let stats = load(&conn, &ex).await.expect("load");
+        assert_eq!(stats.contexts, 3);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_context_whose_parent_is_nowhere_stops_the_load_by_name() {
+        let conn = staging().await;
+        let ex = Extraction {
+            contexts: vec![context("root", None), context("lost", Some("gone"))],
+            ..Default::default()
+        };
+        match load(&conn, &ex).await {
+            Err(LoadError::DanglingParent { context, parent }) => {
+                assert_eq!(context, "lost");
+                assert_eq!(parent, "gone");
+            }
+            other => panic!("expected a dangling-parent error, got {other:?}"),
+        }
+    }
+
+    /// The load is the rehearsal's integrity check, so it must be checking.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_row_pointing_at_nothing_fails_the_load() {
+        let conn = staging().await;
+        let mut ex = sample();
+        ex.documents[0].context_id = "no-such-context".into();
+        assert!(
+            load(&conn, &ex).await.is_err(),
+            "a document in a context the dump does not contain was loaded"
         );
     }
 }

@@ -52,6 +52,18 @@ data layer.
   fetches whatever host the caller names. The outbound client now refuses
   non-https and non-public addresses, at resolution time, so DNS rebinding gains
   nothing. A dev instance (no public URL) stays unrestricted for a local PDS.
+- **The engine was five minor versions behind, and it mattered.** turso 0.2.2
+  had no `EXISTS`, no `IN (subquery)`, no upsert, and ignored the foreign-key
+  pragma, so nothing was referentially checked. 0.7.2 has all four. Turning
+  enforcement on surfaced two real defects at once (the firehose and the
+  loader, both fixed). Recursive CTEs are still missing, which M3's path
+  resolution has to design around.
+- **The extractor leaves gaps the loader will now refuse.** A context's
+  `parent_id` is carried over verbatim, but in the interim tree a group or event
+  can sit under a folder, which is a `document` here, so that key dangles. The
+  node that owns a context without holding a membership row in it (a real case:
+  `docs/read-permissions.md`) gets no owner row. Interim public contexts are all
+  extracted as private. Extracted polls are never loaded. M3 and M9.
 - **Reads are ungated.** Every read serves private content to anyone. M2 gates
   them on visibility and membership.
 - **A document cannot be addressed by path.** The entity schema gives `context`
@@ -74,6 +86,8 @@ is merged and its tests pass.
 
 - [x] One rustls `reqwest` client for every outbound call; OpenSSL out of the
   dependency graph; `cargo test --workspace` green in the devshell.
+- [x] turso 0.2.2 to 0.7.2; foreign keys enforced and verified on every
+  connection; the two-step upserts collapsed into real ones.
 
 ### M1: identity and sessions (replaces NHost auth)
 

@@ -1,17 +1,9 @@
-//! The Turso datastore handle. `acquire()` returns a connection and attempts to
-//! enable foreign-key enforcement.
+//! The Turso datastore handle. `acquire()` returns a connection with
+//! foreign-key enforcement on, and verified on.
 //!
-//! FINDING (turso 0.2.2, verified): turso does NOT recognize
-//! `PRAGMA foreign_keys` ("Not a valid pragma name") and does NOT enforce
-//! foreign keys (a dangling reference inserts cleanly). Plain SQLite (the
-//! lossless bridge, `crates/schema/tests/roundtrip.rs`) DOES enforce it once the
-//! pragma is set and read back. So on turso today, referential integrity must be
-//! upheld at the application layer (the loader inserts in FK order; reads join
-//! defensively); the ballot core's off-node replication is the real integrity
-//! control regardless. `acquire()` therefore sets the pragma best-effort and
-//! `foreign_keys_enforced()` reports the truth so callers can branch. When turso
-//! gains FK support, `foreign_keys_enforced()` flips to true and nothing else
-//! changes.
+//! The FK default is a build-time choice, not a constant of the engine (turso
+//! and stock SQLite both ship it off, `crates/schema/tests/roundtrip.rs`), so
+//! the pragma is set and read back per connection rather than assumed.
 
 use turso::{Builder, Connection, Database};
 
@@ -29,14 +21,14 @@ impl Db {
         Ok(Self { inner })
     }
 
-    /// A connection with foreign-key enforcement requested. On SQLite this takes
-    /// effect; on turso 0.2.2 the pragma is unsupported and silently a no-op
-    /// (tolerated, see the module finding). Never fails on the pragma itself.
+    /// A connection with foreign keys enforced. Fails rather than hand out one
+    /// that would accept a dangling reference.
     pub async fn acquire(&self) -> Result<Connection, DbError> {
         let conn = self.inner.connect()?;
-        // Best-effort: errors here mean the engine does not support the pragma
-        // (turso 0.2.2), which is a recorded gap, not a connection failure.
-        let _ = conn.execute("PRAGMA foreign_keys=ON", ()).await;
+        conn.execute("PRAGMA foreign_keys=ON", ()).await?;
+        if !foreign_keys_enforced(&conn).await {
+            return Err(DbError::ForeignKeysOff);
+        }
         Ok(conn)
     }
 
@@ -75,9 +67,7 @@ async fn table_exists(conn: &Connection, name: &str) -> bool {
     }
 }
 
-/// Whether foreign keys are ACTUALLY enforced on `conn`: true on SQLite once the
-/// pragma is set, false on turso 0.2.2 (pragma unsupported). Callers needing a
-/// referential-integrity guarantee branch on this instead of assuming it.
+/// Whether foreign keys are actually enforced on `conn` (the pragma read back).
 pub async fn foreign_keys_enforced(conn: &Connection) -> bool {
     match conn.query("PRAGMA foreign_keys", ()).await {
         Ok(mut rows) => matches!(
@@ -91,12 +81,15 @@ pub async fn foreign_keys_enforced(conn: &Connection) -> bool {
 #[derive(Debug)]
 pub enum DbError {
     Turso(turso::Error),
+    /// The engine would not turn foreign-key enforcement on.
+    ForeignKeysOff,
 }
 
 impl std::fmt::Display for DbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DbError::Turso(e) => write!(f, "turso error: {e}"),
+            DbError::ForeignKeysOff => write!(f, "foreign keys are not enforced"),
         }
     }
 }
@@ -114,18 +107,24 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "current_thread")]
-    async fn acquire_succeeds_and_reports_fk_status() {
+    async fn a_connection_refuses_a_dangling_reference() {
         let db = Db::open(":memory:").await.expect("open");
-        // acquire() never fails on the (unsupported-on-turso) pragma.
+        db.init_schema().await.expect("schema");
         let conn = db.acquire().await.expect("acquire");
-        // FINDING pinned: turso 0.2.2 does not enforce foreign keys, so the
-        // status reports false. This assertion flips when turso adds FK support,
-        // which is the signal to drop the app-layer FK-ordering workaround.
         assert!(
-            !foreign_keys_enforced(&conn).await,
-            "turso 0.2.2 is expected NOT to enforce foreign keys; if this now \
-             enforces, turso gained FK support and the loader's app-layer \
-             ordering can be revisited"
+            foreign_keys_enforced(&conn).await,
+            "acquire() handed out a connection without foreign keys"
+        );
+        let dangling = conn
+            .execute(
+                "INSERT INTO document (id, context_id, kind, title) \
+                 VALUES ('d', 'no-such-context', 'document', 'T')",
+                (),
+            )
+            .await;
+        assert!(
+            dangling.is_err(),
+            "a document in a context that does not exist was accepted"
         );
     }
 }

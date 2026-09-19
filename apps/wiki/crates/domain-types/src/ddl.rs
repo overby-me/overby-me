@@ -16,9 +16,8 @@
 //! the ballot service, not the content/membership migration.
 
 /// The reconciled entity-subset schema, in the SQLite dialect (Turso's primary
-/// frontend and the bridge target). Run with foreign keys enforced where the
-/// engine supports it; on turso 0.2.2 FKs are not enforced (a recorded gap), so
-/// the loader inserts in FK order regardless.
+/// frontend and the bridge target). Its foreign keys bind only on a connection
+/// that has set `PRAGMA foreign_keys=ON`; both engines default it off.
 pub const DDL: &str = r#"
 -- Identity: the DID IS the person.
 CREATE TABLE user (

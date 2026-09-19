@@ -420,6 +420,7 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO user (did, handle, display_name, legacy_id) \
                VALUES ('did:plc:alice', 'alice.test', 'Alice', NULL);
+             INSERT INTO user (did) VALUES ('did:plc:bob');
              INSERT INTO context (id, kind, name, slug, legacy_id) \
                VALUES ('c1', 'group', 'Group One', 'group-one', NULL);
              INSERT INTO context (id, kind, name, slug, parent_id, legacy_id) \
