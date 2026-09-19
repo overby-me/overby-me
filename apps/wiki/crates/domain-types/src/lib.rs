@@ -63,12 +63,14 @@ pub struct User {
     pub legacy_id: Option<String>,
 }
 
-/// A group or event.
+/// A place with its own members: a standing body, a meeting, or a site that
+/// publishes and may have no members at all.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextKind {
     Group,
     Event,
+    Site,
 }
 
 /// Visibility: public content is mirrored to a repo; private stays DB-only.
@@ -80,18 +82,46 @@ pub enum Visibility {
     Public,
 }
 
-/// A context (group/event), the org's organizing structure.
+/// Where a node sits in the tree. `context` and `document` both carry one: the
+/// frontend knows a single tree and reaches every node by the path in its URL.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Place {
+    /// The URL segment, unique among live siblings. The interim `key`.
+    pub slug: String,
+    /// Slash-joined slugs from the root. Stored, and rewritten on a rename or a
+    /// move, because nothing can walk the tree in one query.
+    pub path: String,
+    /// A context or a document: a group can sit in a folder.
+    pub parent_id: Option<String>,
+    /// Manual order among siblings.
+    #[serde(default)]
+    pub idx: i64,
+    /// Whether children may be added (the folder lock).
+    #[serde(default = "yes")]
+    pub attachable: bool,
+    /// Who created it. Distinct from authorship, which a document lists.
+    pub owner_did: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    /// Set while the node is in the bin.
+    pub deleted_at: Option<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// A context (group/event/site), the org's organizing structure.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Context {
     pub id: String,
     pub kind: ContextKind,
     pub name: String,
-    pub slug: String,
-    pub parent_id: Option<String>,
+    #[serde(flatten)]
+    pub place: Place,
     #[serde(default)]
     pub visibility: Visibility,
     pub published_uri: Option<String>,
-    pub created_at: Option<String>,
     pub legacy_id: Option<String>,
 }
 
@@ -116,11 +146,18 @@ pub enum DocumentKind {
 pub struct Document {
     pub id: String,
     pub context_id: String,
-    pub parent_id: Option<String>,
     pub kind: DocumentKind,
     pub title: String,
+    #[serde(flatten)]
+    pub place: Place,
+    /// Whether it may still be edited. Submitting a motion clears it.
+    #[serde(default = "yes")]
+    pub mutable: bool,
     /// Slate JSON, carried over verbatim (parsed only at the publish seam).
     pub content: Option<serde_json::Value>,
+    /// What the interim `data` blob held beside `content`: a file's id and type,
+    /// a cover image. An object, or absent.
+    pub data: Option<serde_json::Value>,
     /// Authors: possibly several (the census found up to 8 per node), each a
     /// DID or a free-text fallback. Replaces the single nullable author_did the
     /// census showed to be insufficient.
@@ -129,7 +166,6 @@ pub struct Document {
     #[serde(default)]
     pub visibility: Visibility,
     pub published_uri: Option<String>,
-    pub created_at: Option<String>,
     pub legacy_id: Option<String>,
 }
 

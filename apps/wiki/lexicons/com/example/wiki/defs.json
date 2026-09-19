@@ -26,12 +26,14 @@
 		},
 		"documentView": {
 			"type": "object",
-			"description": "A content node: document / folder / file / proposal, with its authors.",
+			"description": "A content node: document / folder / file / proposal, with its authors and its place in the tree.",
 			"required": [
 				"id",
 				"context_id",
 				"kind",
 				"title",
+				"slug",
+				"path",
 				"authors",
 				"visibility"
 			],
@@ -40,10 +42,6 @@
 				"context_id": {
 					"type": "string",
 					"description": "The owning context (group/event)."
-				},
-				"parent_id": {
-					"type": "string",
-					"description": "The parent node, when nested."
 				},
 				"kind": {
 					"type": "string",
@@ -60,6 +58,46 @@
 					"description": "The content sub-kind (open set: unknown values are tolerated for forward compatibility)."
 				},
 				"title": { "type": "string" },
+				"slug": {
+					"type": "string",
+					"description": "The URL segment, unique among live siblings. The server picks it from the name."
+				},
+				"path": {
+					"type": "string",
+					"description": "The slugs from the root, slash-joined: what the URL carries, and what resolveNode takes."
+				},
+				"parent_id": {
+					"type": "string",
+					"description": "The parent node, a context or a document. Absent for a root."
+				},
+				"idx": {
+					"type": "integer",
+					"description": "Manual order among siblings."
+				},
+				"attachable": {
+					"type": "boolean",
+					"description": "Whether children may be added (the folder lock)."
+				},
+				"owner_did": {
+					"type": "string",
+					"format": "did",
+					"description": "Who created it. Distinct from authorship."
+				},
+				"created_at": { "type": "string", "format": "datetime" },
+				"updated_at": { "type": "string", "format": "datetime" },
+				"deleted_at": {
+					"type": "string",
+					"format": "datetime",
+					"description": "Set while the node is in the bin. No read but the bin's own serves such a node."
+				},
+				"mutable": {
+					"type": "boolean",
+					"description": "Whether it may still be edited. Submitting a motion clears it."
+				},
+				"data": {
+					"type": "unknown",
+					"description": "What the node holds beside its text: a file's id and type, a cover image. An object, or absent."
+				},
 				"content": {
 					"type": "unknown",
 					"description": "The Slate document JSON, carried verbatim (parsed only at the publish seam). Absent for content-free nodes (folders)."
@@ -79,7 +117,6 @@
 					"format": "at-uri",
 					"description": "The at-uri of the mirrored public record, when published."
 				},
-				"created_at": { "type": "string", "format": "datetime" },
 				"legacy_id": {
 					"type": "string",
 					"description": "The interim node id this row was migrated from (import provenance)."
@@ -88,29 +125,52 @@
 		},
 		"contextView": {
 			"type": "object",
-			"description": "A context: a group or an event, the org's organizing structure.",
-			"required": ["id", "kind", "name", "slug", "visibility"],
+			"description": "A context: a group, an event or a site, the org's organizing structure, with its place in the tree.",
+			"required": ["id", "kind", "name", "slug", "path", "visibility"],
 			"properties": {
 				"id": { "type": "string" },
 				"kind": {
 					"type": "string",
-					"enum": ["group", "event"]
+					"enum": ["group", "event", "site"]
 				},
 				"name": { "type": "string" },
 				"slug": {
 					"type": "string",
-					"description": "The URL-path segment for this context (unique among siblings)."
+					"description": "The URL segment, unique among live siblings. The server picks it from the name."
+				},
+				"path": {
+					"type": "string",
+					"description": "The slugs from the root, slash-joined: what the URL carries, and what resolveNode takes."
 				},
 				"parent_id": {
 					"type": "string",
-					"description": "The parent context, when nested (absent for a root context)."
+					"description": "The parent node, a context or a document. Absent for a root."
+				},
+				"idx": {
+					"type": "integer",
+					"description": "Manual order among siblings."
+				},
+				"attachable": {
+					"type": "boolean",
+					"description": "Whether children may be added (the folder lock)."
+				},
+				"owner_did": {
+					"type": "string",
+					"format": "did",
+					"description": "Who created it. Distinct from authorship."
+				},
+				"created_at": { "type": "string", "format": "datetime" },
+				"updated_at": { "type": "string", "format": "datetime" },
+				"deleted_at": {
+					"type": "string",
+					"format": "datetime",
+					"description": "Set while the node is in the bin. No read but the bin's own serves such a node."
 				},
 				"visibility": {
 					"type": "string",
 					"enum": ["private", "public"]
 				},
 				"published_uri": { "type": "string", "format": "at-uri" },
-				"created_at": { "type": "string", "format": "datetime" },
 				"legacy_id": { "type": "string" }
 			}
 		},

@@ -70,13 +70,14 @@ data layer.
   membership alone, and `migrations/0024` records what reinterpreting a write
   model as a read model cost: a context went dark for its own members. The
   AppView's gate follows the same line.
-- **A document cannot be addressed by path.** The entity schema gives `context`
-  a slug and `document` none, while the frontend routes every node by its key
-  path (`/a/b/c`). Without a slug on documents every existing link breaks at
-  cutover. The schema also has no place for `index` (manual order), `mutable`
-  (published/locked), `attachable` (the folder lock), the non-content `data`
-  keys (file id and type, cover image), `updated_at`, or a deleted marker (the
-  bin), and its `context.kind` CHECK rejects `wiki/site`. M3 reconciles these.
+- **A document could not be addressed by path.** The entity schema gave
+  `context` a slug and `document` none, while the frontend routes every node by
+  its key path (`/a/b/c`), so every existing link would have broken at cutover.
+  The extractor dropped the key without a word, and with it `index`, `mutable`,
+  `attachable`, the owner, `updatedAt` and the bin; it REPORTED a file's
+  `fileId` and `type` as gaps rather than carrying them, which would have
+  migrated every attachment as an empty page; and `context.kind` rejected
+  `wiki/site`. Reconciled in M3.
 - **Speaker lists were classed as ephemeral and dropped by the extractor**, but
   the speak app persists them and an assembly reads them back. M5 gives them
   tables; M9 migrates them or records why not.
@@ -132,9 +133,39 @@ is merged and its tests pass.
 
 ### M3: the node tree the frontend routes by
 
-- [ ] Schema reconcile: document slug, index, mutable, attachable, data,
-  updated_at, deleted_at; `site` context kind. Generated DDL, both engines.
-- [ ] Path resolution across contexts and documents; crumbs; path from id.
+The frontend knows one tree of typed nodes, each reachable by the path of keys
+in its URL; the store keeps typed entities in separate tables. The design that
+joins them:
+
+- `context` and `document` are the two spines of the tree. Both carry `slug`
+  (the interim `key`), a stored `path`, `idx`, `attachable`, `owner_did`,
+  `updated_at` and `deleted_at`; `document` also `mutable` and `data`. A parent
+  may be either kind (a group can sit in a folder), so `parent_id` is a plain
+  column on both and the write path keeps it honest.
+- `path` is STORED and maintained on write, as the interim does with a trigger.
+  turso has no recursive CTEs, and a stored path makes resolution one indexed
+  lookup at any depth. A rename or a move rewrites the subtree's prefix. It is
+  unique among live rows only, so a binned node does not hold its URL hostage.
+- The server picks the slug (`name`, then `name-2`, ...), because only it can
+  see every sibling; the frontend finds collisions today by attempting inserts.
+- Kinds that are nodes in the frontend but have their own state (polls, speaker
+  lists, canvases) become `document` kinds with a side table keyed by the same
+  id, when their milestone arrives.
+- Who may create what under what is the interim's per-context template
+  (`context_permission_objects`), as one static table: (kind, role, parents).
+  Reading stays by membership (M2); this is the write model only.
+
+The steps:
+
+- [x] Schema reconcile: slug, stored path, idx, attachable, owner, updated_at and
+  deleted_at on both spines; mutable and data on documents; the `site` kind.
+  Generated DDL on both engines, and carried by the dump, extractor and loader.
+- [x] Path resolution across contexts and documents, in one lookup.
+- [x] The server picks a new document's slug, in one write transaction, across
+  both tables' namespace.
+- [ ] Crumbs for a path; path from an id.
+- [ ] The write model: which kind a role may create under which parent, the
+  folder lock with its owner and discussion exemptions, a closed poll.
 - [ ] Node read model in the `src/model.rs` shape (node with children, members,
   permission flags).
 - [ ] Create, update, delete, move, reorder, copy; the bin (soft delete,

@@ -9,7 +9,11 @@
 //!   and paired with `author_text`, guarded by a CHECK that one is present;
 //! - a document has MANY authors (up to 8), so authorship is a
 //!   `document_author` join table, not a scalar `document.author_did`;
-//! - every table carries `legacy_id UNIQUE` for idempotent big-bang import.
+//! - every table carries `legacy_id UNIQUE` for idempotent big-bang import;
+//! - `context` and `document` are the two spines of ONE tree (`Place`). The
+//!   frontend reaches every node by the path in its URL, so both carry a stored
+//!   `path`, unique among live rows, and `parent_id` is a plain column on both
+//!   because a parent may be either kind.
 //!
 //! Voting entities (poll, eligibility, delegation, token_issued, board_entry)
 //! are intentionally NOT here: they settle with the ballot spec and are added by
@@ -28,35 +32,56 @@ CREATE TABLE user (
   legacy_id    TEXT UNIQUE
 );
 
--- Contexts: groups and events (the org's structures). Hierarchy via parent_id.
+-- Contexts: groups, events and sites (the org's structures). parent_id names a
+-- context OR a document (a group can sit in a folder), so it is not a foreign
+-- key; the write path keeps it honest.
 CREATE TABLE context (
   id            TEXT PRIMARY KEY,
-  kind          TEXT NOT NULL CHECK (kind IN ('group','event')),
+  kind          TEXT NOT NULL CHECK (kind IN ('group','event','site')),
   name          TEXT NOT NULL,
   slug          TEXT NOT NULL,
-  parent_id     TEXT REFERENCES context(id),
+  path          TEXT NOT NULL,
+  parent_id     TEXT,
+  idx           INTEGER NOT NULL DEFAULT 0,
+  attachable    INTEGER NOT NULL DEFAULT 1,
+  owner_did     TEXT REFERENCES user(did),
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
   published_uri TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at    TEXT,
   legacy_id     TEXT UNIQUE
 );
-CREATE UNIQUE INDEX context_slug ON context(parent_id, slug);
+-- Live rows only: a node in the bin does not hold its URL hostage.
+CREATE UNIQUE INDEX context_path_live ON context(path) WHERE deleted_at IS NULL;
+CREATE INDEX context_children ON context(parent_id, idx);
 
 -- Content: documents / folders / files / proposals (kind-tagged). Authorship is
 -- in the document_author join table below, not a scalar column here.
 CREATE TABLE document (
   id            TEXT PRIMARY KEY,
   context_id    TEXT NOT NULL REFERENCES context(id),
-  parent_id     TEXT,
   kind          TEXT NOT NULL,
   title         TEXT NOT NULL,
+  slug          TEXT NOT NULL,
+  path          TEXT NOT NULL,
+  parent_id     TEXT,
+  idx           INTEGER NOT NULL DEFAULT 0,
+  mutable       INTEGER NOT NULL DEFAULT 1,
+  attachable    INTEGER NOT NULL DEFAULT 1,
+  owner_did     TEXT REFERENCES user(did),
   content       TEXT,
+  data          TEXT,
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
   published_uri TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at    TEXT,
   legacy_id     TEXT UNIQUE
 );
-CREATE INDEX document_context ON document(context_id, parent_id);
+CREATE UNIQUE INDEX document_path_live ON document(path) WHERE deleted_at IS NULL;
+CREATE INDEX document_children ON document(parent_id, idx);
+CREATE INDEX document_context ON document(context_id);
 
 -- A document's authors: many per document, each a DID (an account) OR a
 -- free-text display name (no account), never a single scalar author_did.

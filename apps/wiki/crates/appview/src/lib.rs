@@ -18,6 +18,7 @@ pub mod http;
 pub mod oauth;
 pub mod schema;
 pub mod session;
+pub mod slug;
 pub mod statecookie;
 pub mod store;
 pub mod util;

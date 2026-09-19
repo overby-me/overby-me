@@ -136,8 +136,8 @@ mod tests {
             "INSERT INTO user (did) VALUES ('did:plc:owner');
              INSERT INTO user (did) VALUES ('did:plc:member');
              INSERT INTO user (did) VALUES ('did:plc:gone');
-             INSERT INTO context (id, kind, name, slug) VALUES ('c1', 'group', 'G', 'g');
-             INSERT INTO context (id, kind, name, slug, parent_id) VALUES ('c2', 'event', 'E', 'e', 'c1');
+             INSERT INTO context (id, kind, name, slug, path) VALUES ('c1', 'group', 'G', 'g', 'g');
+             INSERT INTO context (id, kind, name, slug, path, parent_id) VALUES ('c2', 'event', 'E', 'e', 'g/e', 'c1');
              INSERT INTO member (id, user_did, context_id, role, active) VALUES ('m1', 'did:plc:owner', 'c1', 'owner', 1);
              INSERT INTO member (id, user_did, context_id, role, active) VALUES ('m2', 'did:plc:member', 'c1', 'member', 1);
              INSERT INTO member (id, user_did, context_id, role, active) VALUES ('m3', 'did:plc:gone', 'c1', 'owner', 0);

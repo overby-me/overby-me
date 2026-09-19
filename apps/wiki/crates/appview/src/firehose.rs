@@ -549,9 +549,9 @@ mod tests {
         let (store, db) = store_with_db().await;
         let conn = db.acquire().await.unwrap();
         conn.execute_batch(
-            "INSERT INTO context (id, kind, name, slug, legacy_id) VALUES ('c1','group','G','g',NULL);
-             INSERT INTO document (id, context_id, kind, title, published_uri, legacy_id) \
-               VALUES ('doc1','c1','document','Doc','doc1',NULL);",
+            "INSERT INTO context (id, kind, name, slug, path) VALUES ('c1','group','G','g','g');
+             INSERT INTO document (id, context_id, parent_id, kind, title, slug, path, published_uri) \
+               VALUES ('doc1','c1','c1','document','Doc','doc','g/doc','doc1');",
         )
         .await
         .unwrap();
@@ -633,6 +633,47 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(a.next().await.unwrap().unwrap().get::<i64>(0).unwrap(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_mirrored_record_takes_its_place_in_the_tree() {
+        let (store, _db) = store_with_db().await;
+        let context = |collection: &str, rkey: &str, slug: &str, parent: Option<&str>| {
+            let parent = parent
+                .map(|uri| format!(r#","parent":{{"uri":"{uri}"}}"#))
+                .unwrap_or_default();
+            format!(
+                r#"{{"did":"did:plc:org","kind":"commit","commit":{{"operation":"create","collection":"com.example.wiki.{collection}","rkey":"{rkey}","record":{{"name":"N","slug":"{slug}","createdAt":"2026-07-16T11:00:00.000Z"{parent}}}}}}}"#
+            )
+        };
+        let group_uri = concat!("at:", "//did:plc:org/com.example.wiki.group/g1");
+        ingest(&store, &context("group", "g1", "org", None))
+            .await
+            .expect("group");
+        ingest(&store, &context("event", "e1", "møde", Some(group_uri)))
+            .await
+            .expect("event");
+        let resolution = format!(
+            r#"{{"did":"did:plc:org","kind":"commit","commit":{{"operation":"create","collection":"com.example.wiki.resolution","rkey":"r1","record":{{"title":"Vedtaegt","status":"carried","context":"{group_uri}","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
+        );
+        ingest(&store, &resolution).await.expect("resolution");
+
+        let at = |path: &'static str| {
+            let store = store.clone();
+            async move { store.resolve_path(path, None).await.expect("resolve") }
+        };
+        assert!(matches!(
+            at("org").await,
+            Some(crate::store::Node::Context(_))
+        ));
+        assert!(matches!(
+            at("org/møde").await,
+            Some(crate::store::Node::Context(_))
+        ));
+        assert!(
+            matches!(at("org/r1").await, Some(crate::store::Node::Document(_))),
+            "a resolution is filed under its group by its record key"
+        );
     }
 
     #[test]

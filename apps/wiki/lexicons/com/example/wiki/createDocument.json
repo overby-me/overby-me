@@ -17,7 +17,7 @@
 						},
 						"parent_id": {
 							"type": "string",
-							"description": "The parent node, when nesting under another document."
+							"description": "The parent node, which must be live and in that context. Absent hangs the document directly off the context."
 						},
 						"kind": {
 							"type": "string",
@@ -33,10 +33,17 @@
 							],
 							"description": "The content sub-kind."
 						},
-						"title": { "type": "string" },
+						"title": {
+							"type": "string",
+							"description": "The name. The server derives the slug from it (`name`, then `name-2`, ...) and with it the path."
+						},
 						"content": {
 							"type": "unknown",
 							"description": "The Slate document JSON, stored verbatim."
+						},
+						"data": {
+							"type": "unknown",
+							"description": "What the node holds beside its text: a file's id and type, a cover image. An object."
 						}
 					}
 				}
@@ -62,7 +69,7 @@
 				},
 				{
 					"name": "InvalidRequest",
-					"description": "`parent_id` is neither the context nor a node in it."
+					"description": "`parent_id` names no live node, or one in another context."
 				}
 			]
 		}

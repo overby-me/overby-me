@@ -22,7 +22,8 @@ fn sqlite_mem() -> rusqlite::Connection {
 fn seed(conn: &rusqlite::Connection) {
     conn.execute_batch(
         "INSERT INTO user (did, handle, display_name) VALUES ('did:plc:alice', 'alice.test', 'Alice');
-         INSERT INTO context (id, kind, name, slug) VALUES ('c1', 'group', 'Group One', 'group-one');",
+         INSERT INTO context (id, kind, name, slug, path)
+           VALUES ('c1', 'group', 'Group One', 'group-one', 'group-one');",
     )
     .expect("seed");
 }
@@ -34,8 +35,9 @@ fn ddl_executes_and_rows_round_trip_on_sqlite() {
     // One row per remaining table, exercising defaults and FKs. Authorship is
     // via the document_author join, not a scalar document.author_did.
     conn.execute_batch(
-        "INSERT INTO document (id, context_id, kind, title, content)
-           VALUES ('d1', 'c1', 'document', 'Doc', '{\"blocks\":[{\"text\":\"hi\"}]}');
+        "INSERT INTO document (id, context_id, kind, title, slug, path, content)
+           VALUES ('d1', 'c1', 'document', 'Doc', 'doc', 'group-one/doc',
+                   '{\"blocks\":[{\"text\":\"hi\"}]}');
          INSERT INTO document_author (document_id, author_did, ord) VALUES ('d1', 'did:plc:alice', 0);
          INSERT INTO post (id, author_did, group_id, text) VALUES ('p1', 'did:plc:alice', 'c1', 'hello');
          INSERT INTO member (id, user_did, context_id, role) VALUES ('m1', 'did:plc:alice', 'c1', 'owner');
@@ -100,7 +102,8 @@ fn multi_author_and_free_text_authorship_on_sqlite() {
     let conn = sqlite_mem();
     seed(&conn);
     conn.execute_batch(
-        "INSERT INTO document (id, context_id, kind, title) VALUES ('d1', 'c1', 'policy', 'Motion');
+        "INSERT INTO document (id, context_id, kind, title, slug, path)
+           VALUES ('d1', 'c1', 'policy', 'Motion', 'motion', 'group-one/motion');
          INSERT INTO document_author (document_id, author_did, ord) VALUES ('d1', 'did:plc:alice', 0);
          INSERT INTO document_author (document_id, author_text, ord) VALUES ('d1', 'Anonymous Delegate', 1);",
     )
@@ -145,21 +148,31 @@ fn constraints_enforced_on_sqlite() {
     let conn = sqlite_mem();
     seed(&conn);
 
-    // CHECK constraints.
-    assert!(
+    // CHECK constraints. Each refused insert differs from an accepted one in the
+    // checked column alone, so it is that CHECK doing the refusing.
+    let context = |id: &str, kind: &str| {
         conn.execute(
-            "INSERT INTO context (id, kind, name, slug) VALUES ('cx', 'club', 'X', 'x')",
-            []
+            "INSERT INTO context (id, kind, name, slug, path) VALUES (?1, ?2, 'X', ?1, ?1)",
+            [id, kind],
         )
-        .is_err(),
+    };
+    context("site-ok", "site").expect("a site is a context kind");
+    assert!(
+        context("cx", "club").is_err(),
         "kind CHECK rejects unknown kind"
     );
-    assert!(conn
-        .execute(
-            "INSERT INTO document (id, context_id, kind, title, visibility) VALUES ('dx', 'c1', 'document', 'X', 'secret')",
-            [],
+    let document = |id: &str, visibility: &str| {
+        conn.execute(
+            "INSERT INTO document (id, context_id, kind, title, slug, path, visibility) \
+             VALUES (?1, 'c1', 'document', 'X', ?1, ?1, ?2)",
+            [id, visibility],
         )
-        .is_err(), "visibility CHECK rejects unknown value");
+    };
+    document("d-ok", "public").expect("a valid visibility");
+    assert!(
+        document("dx", "secret").is_err(),
+        "visibility CHECK rejects unknown value"
+    );
     assert!(
         conn.execute(
             "INSERT INTO member (id, context_id, role) VALUES ('mx', 'c1', 'admin')",
@@ -169,12 +182,21 @@ fn constraints_enforced_on_sqlite() {
         "role CHECK rejects unknown role"
     );
 
-    // context (parent_id, slug) uniqueness.
-    conn.execute("INSERT INTO context (id, kind, name, slug, parent_id) VALUES ('c2', 'event', 'E', 'ev', 'c1')", [])
-        .expect("child context");
-    assert!(conn
-        .execute("INSERT INTO context (id, kind, name, slug, parent_id) VALUES ('c3', 'event', 'E2', 'ev', 'c1')", [])
-        .is_err(), "duplicate slug under one parent rejected");
+    // A path is unique among LIVE rows, which is also what keeps two siblings
+    // from sharing a slug. A node in the bin gives its path up.
+    let event = |id: &str, deleted_at: Option<&str>| {
+        conn.execute(
+            "INSERT INTO context (id, kind, name, slug, path, parent_id, deleted_at) \
+             VALUES (?1, 'event', 'E', 'ev', 'group-one/ev', 'c1', ?2)",
+            rusqlite::params![id, deleted_at],
+        )
+    };
+    event("c2", None).expect("child context");
+    assert!(
+        event("c3", None).is_err(),
+        "a second live node at one path rejected"
+    );
+    event("c4", Some("2026-01-01 00:00:00")).expect("a binned node holds no path");
 
     // FK enforcement (with the pragma ON).
     assert!(
@@ -277,7 +299,7 @@ async fn ddl_executes_and_rows_round_trip_on_turso() {
     .await
     .expect("insert user");
     conn.execute(
-        "INSERT INTO context (id, kind, name, slug, legacy_id) VALUES ('c1', 'group', 'Group One', 'group-one', NULL)",
+        "INSERT INTO context (id, kind, name, slug, path, legacy_id) VALUES ('c1', 'group', 'Group One', 'group-one', 'group-one', NULL)",
         (),
     )
     .await
@@ -383,10 +405,10 @@ async fn turso_dialect_the_appview_relies_on() {
 
     // Subqueries, which the read gate is written in.
     conn.execute_batch(
-        "INSERT INTO context (id, kind, name, slug, visibility) VALUES ('open', 'group', 'O', 'o', 'public');
-         INSERT INTO context (id, kind, name, slug) VALUES ('shut', 'group', 'S', 's');
-         INSERT INTO document (id, context_id, kind, title) VALUES ('d-open', 'open', 'document', 'A');
-         INSERT INTO document (id, context_id, kind, title) VALUES ('d-shut', 'shut', 'document', 'B');",
+        "INSERT INTO context (id, kind, name, slug, path, visibility) VALUES ('open', 'group', 'O', 'o', 'o', 'public');
+         INSERT INTO context (id, kind, name, slug, path) VALUES ('shut', 'group', 'S', 's', 's');
+         INSERT INTO document (id, context_id, kind, title, slug, path) VALUES ('d-open', 'open', 'document', 'A', 'a', 'o/a');
+         INSERT INTO document (id, context_id, kind, title, slug, path) VALUES ('d-shut', 'shut', 'document', 'B', 'b', 's/b');",
     )
     .await
     .expect("seed");
@@ -407,6 +429,31 @@ async fn turso_dialect_the_appview_relies_on() {
         assert_eq!(id, "d-open", "{gated}");
         assert!(rows.next().await.expect("next").is_none(), "{gated}");
     }
+
+    // The partial unique index the slug allocator leans on: one LIVE row per
+    // path, and a row in the bin gives its path up.
+    let at_path = |id: &'static str, deleted_at: Option<&'static str>| {
+        let conn = conn.clone();
+        async move {
+            conn.execute(
+                "INSERT INTO document (id, context_id, kind, title, slug, path, deleted_at) \
+                 VALUES (?1, 'open', 'document', 'T', 'same', 'o/same', ?2)",
+                vec![
+                    turso::Value::Text(id.to_string()),
+                    deleted_at.map_or(turso::Value::Null, |d| turso::Value::Text(d.to_string())),
+                ],
+            )
+            .await
+        }
+    };
+    at_path("first", None).await.expect("a free path");
+    assert!(
+        at_path("second", None).await.is_err(),
+        "turso enforces path uniqueness among live rows"
+    );
+    at_path("binned", Some("2026-01-01 00:00:00"))
+        .await
+        .expect("a binned row holds no path");
 
     // Still missing: a tree cannot be walked in one query, so a path is resolved
     // a segment at a time. When this starts passing, that can be revisited.

@@ -54,7 +54,8 @@ row is readable when it or its context is public, when the caller is a member of
 the caller wrote it. A row the caller may not read answers exactly as a missing one does.
 `getReactions` alone is ungated, because reactions only ever mirror public records.
 
-- `getDocument` / `getContext` return a single entity; `resolveNode` walks a slug path to a context.
+- `getDocument` / `getContext` return a single entity; `resolveNode` returns the context or document
+  a path names. Every node stores its path, so that is one lookup at any depth.
 - `listChildren`, `listContexts`, `listRecent`, `search`, `getComments`, `getReactions` return an
   object wrapping a named array (`{ documents: [...] }`, `{ contexts: [...] }`, ...). Lists are
   wrapped, never a bare top-level array, because a bare array is not a valid lexicon `output.schema`

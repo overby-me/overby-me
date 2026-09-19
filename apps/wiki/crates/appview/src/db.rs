@@ -117,8 +117,8 @@ mod tests {
         );
         let dangling = conn
             .execute(
-                "INSERT INTO document (id, context_id, kind, title) \
-                 VALUES ('d', 'no-such-context', 'document', 'T')",
+                "INSERT INTO document (id, context_id, kind, title, slug, path) \
+                 VALUES ('d', 'no-such-context', 'document', 'T', 't', 't')",
                 (),
             )
             .await;

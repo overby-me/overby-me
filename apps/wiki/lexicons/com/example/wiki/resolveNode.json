@@ -4,25 +4,32 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "Resolve a slash-separated context slug path (e.g. `group-one/sub`) to a context. Serves only what the caller may read.",
+			"description": "The context or document a path names (e.g. `group-one/sub/dagsorden`). The path is stored with each node, so this is one lookup at any depth, and nothing above the node has to be readable by the caller: only the node itself. Serves only what the caller may read.",
 			"parameters": {
 				"type": "params",
 				"required": ["path"],
 				"properties": {
 					"path": {
 						"type": "string",
-						"description": "A slash-separated path of context slugs; empty segments are ignored."
+						"description": "The slugs from the root, slash-joined, as a URL carries them; empty segments are ignored."
 					}
 				}
 			},
 			"output": {
 				"encoding": "application/json",
-				"schema": { "type": "ref", "ref": "com.example.wiki.defs#contextView" }
+				"schema": {
+					"type": "union",
+					"description": "A contextView or a documentView, told apart by an added `node` field: `context` or `document`.",
+					"refs": [
+						"com.example.wiki.defs#contextView",
+						"com.example.wiki.defs#documentView"
+					]
+				}
 			},
 			"errors": [
 				{
 					"name": "NotFound",
-					"description": "No node exists at that slug path."
+					"description": "No live node is at that path, or none the caller may read."
 				}
 			]
 		}

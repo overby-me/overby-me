@@ -234,32 +234,41 @@ CREATE TABLE user (
   avatar_url   TEXT
 );
 
--- Contexts: groups & events (the org's structures). Hierarchy via parent_id.
+-- Contexts and documents are the two spines of ONE tree. The frontend reaches
+-- every node by the path in its URL, so both carry the same place columns:
+--   slug (the interim key), path (the slugs from the root, STORED and rewritten
+--   on a rename or a move, since turso has no recursive CTEs), parent_id, idx,
+--   attachable, owner_did, created_at, updated_at, deleted_at (the bin).
+-- parent_id names a context OR a document (a group can sit in a folder), so it
+-- is not a foreign key on either; the write path keeps it honest. A path is
+-- unique among LIVE rows only, so a binned node does not hold its URL hostage.
+
+-- Contexts: groups, events & sites (the org's structures).
 CREATE TABLE context (
   id            TEXT PRIMARY KEY,
-  kind          TEXT NOT NULL CHECK (kind IN ('group','event')),
+  kind          TEXT NOT NULL CHECK (kind IN ('group','event','site')),
   name          TEXT NOT NULL,
-  slug          TEXT NOT NULL,
-  parent_id     TEXT REFERENCES context(id),
+  -- ...the place columns...
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
-  published_uri TEXT,                                    -- the at-uri, if the group/event is public
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  published_uri TEXT                                     -- the at-uri, if the context is public
 );
-CREATE UNIQUE INDEX context_slug ON context(parent_id, slug);
+CREATE UNIQUE INDEX context_path_live ON context(path) WHERE deleted_at IS NULL;
 
 -- Content: documents / folders / files / proposals (kind-tagged).
 CREATE TABLE document (
   id            TEXT PRIMARY KEY,
   context_id    TEXT NOT NULL REFERENCES context(id),
-  parent_id     TEXT,                                    -- folder or context
-  kind          TEXT NOT NULL,                           -- document|folder|file|policy|position|candidate|change
+  kind          TEXT NOT NULL,                           -- document|folder|file|policy|position|candidate|change|question
   title         TEXT NOT NULL,
+  -- ...the place columns...
+  mutable       INTEGER NOT NULL DEFAULT 1,              -- cleared when a motion is submitted
   content       TEXT,                                    -- Slate JSON (carries over)
+  data          TEXT,                                    -- the rest of the interim data blob: file id/type, cover image
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
-  published_uri TEXT,                                    -- the at-uri, once published
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  published_uri TEXT                                     -- the at-uri, once published
 );
-CREATE INDEX document_context ON document(context_id, parent_id);
+CREATE UNIQUE INDEX document_path_live ON document(path) WHERE deleted_at IS NULL;
+CREATE INDEX document_children ON document(parent_id, idx);
 
 -- A document's authors: many per document (census: up to 8), each a DID (an
 -- account) OR a free-text display name (no account), never a scalar author_did.

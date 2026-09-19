@@ -4,11 +4,14 @@
 //! properties the schema was designed for:
 //!
 //! - **FK ORDER**: users and contexts are inserted before the documents /
-//!   members / comments that reference them, a parent context before its
-//!   children, and a document before its author-join rows. The load turns
-//!   foreign-key enforcement on and checks that it took, so a dump that points
-//!   at a row it does not contain fails here, at the rehearsal, rather than
-//!   loading quietly and surfacing as a page with a piece missing.
+//!   members / comments that reference them, and a document before its
+//!   author-join rows. The load turns foreign-key enforcement on and checks that
+//!   it took, so a dump that points at a row it does not contain fails here, at
+//!   the rehearsal, rather than loading quietly and surfacing as a page with a
+//!   piece missing.
+//! - **THE TREE**: `parent_id` is not a foreign key, because a parent may be a
+//!   context or a document. The load checks every one itself, before it writes
+//!   anything.
 //! - **IDEMPOTENCY**: every entity is keyed by its primary key (checked before
 //!   insert) and carries `legacy_id UNIQUE`, so re-running the big-bang load
 //!   never duplicates a row. A document's author-join rows load only when the
@@ -20,7 +23,7 @@
 use migration_extractor::Extraction;
 use std::collections::BTreeSet;
 use turso::{Connection, Value};
-use wiki_domain_types::Context;
+use wiki_domain_types::Place;
 
 /// What a load inserted (new rows only; already-present rows are skipped), per
 /// table. A second load of the same `Extraction` yields all zeros.
@@ -41,10 +44,10 @@ pub enum LoadError {
     /// The engine would not turn foreign-key enforcement on, so the load would
     /// have checked nothing.
     ForeignKeysOff,
-    /// A context names a parent that is neither in the extraction nor already
-    /// loaded (or the contexts form a cycle).
+    /// A node names a parent that is neither in the extraction nor already
+    /// loaded, as a context or as a document.
     DanglingParent {
-        context: String,
+        node: String,
         parent: String,
     },
 }
@@ -55,8 +58,8 @@ impl std::fmt::Display for LoadError {
             LoadError::Turso(e) => write!(f, "load query error: {e}"),
             LoadError::Json(e) => write!(f, "load json error: {e}"),
             LoadError::ForeignKeysOff => write!(f, "foreign keys are not enforced"),
-            LoadError::DanglingParent { context, parent } => {
-                write!(f, "context {context} has no loadable parent {parent}")
+            LoadError::DanglingParent { node, parent } => {
+                write!(f, "node {node} has no loadable parent {parent}")
             }
         }
     }
@@ -100,11 +103,48 @@ fn boolv(b: bool) -> Value {
 /// Append the `created_at` column + param ONLY when a source timestamp exists.
 /// Omitting it lets the `NOT NULL DEFAULT (datetime('now'))` fire; passing an
 /// explicit NULL would violate the NOT NULL constraint (default notwithstanding).
-fn push_created_at(cols: &mut Vec<&str>, params: &mut Vec<Value>, created_at: &Option<String>) {
-    if let Some(ts) = created_at {
-        cols.push("created_at");
+fn push_created_at(
+    cols: &mut Vec<&'static str>,
+    params: &mut Vec<Value>,
+    created_at: &Option<String>,
+) {
+    push_timestamp(cols, params, "created_at", created_at);
+}
+
+fn push_timestamp(
+    cols: &mut Vec<&'static str>,
+    params: &mut Vec<Value>,
+    col: &'static str,
+    at: &Option<String>,
+) {
+    if let Some(ts) = at {
+        cols.push(col);
         params.push(Value::Text(ts.clone()));
     }
+}
+
+/// The tree columns `context` and `document` share.
+fn push_place(cols: &mut Vec<&'static str>, params: &mut Vec<Value>, place: &Place) {
+    cols.extend([
+        "slug",
+        "path",
+        "parent_id",
+        "idx",
+        "attachable",
+        "owner_did",
+        "deleted_at",
+    ]);
+    params.extend([
+        text(&place.slug),
+        text(&place.path),
+        opt(&place.parent_id),
+        Value::Integer(place.idx),
+        boolv(place.attachable),
+        opt(&place.owner_did),
+        opt(&place.deleted_at),
+    ]);
+    push_timestamp(cols, params, "created_at", &place.created_at);
+    push_timestamp(cols, params, "updated_at", &place.updated_at);
 }
 
 /// Serialize a `#[serde(rename_all = "snake_case")]` domain enum to its DB
@@ -161,49 +201,37 @@ async fn enforce_foreign_keys(conn: &Connection) -> Result<(), LoadError> {
     }
 }
 
-/// The contexts not yet in the database, parents before children. A dump lists
-/// them in no particular order, and `context.parent_id` is a foreign key.
-async fn contexts_parents_first<'a>(
-    conn: &Connection,
-    contexts: &'a [Context],
-) -> Result<Vec<&'a Context>, LoadError> {
-    let mut pending = Vec::new();
-    for c in contexts {
-        if !exists(conn, "context", "id", &c.id).await? {
-            pending.push(c);
-        }
-    }
-    let mut placed: BTreeSet<&str> = BTreeSet::new();
-    let mut ordered = Vec::with_capacity(pending.len());
-    while !pending.is_empty() {
-        let placed_before = ordered.len();
-        let mut waiting = Vec::new();
-        for c in pending {
-            let ready = match c.parent_id.as_deref() {
-                None => true,
-                Some(parent) => {
-                    placed.contains(parent) || exists(conn, "context", "id", parent).await?
-                }
-            };
-            if ready {
-                placed.insert(c.id.as_str());
-                ordered.push(c);
-            } else {
-                waiting.push(c);
-            }
-        }
-        // A pass that places nothing will never place the rest.
-        if ordered.len() == placed_before
-            && let Some(stuck) = waiting.first()
+/// Refuse an extraction in which some node's parent is nowhere: not in the
+/// extraction, and not already loaded. The schema cannot say this (see the
+/// module doc), and a node with a missing parent is unreachable by any path.
+async fn check_parents(conn: &Connection, ex: &Extraction) -> Result<(), LoadError> {
+    let arriving: BTreeSet<&str> = ex
+        .contexts
+        .iter()
+        .map(|c| c.id.as_str())
+        .chain(ex.documents.iter().map(|d| d.id.as_str()))
+        .collect();
+    let places = ex
+        .contexts
+        .iter()
+        .map(|c| (&c.id, &c.place))
+        .chain(ex.documents.iter().map(|d| (&d.id, &d.place)));
+    for (id, place) in places {
+        let Some(parent) = place.parent_id.as_deref() else {
+            continue;
+        };
+        if arriving.contains(parent)
+            || exists(conn, "context", "id", parent).await?
+            || exists(conn, "document", "id", parent).await?
         {
-            return Err(LoadError::DanglingParent {
-                context: stuck.id.clone(),
-                parent: stuck.parent_id.clone().unwrap_or_default(),
-            });
+            continue;
         }
-        pending = waiting;
+        return Err(LoadError::DanglingParent {
+            node: id.clone(),
+            parent: parent.to_string(),
+        });
     }
-    Ok(ordered)
+    Ok(())
 }
 
 /// Load an `Extraction` into `conn` (which must already have `ENTITY_SCHEMA`
@@ -211,6 +239,7 @@ async fn contexts_parents_first<'a>(
 /// newly inserted rows per table.
 pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadError> {
     enforce_foreign_keys(conn).await?;
+    check_parents(conn, ex).await?;
     let mut stats = LoadStats::default();
 
     // 1. Users: the FK target every author / member / comment references.
@@ -235,13 +264,14 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
     }
 
     // 2. Contexts (groups/events): before the documents/members/comments in them.
-    for c in contexts_parents_first(conn, &ex.contexts).await? {
+    for c in &ex.contexts {
+        if exists(conn, "context", "id", &c.id).await? {
+            continue;
+        }
         let mut cols = vec![
             "id",
             "kind",
             "name",
-            "slug",
-            "parent_id",
             "visibility",
             "published_uri",
             "legacy_id",
@@ -250,13 +280,11 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
             text(&c.id),
             enum_val(&c.kind)?,
             text(&c.name),
-            text(&c.slug),
-            opt(&c.parent_id),
             enum_val(&c.visibility)?,
             opt(&c.published_uri),
             opt(&c.legacy_id),
         ];
-        push_created_at(&mut cols, &mut params, &c.created_at);
+        push_place(&mut cols, &mut params, &c.place);
         insert(conn, "context", &cols, params).await?;
         stats.contexts += 1;
     }
@@ -270,13 +298,18 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
             Some(v) => Value::Text(serde_json::to_string(v)?),
             None => Value::Null,
         };
+        let data = match &d.data {
+            Some(v) => Value::Text(serde_json::to_string(v)?),
+            None => Value::Null,
+        };
         let mut cols = vec![
             "id",
             "context_id",
-            "parent_id",
             "kind",
             "title",
+            "mutable",
             "content",
+            "data",
             "visibility",
             "published_uri",
             "legacy_id",
@@ -284,15 +317,16 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
         let mut params = vec![
             text(&d.id),
             text(&d.context_id),
-            opt(&d.parent_id),
             enum_val(&d.kind)?,
             text(&d.title),
+            boolv(d.mutable),
             content,
+            data,
             enum_val(&d.visibility)?,
             opt(&d.published_uri),
             opt(&d.legacy_id),
         ];
-        push_created_at(&mut cols, &mut params, &d.created_at);
+        push_place(&mut cols, &mut params, &d.place);
         insert(conn, "document", &cols, params).await?;
         stats.documents += 1;
         for (ord, a) in d.authors.iter().enumerate() {
@@ -384,6 +418,16 @@ mod tests {
         Visibility,
     };
 
+    fn place(slug: &str, path: &str, parent: Option<&str>) -> Place {
+        Place {
+            slug: slug.into(),
+            path: path.into(),
+            parent_id: parent.map(str::to_string),
+            attachable: true,
+            ..Place::default()
+        }
+    }
+
     fn sample() -> Extraction {
         Extraction {
             users: vec![User {
@@ -397,20 +441,27 @@ mod tests {
                 id: "c1".into(),
                 kind: ContextKind::Group,
                 name: "Group One".into(),
-                slug: "group-one".into(),
-                parent_id: None,
+                place: place("group-one", "group-one", None),
                 visibility: Visibility::Private,
                 published_uri: None,
-                created_at: None,
                 legacy_id: Some("c1".into()),
             }],
             documents: vec![Document {
                 id: "d1".into(),
                 context_id: "c1".into(),
-                parent_id: None,
                 kind: DocumentKind::Document,
                 title: "Doc".into(),
+                place: Place {
+                    idx: 4,
+                    attachable: false,
+                    owner_did: Some("did:plc:alice".into()),
+                    updated_at: Some("2026-02-02 00:00:00".into()),
+                    deleted_at: Some("2026-03-03 00:00:00".into()),
+                    ..place("doc", "group-one/doc", Some("c1"))
+                },
+                mutable: false,
                 content: Some(serde_json::json!({"blocks": [{"text": "hi"}]})),
+                data: Some(serde_json::json!({"image": "file-1"})),
                 // One DID author, one free-text author (the reconciled model).
                 authors: vec![
                     Author::User {
@@ -422,7 +473,6 @@ mod tests {
                 ],
                 visibility: Visibility::Private,
                 published_uri: None,
-                created_at: None,
                 legacy_id: Some("d1".into()),
             }],
             members: vec![Member {
@@ -543,11 +593,9 @@ mod tests {
             id: id.into(),
             kind: ContextKind::Event,
             name: id.into(),
-            slug: id.into(),
-            parent_id: parent.map(str::to_string),
+            place: place(id, id, parent),
             visibility: Visibility::Private,
             published_uri: None,
-            created_at: None,
             legacy_id: Some(id.into()),
         }
     }
@@ -576,12 +624,59 @@ mod tests {
             ..Default::default()
         };
         match load(&conn, &ex).await {
-            Err(LoadError::DanglingParent { context, parent }) => {
-                assert_eq!(context, "lost");
+            Err(LoadError::DanglingParent { node, parent }) => {
+                assert_eq!(node, "lost");
                 assert_eq!(parent, "gone");
             }
             other => panic!("expected a dangling-parent error, got {other:?}"),
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_refused_extraction_writes_nothing() {
+        let conn = staging().await;
+        let ex = Extraction {
+            contexts: vec![context("root", None), context("lost", Some("gone"))],
+            ..Default::default()
+        };
+        assert!(load(&conn, &ex).await.is_err());
+        assert_eq!(count(&conn, "context").await, 0, "half a tree was loaded");
+    }
+
+    /// The interim lets a group or an event sit in a folder.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_context_may_hang_off_a_document() {
+        let conn = staging().await;
+        let mut ex = sample();
+        ex.contexts.push(context("nested", Some("d1")));
+        load(&conn, &ex).await.expect("load");
+        assert_eq!(count(&conn, "context").await, 2);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_tree_columns_survive_the_load() {
+        let conn = staging().await;
+        load(&conn, &sample()).await.expect("load");
+        let mut rows = conn
+            .query(
+                "SELECT slug, path, parent_id, idx, mutable, attachable, owner_did, data, \
+                        updated_at, deleted_at FROM document WHERE id = 'd1'",
+                (),
+            )
+            .await
+            .expect("query");
+        let row = rows.next().await.expect("next").expect("row");
+        let text = |i: usize| row.get::<String>(i).expect("text");
+        assert_eq!(text(0), "doc");
+        assert_eq!(text(1), "group-one/doc");
+        assert_eq!(text(2), "c1");
+        assert_eq!(row.get::<i64>(3).expect("idx"), 4);
+        assert_eq!(row.get::<i64>(4).expect("mutable"), 0);
+        assert_eq!(row.get::<i64>(5).expect("attachable"), 0);
+        assert_eq!(text(6), "did:plc:alice");
+        assert_eq!(text(7), r#"{"image":"file-1"}"#);
+        assert_eq!(text(8), "2026-02-02 00:00:00");
+        assert_eq!(text(9), "2026-03-03 00:00:00");
     }
 
     /// The load is the rehearsal's integrity check, so it must be checking.

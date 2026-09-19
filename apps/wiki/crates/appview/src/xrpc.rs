@@ -76,27 +76,28 @@ pub async fn get_context(
     }
 }
 
-/// `?path=a/b/c` — a slash-separated context slug path.
+/// `?path=a/b/c` — the slugs from the root, as a URL carries them.
 #[derive(Debug, Deserialize)]
 pub struct PathParam {
     pub path: String,
 }
 
-/// `com.example.wiki.resolveNode` — resolve a slug path to a context.
+/// `com.example.wiki.resolveNode` — the context or document a path names.
 pub async fn resolve_node(
     State(state): State<AppState>,
     caller: MaybeCaller,
     Query(p): Query<PathParam>,
 ) -> Response {
-    let slugs: Vec<String> = p
+    // Empty segments are dropped, so `/a//b/` names what `a/b` names.
+    let path = p
         .path
         .split('/')
         .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .collect();
+        .collect::<Vec<_>>()
+        .join("/");
     let store = crate::Store::new(state.db.clone());
-    match store.resolve_context(&slugs, caller.did()).await {
-        Ok(Some(ctx)) => (StatusCode::OK, Json(ctx)).into_response(),
+    match store.resolve_path(&path, caller.did()).await {
+        Ok(Some(node)) => (StatusCode::OK, Json(node)).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "NotFound", "no node at that path"),
         Err(e) => {
             tracing::error!("resolveNode failed: {e}");
@@ -457,6 +458,9 @@ pub struct CreateDocumentBody {
     pub title: String,
     #[serde(default)]
     pub content: Option<serde_json::Value>,
+    /// What the node holds beside its text: a file's id and type, a cover image.
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
 }
 
 /// `com.example.wiki.createDocument` (procedure) — the caller authors a document.
@@ -468,36 +472,28 @@ pub async fn create_document(
     if let Err(refusal) = require_member(&state, &body.context_id, &did).await {
         return refusal;
     }
-    let store = crate::Store::new(state.db.clone());
-    // A parent is the context itself or a node already in it. Otherwise a member
-    // of one context could hang a document off another's tree.
-    if let Some(parent) = body.parent_id.as_deref().filter(|p| *p != body.context_id) {
-        match store.node_owner_and_context(parent).await {
-            Ok(Some(node)) if node.context_id.as_deref() == Some(&body.context_id) => {}
-            Ok(_) => {
-                return err(
-                    StatusCode::BAD_REQUEST,
-                    "InvalidRequest",
-                    "parent is not in that context",
-                );
-            }
-            Err(e) => return write_failed("createDocument", e),
-        }
-    }
     let content = body.content.as_ref().map(|v| v.to_string());
-    match store
-        .create_document(
-            &body.context_id,
-            body.parent_id.as_deref(),
-            &body.kind,
-            &body.title,
-            content.as_deref(),
-            &did,
-        )
+    let data = body.data.as_ref().map(|v| v.to_string());
+    let new = crate::store::NewDocument {
+        context_id: &body.context_id,
+        parent_id: body.parent_id.as_deref(),
+        kind: &body.kind,
+        title: &body.title,
+        content: content.as_deref(),
+        data: data.as_deref(),
+        author_did: &did,
+    };
+    match crate::Store::new(state.db.clone())
+        .create_document(&new)
         .await
     {
         Ok(id) => wrote(id),
-        Err(e) => write_failed("createDocument", e),
+        Err(crate::store::WriteError::Db(e)) => write_failed("createDocument", e),
+        Err(refused) => err(
+            StatusCode::BAD_REQUEST,
+            "InvalidRequest",
+            &refused.to_string(),
+        ),
     }
 }
 
@@ -607,24 +603,26 @@ mod tests {
                VALUES ('did:plc:alice', 'alice.test', 'Alice');
              INSERT INTO user (did) VALUES ('did:plc:bob');
              INSERT INTO user (did) VALUES ('did:plc:zoe');
-             INSERT INTO context (id, kind, name, slug, visibility) \
-               VALUES ('c1', 'group', 'Group One', 'group-one', 'public');
-             INSERT INTO context (id, kind, name, slug, parent_id, visibility) \
-               VALUES ('c2', 'event', 'Sub Event', 'sub', 'c1', 'public');
-             INSERT INTO document (id, context_id, kind, title, content) \
-               VALUES ('d1', 'c1', 'policy', 'Motion', '{\"blocks\":[{\"text\":\"hi\"}]}');
-             INSERT INTO document (id, context_id, parent_id, kind, title) \
-               VALUES ('d2', 'c1', 'c1', 'document', 'Child Doc');
+             INSERT INTO context (id, kind, name, slug, path, visibility) \
+               VALUES ('c1', 'group', 'Group One', 'group-one', 'group-one', 'public');
+             INSERT INTO context (id, kind, name, slug, path, parent_id, visibility) \
+               VALUES ('c2', 'event', 'Sub Event', 'sub', 'group-one/sub', 'c1', 'public');
+             INSERT INTO document (id, context_id, parent_id, kind, title, slug, path, content) \
+               VALUES ('d1', 'c1', 'c1', 'policy', 'Motion', 'motion', 'group-one/motion', \
+                       '{\"blocks\":[{\"text\":\"hi\"}]}');
+             INSERT INTO document (id, context_id, parent_id, kind, title, slug, path) \
+               VALUES ('d2', 'c1', 'c1', 'document', 'Child Doc', 'child_doc', \
+                       'group-one/child_doc');
              INSERT INTO document_author (document_id, author_did, author_text, ord) \
                VALUES ('d1', 'did:plc:alice', NULL, 0);
              INSERT INTO document_author (document_id, author_did, author_text, ord) \
                VALUES ('d1', NULL, 'Guest', 1);
              INSERT INTO comment (id, on_id, context_id, author_did, text) \
                VALUES ('k1', 'd1', 'c1', 'did:plc:alice', 'Nice motion');
-             INSERT INTO context (id, kind, name, slug) \
-               VALUES ('c9', 'group', 'Closed Group', 'closed');
-             INSERT INTO context (id, kind, name, slug, parent_id) \
-               VALUES ('c10', 'event', 'Closed Meeting', 'meeting', 'c9');
+             INSERT INTO context (id, kind, name, slug, path) \
+               VALUES ('c9', 'group', 'Closed Group', 'closed', 'closed');
+             INSERT INTO context (id, kind, name, slug, path, parent_id) \
+               VALUES ('c10', 'event', 'Closed Meeting', 'meeting', 'closed/meeting', 'c9');
              INSERT INTO member (id, user_did, context_id, role, active) \
                VALUES ('m-alice', 'did:plc:alice', 'c9', 'owner', 1);
              INSERT INTO member (id, user_did, context_id, role, active) \
@@ -634,8 +632,9 @@ mod tests {
              INSERT INTO user (did) VALUES ('did:plc:ivan');
              INSERT INTO member (id, user_did, context_id, role, active) \
                VALUES ('m-ivan', 'did:plc:ivan', 'c9', 'member', 0);
-             INSERT INTO document (id, context_id, parent_id, kind, title) \
-               VALUES ('s1', 'c9', 'c9', 'document', 'Secret Minutes');
+             INSERT INTO document (id, context_id, parent_id, kind, title, slug, path) \
+               VALUES ('s1', 'c9', 'c9', 'document', 'Secret Minutes', 'secret_minutes', \
+                       'closed/secret_minutes');
              INSERT INTO comment (id, on_id, context_id, author_did, text) \
                VALUES ('ks', 's1', 'c9', 'did:plc:alice', 'Secret remark');",
         )
@@ -1464,5 +1463,167 @@ mod tests {
             refused, unknown,
             "an unknown member must not be tellable apart"
         );
+    }
+
+    // -- The tree: stored paths, server-picked slugs, the bin, sibling order. --
+
+    async fn create(state: &AppState, token: &str, body: serde_json::Value) -> serde_json::Value {
+        let (status, v) = post(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.createDocument",
+            Some(token),
+            body,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        let id = v["id"].as_str().expect("id");
+        let (status, doc) = get_as(
+            router(state.clone()),
+            &format!("/xrpc/com.example.wiki.getDocument?id={id}"),
+            token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{doc}");
+        doc
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_path_names_a_document_as_well_as_a_context() {
+        let state = seeded_state().await;
+        let resolve = "/xrpc/com.example.wiki.resolveNode?path=";
+        let (status, v) = get(router(state.clone()), &format!("{resolve}group-one/motion")).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["node"], "document");
+        assert_eq!(v["id"], "d1");
+        let (_, v) = get(router(state.clone()), &format!("{resolve}/group-one//sub/")).await;
+        assert_eq!(v["node"], "context");
+        assert_eq!(
+            v["id"], "c2",
+            "empty segments must not change what a path names"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_server_gives_a_new_document_the_cleanest_free_key() {
+        let state = seeded_state().await;
+        let carol = token_for(&state, "did:plc:carol").await;
+        join(&state, "did:plc:carol", "c1").await;
+        fn named(title: &str, parent: Option<&str>) -> serde_json::Value {
+            serde_json::json!({
+                "context_id": "c1", "parent_id": parent, "kind": "folder", "title": title
+            })
+        }
+
+        let first = create(&state, &carol, named("Landsmøde 2026", None)).await;
+        assert_eq!(first["slug"], "landsmøde_2026");
+        assert_eq!(first["path"], "group-one/landsmøde_2026");
+        assert_eq!(first["parent_id"], "c1");
+        assert_eq!(first["owner_did"], "did:plc:carol");
+
+        let second = create(&state, &carol, named("Landsmøde 2026", None)).await;
+        assert_eq!(
+            second["slug"], "landsmøde_2026-2",
+            "a taken key counts up from 2"
+        );
+
+        // `sub` is a CONTEXT under c1. The two tables share one namespace.
+        let beside_a_context = create(&state, &carol, named("Sub", None)).await;
+        assert_eq!(beside_a_context["path"], "group-one/sub-2");
+
+        let folder = first["id"].as_str().expect("id");
+        let nested = create(&state, &carol, named("Dagsorden", Some(folder))).await;
+        assert_eq!(nested["path"], "group-one/landsmøde_2026/dagsorden");
+        let (status, v) = get(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.resolveNode?path=group-one/landsmøde_2026/dagsorden",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["id"], nested["id"]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_document_needs_a_parent_that_is_there() {
+        let state = seeded_state().await;
+        let carol = token_for(&state, "did:plc:carol").await;
+        join(&state, "did:plc:carol", "c1").await;
+        let (status, v) = post(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.createDocument",
+            Some(&carol),
+            serde_json::json!({
+                "context_id": "c1", "parent_id": "nowhere", "kind": "document", "title": "Lost"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+        assert_eq!(v["error"], "InvalidRequest");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_binned_document_is_gone_from_every_read_and_gives_up_its_path() {
+        let state = seeded_state().await;
+        let conn = state.db.acquire().await.expect("conn");
+        conn.execute(
+            "UPDATE document SET deleted_at = datetime('now') WHERE id = 'd1'",
+            (),
+        )
+        .await
+        .expect("bin");
+        for uri in [
+            "/xrpc/com.example.wiki.getDocument?id=d1",
+            "/xrpc/com.example.wiki.resolveNode?path=group-one/motion",
+        ] {
+            let (status, _) = get(router(state.clone()), uri).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
+        }
+        for uri in [
+            "/xrpc/com.example.wiki.listChildren?parent=c1",
+            "/xrpc/com.example.wiki.search?q=Motion",
+            "/xrpc/com.example.wiki.listRecent",
+        ] {
+            let (_, v) = get(router(state.clone()), uri).await;
+            assert!(
+                !v.to_string().contains("Motion"),
+                "{uri} served the bin: {v}"
+            );
+        }
+
+        let carol = token_for(&state, "did:plc:carol").await;
+        join(&state, "did:plc:carol", "c1").await;
+        let again = create(
+            &state,
+            &carol,
+            serde_json::json!({"context_id": "c1", "kind": "policy", "title": "Motion"}),
+        )
+        .await;
+        assert_eq!(
+            again["path"], "group-one/motion",
+            "a node in the bin held its URL hostage"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn children_come_in_their_manual_order() {
+        let state = seeded_state().await;
+        let conn = state.db.acquire().await.expect("conn");
+        conn.execute("UPDATE document SET idx = 5 WHERE id = 'd1'", ())
+            .await
+            .expect("reorder");
+        conn.execute("UPDATE document SET idx = 1 WHERE id = 'd2'", ())
+            .await
+            .expect("reorder");
+        let (_, v) = get(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.listChildren?parent=c1",
+        )
+        .await;
+        let ids: Vec<&str> = v["documents"]
+            .as_array()
+            .expect("array")
+            .iter()
+            .filter_map(|d| d["id"].as_str())
+            .collect();
+        assert_eq!(ids, ["d2", "d1"]);
     }
 }

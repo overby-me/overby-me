@@ -35,6 +35,21 @@ pub struct InterimNode {
     pub data: Option<serde_json::Value>,
     #[serde(rename = "createdAt", default)]
     pub created_at: Option<String>,
+    #[serde(rename = "updatedAt", default)]
+    pub updated_at: Option<String>,
+    /// Slash-joined keys from the root, kept by a trigger. Absent in an older
+    /// dump, in which case it is rebuilt from the keys.
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub index: Option<i64>,
+    #[serde(default)]
+    pub mutable: Option<bool>,
+    #[serde(default)]
+    pub attachable: Option<bool>,
+    /// Set while the node is in the bin.
+    #[serde(default)]
+    pub deleted_at: Option<String>,
 }
 
 /// An interim `members` row.
@@ -74,7 +89,7 @@ pub struct InterimUser {
     pub handle: Option<String>,
 }
 
-const CONTEXT_MIMES: &[&str] = &["wiki/group", "wiki/event"];
+const CONTEXT_MIMES: &[&str] = &["wiki/group", "wiki/event", "wiki/site"];
 const CONTENT_MIMES: &[&str] = &[
     "wiki/document",
     "vote/policy",
@@ -239,6 +254,18 @@ pub fn extract(
         });
     }
 
+    let tree: BTreeMap<&str, &InterimNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    // The ids that become a `context` or a `document`: the rows a `parent_id`
+    // can still point at after the move.
+    let migrated: BTreeSet<&str> = nodes
+        .iter()
+        .filter(|n| {
+            let mime = n.mime_id.as_deref().unwrap_or("");
+            CONTEXT_MIMES.contains(&mime) || CONTENT_MIMES.contains(&mime)
+        })
+        .map(|n| n.id.as_str())
+        .collect();
+
     for n in nodes {
         let mime = n.mime_id.as_deref().unwrap_or("");
         if CONTEXT_MIMES.contains(&mime) {
@@ -251,32 +278,31 @@ pub fn extract(
             };
             out.contexts.push(Context {
                 id: n.id.clone(),
-                kind: if mime == "wiki/event" {
-                    ContextKind::Event
-                } else {
-                    ContextKind::Group
+                kind: match mime {
+                    "wiki/event" => ContextKind::Event,
+                    "wiki/site" => ContextKind::Site,
+                    _ => ContextKind::Group,
                 },
                 name,
-                slug: n.key.clone().unwrap_or_default(),
-                parent_id: n.parent_id.clone(),
+                place: place_of(n, &tree, &migrated, &mut out.report),
                 visibility: Visibility::Private,
                 published_uri: None,
-                created_at: n.created_at.clone(),
                 legacy_id: Some(n.id.clone()),
             });
         } else if CONTENT_MIMES.contains(&mime) {
-            let (content, kind) = map_content(n, &mut out.report);
+            let (content, data, kind) = map_content(n);
             out.documents.push(Document {
                 id: n.id.clone(),
                 context_id: n.context_id.clone().unwrap_or_default(),
-                parent_id: n.parent_id.clone(),
                 kind,
                 title: n.name.clone().unwrap_or_default(),
+                place: place_of(n, &tree, &migrated, &mut out.report),
+                mutable: n.mutable.unwrap_or(true),
                 content,
+                data,
                 authors: authors_by_node.remove(&n.id).unwrap_or_default(),
                 visibility: Visibility::Private,
                 published_uri: None,
-                created_at: n.created_at.clone(),
                 legacy_id: Some(n.id.clone()),
             });
         } else if mime == COMMENT_MIME {
@@ -353,11 +379,72 @@ pub fn extract(
     out
 }
 
-/// Map a content node's `data` JSONB into `content`, reporting unmapped keys.
+/// Where a node sits: its key, its path and its parent.
+///
+/// A parent that is not itself migrated cannot be kept, or the row would hang
+/// off something the new tree does not have. The interim root (`wiki/home`) is
+/// the expected case, and makes its children roots; any other is reported,
+/// because that subtree is about to come loose.
+fn place_of(
+    n: &InterimNode,
+    tree: &BTreeMap<&str, &InterimNode>,
+    migrated: &BTreeSet<&str>,
+    report: &mut FieldGapReport,
+) -> Place {
+    let parent_id = n
+        .parent_id
+        .as_deref()
+        .filter(|p| migrated.contains(p))
+        .map(str::to_string);
+    if parent_id.is_none()
+        && let Some(parent) = n.parent_id.as_deref()
+        && let Some(parent_mime) = tree.get(parent).map(|p| p.mime_id.as_deref().unwrap_or(""))
+        && parent_mime != "wiki/home"
+    {
+        report.note_source(
+            &format!("nodes.parentId -> {parent_mime}"),
+            "parent kind is not migrated: the node is re-rooted",
+        );
+    }
+    Place {
+        slug: n.key.clone().unwrap_or_default(),
+        path: n.path.clone().unwrap_or_else(|| path_from_keys(n, tree)),
+        parent_id,
+        idx: n.index.unwrap_or(0),
+        attachable: n.attachable.unwrap_or(true),
+        owner_did: n.owner_id.clone(),
+        created_at: n.created_at.clone(),
+        updated_at: n.updated_at.clone(),
+        deleted_at: n.deleted_at.clone(),
+    }
+}
+
+/// The path the interim trigger would have stored: the keys from the root down,
+/// the root's own key excluded. Bounded, so a parent cycle in bad data ends.
+fn path_from_keys(n: &InterimNode, tree: &BTreeMap<&str, &InterimNode>) -> String {
+    let mut keys = Vec::new();
+    let mut at = Some(n);
+    for _ in 0..64 {
+        let Some(node) = at else { break };
+        if node.parent_id.is_none() {
+            break;
+        }
+        keys.push(node.key.as_deref().unwrap_or_default());
+        at = node.parent_id.as_deref().and_then(|p| tree.get(p).copied());
+    }
+    keys.reverse();
+    keys.join("/")
+}
+
+/// Split a content node's `data` JSONB into the Slate `content` and everything
+/// else (a file's id and type, a cover image), which is carried as it is.
 fn map_content(
     n: &InterimNode,
-    report: &mut FieldGapReport,
-) -> (Option<serde_json::Value>, DocumentKind) {
+) -> (
+    Option<serde_json::Value>,
+    Option<serde_json::Value>,
+    DocumentKind,
+) {
     let kind = match n.mime_id.as_deref().unwrap_or("") {
         "wiki/document" => DocumentKind::Document,
         "wiki/folder" => DocumentKind::Folder,
@@ -370,20 +457,12 @@ fn map_content(
         _ => DocumentKind::Document,
     };
     let Some(serde_json::Value::Object(map)) = &n.data else {
-        return (None, kind);
+        return (None, None, kind);
     };
-    // `content` is the Slate body; other keys (image, fileId, type, text) are
-    // carried in report notes so the importer decides where each lands.
-    let content = map.get("content").cloned();
-    for key in map.keys() {
-        if key != "content" {
-            report.note_source(
-                &format!("{}.data.{key}", n.mime_id.as_deref().unwrap_or("?")),
-                "non-content data key: importer must map (image/fileId/type/etc.)",
-            );
-        }
-    }
-    (content, kind)
+    let mut rest = map.clone();
+    let content = rest.remove("content");
+    let data = (!rest.is_empty()).then_some(serde_json::Value::Object(rest));
+    (content, data, kind)
 }
 
 /// A comment node's text lives in `data.text` (census: vote/comment shape).
