@@ -5441,14 +5441,14 @@ index 23c6d3a..2db9cc5 100644
  			      &peripheral.clk_src, &peripheral.clk_div);
 @@ -620,10 +1097,17 @@ static int spi_geni_init(struct spi_geni_master *mas)
  			dev_err(mas->dev, "spi master firmware load failed ret: %d\n", ret);
- 			goto out_pm;
+ 			return ret;
  		}
 +	} else if (proto == GENI_SE_QSPI && !strcmp(dev_name(mas->dev), "a88000.spi")) {
 +		dev_info(mas->dev, "SP11: accepting protocol 9 as QSPI controller\n");
 +		mas->is_qspi = true;
  	} else if (proto != GENI_SE_SPI) {
  		dev_err(mas->dev, "Invalid proto %d\n", proto);
- 		goto out_pm;
+ 		return -EINVAL;
  	}
 +
 +	if (mas->is_qspi)
@@ -5500,7 +5500,7 @@ index 23c6d3a..2db9cc5 100644
 +			dev_info(mas->dev, "SP11: QSPI using GPI DMA descriptor mode\n");
 +			goto setup_cs;
 +		} else if (ret == -EPROBE_DEFER) {
-+			goto out_pm;
++			return ret;
 +		}
 +
 +		dev_warn(mas->dev,
