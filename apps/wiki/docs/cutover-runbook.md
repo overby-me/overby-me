@@ -41,12 +41,11 @@ tested.
   unit with a persistent `StateDirectory` for the Turso file, restart-on-failure,
   and `/healthz`). Acceptance (`nixos-rebuild build-vm` behind Ferron, restart
   soak) is the operator step.
-- **PARTLY BUILT**: the AppView itself. `docs/appview-roadmap.md` tracks what it
-  serves (sessions, the read and write gates, the node tree, membership,
-  meetings, live updates, files) and what it does not yet (voting, the
-  carried-over sidecar endpoints, and the frontend's own data layer). Until the
-  roadmap is done the flip target does not answer everything the app asks, so
-  this runbook is rehearsed against staging first.
+- **The AppView itself** answers every data call the frontend makes
+  (`docs/appview-api-coverage.md`). What is NOT BUILT is the other end of the
+  flip: the frontend's own data layer still speaks GraphQL to Hasura
+  (`docs/appview-roadmap.md`, M9), so there is nothing to flip to yet, and this
+  runbook is rehearsed against staging first.
 
 ## Ordered checklist
 
@@ -65,10 +64,15 @@ tested.
    schema, loads everything or nothing, and prints what it loaded. Set the
    printed counts against those `extract` printed. The search index is built
    when the service next starts.
-5. **Copy the files.** NOT BUILT (`docs/appview-roadmap.md`, M8). Every file in
-   NHost storage goes into the AppView's blob store under its OLD storage id,
-   filed under the context of the node that points at it, so `data.fileId` on a
-   node needs no rewriting. A file no node points at is reported, not copied.
+5. **Copy the files.** `HASURA_URL=… NHOST_STORAGE_URL=… HASURA_ADMIN_SECRET=…
+   nu scripts/dump-interim-files.nu files` downloads every file in NHost storage
+   into `files/`, with what storage says of each in `files/manifest.json`. Then
+   `appview import-files extraction.json files` files each in the blob store
+   under its OLD storage id, under the context of what points at it, so nothing
+   that points at a file is rewritten. Both can be run again after a failure:
+   what is already there is passed over. `import-files` exits non-zero and lists
+   every file it did not copy (never downloaded, or short of the size storage
+   reported), and lists without copying every file that nothing points at.
 6. **Verification gates** (below): go/no-go. Any red gate stops the cutover.
 7. **Flip.** Build the frontend with `WIKI_GRAPHQL_URL` / `WIKI_BACKEND_URL`
    pointed at the AppView, and change the `backend_api::file_url` body to the

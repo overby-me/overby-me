@@ -146,6 +146,190 @@ async fn load_all(conn: &Connection, ex: &Extraction) -> Result<ImportStats, Imp
     Ok(stats)
 }
 
+/// What came of copying the interim's files across.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct FileStats {
+    pub copied: usize,
+    /// Here already, from an earlier run.
+    pub already: usize,
+    /// Pointed at and not copied: `(file id, why)`.
+    pub failed: Vec<(String, String)>,
+    /// In the directory with nothing pointing at it. Not copied.
+    pub unreferenced: Vec<String>,
+}
+
+/// A file something in the extraction points at, and whose it is to read.
+struct Wanted {
+    id: String,
+    context_id: String,
+    owner: Option<String>,
+    name: Option<String>,
+    mime: Option<String>,
+}
+
+/// What the interim's storage said of a file (its `files` rows, as dumped).
+#[derive(Debug, serde::Deserialize)]
+struct Listed {
+    id: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(rename = "mimeType", default)]
+    mime_type: Option<String>,
+    #[serde(default)]
+    size: Option<u64>,
+}
+
+fn wanted(ex: &Extraction, home: Option<&str>) -> Vec<Wanted> {
+    let text = |data: &Option<serde_json::Value>, key: &str| {
+        data.as_ref()
+            .and_then(|d| d.get(key))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let mut wanted = Vec::new();
+    for d in &ex.documents {
+        if let Some(id) = text(&d.data, "fileId") {
+            wanted.push(Wanted {
+                id,
+                context_id: d.context_id.clone(),
+                owner: d.place.owner_did.clone(),
+                name: Some(d.title.clone()),
+                mime: text(&d.data, "type"),
+            });
+        }
+        if let Some(id) = text(&d.data, "image") {
+            wanted.push(Wanted {
+                id,
+                context_id: d.context_id.clone(),
+                owner: d.place.owner_did.clone(),
+                name: None,
+                mime: None,
+            });
+        }
+    }
+    for c in &ex.contexts {
+        if let Some(id) = text(&c.data, "image") {
+            wanted.push(Wanted {
+                id,
+                context_id: c.id.clone(),
+                owner: c.place.owner_did.clone(),
+                name: None,
+                mime: None,
+            });
+        }
+    }
+    for k in &ex.comments {
+        if let Some(id) = &k.image {
+            wanted.push(Wanted {
+                id: id.clone(),
+                context_id: k.context_id.clone(),
+                owner: k.author.did().map(str::to_string),
+                name: None,
+                mime: None,
+            });
+        }
+    }
+    // A report belongs to no group. Its screenshot is for whoever runs the site.
+    for report in &ex.feedback {
+        if let (Some(id), Some(home)) = (&report.image, home) {
+            wanted.push(Wanted {
+                id: id.clone(),
+                context_id: home.to_string(),
+                owner: report.owner_did.clone(),
+                name: None,
+                mime: None,
+            });
+        }
+    }
+    wanted
+}
+
+/// Copy the interim's files, downloaded into `dir` under their ids, into the
+/// blob store under those same ids, so that nothing that points at one needs
+/// rewriting. Each is filed under the context of what points at it, which is
+/// who gets to read it. A file nothing points at is listed and left. Run after
+/// [`import`], and as often as it takes: what is here already is passed over.
+pub async fn import_files(
+    state: &crate::AppState,
+    ex: &Extraction,
+    dir: &std::path::Path,
+) -> Result<FileStats, ImportError> {
+    let listed: Vec<Listed> = match tokio::fs::read(dir.join("manifest.json")).await {
+        Ok(raw) => serde_json::from_slice(&raw)?,
+        Err(_) => Vec::new(),
+    };
+    let conn = state.db.acquire().await?;
+    let mut rows = conn
+        .query("SELECT id FROM context WHERE kind = 'home'", ())
+        .await?;
+    let home: Option<String> = match rows.next().await? {
+        Some(row) => Some(row.get(0)?),
+        None => None,
+    };
+    drop(rows);
+
+    let mut stats = FileStats::default();
+    let mut seen = std::collections::BTreeSet::new();
+    for file in wanted(ex, home.as_deref()) {
+        // A file id is a path segment here, and the dump is not ours.
+        let plain = file
+            .id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        if !seen.insert(file.id.clone()) || !plain {
+            continue;
+        }
+        if exists(&conn, "blob", &file.id).await? {
+            stats.already += 1;
+            continue;
+        }
+        let said = listed.iter().find(|l| l.id == file.id);
+        let source = dir.join(&file.id);
+        let size = tokio::fs::metadata(&source).await.ok().map(|m| m.len());
+        let refusal = match (size, said.and_then(|l| l.size)) {
+            (None, _) => Some("not among the downloaded files".to_string()),
+            (Some(read), Some(said)) if read != said => {
+                Some(format!("{read} bytes were downloaded, of {said}"))
+            }
+            _ => None,
+        };
+        if let Some(why) = refusal {
+            stats.failed.push((file.id, why));
+            continue;
+        }
+        let blob = crate::blob::BlobMeta {
+            id: file.id.clone(),
+            context_id: file.context_id,
+            owner_did: match known(&conn, file.owner.as_deref()).await? {
+                Value::Text(did) => Some(did),
+                _ => None,
+            },
+            sha256: String::new(),
+            size: 0,
+            mime: file
+                .mime
+                .or_else(|| said.and_then(|l| l.mime_type.clone()))
+                .unwrap_or_default(),
+            name: file.name.or_else(|| said.and_then(|l| l.name.clone())),
+        };
+        match crate::blob::file_a_copy(state, &source, blob).await {
+            Ok(_) => stats.copied += 1,
+            Err(e) => stats.failed.push((file.id, e.to_string())),
+        }
+    }
+    if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name != "manifest.json" && !seen.contains(&name) {
+                stats.unreferenced.push(name);
+            }
+        }
+    }
+    stats.unreferenced.sort();
+    Ok(stats)
+}
+
 /// The service gives a datastore a home the first time it starts. Started once
 /// before the load, that empty home is in the way of the one being loaded, and
 /// goes. One that has been used is not this command's to remove.
@@ -564,6 +748,77 @@ mod tests {
             import(&used.db, &interim()).await,
             Err(ImportError::HomeTaken)
         ));
+    }
+
+    /// Every file keeps its id, so nothing that points at one is rewritten, and
+    /// is read by whoever reads what points at it.
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_files_come_across_under_the_ids_they_had() {
+        let mut ex = interim();
+        let agenda = ex.documents.iter_mut().find(|d| d.id == "mo").expect("mo");
+        agenda.data =
+            Some(json!({"fileId": "f-agenda", "type": "application/pdf", "image": "f-cover"}));
+        ex.contexts[0].data = Some(json!({"image": "f-front"}));
+        ex.comments[0].image = Some("f-gone".into());
+
+        let mut state = fresh().await;
+        let dir =
+            std::env::temp_dir().join(format!("interim-files-{}", crate::util::random_token(8)));
+        state.config.blob_dir = dir.join("blobs").to_string_lossy().into_owned();
+        let files = dir.join("files");
+        std::fs::create_dir_all(&files).expect("dir");
+        for (name, bytes) in [
+            ("f-agenda", &b"%PDF the agenda"[..]),
+            ("f-cover", b"a cover"),
+            ("f-front", b"cut short"),
+            ("f-stray", b"nothing points here"),
+        ] {
+            std::fs::write(files.join(name), bytes).expect("file");
+        }
+        let manifest = json!([
+            {"id": "f-cover", "name": "forside.png", "mimeType": "image/png", "size": 7},
+            {"id": "f-front", "name": "front.jpg", "mimeType": "image/jpeg", "size": 4096},
+        ]);
+        std::fs::write(files.join("manifest.json"), manifest.to_string()).expect("manifest");
+
+        import(&state.db, &ex).await.expect("import");
+        let stats = import_files(&state, &ex, &files).await.expect("files");
+        assert_eq!((stats.copied, stats.already), (2, 0), "{stats:?}");
+        let failed: Vec<&str> = stats.failed.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(
+            failed,
+            ["f-front", "f-gone"],
+            "one cut short in the download, one never downloaded: {stats:?}"
+        );
+        assert_eq!(stats.unreferenced, ["f-stray"]);
+        let again = import_files(&state, &ex, &files).await.expect("again");
+        assert_eq!((again.copied, again.already), (0, 2));
+
+        let alice = token_for(&state, ALICE).await;
+        let session = json!({"email": "alice@x.dk", "emailConfirmed": true});
+        let account = account_from(ALICE, "https://bsky.social", &session, None);
+        apply(&state, ALICE, &account).await.expect("apply");
+        let stranger = token_for(&state, "did:plc:mallory").await;
+        let (status, headers, bytes) =
+            crate::blob::tests::fetch(&state, "/blob/f-agenda", Some(&alice), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(bytes, b"%PDF the agenda");
+        assert_eq!(headers["content-type"], "application/pdf");
+        let (status, headers, _) =
+            crate::blob::tests::fetch(&state, "/blob/f-cover", Some(&alice), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers["content-type"], "image/png",
+            "what the interim said it was"
+        );
+        let (status, _, _) =
+            crate::blob::tests::fetch(&state, "/blob/f-agenda", Some(&stranger), None).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "a file is read through its context"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test(flavor = "current_thread")]

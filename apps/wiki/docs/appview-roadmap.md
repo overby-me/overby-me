@@ -35,9 +35,9 @@ interim sidecar served, search and the feeds, and `appview import`, which loads
 a migrated wiki. `docs/appview-api-coverage.md` sets every data call the
 frontend makes against the method that answers it, and none is left without.
 
-Not built: the frontend's own data layer (M9), copying the interim's files
-across (M8), mail to an invited address (M4), and the parts of voting that wait
-on a decision that is the owner's to make (M6). What needs a person and cannot
+Not built: the frontend's own data layer (M9), mail to an invited address (M4),
+and the parts of voting that wait on a decision that is the owner's to make
+(M6). What needs a person and cannot
 be tested from here: one real browser login, and with it the token exchange,
 the profile read and posting to a PDS.
 
@@ -423,9 +423,14 @@ Decided here without the owner, and cheap to change now:
 - [x] A ceiling on what one member and what one context may store, beside the
   cap on a single file (`StorageFull`). The interim has neither. Deleting gives
   the room back.
-- [ ] Copying the interim's files across, each under its old storage id so that
-  `data.fileId` on a node keeps working (a cutover step, listed here because
-  the blob table is its target).
+- [x] Copying the interim's files across, each under its old storage id so that
+  nothing that points at one is rewritten. `scripts/dump-interim-files.nu`
+  downloads them (read-only, the owner's to run; proven against a stand-in for
+  NHost's storage, since the real one is not ours to reach), and `appview
+  import-files` files each under the context of what points at it: a page's
+  file and cover, a place's cover, a comment's picture, a report's screenshot.
+  One that came across short is refused by its size; one that nothing points
+  at is listed and left.
 
 #### The interim sidecar's other endpoints
 

@@ -335,6 +335,47 @@ async fn keep(
     Ok(())
 }
 
+/// File a copy of the bytes at `source` as `blob`, whose hash and size are
+/// found here: how a file that was stored somewhere else comes to be stored
+/// here, under the id it already had. `source` is left as it was.
+pub(crate) async fn file_a_copy(
+    state: &AppState,
+    source: &std::path::Path,
+    mut blob: BlobMeta,
+) -> Result<BlobMeta, Failure> {
+    tokio::fs::create_dir_all(&state.config.blob_dir).await?;
+    // Beside where it will be kept, so that keeping it is a rename.
+    let incoming = PathBuf::from(&state.config.blob_dir)
+        .join(format!("incoming-{}", crate::util::random_token(12)));
+    let mut from = tokio::fs::File::open(source).await?;
+    let mut to = tokio::fs::File::create(&incoming).await?;
+    let mut hasher = Sha256::new();
+    let mut size: u64 = 0;
+    let mut chunk = vec![0u8; 64 * 1024];
+    loop {
+        let read = from.read(&mut chunk).await?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&chunk[..read]);
+        to.write_all(&chunk[..read]).await?;
+        size += read as u64;
+    }
+    to.sync_all().await?;
+    blob.sha256 = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    blob.size = i64::try_from(size)?;
+    blob.mime = clean_mime(Some(&blob.mime));
+    if let Err(e) = keep(state, &incoming, &blob).await {
+        let _ = tokio::fs::remove_file(&incoming).await;
+        return Err(e);
+    }
+    Ok(blob)
+}
+
 /// Drop the row, and the bytes with it unless another row shares them.
 async fn forget(state: &AppState, blob: &BlobMeta) -> Result<(), DbError> {
     let _files = FILES.lock().await;

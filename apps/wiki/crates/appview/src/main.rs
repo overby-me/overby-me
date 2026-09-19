@@ -1,7 +1,8 @@
 //! AppView entrypoint: open the Turso datastore, build the router, and serve on
 //! `$PORT` as a long-running process (NOT scale-to-zero serverless).
 //!
-//! `appview import <extraction.json>` loads a migrated wiki instead, and exits.
+//! `appview import <extraction.json>` loads a migrated wiki instead, and exits;
+//! `appview import-files <extraction.json> <dir>` then files its files.
 
 use appview::oauth::WikiOAuth;
 use appview::{AppState, Config, Db, router};
@@ -34,11 +35,16 @@ async fn main() {
         std::process::exit(1);
     }
     let mut args = std::env::args().skip(1);
-    match (args.next().as_deref(), args.next()) {
-        (None, _) => {}
-        (Some("import"), Some(path)) => import(&db, &path).await,
+    match (args.next().as_deref(), args.next(), args.next()) {
+        (None, _, _) => {}
+        (Some("import"), Some(path), None) => import(&db, &path).await,
+        (Some("import-files"), Some(path), Some(dir)) => {
+            import_files(AppState::new(db, config), &path, &dir).await
+        }
         _ => {
-            eprintln!("usage: appview [import <extraction.json>]");
+            eprintln!(
+                "usage: appview [import <extraction.json> | import-files <extraction.json> <dir>]"
+            );
             std::process::exit(2);
         }
     }
@@ -128,6 +134,38 @@ async fn import(db: &Db, path: &str) -> ! {
         }
         Err(e) => {
             eprintln!("import failed, nothing was loaded: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn import_files(state: AppState, path: &str, dir: &str) -> ! {
+    let copied = async {
+        let raw = tokio::fs::read(path).await?;
+        let ex = serde_json::from_slice(&raw)?;
+        Ok::<_, Box<dyn std::error::Error>>(
+            appview::import::import_files(&state, &ex, std::path::Path::new(dir)).await?,
+        )
+    };
+    match copied.await {
+        Ok(stats) => {
+            println!(
+                "files: {} copied, {} here already, {} not copied, {} that nothing points at",
+                stats.copied,
+                stats.already,
+                stats.failed.len(),
+                stats.unreferenced.len()
+            );
+            for (id, why) in &stats.failed {
+                println!("not copied: {id}: {why}");
+            }
+            for name in &stats.unreferenced {
+                println!("nothing points at: {name}");
+            }
+            std::process::exit(i32::from(!stats.failed.is_empty()));
+        }
+        Err(e) => {
+            eprintln!("import-files failed: {e}");
             std::process::exit(1);
         }
     }
