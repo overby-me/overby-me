@@ -296,6 +296,15 @@ The steps:
   place serves and a search finds. `APPVIEW_SITE_OWNER` seats a DID as an owner
   of the home at every start: the operator's way in, to a new site or to a
   loaded one none of whose owners can sign in.
+- [x] Other people's drafts are theirs alone. The interim keeps an unsubmitted
+  motion, amendment or candidacy out of every listing but its author's, by a
+  filter the FRONTEND adds to its queries, so a backend that answers the same
+  questions without the filter lists everybody's drafts to everybody. It is
+  the server's rule here (`authz::listed_document`), over a node's children,
+  their counts and `listChildren`. It is not a read gate: a draft still opens
+  by its address. And it names the kinds that have a submit step, because on
+  anything else `mutable` means something else, which is how the interim once
+  blanked a canvas for all but one person.
 - [x] What the second pass over the frontend's callers turned up beside that:
   `purgeOrphan`, since the view that lists what has gone astray exists to clear
   it away and the AppView could only list; and an owner redating a page or a

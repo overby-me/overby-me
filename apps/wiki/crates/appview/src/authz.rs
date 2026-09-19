@@ -59,6 +59,26 @@ pub fn readable_comment(alias: &str, caller: usize) -> String {
     )
 }
 
+/// Holds for the rows of document `alias` that a LISTING shows the caller.
+///
+/// Other people's unsubmitted work is theirs alone, where "unsubmitted" is a
+/// thing that exists: a motion, an amendment and a candidacy have a submit
+/// step, and on anything else `mutable` means something else (an open canvas).
+/// The interim learnt both halves the hard way: a page people vote from listed
+/// three amendments of one title, two of them drafts, and a filter on `mutable`
+/// alone blanked the congress canvas for all but one person.
+///
+/// Not a read gate. A draft opens by its URL for whoever may read its context,
+/// as it always did; it is only not put in front of them.
+pub fn listed_document(alias: &str, caller: usize) -> String {
+    format!(
+        "({alias}.kind NOT IN ('candidate','policy','change') OR {alias}.mutable = 0 \
+          OR {alias}.owner_did = ?{caller} \
+          OR EXISTS (SELECT 1 FROM document_author a \
+                     WHERE a.document_id = {alias}.id AND a.author_did = ?{caller}))"
+    )
+}
+
 // -- The write model: who may create which kind under which parent. --
 //
 // The interim keeps this per context, as `permissions` rows seeded from one

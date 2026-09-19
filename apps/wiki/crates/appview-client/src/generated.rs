@@ -1184,7 +1184,7 @@ pub mod get_node {
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
     #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
     pub struct Output {
-        /// Live children the caller may read, contexts and documents in one list, by `idx` and then age.
+        /// Live children the caller may read, contexts and documents in one list, by `idx` and then age. Less other people's drafts: an unsubmitted motion, amendment or candidacy is listed to its creator and its named authors only, though it opens by its address for whoever may read its context.
         pub children: Vec<defs::ChildView>,
         /// A crumb per path segment, the node's own last.
         pub crumbs: Vec<CrumbView>,

@@ -21,7 +21,7 @@
 //! - `members.nodeId`/`parentId`/`accepted` became `member.user_did`/
 //!   `context_id` and the folded-in active state (there is no `accepted`);
 
-use crate::authz::{readable_comment, readable_context, readable_document};
+use crate::authz::{listed_document, readable_comment, readable_context, readable_document};
 use crate::db::{Db, DbError};
 use turso::Value;
 use wiki_domain_types::{
@@ -1403,11 +1403,17 @@ impl Store {
         parent_id: &str,
         caller: Option<&str>,
     ) -> Result<Vec<Child>, DbError> {
-        // A context is locked from the day it is made, as in the interim.
+        // What the caller would be listed on opening it, so that a drawer
+        // offers to expand only what has something to show them.
         let counted = |alias: &str| {
             format!(
-                "(SELECT count(*) FROM document x WHERE x.parent_id = {alias}.id AND x.{LIVE}) + \
-                 (SELECT count(*) FROM context y WHERE y.parent_id = {alias}.id AND y.{LIVE})"
+                "(SELECT count(*) FROM document x WHERE x.parent_id = {alias}.id AND x.{LIVE} \
+                    AND {} AND {}) + \
+                 (SELECT count(*) FROM context y WHERE y.parent_id = {alias}.id AND y.{LIVE} \
+                    AND {})",
+                readable_document("x", 2),
+                listed_document("x", 2),
+                readable_context("y", 2)
             )
         };
         let queries = [
@@ -1426,9 +1432,10 @@ impl Store {
                 format!(
                     "SELECT d.id, d.kind, d.title, d.slug, d.path, d.idx, d.mutable, d.attachable, \
                             d.owner_did, d.created_at, d.data, {}, d.updated_at \
-                     FROM document d WHERE d.parent_id = ?1 AND d.{LIVE} AND {}",
+                     FROM document d WHERE d.parent_id = ?1 AND d.{LIVE} AND {} AND {}",
                     counted("d"),
-                    readable_document("d", 2)
+                    readable_document("d", 2),
+                    listed_document("d", 2)
                 ),
             ),
         ];
@@ -1648,9 +1655,10 @@ impl Store {
                 .query(
                     &format!(
                         "SELECT {DOC_COLS} FROM document d \
-                         WHERE d.parent_id = ?1 AND d.{LIVE} AND {} \
+                         WHERE d.parent_id = ?1 AND d.{LIVE} AND {} AND {} \
                          ORDER BY d.idx, d.created_at",
-                        readable_document("d", 2)
+                        readable_document("d", 2),
+                        listed_document("d", 2)
                     ),
                     vec![Value::Text(parent_id.to_string()), opt_str_val(caller)],
                 )

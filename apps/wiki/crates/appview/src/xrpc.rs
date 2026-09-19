@@ -2686,9 +2686,13 @@ pub(crate) mod tests {
     async fn children_come_in_their_manual_order() {
         let state = seeded_state().await;
         let conn = state.db.acquire().await.expect("conn");
-        conn.execute("UPDATE document SET idx = 5 WHERE id = 'd1'", ())
-            .await
-            .expect("reorder");
+        // Submitted, or as a motion it would be listed to its author alone.
+        conn.execute(
+            "UPDATE document SET idx = 5, mutable = 0 WHERE id = 'd1'",
+            (),
+        )
+        .await
+        .expect("reorder");
         conn.execute("UPDATE document SET idx = 1 WHERE id = 'd2'", ())
             .await
             .expect("reorder");
@@ -2846,6 +2850,76 @@ pub(crate) mod tests {
             )
             .await
         }
+    }
+
+    /// Other people's unsubmitted work is theirs alone. The interim held to it
+    /// in the drawer and not on the page, and a page people vote from listed
+    /// three amendments of one title, two of them drafts. Here a listing is a
+    /// listing, wherever it is drawn.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_draft_is_listed_to_whoever_is_writing_it_and_to_nobody_else() {
+        let m = meeting().await;
+        let erin = token_for(&m.state, "did:plc:erin").await;
+        join(&m.state, "did:plc:erin", "c1").await;
+        let listed = |who: String| {
+            let state = m.state.clone();
+            async move {
+                let uri = "/xrpc/com.example.wiki.getNode?path=group-one/resolutioner";
+                let (_, v) = get_as(router(state.clone()), uri, &who).await;
+                let on_the_page = v["children"].as_array().expect("children").len();
+                let uri = "/xrpc/com.example.wiki.listChildren?parent=fold";
+                let (_, v) = get_as(router(state.clone()), uri, &who).await;
+                let whole = v["documents"].as_array().expect("documents").len();
+                let uri = "/xrpc/com.example.wiki.getNode?path=group-one";
+                let (_, v) = get_as(router(state), uri, &who).await;
+                let folder = v["children"].as_array().expect("children");
+                let folder = folder.iter().find(|c| c["id"] == "fold").expect("fold");
+                (
+                    on_the_page,
+                    whole,
+                    folder["child_count"].as_i64().expect("count"),
+                )
+            }
+        };
+        assert_eq!(listed(m.dave.clone()).await, (1, 1, 1), "his own draft");
+        assert_eq!(
+            listed(m.chair.clone()).await,
+            (0, 0, 0),
+            "not the chair's to be shown"
+        );
+        assert_eq!(listed(erin.clone()).await, (0, 0, 0));
+        let (status, _) = m.read(&erin).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "it still opens for who has its address"
+        );
+
+        // Named as an author of it, she is writing it too.
+        let authors = serde_json::json!({"id": m.motion, "authors": [
+            {"kind": "user", "did": "did:plc:dave"}, {"kind": "user", "did": "did:plc:erin"}
+        ]});
+        assert_eq!(
+            m.call("setDocumentAuthors", &m.dave, authors).await,
+            StatusCode::OK
+        );
+        assert_eq!(listed(erin.clone()).await, (1, 1, 1));
+
+        let submit = serde_json::json!({"id": m.motion, "mutable": false});
+        assert_eq!(
+            m.call("updateDocument", &m.dave, submit).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            listed(m.chair.clone()).await,
+            (1, 1, 1),
+            "submitted, it is everyone's"
+        );
+
+        // A page has no submit step: `mutable` there is no draft.
+        let (status, v) = try_create(&m.state, &m.chair, "document", "fold").await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(listed(erin).await, (2, 2, 2));
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -3109,11 +3183,11 @@ pub(crate) mod tests {
         conn.execute_batch(
             "UPDATE context SET idx = 2 WHERE id = 'c2';
              UPDATE document SET idx = 1 WHERE id = 'fold';
-             UPDATE document SET idx = 3, data = '{\"image\":\"f1\"}' WHERE id = 'd1';
+             UPDATE document SET idx = 3, mutable = 0, data = '{\"image\":\"f1\"}' WHERE id = 'd1';
              UPDATE document SET idx = 4 WHERE id = 'd2';
-             INSERT INTO document (id, context_id, parent_id, kind, title, slug, path) \
+             INSERT INTO document (id, context_id, parent_id, kind, title, slug, path, mutable) \
                VALUES ('in-fold', 'c1', 'fold', 'policy', 'Inde', 'inde', \
-                       'group-one/resolutioner/inde');",
+                       'group-one/resolutioner/inde', 0);",
         )
         .await
         .expect("arrange");
