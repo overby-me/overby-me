@@ -340,7 +340,11 @@ asks Bluesky's public API itself. The steps:
   PowerPoint files to SVG, or PNG where the SVG emitter declines. The PNG path
   draws text with whatever generic sans the host has, so a host with no fonts
   installed renders those figures without their text.
-- [ ] Posting to a member's own PDS.
+- [x] Posting to a member's own PDS (`shareToBluesky`), through the OAuth
+  session atrium keeps from their login, which replaces the interim's own
+  sealed copy and hand-rolled refresh. What is refused and what record is
+  built are tested; the write itself has not met a real PDS, and cannot before
+  the human login listed under M1.
 
 ### M9: frontend swap, migration, cutover rehearsal
 

@@ -25,6 +25,7 @@ pub mod push;
 pub mod roster;
 pub mod schema;
 pub mod session;
+pub mod share;
 pub mod slug;
 pub mod speak;
 pub mod statecookie;
@@ -359,6 +360,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.notifyReply",
             post(push::notify_reply),
+        )
+        .route(
+            "/xrpc/com.example.wiki.shareToBluesky",
+            post(share::share_to_bluesky),
         )
         .route(
             "/xrpc/com.example.wiki.renderMetafile",

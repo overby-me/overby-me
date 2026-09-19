@@ -100,6 +100,7 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   token and a choice). `getPoll` and `listPolls` (queries) are the state and the tally as the
   caller may see them, `getBoard` is every ballot for whoever may see the counts, and
   `getBoardEntry` is how a voter finds their own.
+- `shareToBluesky` posts a page to the caller's own account, on their own PDS.
 - `renderMetafile` draws the EMF and WMF figures inside Word and PowerPoint files, which no browser
   can, so that the renderer stays out of the bundle.
 - Feedback: `submitFeedback` files a report or a crash, with or without a session; `listFeedback`

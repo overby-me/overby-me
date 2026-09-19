@@ -362,6 +362,40 @@ impl WikiOAuth {
         Ok(CallbackOutcome { did, app_state })
     }
 
+    /// Write a record into `did`'s own repo, on their PDS, with the OAuth session
+    /// their login left here. Returns the record's at-uri. Fails for someone who
+    /// has not signed in through this AppView, or whose PDS has since withdrawn
+    /// the grant.
+    pub async fn create_record(
+        &self,
+        did: &str,
+        collection: &str,
+        record: serde_json::Value,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        use atrium_api::com::atproto::repo::create_record::InputData;
+        let did: atrium_api::types::string::Did = did.parse()?;
+        let session = self.client.restore(&did).await?;
+        let agent = atrium_api::agent::Agent::new(session);
+        let created = agent
+            .api
+            .com
+            .atproto
+            .repo
+            .create_record(
+                InputData {
+                    collection: collection.parse()?,
+                    record: serde_json::from_value(record)?,
+                    repo: did.into(),
+                    rkey: None,
+                    swap_commit: None,
+                    validate: None,
+                }
+                .into(),
+            )
+            .await?;
+        Ok(created.uri.clone())
+    }
+
     /// The client metadata document a PDS fetches from the `client_id` URL.
     /// atrium's struct omits two fields the atproto profile lists as required.
     pub fn client_metadata(&self) -> serde_json::Value {
