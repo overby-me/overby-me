@@ -322,7 +322,14 @@ asks Bluesky's public API itself. The steps:
   through. It takes no session, so what it remembers about builds is bounded:
   made-up build hashes cannot push a real build's symbols out or grow without
   limit.
-- [ ] Push: subscribe, unsubscribe, notify, reply.
+- [x] Push: subscribe, unsubscribe, notify, reply (`crates/appview/src/push.rs`).
+  The encryption and VAPID are the interim's, against the RFC 8291 vector. A
+  subscription is a device's and is keyed by DID, where the interim keyed by
+  email. A push endpoint is a URL a client hands over, so it goes out through
+  the guarded client, which also closes the DNS-rebinding hole the interim
+  accepted. A notification may link only into the app. The cutover must carry
+  the interim's VAPID key pair over: the frontend has the public half compiled
+  in, and every browser's subscription is bound to it.
 - [ ] Feedback and crash reports. The interim files them as nodes under the root
   node; here they need a table of their own.
 - [ ] Metafile rendering (EMF/WMF figures in Word and PowerPoint files to PNG).

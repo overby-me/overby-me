@@ -79,6 +79,7 @@ impl Db {
         conn.execute_batch(crate::speak::SPEAK_DDL).await?;
         conn.execute_batch(crate::projector::PROJECTOR_DDL).await?;
         conn.execute_batch(crate::blob::BLOB_DDL).await?;
+        conn.execute_batch(crate::push::PUSH_DDL).await?;
         // The ballot service's durable tables (public board + private roster),
         // both IF NOT EXISTS, so they live in the same datastore as the entities.
         crate::ballot::init_ballot_schema(self).await?;
@@ -95,7 +96,7 @@ impl Db {
 /// so a file made by an older binary keeps its old columns. Without this the
 /// process would start and then fail one query at a time; with it, it refuses
 /// to start and says why.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 async fn schema_version(conn: &Connection) -> Result<i64, DbError> {
     let mut rows = conn.query("PRAGMA user_version", ()).await?;

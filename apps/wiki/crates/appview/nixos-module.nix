@@ -106,6 +106,38 @@ in {
       description = "The Jetstream firehose endpoint the consumer connects to.";
     };
 
+    secretsFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = ''
+        Optional path to a file of `KEY=value` lines, loaded via systemd
+        EnvironmentFile so none of it enters the store: `APPVIEW_SECRET` (signs
+        file links and seals a running poll's issuer key; without it one is
+        made and kept in the state directory), `VAPID_PRIVATE_KEY` (Web Push;
+        without it no notification is sent) and `BETTERSTACK_SOURCE_TOKEN`.
+      '';
+    };
+
+    vapidPublicKey = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      description = ''
+        The public half of the Web Push key pair, base64url. It must be the one
+        the frontend has compiled in, which every browser's subscription is
+        bound to.
+      '';
+    };
+
+    vapidSubject = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      example = "mailto:webmaster@example.org";
+      description = ''
+        The contact a push service is given (`mailto:` or `https:`). Empty uses
+        `publicUrl`.
+      '';
+    };
+
     betterstackTokenFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
@@ -139,6 +171,8 @@ in {
         RUST_LOG = cfg.logFilter;
         APPVIEW_PUBLIC_URL = lib.optionalString (cfg.publicUrl != null) cfg.publicUrl;
         APPVIEW_FRONTEND_ORIGINS = lib.concatStringsSep "," cfg.frontendOrigins;
+        VAPID_PUBLIC_KEY = cfg.vapidPublicKey;
+        VAPID_SUBJECT = cfg.vapidSubject;
       };
 
       serviceConfig = {
@@ -153,7 +187,7 @@ in {
         StateDirectory = "wiki-appview";
         StateDirectoryMode = "0700";
 
-        EnvironmentFile = lib.mkIf (cfg.betterstackTokenFile != null) [cfg.betterstackTokenFile];
+        EnvironmentFile = lib.filter (file: file != null) [cfg.secretsFile cfg.betterstackTokenFile];
 
         # Hardening: an unprivileged, sandboxed service with no host access
         # beyond its state dir and the network.

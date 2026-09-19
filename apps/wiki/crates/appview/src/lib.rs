@@ -18,6 +18,7 @@ pub mod logs;
 pub mod oauth;
 pub mod poll;
 pub mod projector;
+pub mod push;
 pub mod roster;
 pub mod schema;
 pub mod session;
@@ -324,6 +325,22 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.castOpenBallot",
             post(poll::cast_open_ballot),
+        )
+        .route(
+            "/xrpc/com.example.wiki.subscribePush",
+            post(push::subscribe_push),
+        )
+        .route(
+            "/xrpc/com.example.wiki.unsubscribePush",
+            post(push::unsubscribe_push),
+        )
+        .route(
+            "/xrpc/com.example.wiki.notifyContext",
+            post(push::notify_context),
+        )
+        .route(
+            "/xrpc/com.example.wiki.notifyReply",
+            post(push::notify_reply),
         )
         .route(
             "/xrpc/com.example.wiki.parseRoster",

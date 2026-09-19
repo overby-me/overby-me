@@ -58,6 +58,14 @@ pub struct Config {
     /// redirect (`APPVIEW_FRONTEND_ORIGINS`, comma-separated). Empty keeps the
     /// API same-origin.
     pub frontend_origins: Vec<String>,
+    /// The VAPID (RFC 8292) application-server key for Web Push, as the interim
+    /// has it: the 32-byte P-256 scalar and the uncompressed point, base64url
+    /// (`VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`). No private key, no push.
+    pub vapid_private: Secret,
+    pub vapid_public: String,
+    /// The VAPID `sub` claim, a contact for the push service (`VAPID_SUBJECT`):
+    /// a `mailto:` or `https:` URL. Unset, the AppView's own public URL.
+    pub vapid_subject: String,
     /// Where the frontend is served (`APPVIEW_APP_ORIGIN`): its builds publish
     /// their debug symbols there. Unset, the first of `frontend_origins`.
     pub app_origin: String,
@@ -102,6 +110,11 @@ impl Config {
         let db_path = std::env::var("APPVIEW_DB").unwrap_or_else(|_| ":memory:".to_string());
         let secret = Secret::new(secret_for(&db_path, env("APPVIEW_SECRET")));
         let frontend_origins = parse_origins(&env("APPVIEW_FRONTEND_ORIGINS"));
+        let public_url = env("APPVIEW_PUBLIC_URL").trim_end_matches('/').to_string();
+        let vapid_subject = match env("VAPID_SUBJECT") {
+            subject if subject.is_empty() => public_url.clone(),
+            subject => subject,
+        };
         Config {
             port: std::env::var("PORT")
                 .ok()
@@ -122,7 +135,10 @@ impl Config {
                 .unwrap_or_else(|_| "in.logs.betterstack.com".to_string()),
             betterstack_token: Secret::new(env("BETTERSTACK_SOURCE_TOKEN")),
             ballot_replica_log: env("BALLOT_REPLICA_LOG"),
-            public_url: env("APPVIEW_PUBLIC_URL").trim_end_matches('/').to_string(),
+            public_url,
+            vapid_private: Secret::new(env("VAPID_PRIVATE_KEY")),
+            vapid_public: env("VAPID_PUBLIC_KEY"),
+            vapid_subject,
             app_origin: match env("APPVIEW_APP_ORIGIN") {
                 origin if origin.is_empty() => {
                     frontend_origins.first().cloned().unwrap_or_default()
@@ -192,6 +208,9 @@ impl Default for Config {
             ballot_replica_log: String::new(),
             public_url: String::new(),
             frontend_origins: Vec::new(),
+            vapid_private: Secret::default(),
+            vapid_public: String::new(),
+            vapid_subject: String::new(),
             app_origin: String::new(),
             blob_dir: blobs_beside(":memory:"),
             max_blob_bytes: DEFAULT_MAX_BLOB_BYTES,

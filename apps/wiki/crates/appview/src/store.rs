@@ -20,8 +20,6 @@
 //!   authors having no notifiable DID;
 //! - `members.nodeId`/`parentId`/`accepted` became `member.user_did`/
 //!   `context_id` and the folded-in active state (there is no `accepted`);
-//! - `push_subscriptions` is AppView runtime infra (`RUNTIME_DDL`), keyed by
-//!   endpoint, with `user_id` now `user_did`.
 
 use crate::authz::{readable_comment, readable_context, readable_document};
 use crate::db::{Db, DbError};
@@ -158,13 +156,6 @@ pub struct ClaimMember {
 pub struct MemberClaimInfo {
     pub parent_id: Option<String>,
     pub claim_token: Option<String>,
-}
-
-/// A stored Web Push subscription (the fields the push sender needs).
-pub struct Subscription {
-    pub endpoint: String,
-    pub p256dh: String,
-    pub auth: String,
 }
 
 /// What a path names: either spine of the tree.
@@ -1016,102 +1007,6 @@ impl Store {
             Some(row) => Ok(row.get::<i64>(0)?),
             None => Ok(0),
         }
-    }
-
-    /// The emails of a context's active members (push fan-out targets). The
-    /// interim `accepted` flag has no target column (it folded into the active/
-    /// bind state), so active membership is `active = 1`.
-    pub async fn active_member_emails(&self, context: &str) -> Result<Vec<String>, DbError> {
-        let conn = self.db.acquire().await?;
-        let mut rows = conn
-            .query(
-                "SELECT email FROM member \
-                 WHERE context_id = ?1 AND active = 1 AND email IS NOT NULL",
-                [context],
-            )
-            .await?;
-        let mut out = Vec::new();
-        while let Some(row) = rows.next().await? {
-            if let Some(email) = opt_text(&row, 0) {
-                out.push(email);
-            }
-        }
-        Ok(out)
-    }
-
-    /// Upsert a device's Web Push subscription by endpoint (a device
-    /// re-subscribing keeps one row with fresh keys).
-    pub async fn upsert_push_subscription(
-        &self,
-        user_did: &str,
-        email: &str,
-        endpoint: &str,
-        p256dh: &str,
-        auth: &str,
-    ) -> Result<(), DbError> {
-        let conn = self.db.acquire().await?;
-        conn.execute(
-            "INSERT INTO push_subscription (endpoint, user_did, email, p256dh, auth) \
-             VALUES (?1, ?2, ?3, ?4, ?5) \
-             ON CONFLICT(endpoint) DO UPDATE SET user_did = excluded.user_did, \
-               email = excluded.email, p256dh = excluded.p256dh, auth = excluded.auth",
-            [endpoint, user_did, email, p256dh, auth],
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// Delete push subscriptions by endpoint (unsubscribe, or pruning gone ones).
-    pub async fn delete_subscriptions_by_endpoint(
-        &self,
-        endpoints: &[String],
-    ) -> Result<(), DbError> {
-        if endpoints.is_empty() {
-            return Ok(());
-        }
-        let conn = self.db.acquire().await?;
-        let placeholders = in_placeholders(endpoints.len());
-        conn.execute(
-            &format!("DELETE FROM push_subscription WHERE endpoint IN ({placeholders})"),
-            turso::params_from_iter(endpoints.to_vec()),
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// The stored Web Push subscriptions for a set of member emails.
-    pub async fn subscriptions_for_emails(
-        &self,
-        emails: &[String],
-    ) -> Result<Vec<Subscription>, DbError> {
-        if emails.is_empty() {
-            return Ok(Vec::new());
-        }
-        let conn = self.db.acquire().await?;
-        let placeholders = in_placeholders(emails.len());
-        let mut rows = conn
-            .query(
-                &format!(
-                    "SELECT endpoint, p256dh, auth FROM push_subscription \
-                     WHERE email IN ({placeholders})"
-                ),
-                turso::params_from_iter(emails.to_vec()),
-            )
-            .await?;
-        let mut out = Vec::new();
-        while let Some(row) = rows.next().await? {
-            let (Some(endpoint), Some(p256dh), Some(auth)) =
-                (opt_text(&row, 0), opt_text(&row, 1), opt_text(&row, 2))
-            else {
-                continue;
-            };
-            out.push(Subscription {
-                endpoint,
-                p256dh,
-                auth,
-            });
-        }
-        Ok(out)
     }
 
     // -- Firehose materialization (public records mirrored into the view) --
@@ -2534,64 +2429,5 @@ mod tests {
             .expect("some");
         assert_eq!(info.parent_id.as_deref(), Some("c1"));
         assert_eq!(info.claim_token.as_deref(), Some("tok-a"));
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn active_member_emails_excludes_inactive() {
-        let store = Store::new(seeded().await);
-        let mut emails = store.active_member_emails("c1").await.expect("query");
-        emails.sort();
-        // m1 + m2 are active; m3 is inactive and excluded.
-        assert_eq!(emails, vec!["alice@x.dk", "bob@x.dk"]);
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn push_subscriptions_upsert_fetch_and_delete() {
-        let store = Store::new(seeded().await);
-        store
-            .upsert_push_subscription("did:plc:alice", "alice@x.dk", "https://ep/1", "k1", "a1")
-            .await
-            .expect("insert");
-        // Re-subscribing the same endpoint updates keys, not duplicates.
-        store
-            .upsert_push_subscription("did:plc:alice", "alice@x.dk", "https://ep/1", "k2", "a2")
-            .await
-            .expect("update");
-        store
-            .upsert_push_subscription("did:plc:bob", "bob@x.dk", "https://ep/2", "k3", "a3")
-            .await
-            .expect("insert 2");
-
-        let subs = store
-            .subscriptions_for_emails(&["alice@x.dk".into(), "bob@x.dk".into()])
-            .await
-            .expect("fetch");
-        assert_eq!(
-            subs.len(),
-            2,
-            "one row per endpoint (no duplicate on upsert)"
-        );
-        let alice = subs.iter().find(|s| s.endpoint == "https://ep/1").unwrap();
-        assert_eq!(alice.p256dh, "k2", "upsert refreshed the key");
-
-        // Empty inputs short-circuit.
-        assert!(
-            store
-                .subscriptions_for_emails(&[])
-                .await
-                .expect("empty")
-                .is_empty()
-        );
-
-        store
-            .delete_subscriptions_by_endpoint(&["https://ep/1".into()])
-            .await
-            .expect("delete");
-        let after = store
-            .subscriptions_for_emails(&["alice@x.dk".into(), "bob@x.dk".into()])
-            .await
-            .expect("fetch after delete");
-        assert_eq!(after.len(), 1);
-        assert_eq!(after[0].endpoint, "https://ep/2");
     }
 }

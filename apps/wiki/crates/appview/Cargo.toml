@@ -16,6 +16,11 @@ path = "src/main.rs"
 # `file:line` against the DWARF sidecar the frontend build publishes. `addr2line`
 # wraps `gimli` with the lookup logic; `object` parses the wasm container.
 addr2line = "0.24"
+# Background Web Push (RFC 8291 message encryption + RFC 8292 VAPID) is
+# hand-rolled on RustCrypto primitives, since the `web-push` crate pulls
+# libcurl/openssl: `aes-gcm` for the aes128gcm content encoding, `p256` for the
+# ECDH agreement and the ES256 VAPID signature, `hkdf` for the key derivation.
+aes-gcm = "0.10"
 atrium-api = { version = "0.25.8", default-features = false, features = [
   "agent"
 ] }
@@ -48,6 +53,7 @@ object = { version = "0.36", default-features = false, features = [
   "read",
   "wasm"
 ] }
+p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
 rand = "0.8"
 # Same 0.12 line atrium resolves, so the two share one connection pool.
 reqwest = { version = "0.12", default-features = false, features = [

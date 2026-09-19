@@ -100,6 +100,9 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   token and a choice). `getPoll` and `listPolls` (queries) are the state and the tally as the
   caller may see them, `getBoard` is every ballot for whoever may see the counts, and
   `getBoardEntry` is how a voter finds their own.
+- Push: `subscribePush` and `unsubscribePush` are a device's; `notifyContext` is an owner telling a
+  context's members something, and `notifyReply` tells an author they were answered. A notification
+  only ever links into the app.
 - Files: `uploadBlob` takes the raw bytes (not JSON) into a context, `deleteBlob` removes one, and
   `getBlobLink` (a query) signs a short-lived link for an `<iframe>`, a `<video>` or a document
   viewer, none of which can send a header. The bytes themselves are `GET /blob/<id>`, which is plain
