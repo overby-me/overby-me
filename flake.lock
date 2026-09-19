@@ -124,11 +124,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787377438,
-        "narHash": "sha256-Sxu1NLTD/Ern6hFGLlZmtKCSct3YQXZI/lls8RE1XeM=",
+        "lastModified": 1789267039,
+        "narHash": "sha256-LWiBv9yAYFi2LPbUhDGHPGKYskJQjj2fw12OlyO1uQo=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "65258d5c65a250189fde2e35f490d15e064c4c62",
+        "rev": "ec172013fa62135f58fb58dd17ae9651e8f39727",
         "type": "github"
       },
       "original": {
@@ -322,7 +322,7 @@
         "oxidized-ninja": "oxidized-ninja_16",
         "workspace": [
           "publish-checks",
-          "oxidized-ninja",
+          "oxidized-patch",
           "workspace"
         ]
       },
@@ -345,7 +345,7 @@
         "oxidized-ninja": "oxidized-ninja_17",
         "workspace": [
           "publish-checks",
-          "oxidized-patch",
+          "oxidized-patchelf",
           "workspace"
         ]
       },
@@ -368,7 +368,7 @@
         "oxidized-ninja": "oxidized-ninja_18",
         "workspace": [
           "publish-checks",
-          "oxidized-patchelf",
+          "oxidized-pcre2",
           "workspace"
         ]
       },
@@ -391,7 +391,7 @@
         "oxidized-ninja": "oxidized-ninja_19",
         "workspace": [
           "publish-checks",
-          "oxidized-pcre2",
+          "oxidized-perl",
           "workspace"
         ]
       },
@@ -414,7 +414,7 @@
         "oxidized-ninja": "oxidized-ninja_20",
         "workspace": [
           "publish-checks",
-          "oxidized-perl",
+          "oxidized-pipewire",
           "workspace"
         ]
       },
@@ -460,7 +460,7 @@
         "oxidized-ninja": "oxidized-ninja_21",
         "workspace": [
           "publish-checks",
-          "oxidized-pipewire",
+          "oxidized-sed",
           "workspace"
         ]
       },
@@ -483,7 +483,7 @@
         "oxidized-ninja": "oxidized-ninja_22",
         "workspace": [
           "publish-checks",
-          "oxidized-sed",
+          "oxidized-texinfo",
           "workspace"
         ]
       },
@@ -504,29 +504,6 @@
     "nix-lib_22": {
       "inputs": {
         "oxidized-ninja": "oxidized-ninja_23",
-        "workspace": [
-          "publish-checks",
-          "oxidized-texinfo",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "lastModified": 1788364787,
-        "narHash": "sha256-CHtw9GhxCxeMCoka7+mdPmkSJBKmv1HEj6YaQea53tI=",
-        "ref": "refs/heads/main",
-        "rev": "90de5a22b623a7b23393f75887d91c5c92c66878",
-        "revCount": 127,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-lib"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/nix-lib"
-      }
-    },
-    "nix-lib_23": {
-      "inputs": {
-        "oxidized-ninja": "oxidized-ninja_24",
         "workspace": [
           "publish-checks",
           "wclip",
@@ -802,11 +779,11 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1788405554,
-        "narHash": "sha256-r2f1oUwixlgq9zOdYLqJLfS/lWBT60/IITjhTKI59JU=",
+        "lastModified": 1789749394,
+        "narHash": "sha256-cFTsMQz8Hzn8MT49oaeLSHg62tE86NykugCWkeM2ypk=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "a5cc6f2c37bf518436dc8d1c288ccd0c43c2f4c4",
+        "rev": "cf9d2fb3e50fa1cd5114c47505ea9177f7ff5f49",
         "type": "github"
       },
       "original": {
@@ -1252,7 +1229,7 @@
     },
     "oxidized-ninja_15": {
       "inputs": {
-        "nix-lib": "nix-lib_15",
+        "rust": "rust_15",
         "workspace": [
           "publish-checks",
           "workspace"
@@ -1271,30 +1248,6 @@
       ]
     },
     "oxidized-ninja_16": {
-      "inputs": {
-        "rust": "rust_15",
-        "workspace": [
-          "publish-checks",
-          "oxidized-ninja",
-          "nix-lib",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "lastModified": 1787423498,
-        "narHash": "sha256-9XaD9bKLGmAM3jdmbXGGTzzBvX3umwLmzNc8jyCWX6A=",
-        "ref": "refs/heads/main",
-        "rev": "c2d637ff095a63c20bb84ece26a161d34355f041",
-        "revCount": 50,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-ninja"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-ninja"
-      }
-    },
-    "oxidized-ninja_17": {
       "inputs": {
         "rust": "rust_16",
         "workspace": [
@@ -1318,7 +1271,7 @@
         "url": "https://tangled.org/overby.me/oxidized-ninja"
       }
     },
-    "oxidized-ninja_18": {
+    "oxidized-ninja_17": {
       "inputs": {
         "rust": "rust_17",
         "workspace": [
@@ -1342,12 +1295,36 @@
         "url": "https://tangled.org/overby.me/oxidized-ninja"
       }
     },
-    "oxidized-ninja_19": {
+    "oxidized-ninja_18": {
       "inputs": {
         "rust": "rust_18",
         "workspace": [
           "publish-checks",
           "oxidized-pcre2",
+          "nix-lib",
+          "workspace"
+        ]
+      },
+      "locked": {
+        "lastModified": 1787423498,
+        "narHash": "sha256-9XaD9bKLGmAM3jdmbXGGTzzBvX3umwLmzNc8jyCWX6A=",
+        "ref": "refs/heads/main",
+        "rev": "c2d637ff095a63c20bb84ece26a161d34355f041",
+        "revCount": 50,
+        "type": "git",
+        "url": "https://tangled.org/overby.me/oxidized-ninja"
+      },
+      "original": {
+        "type": "git",
+        "url": "https://tangled.org/overby.me/oxidized-ninja"
+      }
+    },
+    "oxidized-ninja_19": {
+      "inputs": {
+        "rust": "rust_19",
+        "workspace": [
+          "publish-checks",
+          "oxidized-perl",
           "nix-lib",
           "workspace"
         ]
@@ -1392,30 +1369,6 @@
     },
     "oxidized-ninja_20": {
       "inputs": {
-        "rust": "rust_19",
-        "workspace": [
-          "publish-checks",
-          "oxidized-perl",
-          "nix-lib",
-          "workspace"
-        ]
-      },
-      "locked": {
-        "lastModified": 1787423498,
-        "narHash": "sha256-9XaD9bKLGmAM3jdmbXGGTzzBvX3umwLmzNc8jyCWX6A=",
-        "ref": "refs/heads/main",
-        "rev": "c2d637ff095a63c20bb84ece26a161d34355f041",
-        "revCount": 50,
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-ninja"
-      },
-      "original": {
-        "type": "git",
-        "url": "https://tangled.org/overby.me/oxidized-ninja"
-      }
-    },
-    "oxidized-ninja_21": {
-      "inputs": {
         "rust": "rust_20",
         "workspace": [
           "publish-checks",
@@ -1438,7 +1391,7 @@
         "url": "https://tangled.org/overby.me/oxidized-ninja"
       }
     },
-    "oxidized-ninja_22": {
+    "oxidized-ninja_21": {
       "inputs": {
         "rust": "rust_21",
         "workspace": [
@@ -1462,7 +1415,7 @@
         "url": "https://tangled.org/overby.me/oxidized-ninja"
       }
     },
-    "oxidized-ninja_23": {
+    "oxidized-ninja_22": {
       "inputs": {
         "rust": "rust_22",
         "workspace": [
@@ -1486,7 +1439,7 @@
         "url": "https://tangled.org/overby.me/oxidized-ninja"
       }
     },
-    "oxidized-ninja_24": {
+    "oxidized-ninja_23": {
       "inputs": {
         "rust": "rust_23",
         "workspace": [
@@ -1680,7 +1633,7 @@
     },
     "oxidized-patch": {
       "inputs": {
-        "nix-lib": "nix-lib_16",
+        "nix-lib": "nix-lib_15",
         "workspace": [
           "publish-checks",
           "workspace"
@@ -1700,7 +1653,7 @@
     },
     "oxidized-patchelf": {
       "inputs": {
-        "nix-lib": "nix-lib_17",
+        "nix-lib": "nix-lib_16",
         "workspace": [
           "publish-checks",
           "workspace"
@@ -1720,7 +1673,7 @@
     },
     "oxidized-pcre2": {
       "inputs": {
-        "nix-lib": "nix-lib_18",
+        "nix-lib": "nix-lib_17",
         "workspace": [
           "publish-checks",
           "workspace"
@@ -1740,7 +1693,7 @@
     },
     "oxidized-perl": {
       "inputs": {
-        "nix-lib": "nix-lib_19",
+        "nix-lib": "nix-lib_18",
         "workspace": [
           "publish-checks",
           "workspace"
@@ -1760,7 +1713,7 @@
     },
     "oxidized-pipewire": {
       "inputs": {
-        "nix-lib": "nix-lib_20",
+        "nix-lib": "nix-lib_19",
         "workspace": [
           "publish-checks",
           "workspace"
@@ -1780,7 +1733,7 @@
     },
     "oxidized-sed": {
       "inputs": {
-        "nix-lib": "nix-lib_21",
+        "nix-lib": "nix-lib_20",
         "workspace": [
           "publish-checks",
           "workspace"
@@ -1800,7 +1753,7 @@
     },
     "oxidized-texinfo": {
       "inputs": {
-        "nix-lib": "nix-lib_22",
+        "nix-lib": "nix-lib_21",
         "workspace": [
           "publish-checks",
           "workspace"
@@ -1898,11 +1851,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1788591095,
-        "narHash": "sha256-Vh+BeLWfbTT9AecazIsQ/Tkg/RzJeX3lEduANf256WA=",
+        "lastModified": 1789715798,
+        "narHash": "sha256-hWw9vlrsFm9kOw8MT5k6IX/7xCzgROuJ6ZvQOrkq66Q=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "c361047d3a538f547f1617bb6b410411929ac9cc",
+        "rev": "fbdb2de9e7619d660ae7e8f752f38b261020b701",
         "type": "github"
       },
       "original": {
@@ -2046,18 +1999,16 @@
         "workspace": [
           "publish-checks",
           "oxidized-ninja",
-          "nix-lib",
-          "oxidized-ninja",
           "workspace"
         ]
       },
       "locked": {
         "dir": "modules/rust",
-        "lastModified": 1787506791,
-        "narHash": "sha256-bi7DNao4miSVTlMvr9Ig8oNX0O8kdXmFbZYX+VSgNME=",
+        "lastModified": 1787862950,
+        "narHash": "sha256-a1+B79yTzHtmJ0xU9/djke8sn3UuAb7zfChsEH9qD1k=",
         "ref": "refs/heads/main",
-        "rev": "aa15e2352718409fd4e7f817818d4e6d41934b1a",
-        "revCount": 88,
+        "rev": "5f2c0d46b1636fe97c918d9cff5504635acf9926",
+        "revCount": 93,
         "type": "git",
         "url": "https://tangled.org/overby.me/nix-workspace"
       },
@@ -2490,11 +2441,11 @@
         "userborn": "userborn"
       },
       "locked": {
-        "lastModified": 1788627374,
-        "narHash": "sha256-2eDv+mAZq9FF9chjRfb63AdryloMbgdPYbwA223AcJc=",
+        "lastModified": 1789772108,
+        "narHash": "sha256-3xiYXu3JbJR40br4P43KlUf+9X6inU+Y69dwiiHwBH0=",
         "owner": "numtide",
         "repo": "system-manager",
-        "rev": "ef548047755cc01a7a317df322cca3fabeadf174",
+        "rev": "99489e550a3037183c5586d25c7a7178b7ef95fd",
         "type": "github"
       },
       "original": {
@@ -2589,7 +2540,7 @@
     },
     "wclip": {
       "inputs": {
-        "nix-lib": "nix-lib_23",
+        "nix-lib": "nix-lib_22",
         "workspace": [
           "publish-checks",
           "workspace"
