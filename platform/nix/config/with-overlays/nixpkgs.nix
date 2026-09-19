@@ -1,15 +1,15 @@
 (final: prev: let
-  # Update claude-code past the nixpkgs-unstable pin (2.1.193 -> 2.1.219).
+  # Update claude-code past the nixpkgs-unstable pin (2.1.193 -> 2.1.272).
   # Checksums come from the upstream release manifest:
-  # https://downloads.claude.ai/claude-code-releases/2.1.219/manifest.json
+  # https://downloads.claude.ai/claude-code-releases/2.1.272/manifest.json
   # Drop this overlay once the pin catches up.
   claudeCode = {
-    version = "2.1.219";
+    version = "2.1.272";
     checksums = {
-      darwin-arm64 = "a8e806faaefac53c7a0f26523d8a45c60dbef3407b14ef990c75765d08febc82";
-      darwin-x64 = "03be9f988ed88391b4a5f08e4c5dc317ce2fffa4a9dc66c01106326e7698ee76";
-      linux-arm64 = "1f834b322ba9d1291cc7ffeff16a6795a59145bda279dbd59cd7ecebc7b7f15a";
-      linux-x64 = "22cfd6f5b3061c0391ba84e9cf8c9deaa37783aac18b004d42ec061e98f00691";
+      darwin-arm64 = "195e24e8e1f9bf46f1eaee72d434a33e18f9f5796f29a6348a00d16c5f8aee75";
+      darwin-x64 = "6377b8e95ecbf90fd6b91e543b3c23e1b23c9c968b2acb7ad460ce5573d3e41c";
+      linux-arm64 = "214a90efdd16ee0ea81132ffecced588dba394d178cc494f285ba04b5288c8de";
+      linux-x64 = "d81396a668eb76fbddb49a2a5841f1b5d7af96b4c1f6500ced92f2c988f5bcd4";
     };
   };
 in {
