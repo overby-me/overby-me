@@ -190,6 +190,17 @@ pub async fn submit_feedback(
         known @ ("bug" | "feature" | "crash" | "error") => known,
         _ => "other",
     };
+    // A screenshot is the reporter's own upload. Whoever runs the site is let
+    // read what a report shows (`blob::readable`), so a report must not be a
+    // way to show them somebody else's file.
+    if let Some(image) = body.image.as_deref().filter(|id| !id.is_empty()) {
+        match crate::blob::meta(&state, image).await {
+            Ok(Some(blob))
+                if blob.owner_did.as_deref() == caller.did() && caller.did().is_some() => {}
+            Ok(_) => return invalid("no such screenshot of yours"),
+            Err(e) => return write_failed(what, e),
+        }
+    }
     // Bounded BEFORE it is resolved: the cap exists to stop a runaway paste, and
     // applying it afterwards would instead have trimmed the work.
     let message = clamp(message, MAX_MESSAGE);
@@ -430,6 +441,65 @@ mod tests {
     const CRASH: &str = "panicked at src/components/vote/poll.rs:412:9: index out of bounds\n\
         at wiki::vote::poll::PollApp (src/components/vote/poll.rs:412)\n\
         at dioxus_core::render<T> (dioxus-core-0.7.0/src/render.rs:88)";
+
+    /// A screenshot sits in the reporter's own group, which whoever reads the
+    /// reports is likely no member of. They are let open it all the same, and
+    /// a report is no way to show them a file that is not the reporter's.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_reports_screenshot_is_for_whoever_reads_the_reports() {
+        use crate::blob::tests::{fetch, upload};
+        let mut state = state().await;
+        state.config.blob_dir = std::env::temp_dir()
+            .join(format!("feedback-blobs-{}", crate::util::random_token(8)))
+            .to_string_lossy()
+            .into_owned();
+        let bob = token_for(&state, "did:plc:bob").await;
+        let alice = token_for(&state, "did:plc:alice").await;
+        let carol = token_for(&state, "did:plc:carol").await;
+        let (_, shot) = upload(&state, &bob, "c9", "image/png", b"a screenshot").await;
+        let (_, hers) = upload(&state, &alice, "c9", "image/png", b"somebody else's").await;
+        let uri = format!("/blob/{}", shot["id"].as_str().expect("id"));
+
+        let (status, _, _) = fetch(&state, &uri, Some(&carol), None).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "a closed group's file, and no report yet"
+        );
+        let report =
+            |image: &serde_json::Value| json!({"message": "Knappen er grå", "image": image});
+        let (status, v) = post(
+            router(state.clone()),
+            SUBMIT,
+            Some(&bob),
+            report(&hers["id"]),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "not his to show: {v}");
+        let (status, v) = post(router(state.clone()), SUBMIT, None, report(&shot["id"])).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "nobody's, signed out: {v}");
+        let (status, v) = post(
+            router(state.clone()),
+            SUBMIT,
+            Some(&bob),
+            report(&shot["id"]),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+
+        let (status, _, bytes) = fetch(&state, &uri, Some(&carol), None).await;
+        assert_eq!(
+            (status, bytes.as_slice()),
+            (StatusCode::OK, &b"a screenshot"[..])
+        );
+        let zoe = token_for(&state, "did:plc:zoe").await;
+        let (status, _, _) = fetch(&state, &uri, Some(&zoe), None).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "and for nobody else outside the group"
+        );
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn a_member_reads_what_they_sent_and_a_site_owner_reads_it_all() {

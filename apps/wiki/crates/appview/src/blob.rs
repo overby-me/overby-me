@@ -111,7 +111,25 @@ async fn readable(
     let context = crate::Store::new(state.db.clone())
         .read_context(&blob.context_id, did)
         .await?;
-    Ok(context.map(|_| blob))
+    if context.is_some() {
+        return Ok(Some(blob));
+    }
+    // A report's screenshot sits in the reporter's own context, where whoever
+    // reads the reports is likely no member. It is theirs to see all the same.
+    let Some(did) = did else {
+        return Ok(None);
+    };
+    let conn = state.db.acquire().await?;
+    let mut rows = conn
+        .query("SELECT 1 FROM feedback WHERE image = ?1 LIMIT 1", [id])
+        .await?;
+    let reported = rows.next().await?.is_some();
+    drop(rows);
+    let runs_the_site = reported
+        && crate::authz::Authz::new(state.db.clone())
+            .owns_the_site(did)
+            .await?;
+    Ok(runs_the_site.then_some(blob))
 }
 
 fn path_of(config: &Config, sha256: &str) -> PathBuf {
