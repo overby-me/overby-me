@@ -1,0 +1,75 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.paintCell",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "A member of the canvas's context paints one cell, and then waits out the cooldown. The cell becomes theirs: a repaint takes over the colour, the painter and the time. The cooldown is the server's, so it holds whatever a client does.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["canvas", "x", "y", "colour"],
+					"properties": {
+						"canvas": {
+							"type": "string"
+						},
+						"x": {
+							"type": "integer",
+							"minimum": 0
+						},
+						"y": {
+							"type": "integer",
+							"minimum": 0
+						},
+						"colour": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 255,
+							"description": "An index into the client's palette, which only ever grows at the end."
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["next_paint_at"],
+					"properties": {
+						"next_paint_at": {
+							"type": "integer",
+							"description": "Unix milliseconds, on the server's clock."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such canvas, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is not a member of the canvas's context."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "A cell off the board, or no such colour."
+				},
+				{
+					"name": "TooSoon",
+					"description": "The cooldown has not run out (HTTP 429). The body carries `retry_after_ms`."
+				},
+				{
+					"name": "CanvasClosed",
+					"description": "The canvas takes no more paint (HTTP 409)."
+				}
+			]
+		}
+	}
+}

@@ -1,0 +1,51 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.setCanvasOpen",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "An owner opens a canvas to the room, or locks it so that it takes no more paint.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id", "open"],
+					"properties": {
+						"id": {
+							"type": "string"
+						},
+						"open": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["open"],
+					"properties": {
+						"open": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such canvas, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller does not own the context."
+				}
+			]
+		}
+	}
+}

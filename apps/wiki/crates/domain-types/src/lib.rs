@@ -165,6 +165,9 @@ pub enum DocumentKind {
     /// A poll's place in the tree. What is voted on, and how it went, is its
     /// `poll` row (`ballot-store`), which shares this document's id.
     Poll,
+    /// A shared pixel canvas's place in the tree. Its size and its cells are the
+    /// AppView's `canvas` tables.
+    Canvas,
 }
 
 /// A content node: document / folder / file / proposal.

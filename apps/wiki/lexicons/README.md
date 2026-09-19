@@ -102,6 +102,8 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   `nextSpeaker` and `moveSpeaker` are the chair's; `joinSpeakerList` and `leaveSpeakerList` are any
   member's; `listSpeakerLists` (a query) is what the room follows. `setProjector` and
   `getProjector` are what the projector shows.
+- The canvas: `createCanvas` and `setCanvasOpen` are an owner's, `paintCell` is a member's, one
+  cell per cooldown, and `getCanvas` (a query) is the board, or with `since` what was painted since.
 - Voting: `openPoll` and `closePoll` are the chair's. A poll that is not secret takes
   `castOpenBallot`. A secret one takes two steps that the server cannot join: `issueBallotTokens`
   (signed in: blind signatures on tokens the server cannot read) and `castBallot` (NO session: a

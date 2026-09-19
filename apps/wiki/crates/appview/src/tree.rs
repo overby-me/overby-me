@@ -112,14 +112,16 @@ async fn copy_in(
     }
 
     // Parents before children, so that a child finds its parent's copy. A poll
-    // is a vote's record and not content, and a context is not a document.
+    // is a vote's record and not content, a canvas is what a room made and not a
+    // template, and a context is not a document.
     let mut rows = conn
         .query(
             &format!(
                 "SELECT d.id, d.parent_id, d.kind, d.title, d.slug, d.idx, d.attachable, \
                    d.mutable, d.content, d.data, d.created_at \
                  FROM document d \
-                 WHERE (d.id = ?2 OR {}) AND d.deleted_at IS NULL AND d.kind <> 'poll' AND {} \
+                 WHERE (d.id = ?2 OR {}) AND d.deleted_at IS NULL \
+                   AND d.kind NOT IN ('poll', 'canvas') AND {} \
                  ORDER BY length(d.path), d.path",
                 under("d.path", 3),
                 readable_document("d", 1)
@@ -238,8 +240,8 @@ pub async fn copy_document(
         .ok()
         .and_then(|k| k.as_str().map(str::to_string))
         .unwrap_or_default();
-    if kind == "poll" {
-        return invalid("a poll is a vote's record, and is not copied");
+    if matches!(kind.as_str(), "poll" | "canvas") {
+        return invalid("a poll and a canvas are records of what happened, and are not copied");
     }
     let parent = match store.parent_of(&body.parent_id).await {
         Ok(Some(parent)) => parent,
@@ -335,6 +337,9 @@ async fn purge_in(conn: &Connection, id: &str) -> Result<(u64, Vec<String>), Wri
     }
     let going = "SELECT id FROM document WHERE deleted_root = ?1";
     for sql in [
+        format!("DELETE FROM canvas_cell WHERE canvas_id IN ({going})"),
+        format!("DELETE FROM canvas_painter WHERE canvas_id IN ({going})"),
+        format!("DELETE FROM canvas WHERE id IN ({going})"),
         format!("DELETE FROM document_author WHERE document_id IN ({going})"),
         format!("DELETE FROM comment WHERE on_id IN ({going})"),
         format!("DELETE FROM search_index WHERE node_id IN ({going})"),

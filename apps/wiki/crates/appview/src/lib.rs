@@ -9,6 +9,7 @@
 pub mod authz;
 pub mod ballot;
 pub mod blob;
+pub mod canvas;
 pub mod config;
 pub mod context;
 pub mod db;
@@ -74,6 +75,8 @@ pub struct AppState {
     pub polls: Arc<poll::Shared>,
     /// What `crate::feedback` keeps between requests.
     pub feedback: Arc<feedback::Shared>,
+    /// What `crate::canvas` keeps between requests.
+    pub canvases: Arc<canvas::Shared>,
 }
 
 impl AppState {
@@ -97,6 +100,7 @@ impl AppState {
             replica: None,
             polls: Arc::default(),
             feedback: Arc::default(),
+            canvases: Arc::default(),
         }
     }
 
@@ -303,6 +307,16 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.moveDocument",
             post(xrpc::move_document),
+        )
+        .route(
+            "/xrpc/com.example.wiki.createCanvas",
+            post(canvas::create_canvas),
+        )
+        .route("/xrpc/com.example.wiki.getCanvas", get(canvas::get_canvas))
+        .route("/xrpc/com.example.wiki.paintCell", post(canvas::paint_cell))
+        .route(
+            "/xrpc/com.example.wiki.setCanvasOpen",
+            post(canvas::set_canvas_open),
         )
         .route(
             "/xrpc/com.example.wiki.createContext",

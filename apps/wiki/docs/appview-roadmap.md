@@ -276,9 +276,17 @@ The steps:
 - [x] Projector state: one row per context (the node on screen, a focus anchor
   that does not follow the screen to another node, comments and feed toggles),
   where the interim packs it into relation names.
+- [x] The canvas (`crates/appview/src/canvas.rs`): a board a room paints
+  together, one cell per person per cooldown. It was not in the plan: it came
+  to light when every data call the frontend makes was gone through. The
+  interim keeps each cell as a node and the cooldown in a trigger. Here cells
+  have a table, the cooldown is checked under the write lock, and a listener
+  reads what was painted since its last answer rather than the board again.
+  Not migrated yet (M9): the boards that have been painted.
 
-Neither is migrated, on purpose: a queue or a screen from a meeting that has
-ended is of no use to the next one, and a list is one click to make again.
+Speaker lists and the projector are not migrated, on purpose: a queue or a
+screen from a meeting that has ended is of no use to the next one, and a list
+is one click to make again.
 
 ### M6: voting
 
