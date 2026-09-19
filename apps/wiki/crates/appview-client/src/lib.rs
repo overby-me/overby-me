@@ -58,6 +58,47 @@ impl Error {
     }
 }
 
+/// How far the AppView's clock is ahead of this device's, in milliseconds.
+static CLOCK_AHEAD_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+static CLOCK_KNOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// An answer that took longer than this says little about the clock: the
+/// reading is only as good as half the round trip.
+const CLOCK_SAMPLE_MAX_MS: f64 = 1_000.0;
+
+fn now_ms() -> f64 {
+    #[cfg(target_arch = "wasm32")]
+    return js_sys::Date::now();
+    #[cfg(not(target_arch = "wasm32"))]
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
+}
+
+/// How far the AppView's clock is ahead of this device's, in milliseconds, as
+/// its latest prompt answer showed (`x-server-time`). `None` until one has.
+/// For whatever is reckoned against a time the server stamped: a countdown, a
+/// cooldown. A phone's clock can be minutes out.
+pub fn server_clock_ahead_ms() -> Option<i64> {
+    use std::sync::atomic::Ordering::Relaxed;
+    CLOCK_KNOWN
+        .load(Relaxed)
+        .then(|| CLOCK_AHEAD_MS.load(Relaxed))
+}
+
+fn read_the_clock(headers: &reqwest::header::HeaderMap, asked: f64, answered: f64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let stamp = headers
+        .get("x-server-time")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<f64>().ok());
+    if let Some(server) = stamp.filter(|_| answered - asked < CLOCK_SAMPLE_MAX_MS) {
+        // The server stamped it about halfway between the asking and the answer.
+        CLOCK_AHEAD_MS.store((server - (asked + answered) / 2.0) as i64, Relaxed);
+        CLOCK_KNOWN.store(true, Relaxed);
+    }
+}
+
 /// Bytes that are not JSON, with what they say they are.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Binary {
@@ -167,10 +208,12 @@ impl Client {
         if let Some(session) = &self.session {
             request = request.bearer_auth(session);
         }
+        let asked = now_ms();
         let response = request
             .send()
             .await
             .map_err(|e| Error::Transport(e.to_string()))?;
+        read_the_clock(response.headers(), asked, now_ms());
         let status = response.status();
         let content_type = response
             .headers()

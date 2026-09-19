@@ -173,6 +173,7 @@ dependencies = [
  "axum",
  "ballot-spec",
  "base64",
+ "js-sys",
  "lexgen",
  "reqwest",
  "serde",

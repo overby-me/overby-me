@@ -20,6 +20,10 @@ base64 = "0.22"
 lexgen = { path = "../lexgen" }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
 
+# The clock, where there is no `SystemTime`.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+
 [features]
 # Refuse a field the lexicons do not name. For the contract tests: a client in
 # a browser must keep working when the server learns to say more.

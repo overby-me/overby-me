@@ -1416,7 +1416,12 @@ pub async fn post_comment(
         .await
     {
         Ok(id) => {
-            state.publish(Topic::Context(context_id), "comment", &body.on_id);
+            state.publish_row(
+                Topic::Context(context_id),
+                "comment",
+                &body.on_id,
+                Some(&id),
+            );
             wrote(id)
         }
         Err(e) => write_failed("postComment", e),
@@ -1487,7 +1492,7 @@ pub async fn add_reaction(
         .await
     {
         Ok(id) => {
-            state.publish(topic, "reaction", &body.subject);
+            state.publish_row(topic, "reaction", &body.subject, Some(&id));
             wrote(id)
         }
         Err(e) => write_failed("addReaction", e),

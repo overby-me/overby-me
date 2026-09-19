@@ -900,6 +900,9 @@ async fn the_vote() {
 async fn the_files_and_the_rest() {
     let wiki = Wiki::start().await;
     let (carol, alice, bob, group) = wiki.with_group().await;
+    // Both clocks are this machine's, so what is measured is the error.
+    let ahead = appview_client::server_clock_ahead_ms().expect("every answer says the time");
+    assert!(ahead.abs() < 1_000, "{ahead}");
 
     let picture = alice
         .upload_blob(

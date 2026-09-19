@@ -50,7 +50,7 @@ pub use store::Store;
 
 use axum::extract::State;
 use axum::http::header::{ACCEPT_RANGES, AUTHORIZATION, CONTENT_RANGE, CONTENT_TYPE, RANGE};
-use axum::http::{HeaderValue, Method};
+use axum::http::{HeaderName, HeaderValue, Method};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use std::sync::Arc;
@@ -110,10 +110,16 @@ impl AppState {
 
     /// Tell the listeners something changed. Nobody listening is not an error.
     pub fn publish(&self, topic: live::Topic, kind: &'static str, id: &str) {
+        self.publish_row(topic, kind, id, None);
+    }
+
+    /// [`Self::publish`] for a change that made a row of its own on `id`.
+    pub fn publish_row(&self, topic: live::Topic, kind: &'static str, id: &str, row: Option<&str>) {
         let _ = self.changes.send(live::Change {
             topic,
             kind,
             id: id.to_string(),
+            row: row.map(str::to_string),
         });
     }
 
@@ -141,17 +147,30 @@ fn cors(config: &Config) -> Option<CorsLayer> {
             .allow_origin(origins)
             .allow_methods([Method::GET, Method::POST])
             .allow_headers([AUTHORIZATION, CONTENT_TYPE, RANGE])
-            // A player seeking through a video reads these off a ranged reply.
-            .expose_headers([ACCEPT_RANGES, CONTENT_RANGE])
+            // A player seeking through a video reads the first two off a ranged
+            // reply; the frontend sets its clock by the third.
+            .expose_headers([ACCEPT_RANGES, CONTENT_RANGE, SERVER_TIME])
             .max_age(Duration::from_secs(3600)),
     )
+}
+
+/// This server's clock on every answer, in unix milliseconds. A countdown or a
+/// cooldown is reckoned against rows stamped here, and a phone's clock can be
+/// minutes out, so the frontend measures the difference off whatever it asks.
+pub const SERVER_TIME: HeaderName = HeaderName::from_static("x-server-time");
+
+async fn stamped(mut response: axum::response::Response) -> axum::response::Response {
+    response
+        .headers_mut()
+        .insert(SERVER_TIME, HeaderValue::from(util::now_millis()));
+    response
 }
 
 /// The AppView router: liveness, the multiplexed client WebSocket, the atproto
 /// OAuth login, and the XRPC surface.
 pub fn router(state: AppState) -> Router {
     let cors = cors(&state.config);
-    let router = build_router(state);
+    let router = build_router(state).layer(axum::middleware::map_response(stamped));
     match cors {
         Some(layer) => router.layer(layer),
         None => router,
@@ -501,6 +520,13 @@ mod tests {
             .await
             .expect("request");
         assert_eq!(resp.status(), StatusCode::OK);
+        let stamp: i64 = resp
+            .headers()
+            .get(SERVER_TIME)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+            .expect("every answer says what time it is here");
+        assert!((util::now_millis() - stamp).abs() < 60_000, "{stamp}");
         let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
             .await
             .expect("body");
@@ -555,10 +581,25 @@ mod tests {
             "sessions are header-borne; cookies must not be invited"
         );
 
-        let theirs = preflight(app, "https://evil.example").await;
+        let theirs = preflight(app.clone(), "https://evil.example").await;
         assert!(
             theirs.get("access-control-allow-origin").is_none(),
             "a foreign origin was granted CORS"
         );
+
+        // A page on another origin reads only the headers it is shown.
+        let asked = Request::builder()
+            .uri("/healthz")
+            .header("origin", "https://wiki.example")
+            .body(Body::empty())
+            .unwrap();
+        let answer = app.oneshot(asked).await.expect("request");
+        let shown = answer
+            .headers()
+            .get("access-control-expose-headers")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        assert!(shown.contains("x-server-time"), "{shown}");
     }
 }

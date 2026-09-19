@@ -17,7 +17,11 @@
 //!   the listener may read that context. `user:<did>` is granted to that DID
 //!   alone, and `public` to anyone.
 //! - `{"op":"unsub","topic":"..."}`.
-//! - From the server: `{"topic":"...","kind":"...","id":"..."}`.
+//! - `{"op":"ping"}`, answered `{"op":"pong"}`. A browser cannot send a
+//!   WebSocket ping, and a proxy drops a socket that says nothing for a minute.
+//! - From the server: `{"topic":"...","kind":"...","id":"..."}`, with a `"row"`
+//!   where the change made a row that `id` does not name: a new comment's or
+//!   reaction's own id, `id` being what it is to. A feed fetches that row.
 //! - From the server, unasked: `{"op":"unsub","topic":"...","revoked":true}`. A
 //!   grant is checked again whenever the context's membership changes, and a
 //!   listener who may no longer read it hears this once and then nothing more.
@@ -73,6 +77,8 @@ pub struct Change {
     /// What sort of thing: `node`, `comment`, `member`, `speak`, `record`.
     pub kind: &'static str,
     pub id: String,
+    /// The row the change made, where `id` names what it was made on.
+    pub row: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -80,6 +86,8 @@ struct ChangeFrame<'a> {
     topic: &'a str,
     kind: &'a str,
     id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    row: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -88,6 +96,7 @@ enum ClientFrame {
     Auth { session: String },
     Sub { topic: String },
     Unsub { topic: String },
+    Ping,
 }
 
 /// One connection's standing: who it is and what it was granted.
@@ -127,6 +136,7 @@ impl Listener {
             topic: &topic,
             kind: change.kind,
             id: &change.id,
+            row: change.row.as_deref(),
         })
         .ok()
     }
@@ -160,6 +170,7 @@ impl Listener {
                 self.topics.remove(&topic);
                 serde_json::json!({ "op": "unsub", "topic": topic, "ok": true })
             }
+            ClientFrame::Ping => serde_json::json!({ "op": "pong" }),
         }
     }
 }
@@ -298,10 +309,18 @@ mod tests {
             topic: Topic::Context("shut".into()),
             kind,
             id: "x".into(),
+            row: None,
         };
         // Someone else joining or leaving changes nothing for bob.
         let heard = l.hear(&change("member")).await.expect("a frame");
         assert_eq!(heard["kind"], "member");
+        assert!(heard.get("row").is_none(), "{heard}");
+        let answer = Change {
+            row: Some("k2".into()),
+            ..change("comment")
+        };
+        let heard = l.hear(&answer).await.expect("a frame");
+        assert_eq!((&heard["id"], &heard["row"]), (&"x".into(), &"k2".into()));
 
         let conn = l.state.db.acquire().await.expect("conn");
         conn.execute("DELETE FROM member WHERE id = 'm'", ())
@@ -326,6 +345,7 @@ mod tests {
     async fn nonsense_is_answered_not_obeyed() {
         let mut l = listener().await;
         assert_eq!(l.handle("not json").await["op"], "error");
+        assert_eq!(l.handle(r#"{"op":"ping"}"#).await["op"], "pong");
         assert_eq!(l.handle(r#"{"op":"drop_tables"}"#).await["op"], "error");
     }
 
