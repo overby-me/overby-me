@@ -170,6 +170,10 @@ fn build_router(state: AppState) -> Router {
             post(xrpc::update_document),
         )
         .route(
+            "/xrpc/com.example.wiki.moveDocument",
+            post(xrpc::move_document),
+        )
+        .route(
             "/xrpc/com.example.wiki.deleteDocument",
             post(xrpc::delete_document),
         )

@@ -680,6 +680,36 @@ pub async fn update_document(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct MoveDocumentBody {
+    pub id: String,
+    pub parent_id: String,
+}
+
+/// `com.example.wiki.moveDocument` (procedure) — move a document, with
+/// everything under it, to another parent in the same context.
+pub async fn move_document(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Json(body): Json<MoveDocumentBody>,
+) -> Response {
+    let (_, standing) = match standing_towards(&state, &body.id, &did, "moveDocument").await {
+        Ok(found) => found,
+        Err(refusal) => return refusal,
+    };
+    if !standing.may_arrange() {
+        return forbidden("only an owner of the context may move things");
+    }
+    match crate::Store::new(state.db.clone())
+        .move_document(&body.id, &body.parent_id)
+        .await
+    {
+        Ok(path) => (StatusCode::OK, Json(serde_json::json!({ "path": path }))).into_response(),
+        Err(crate::store::WriteError::Db(e)) => write_failed("moveDocument", e),
+        Err(refused) => invalid(&refused.to_string()),
+    }
+}
+
+#[derive(Debug, Deserialize)]
 pub struct DocumentIdBody {
     pub id: String,
 }
@@ -2479,5 +2509,143 @@ mod tests {
         let bob = token_for(&state, "did:plc:bob").await;
         let (_, member) = get_as(router(state.clone()), node, &bob).await;
         assert!(ids(&member).contains(&"c9".to_string()), "{member}");
+    }
+
+    // -- Moving: the operation that rewrites stored paths. --
+
+    async fn resolves(state: &AppState, path: &str) -> Option<String> {
+        let (status, v) = get(
+            router(state.clone()),
+            &format!("/xrpc/com.example.wiki.resolveNode?path={path}"),
+        )
+        .await;
+        (status == StatusCode::OK).then(|| v["id"].as_str().expect("id").to_string())
+    }
+
+    async fn mv(m: &Meeting, who: &str, id: &str, parent: &str) -> (StatusCode, serde_json::Value) {
+        post(
+            router(m.state.clone()),
+            "/xrpc/com.example.wiki.moveDocument",
+            Some(who),
+            serde_json::json!({"id": id, "parent_id": parent}),
+        )
+        .await
+    }
+
+    /// A second folder beside `fold`, holding a motion that is ALSO called Forslag.
+    async fn second_folder(m: &Meeting) -> String {
+        let (_, v) = post(
+            router(m.state.clone()),
+            "/xrpc/com.example.wiki.createDocument",
+            Some(&m.chair),
+            serde_json::json!({"context_id": "c1", "kind": "folder", "title": "Arkiv"}),
+        )
+        .await;
+        let arkiv = v["id"].as_str().expect("id").to_string();
+        let (status, _) = try_create(&m.state, &m.dave, "policy", &arkiv).await;
+        assert_eq!(status, StatusCode::OK);
+        arkiv
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_move_takes_the_whole_subtree_to_its_new_address() {
+        let m = meeting().await;
+        let arkiv = second_folder(&m).await;
+        // `fold` holds Dave's motion. Move the whole folder into Arkiv.
+        let (status, v) = mv(&m, &m.chair, "fold", &arkiv).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["path"], "group-one/arkiv/resolutioner");
+
+        assert_eq!(
+            resolves(&m.state, "group-one/arkiv/resolutioner")
+                .await
+                .as_deref(),
+            Some("fold")
+        );
+        assert_eq!(
+            resolves(&m.state, "group-one/arkiv/resolutioner/forslag").await,
+            Some(m.motion.clone()),
+            "the motion did not follow its folder"
+        );
+        assert_eq!(resolves(&m.state, "group-one/resolutioner").await, None);
+        assert_eq!(
+            resolves(&m.state, "group-one/resolutioner/forslag").await,
+            None
+        );
+        let (_, doc) = m.read(&m.dave).await;
+        assert_eq!(
+            doc["parent_id"], "fold",
+            "only the moved node changes parent"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_moved_node_takes_the_next_slug_where_its_own_is_taken() {
+        let m = meeting().await;
+        let arkiv = second_folder(&m).await;
+        // Arkiv already holds a `forslag`.
+        let (status, v) = mv(&m, &m.chair, &m.motion, &arkiv).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["path"], "group-one/arkiv/forslag-2");
+        let (_, doc) = m.read(&m.dave).await;
+        assert_eq!(doc["slug"], "forslag-2");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_binned_child_follows_a_move_so_a_restore_lands_in_the_right_place() {
+        let m = meeting().await;
+        let arkiv = second_folder(&m).await;
+        let motion = serde_json::json!({"id": m.motion});
+        assert_eq!(
+            m.call("deleteDocument", &m.dave, motion.clone()).await,
+            StatusCode::OK
+        );
+        assert_eq!(mv(&m, &m.chair, "fold", &arkiv).await.0, StatusCode::OK);
+        assert_eq!(
+            m.call("restoreDocument", &m.dave, motion).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            resolves(&m.state, "group-one/arkiv/resolutioner/forslag").await,
+            Some(m.motion.clone()),
+            "a restored node came back at the address its folder had left"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_move_is_the_chairs_stays_in_its_context_and_cannot_swallow_itself() {
+        let m = meeting().await;
+        let arkiv = second_folder(&m).await;
+        assert_eq!(
+            mv(&m, &m.dave, &m.motion, &arkiv).await.0,
+            StatusCode::FORBIDDEN,
+            "a member rearranged the meeting"
+        );
+        let (_, v) = post(
+            router(m.state.clone()),
+            "/xrpc/com.example.wiki.createDocument",
+            Some(&m.chair),
+            serde_json::json!({
+                "context_id": "c1", "parent_id": "fold", "kind": "folder", "title": "Inderst"
+            }),
+        )
+        .await;
+        let inner = v["id"].as_str().expect("id").to_string();
+        for (target, why) in [
+            ("fold", "into itself"),
+            (inner.as_str(), "into its own subtree"),
+            ("s1", "into another context"),
+            ("nowhere", "into nothing"),
+        ] {
+            let (status, v) = mv(&m, &m.chair, "fold", target).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{why}: {v}");
+        }
+        assert_eq!(
+            resolves(&m.state, "group-one/resolutioner")
+                .await
+                .as_deref(),
+            Some("fold"),
+            "a refused move must leave the tree as it was"
+        );
     }
 }

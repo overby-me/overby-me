@@ -1,0 +1,52 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.moveDocument",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Move a document, with everything under it, to another parent in the same context. An owner of the context may. It keeps its slug if that is free under the new parent and takes the next one (`name-2`) if not, and every path in the subtree is rewritten, so every node in it has a new URL.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id", "parent_id"],
+					"properties": {
+						"id": { "type": "string" },
+						"parent_id": {
+							"type": "string",
+							"description": "The new parent: a live context or document in the same context."
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["path"],
+					"properties": {
+						"path": { "type": "string", "description": "Its new path." }
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such document, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is not an owner of its context."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "The new parent is missing, in another context, the document itself, or somewhere inside it."
+				}
+			]
+		}
+	}
+}

@@ -293,6 +293,8 @@ pub enum WriteError {
     ParentElsewhere,
     /// A live node has taken the path a restore would put this one back at.
     PathTaken,
+    /// The new parent is the node itself, or somewhere inside it.
+    IntoItself,
 }
 
 impl std::fmt::Display for WriteError {
@@ -302,6 +304,7 @@ impl std::fmt::Display for WriteError {
             WriteError::NoSuchParent => write!(f, "no such parent"),
             WriteError::ParentElsewhere => write!(f, "parent is not in that context"),
             WriteError::PathTaken => write!(f, "another node now has that path"),
+            WriteError::IntoItself => write!(f, "a node cannot be moved into itself"),
         }
     }
 }
@@ -1268,6 +1271,85 @@ impl Store {
         )
         .await?;
         Ok(())
+    }
+
+    /// Move a live document, and everything under it, to a new parent in the
+    /// same context. Returns its new path.
+    ///
+    /// It keeps its slug if that is free there and takes the next one if not.
+    /// Every path in the subtree is rewritten, the binned ones too: a node that
+    /// is restored later must come back under where its parent now is.
+    pub async fn move_document(&self, id: &str, new_parent_id: &str) -> Result<String, WriteError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let moved = self.move_in(&conn, id, new_parent_id).await;
+        conn.execute(if moved.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())
+            .await?;
+        moved
+    }
+
+    async fn move_in(
+        &self,
+        conn: &turso::Connection,
+        id: &str,
+        new_parent_id: &str,
+    ) -> Result<String, WriteError> {
+        let mut rows = conn
+            .query(
+                &format!("SELECT path, slug, context_id FROM document WHERE id = ?1 AND {LIVE}"),
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Err(WriteError::NoSuchParent);
+        };
+        let (old_path, slug, context_id) = (
+            row.get::<String>(0)?,
+            row.get::<String>(1)?,
+            row.get::<String>(2)?,
+        );
+        drop(rows);
+        let parent = self
+            .parent(conn, new_parent_id)
+            .await?
+            .ok_or(WriteError::NoSuchParent)?;
+        if parent.context_id != context_id {
+            return Err(WriteError::ParentElsewhere);
+        }
+        if parent.path == old_path || parent.path.starts_with(&format!("{old_path}/")) {
+            return Err(WriteError::IntoItself);
+        }
+
+        let mut new_slug = slug.clone();
+        let mut new_path = format!("{}/{new_slug}", parent.path);
+        for candidate in std::iter::once(slug.clone()).chain(crate::slug::candidates(&slug).skip(1))
+        {
+            new_path = format!("{}/{candidate}", parent.path);
+            new_slug = candidate;
+            if new_path == old_path || !self.path_taken(conn, &new_path).await? {
+                break;
+            }
+        }
+
+        // Descendants first, while the old prefix still identifies them.
+        for table in ["document", "context"] {
+            conn.execute(
+                &format!(
+                    "UPDATE {table} SET path = ?1 || substr(path, length(?2) + 1), \
+                       updated_at = datetime('now') \
+                     WHERE substr(path, 1, length(?2) + 1) = ?2 || '/'"
+                ),
+                [new_path.as_str(), old_path.as_str()],
+            )
+            .await?;
+        }
+        conn.execute(
+            "UPDATE document SET parent_id = ?1, slug = ?2, path = ?3, \
+               updated_at = datetime('now') WHERE id = ?4",
+            [new_parent_id, new_slug.as_str(), new_path.as_str(), id],
+        )
+        .await?;
+        Ok(new_path)
     }
 
     /// A document's authorization facts, whether or not it is in the bin.

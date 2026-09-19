@@ -182,7 +182,10 @@ The steps:
   the context edits and arranges anything); reorder and the lock with it.
 - [x] The bin: soft delete of a subtree, restore of exactly what went together,
   the listing.
-- [ ] Move, copy, purge.
+- [x] Move: a subtree to a new parent, every stored path in it rewritten, the
+  binned ones too so a later restore lands where its parent now is.
+- [ ] Copy and purge. Moving between contexts, which has to change the context
+  of a whole subtree.
 - [ ] Search, the recent feed, contributions, orphans.
 
 ### M4: membership and roster
