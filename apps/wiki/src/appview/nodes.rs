@@ -65,6 +65,13 @@ async fn read_node(
             node.mutable = board.open;
         }
     }
+    // A context carries its speaker lists as hidden children.
+    if let get_node::OutputNode::Context(context) = &read.node {
+        if let Some(listed) = super::speak::lists_of(access_token, &context.id).await {
+            node.children
+                .extend(listed.lists.iter().map(super::speak::list_child));
+        }
+    }
     // The home lists who runs the site, which no other page does of its members.
     if matches!(&read.node, get_node::OutputNode::Context(c) if c.kind == "home") {
         let members = list_members::Params {
@@ -83,6 +90,10 @@ pub async fn query_node_by_id(
     id: &str,
     user_id: &str,
 ) -> Result<Option<NodeWithChildren>, String> {
+    // A speaker list is no node of the tree, and is read as its component's.
+    if let Some(Seen::SpeakerList { context }) = seen(id) {
+        return Ok(super::speak::list_node(access_token, id, &context, user_id).await);
+    }
     let params = get_node::Params {
         id: Some(id.to_string()),
         ..Default::default()
@@ -400,6 +411,12 @@ pub async fn update_node(
     };
     let created_at = set.created_at.as_ref().map(|at| at.0.clone());
     match kind {
+        Seen::SpeakerList { .. } => super::speak::update_list(access_token, id, &set).await?,
+        Seen::SpeakerEntry => {
+            if let Some(index) = set.index {
+                super::speak::move_entry(access_token, id, index).await?;
+            }
+        }
         Seen::Context => {
             let change = update_context::Input {
                 id: id.to_string(),
@@ -512,7 +529,7 @@ pub async fn delete_node(access_token: Option<&str>, id: &str) -> Result<bool, S
             })
             .await?;
         }
-        Seen::SpeakerList => {
+        Seen::SpeakerList { .. } => {
             let gone = delete_speaker_list::Input {
                 list_id: id.to_string(),
             };

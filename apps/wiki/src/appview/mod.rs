@@ -16,6 +16,7 @@ mod nodes;
 mod people;
 mod screen;
 mod seen;
+mod speak;
 mod talk;
 mod vote;
 
@@ -29,6 +30,8 @@ pub use nodes::*;
 pub use people::*;
 #[allow(unused_imports)]
 pub use screen::*;
+#[allow(unused_imports)]
+pub use speak::*;
 #[allow(unused_imports)]
 pub use talk::*;
 #[allow(unused_imports)]

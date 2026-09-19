@@ -744,3 +744,118 @@ async fn a_board_is_made_painted_and_locked_as_the_canvas_screen_does_it() {
         .expect("the board");
     assert!(!node.mutable, "locked");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_queue_is_joined_reordered_and_served_as_the_speak_screen_does_it() {
+    let server = Server::start();
+    let (carol, alice) = (server.session(CAROL), server.session(ALICE));
+    let (group, _page) = a_group_with_a_page(&carol).await;
+    assert!(
+        super::invite_member_by_node(Some(&carol), &group, ALICE, "Alice")
+            .await
+            .expect("invite")
+    );
+
+    let list = super::create_speaker_list(Some(&carol), &group, "Talerliste")
+        .await
+        .expect("a list");
+    // The screen finds a context's lists among its children, hidden ones.
+    let context = super::query_node_by_id(Some(&carol), &group, CAROL)
+        .await
+        .expect("read")
+        .expect("the group");
+    let lists: Vec<_> = context
+        .children
+        .iter()
+        .filter(|c| c.mime_id.as_deref() == Some("speak/list"))
+        .collect();
+    assert_eq!(lists.len(), 1);
+    assert_eq!(lists[0].id.0, list.id.0);
+
+    let join = |kind: &'static str| {
+        let mut entry = a_node("speak/speak", "x", &list.id.0, &group);
+        entry.data = Some(crate::model::Jsonb(serde_json::Value::String(
+            kind.to_string(),
+        )));
+        entry
+    };
+    super::insert_node(Some(&carol), join("0"))
+        .await
+        .expect("carol joins");
+    super::insert_node(Some(&alice), join("0"))
+        .await
+        .expect("alice joins");
+
+    let queue = |node: &crate::model::NodeWithChildren| -> Vec<String> {
+        let mut rows: Vec<_> = node.children.iter().collect();
+        rows.sort_by_key(|row| row.index);
+        rows.iter()
+            .filter_map(|row| row.owner_id.as_ref().map(|o| o.0.clone()))
+            .collect()
+    };
+    let read = |who: String| {
+        let id = list.id.0.clone();
+        async move {
+            super::query_node_by_id(Some(&who), &id, CAROL)
+                .await
+                .expect("read")
+                .expect("the list")
+        }
+    };
+    let node = read(carol.clone()).await;
+    assert_eq!(node.mime_id.as_deref(), Some("speak/list"));
+    assert!(node.mutable, "open to new speakers");
+    assert_eq!(queue(&node), [CAROL, ALICE]);
+    assert_eq!(
+        node.children[0].data.as_ref().expect("kind").0,
+        serde_json::json!("0")
+    );
+
+    // "Move up" asks for an index below the lowest, which is the front.
+    let alices = node.children[1].id.0.clone();
+    let to_front = NodesSetInput {
+        index: Some(-1),
+        ..Default::default()
+    };
+    assert!(super::update_node(Some(&carol), &alices, to_front)
+        .await
+        .expect("reorder"));
+    assert_eq!(queue(&read(carol.clone()).await), [ALICE, CAROL]);
+
+    // The limit on a turn, which starts its clock; and the list closed.
+    let timed = NodesSetInput {
+        data: Some(crate::model::Jsonb(
+            serde_json::json!({"time": 120, "updatedAt": "ignored"}),
+        )),
+        ..Default::default()
+    };
+    assert!(super::update_node(Some(&carol), &list.id.0, timed)
+        .await
+        .expect("timer"));
+    let closed = NodesSetInput {
+        mutable: Some(false),
+        ..Default::default()
+    };
+    assert!(super::update_node(Some(&carol), &list.id.0, closed)
+        .await
+        .expect("close"));
+    let node = read(carol.clone()).await;
+    assert!(!node.mutable);
+    let data = node.data.expect("data").0;
+    assert_eq!(data["time"], 120);
+    assert!(
+        data["updatedAt"]
+            .as_str()
+            .is_some_and(|at| at.starts_with("20")),
+        "{data}"
+    );
+
+    // "Next speaker" is deleting whoever has the floor.
+    assert!(super::delete_node(Some(&carol), &alices)
+        .await
+        .expect("served"));
+    assert_eq!(queue(&read(carol.clone()).await), [CAROL]);
+    assert!(super::delete_node(Some(&carol), &list.id.0)
+        .await
+        .expect("the list goes"));
+}

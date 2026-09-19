@@ -22,7 +22,10 @@ pub(crate) enum Seen {
         emoji: String,
     },
     Feedback,
-    SpeakerList,
+    /// A list is read through its context, which it has to be asked with.
+    SpeakerList {
+        context: String,
+    },
     SpeakerEntry,
 }
 
