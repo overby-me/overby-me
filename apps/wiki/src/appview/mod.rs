@@ -13,8 +13,10 @@ mod bin;
 pub mod map;
 mod nodes;
 mod people;
+mod screen;
 mod seen;
 mod talk;
+mod vote;
 
 #[allow(unused_imports)]
 pub use bin::*;
@@ -23,7 +25,11 @@ pub use nodes::*;
 #[allow(unused_imports)]
 pub use people::*;
 #[allow(unused_imports)]
+pub use screen::*;
+#[allow(unused_imports)]
 pub use talk::*;
+#[allow(unused_imports)]
+pub use vote::*;
 
 use appview_client::{Client, Error};
 

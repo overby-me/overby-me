@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS projector (
   context_id    TEXT PRIMARY KEY REFERENCES context(id),
   active_id     TEXT,
   focus         TEXT,
+  canvas_id     TEXT,                                      -- the board the context's canvas app shows
   show_comments INTEGER NOT NULL DEFAULT 0,
   show_feed     INTEGER NOT NULL DEFAULT 0,
   updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
@@ -40,6 +41,9 @@ pub struct Projector {
     pub active_id: Option<String>,
     /// A heading anchor within it, for a document too long to show whole.
     pub focus: Option<String>,
+    /// The canvas the context shows where it shows one: the room's board. Its
+    /// own setting, since a board is up beside whatever is on the screen.
+    pub canvas_id: Option<String>,
     pub show_comments: bool,
     pub show_feed: bool,
 }
@@ -57,6 +61,8 @@ pub struct SetProjectorBody {
     pub active_id: Option<Option<String>>,
     #[serde(default, deserialize_with = "set_or_clear")]
     pub focus: Option<Option<String>>,
+    #[serde(default, deserialize_with = "set_or_clear")]
+    pub canvas_id: Option<Option<String>>,
     #[serde(default)]
     pub show_comments: Option<bool>,
     #[serde(default)]
@@ -67,7 +73,7 @@ async fn read(state: &AppState, context_id: &str) -> Result<Projector, DbError> 
     let conn = state.db.acquire().await?;
     let mut rows = conn
         .query(
-            "SELECT active_id, focus, show_comments, show_feed FROM projector \
+            "SELECT active_id, focus, show_comments, show_feed, canvas_id FROM projector \
              WHERE context_id = ?1",
             [context_id],
         )
@@ -82,6 +88,7 @@ async fn read(state: &AppState, context_id: &str) -> Result<Projector, DbError> 
     Ok(Projector {
         active_id: text(0),
         focus: text(1),
+        canvas_id: text(4),
         show_comments: row.get::<i64>(2)? != 0,
         show_feed: row.get::<i64>(3)? != 0,
     })
@@ -95,11 +102,13 @@ async fn write(state: &AppState, context_id: &str, p: &Projector) -> Result<(), 
     let conn = state.db.acquire().await?;
     conn.execute(
         &format!(
-            "INSERT INTO projector (context_id, active_id, focus, show_comments, show_feed) \
-             VALUES (?1, ?2, ?3, ?4, ?5) \
+            "INSERT INTO projector \
+               (context_id, active_id, focus, show_comments, show_feed, canvas_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
              ON CONFLICT(context_id) DO UPDATE SET active_id = excluded.active_id, \
                focus = excluded.focus, show_comments = excluded.show_comments, \
-               show_feed = excluded.show_feed, updated_at = {NOW}"
+               show_feed = excluded.show_feed, canvas_id = excluded.canvas_id, \
+               updated_at = {NOW}"
         ),
         vec![
             Value::Text(context_id.to_string()),
@@ -107,6 +116,7 @@ async fn write(state: &AppState, context_id: &str, p: &Projector) -> Result<(), 
             text(&p.focus),
             Value::Integer(i64::from(p.show_comments)),
             Value::Integer(i64::from(p.show_feed)),
+            text(&p.canvas_id),
         ],
     )
     .await?;
@@ -166,6 +176,9 @@ pub async fn set_projector(
     if let Some(focus) = body.focus {
         projector.focus = focus;
     }
+    if let Some(canvas_id) = body.canvas_id {
+        projector.canvas_id = canvas_id;
+    }
     if let Some(show) = body.show_comments {
         projector.show_comments = show;
     }
@@ -217,10 +230,22 @@ mod tests {
         assert_eq!(
             blank,
             serde_json::json!({
-                "active_id": null, "focus": null, "show_comments": false, "show_feed": false
+                "active_id": null, "focus": null, "canvas_id": null,
+                "show_comments": false, "show_feed": false
             }),
             "a projector nobody has set shows nothing"
         );
+
+        // The room's board is a setting of its own: up beside what is on screen.
+        let board = serde_json::json!({"context_id": "c9", "canvas_id": "cv"});
+        let (_, v) = set(&state, &alice, board).await;
+        assert_eq!(
+            (&v["canvas_id"], &v["active_id"]),
+            (&serde_json::json!("cv"), &serde_json::Value::Null)
+        );
+        let no_board = serde_json::json!({"context_id": "c9", "canvas_id": null});
+        let (_, v) = set(&state, &alice, no_board).await;
+        assert!(v["canvas_id"].is_null(), "{v}");
 
         let show =
             serde_json::json!({"context_id": "c9", "active_id": "s1", "show_comments": true});

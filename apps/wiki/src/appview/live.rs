@@ -539,3 +539,148 @@ async fn a_roster_is_kept_and_an_invitation_answered_as_the_member_screens_do_it
         .expect("her groups")
         .is_empty());
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_show_of_hands_is_opened_cast_in_and_closed_as_the_vote_screens_do_it() {
+    use crate::model::BallotRules;
+    let server = Server::start();
+    let carol = server.session(CAROL);
+    let (group, _page) = a_group_with_a_page(&carol).await;
+    let folder = super::insert_node(
+        Some(&carol),
+        a_node("wiki/folder", "Forslag", &group, &group),
+    )
+    .await
+    .expect("a folder")
+    .expect("inserted");
+    let mut motion = a_node("vote/policy", "Forslag 1", &folder.id.0, &group);
+    motion.mutable = Some(false);
+    let motion = super::insert_node(Some(&carol), motion)
+        .await
+        .expect("a motion")
+        .expect("inserted");
+
+    let options = ["for", "imod", "blank"].map(str::to_string);
+    let poll = super::create_poll(
+        Some(&carol),
+        &motion.id.0,
+        &group,
+        "Forslag 1",
+        "afstemning",
+        &options,
+        1,
+        1,
+        BallotRules::default(),
+    )
+    .await
+    .expect("createPoll");
+    assert_eq!(
+        super::active_node_id(Some(&carol), &group).await,
+        Ok(Some(poll.id.0.clone())),
+        "an opened poll goes on the room's screen"
+    );
+
+    // A poll is a node to the components: what is asked in `data`, open while
+    // `mutable`, both on its own page and among the motion's children.
+    let on_its_page = super::query_node_by_id(Some(&carol), &poll.id.0, CAROL)
+        .await
+        .expect("read")
+        .expect("the poll");
+    assert_eq!(on_its_page.mime_id.as_deref(), Some("vote/poll"));
+    assert!(on_its_page.mutable, "open");
+    let data = on_its_page.data.expect("data").0;
+    assert_eq!(data["options"], serde_json::json!(["for", "imod", "blank"]));
+    assert_eq!(
+        (&data["minVote"], &data["secret"]),
+        (&serde_json::json!(1), &serde_json::json!(false))
+    );
+    let motion_page = super::query_node_by_id(Some(&carol), &motion.id.0, CAROL)
+        .await
+        .expect("read")
+        .expect("the motion");
+    assert_eq!(
+        motion_page.children[0].data.as_ref().expect("data").0["nodeId"],
+        motion.id.0.as_str()
+    );
+
+    assert!(
+        super::cast_vote(Some(&carol), &poll.id.0, Some(&group), &[0], "x")
+            .await
+            .expect("cast")
+    );
+    assert_eq!(
+        super::poll_tally(Some(&carol), &poll.id.0, 3, Some(CAROL)).await,
+        Ok((vec![1, 0, 0], 1, 1))
+    );
+    assert_eq!(
+        super::poll_vote_count(Some(&carol), &poll.id.0).await,
+        Ok(1)
+    );
+    assert_eq!(
+        super::query_poll_votes(Some(&carol), &poll.id.0).await,
+        Ok(vec![vec![0]])
+    );
+
+    // Closing is an `update_node` of `mutable` to the component.
+    let close = NodesSetInput {
+        mutable: Some(false),
+        ..Default::default()
+    };
+    assert!(super::update_node(Some(&carol), &poll.id.0, close)
+        .await
+        .expect("close"));
+    let listed = super::query_context_polls(Some(&carol), &group)
+        .await
+        .expect("polls");
+    assert_eq!(listed.len(), 1);
+    assert!(!listed[0].mutable, "closed");
+
+    // Opening the next one closes nothing that is closed, and takes the screen.
+    let next = super::create_poll(
+        Some(&carol),
+        &motion.id.0,
+        &group,
+        "Forslag 1",
+        "igen",
+        &options,
+        1,
+        1,
+        BallotRules::default(),
+    )
+    .await
+    .expect("a second poll");
+    assert_eq!(
+        super::active_node_id(Some(&carol), &group).await,
+        Ok(Some(next.id.0))
+    );
+
+    // The rest of the screen: an anchor, the talk and the feed beside it, a board.
+    super::set_screen_focus(Some(&carol), &group, Some("punkt-3"))
+        .await
+        .expect("focus");
+    assert_eq!(
+        super::screen_focus_anchor(Some(&carol), &group)
+            .await
+            .as_deref(),
+        Some("punkt-3")
+    );
+    assert!(super::set_screen_comments(Some(&carol), &group, true)
+        .await
+        .expect("comments"));
+    assert_eq!(
+        super::screen_comments_on(Some(&carol), &group).await,
+        Ok(true)
+    );
+    assert_eq!(super::screen_feed_on(Some(&carol), &group).await, Ok(false));
+    super::set_focused_canvas(Some(&carol), &group, Some("board"))
+        .await
+        .expect("board");
+    assert_eq!(
+        super::focused_canvas(Some(&carol), &group).await.as_deref(),
+        Some("board")
+    );
+    assert!(super::set_active_relation(Some(&carol), &group, None)
+        .await
+        .expect("clear"));
+    assert_eq!(super::active_node_id(Some(&carol), &group).await, Ok(None));
+}

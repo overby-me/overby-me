@@ -36,6 +36,27 @@ async fn read_node(
     for child in &read.children {
         saw_node(&child.id, &child.node, &child.kind);
     }
+    // A poll is a node to the components: what is asked in its `data`, open
+    // while `mutable`. So are the polls among a page's children.
+    if node.mime_id.as_deref() == Some("vote/poll") {
+        if let Some(poll) = super::vote::read_poll(access_token, &node.id.0).await {
+            node.data = Some(crate::model::Jsonb(super::vote::poll_data(&poll)));
+            node.mutable = poll.open;
+        }
+    }
+    if node
+        .children
+        .iter()
+        .any(|c| c.mime_id.as_deref() == Some("vote/poll"))
+    {
+        let polls = super::vote::polls_on(access_token, &node.id.0).await;
+        for child in &mut node.children {
+            if let Some(poll) = polls.iter().find(|p| p.id == child.id.0) {
+                child.data = Some(crate::model::Jsonb(super::vote::poll_data(poll)));
+                child.mutable = poll.open;
+            }
+        }
+    }
     // The home lists who runs the site, which no other page does of its members.
     if matches!(&read.node, get_node::OutputNode::Context(c) if c.kind == "home") {
         let members = list_members::Params {

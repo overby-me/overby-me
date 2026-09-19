@@ -1337,6 +1337,9 @@ pub mod get_projector {
         /// The node on screen. During a vote it is the open poll.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub active_id: Option<String>,
+        /// The canvas the context shows where it shows one: the room's board. A setting of its own, since a board is up beside whatever is on the screen.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub canvas_id: Option<String>,
         /// A heading anchor within it, for a document too long to show whole.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub focus: Option<String>,
@@ -2551,6 +2554,9 @@ pub mod set_projector {
         /// The node on screen. During a vote it is the open poll.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub active_id: Option<Option<String>>,
+        /// The canvas the context shows where it shows one: the room's board. A setting of its own, since a board is up beside whatever is on the screen.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub canvas_id: Option<Option<String>>,
         pub context_id: String,
         /// A heading anchor within it, for a document too long to show whole.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2567,6 +2573,9 @@ pub mod set_projector {
         /// The node on screen. During a vote it is the open poll.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub active_id: Option<String>,
+        /// The canvas the context shows where it shows one: the room's board. A setting of its own, since a board is up beside whatever is on the screen.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub canvas_id: Option<String>,
         /// A heading anchor within it, for a document too long to show whole.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub focus: Option<String>,

@@ -28,6 +28,10 @@
 							"type": "string",
 							"description": "A heading anchor within it, for a document too long to show whole."
 						},
+						"canvas_id": {
+							"type": "string",
+							"description": "The canvas the context shows where it shows one: the room's board. A setting of its own, since a board is up beside whatever is on the screen."
+						},
 						"show_comments": {
 							"type": "boolean"
 						},
