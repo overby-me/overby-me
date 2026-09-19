@@ -17,6 +17,7 @@ container or a prebuilt binary.
 | `desktop-sdk.nix` | the desktop SDK |
 | `desktop-common.nix` | the editors' JS/WASM payload |
 | `app.nix` / `app-linux.nix` | the GUI application, per platform |
+| `app-linux-bin.nix` | the Linux app repackaged from the deb upstream CI builds (the default `app` on Linux) |
 | `cef.nix` | the Chromium Embedded Framework dependency |
 | `fonts.nix` | fonts, dictionaries and templates |
 | `sources.nix` | pinned upstream revisions |

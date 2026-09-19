@@ -4,11 +4,10 @@
 # ONLYOFFICE binaries. The CEF prebuilt is upstream Chromium's, not theirs.
 # See ./PLAN.md for the derivation graph, phases and spike findings.
 #
-# What remains is the macOS GUI bundle: a Cocoa app built as an Xcode project,
-# whose signed .app needs xcodebuild and vendored frameworks that do not fit the
-# Nix sandbox. The hard part - Qt 5.15 with CEF 109 and the from-source core -
-# does build, as `desktop-sdk`. Linux is not wired up yet but is viable from
-# source; see PLAN.md §10 option 1.
+# On Linux the app repackages the deb Euro-Office's own CI builds
+# (./app-linux-bin.nix); the from-source Qt build stays on passthru as
+# `app-from-source` for when a patched or hermetic build is worth the hours
+# of C++ it costs. The macOS GUI bundle is built from source; see ./app.nix.
 {
   stdenv,
   callPackage,
@@ -23,10 +22,11 @@
   cef = callPackage ./cef.nix {};
   # `ascdocumentscore`, the CEF/Qt integration the macOS app links.
   desktop-sdk = callPackage ./desktop-sdk.nix {inherit cef;};
+  app-from-source = callPackage ./app-linux.nix {inherit cef core data desktop-common;};
   app =
     if stdenv.hostPlatform.isDarwin
     then callPackage ./app.nix {inherit cef desktop-sdk core data desktop-common;}
-    else callPackage ./app-linux.nix {inherit cef core data desktop-common;};
+    else callPackage ./app-linux-bin.nix {};
 in
   # The top-level package is the data bundle because it is the one that builds
   # everywhere, which keeps the flake's package set green on every system. The
@@ -35,6 +35,6 @@ in
     passthru =
       (old.passthru or {})
       // {
-        inherit data desktop-common core cef desktop-sdk app;
+        inherit data desktop-common core cef desktop-sdk app app-from-source;
       };
   })

@@ -33,9 +33,8 @@
       kooha
       rustdesk-flutter
     ]
-    # Linux x86_64-only.  euro-office would evaluate on aarch64 as well, but
-    # it builds CEF and the editor core from source, which is not something to
-    # hand an emulated builder or the tablet itself.  The
+    # Linux x86_64-only: the app repackages the amd64 deb from Euro-Office's
+    # CI, and upstream ships no other Linux desktop binary.  The
     # onlyoffice-desktopeditors it replaces was x86_64-only too, so the office
     # suite stays where it already was.
     #
