@@ -82,6 +82,10 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   the bin, `restoreDocument` brings back exactly what went together, and `listDeleted` (a query) is
   the bin of a context. Who may do which is the interim's rule: an author edits a draft, an owner of
   the context edits and arranges anything.
+- `inviteMembers` puts people on a roster (one invitation or a whole spreadsheet, skipping whoever is
+  already there), `updateMember` and `removeMember` administer it, and a context always keeps an
+  owner who can sign in. `listInvitations` and `acceptInvitation` are the caller's own; declining and
+  leaving are `removeMember` on one's own row.
 - `claimMembership` binds a pending invitation to the caller by its claim token, and
   `getMemberClaimLink` (a query) gives an active owner the token to hand out.
 

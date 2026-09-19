@@ -1,0 +1,79 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.inviteMembers",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Put people on a context's roster: one invitation, or a whole imported spreadsheet. An owner of the context may. An invite with a `did` invites an account, which is bound from the start and answers with acceptInvitation; any other is a roster row, which whoever holds its claim link binds with claimMembership. Anyone the context already has, by address or by account, is skipped rather than failing the import, and so is an address the batch repeats. Addresses are stored trimmed and lowercased.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["context_id", "invites"],
+					"properties": {
+						"context_id": {
+							"type": "string"
+						},
+						"invites": {
+							"type": "array",
+							"maxLength": 2000,
+							"items": {
+								"type": "object",
+								"properties": {
+									"name": {
+										"type": "string"
+									},
+									"email": {
+										"type": "string"
+									},
+									"did": {
+										"type": "string",
+										"format": "did"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["inserted", "skipped", "without_email"],
+					"properties": {
+						"inserted": {
+							"type": "integer"
+						},
+						"skipped": {
+							"type": "integer",
+							"description": "Already on this roster, or repeated in the batch."
+						},
+						"without_email": {
+							"type": "integer",
+							"description": "Of those inserted, how many have no address and are reachable only by their claim link."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such context, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is not an owner of the context."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "More than 2000 invitations in one call."
+				}
+			]
+		}
+	}
+}

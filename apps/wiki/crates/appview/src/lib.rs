@@ -161,6 +161,26 @@ fn build_router(state: AppState) -> Router {
             get(xrpc::get_voter_count),
         )
         .route(
+            "/xrpc/com.example.wiki.inviteMembers",
+            post(xrpc::invite_members),
+        )
+        .route(
+            "/xrpc/com.example.wiki.updateMember",
+            post(xrpc::update_member),
+        )
+        .route(
+            "/xrpc/com.example.wiki.removeMember",
+            post(xrpc::remove_member),
+        )
+        .route(
+            "/xrpc/com.example.wiki.listInvitations",
+            get(xrpc::list_invitations),
+        )
+        .route(
+            "/xrpc/com.example.wiki.acceptInvitation",
+            post(xrpc::accept_invitation),
+        )
+        .route(
             "/xrpc/com.example.wiki.claimMembership",
             post(xrpc::claim_membership),
         )

@@ -276,6 +276,63 @@ pub struct MemberQuery {
     pub offset: i64,
 }
 
+/// Someone to put on a context's roster. A `did` invites an account, which is
+/// bound from the start and has to say yes; otherwise it is a roster row that
+/// whoever holds its claim link binds.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct Invite {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub did: Option<String>,
+}
+
+/// What an import did. `skipped` counts people this context had already: a
+/// roster says who belongs here, not that none of them are here yet, so they are
+/// passed over rather than failing the import.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct InviteOutcome {
+    pub inserted: usize,
+    pub skipped: usize,
+    /// Of those inserted, how many the roster gave no address for. On the list,
+    /// but only reachable by handing them their claim link.
+    pub without_email: usize,
+}
+
+/// What a change to a member may set. `None` leaves a field as it is.
+#[derive(Debug, Default)]
+pub struct MemberPatch<'a> {
+    pub name: Option<&'a str>,
+    pub email: Option<&'a str>,
+    pub owner: Option<bool>,
+    pub active: Option<bool>,
+    pub hidden: Option<bool>,
+}
+
+/// What authorizing a change to a member row needs to know about it.
+pub struct MemberMeta {
+    pub context_id: String,
+    pub user_did: Option<String>,
+}
+
+/// An invitation the caller has not answered.
+#[derive(Debug, serde::Serialize)]
+pub struct Invitation {
+    pub id: String,
+    pub context_id: String,
+    pub context_kind: String,
+    pub context_name: String,
+    pub context_path: String,
+}
+
+fn normalized_email(email: Option<&str>) -> Option<String> {
+    email
+        .map(|e| e.trim().to_lowercase())
+        .filter(|e| !e.is_empty())
+}
+
 /// A document to create. The store picks its slug and path.
 pub struct NewDocument<'a> {
     pub context_id: &'a str,
@@ -336,6 +393,11 @@ pub enum WriteError {
     PathTaken,
     /// The new parent is the node itself, or somewhere inside it.
     IntoItself,
+    /// The change would leave a context with nobody who owns it, and then
+    /// nobody could ever administer it again.
+    LastOwner,
+    /// Another invitation to this context already has that address.
+    EmailTaken,
 }
 
 impl std::fmt::Display for WriteError {
@@ -346,6 +408,8 @@ impl std::fmt::Display for WriteError {
             WriteError::ParentElsewhere => write!(f, "parent is not in that context"),
             WriteError::PathTaken => write!(f, "another node now has that path"),
             WriteError::IntoItself => write!(f, "a node cannot be moved into itself"),
+            WriteError::LastOwner => write!(f, "a context must keep an owner"),
+            WriteError::EmailTaken => write!(f, "that address is already invited here"),
         }
     }
 }
@@ -658,6 +722,261 @@ impl Store {
             });
         }
         Ok((out, total))
+    }
+
+    /// Put people on a context's roster. Anyone the context already has, by
+    /// address or by account, is skipped, and so is an address the batch itself
+    /// repeats. One write transaction, so two imports cannot interleave.
+    pub async fn invite(
+        &self,
+        context_id: &str,
+        invites: &[Invite],
+    ) -> Result<InviteOutcome, DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let outcome = self.invite_in(&conn, context_id, invites).await;
+        conn.execute(
+            if outcome.is_ok() {
+                "COMMIT"
+            } else {
+                "ROLLBACK"
+            },
+            (),
+        )
+        .await?;
+        outcome
+    }
+
+    async fn invite_in(
+        &self,
+        conn: &turso::Connection,
+        context_id: &str,
+        invites: &[Invite],
+    ) -> Result<InviteOutcome, DbError> {
+        let mut outcome = InviteOutcome::default();
+        for invite in invites {
+            let name = invite
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|n| !n.is_empty());
+            let email = normalized_email(invite.email.as_deref());
+            let did = invite
+                .did
+                .as_deref()
+                .map(str::trim)
+                .filter(|d| !d.is_empty());
+            if name.is_none() && email.is_none() && did.is_none() {
+                continue;
+            }
+            // Only an address or an account can say "the same person". Two rows
+            // sharing a name and nothing else are two people.
+            let had = match (did, email.as_deref()) {
+                (Some(did), _) => {
+                    let mut rows = conn
+                        .query(
+                            "SELECT 1 FROM member WHERE context_id = ?1 AND user_did = ?2",
+                            [context_id, did],
+                        )
+                        .await?;
+                    rows.next().await?.is_some()
+                }
+                (None, Some(email)) => {
+                    let mut rows = conn
+                        .query(
+                            "SELECT 1 FROM member WHERE context_id = ?1 AND email = ?2",
+                            [context_id, email],
+                        )
+                        .await?;
+                    rows.next().await?.is_some()
+                }
+                (None, None) => false,
+            };
+            if had {
+                outcome.skipped += 1;
+                continue;
+            }
+            if let Some(did) = did {
+                conn.execute("INSERT OR IGNORE INTO user (did) VALUES (?1)", [did])
+                    .await?;
+            }
+            conn.execute(
+                "INSERT INTO member (id, context_id, user_did, name, email, claim_token) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                vec![
+                    Value::Text(format!("m-{}", crate::util::random_token(16))),
+                    Value::Text(context_id.to_string()),
+                    opt_str_val(did),
+                    opt_str_val(name),
+                    opt_str_val(email.as_deref()),
+                    // An account is bound already, so it has nothing to claim.
+                    match did {
+                        Some(_) => Value::Null,
+                        None => Value::Text(crate::util::random_token(24)),
+                    },
+                ],
+            )
+            .await?;
+            outcome.inserted += 1;
+            if did.is_none() && email.is_none() {
+                outcome.without_email += 1;
+            }
+        }
+        Ok(outcome)
+    }
+
+    /// A member row's authorization facts.
+    pub async fn member_meta(&self, id: &str) -> Result<Option<MemberMeta>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT context_id, user_did FROM member WHERE id = ?1",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(MemberMeta {
+            context_id: row.get::<String>(0)?,
+            user_did: opt_text(&row, 1),
+        }))
+    }
+
+    /// Whether taking the owner role from member `id` would leave its context
+    /// with no owner who can sign in. An unclaimed invitation cannot administer
+    /// anything, so it does not count.
+    async fn is_last_owner(&self, conn: &turso::Connection, id: &str) -> Result<bool, DbError> {
+        let mut rows = conn
+            .query(
+                "SELECT m.role = 'owner' AND m.user_did IS NOT NULL AND NOT EXISTS ( \
+                   SELECT 1 FROM member o WHERE o.context_id = m.context_id AND o.id <> m.id \
+                     AND o.role = 'owner' AND o.user_did IS NOT NULL) \
+                 FROM member m WHERE m.id = ?1",
+                [id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => Ok(row.get::<i64>(0)? != 0),
+            None => Ok(false),
+        }
+    }
+
+    /// Apply `patch` to a member row. Returns whether there was one.
+    pub async fn update_member(
+        &self,
+        id: &str,
+        patch: &MemberPatch<'_>,
+    ) -> Result<bool, WriteError> {
+        let conn = self.db.acquire().await?;
+        if patch.owner == Some(false) && self.is_last_owner(&conn, id).await? {
+            return Err(WriteError::LastOwner);
+        }
+        let mut sets = Vec::new();
+        let mut params = Vec::new();
+        let mut set = |column: &'static str, value: Value| {
+            params.push(value);
+            sets.push(format!("{column} = ?{}", params.len()));
+        };
+        let flag = |b: bool| Value::Integer(i64::from(b));
+        if let Some(name) = patch.name {
+            set(
+                "name",
+                opt_str_val(Some(name.trim()).filter(|n| !n.is_empty())),
+            );
+        }
+        if let Some(email) = patch.email {
+            set(
+                "email",
+                opt_str_val(normalized_email(Some(email)).as_deref()),
+            );
+        }
+        if let Some(owner) = patch.owner {
+            set(
+                "role",
+                Value::Text(if owner { "owner" } else { "member" }.to_string()),
+            );
+        }
+        if let Some(active) = patch.active {
+            set("active", flag(active));
+        }
+        if let Some(hidden) = patch.hidden {
+            set("hidden", flag(hidden));
+        }
+        if sets.is_empty() {
+            return Ok(self.member_meta(id).await?.is_some());
+        }
+        params.push(Value::Text(id.to_string()));
+        let changed = conn
+            .execute(
+                &format!(
+                    "UPDATE member SET {} WHERE id = ?{}",
+                    sets.join(", "),
+                    params.len()
+                ),
+                params,
+            )
+            .await;
+        match changed {
+            Ok(n) => Ok(n > 0),
+            // `member_pending`: one unclaimed invitation per address per context.
+            Err(turso::Error::Constraint(_)) => Err(WriteError::EmailTaken),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Take someone off a roster: a removal, a leaving, or a declined invitation.
+    pub async fn remove_member(&self, id: &str) -> Result<bool, WriteError> {
+        let conn = self.db.acquire().await?;
+        if self.is_last_owner(&conn, id).await? {
+            return Err(WriteError::LastOwner);
+        }
+        let removed = conn
+            .execute("DELETE FROM member WHERE id = ?1", [id])
+            .await?;
+        Ok(removed > 0)
+    }
+
+    /// The invitations `did` has not answered, newest first.
+    pub async fn list_invitations(&self, did: &str) -> Result<Vec<Invitation>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT m.id, c.id, c.kind, c.name, c.path \
+                     FROM member m JOIN context c ON c.id = m.context_id \
+                     WHERE m.user_did = ?1 AND m.accepted = 0 AND c.{LIVE} \
+                     ORDER BY m.created_at DESC, m.id"
+                ),
+                [did],
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(Invitation {
+                id: row.get::<String>(0)?,
+                context_id: row.get::<String>(1)?,
+                context_kind: row.get::<String>(2)?,
+                context_name: row.get::<String>(3)?,
+                context_path: row.get::<String>(4)?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Say yes to an invitation. The row is named by its id AND its account, so
+    /// nobody accepts on another's behalf, and accepting touches that row alone:
+    /// the interim's accept once asked "is there a membership here?" with a
+    /// question the invitation itself answered, and deleted it as a duplicate.
+    pub async fn accept_invitation(&self, id: &str, did: &str) -> Result<bool, DbError> {
+        let conn = self.db.acquire().await?;
+        let accepted = conn
+            .execute(
+                "UPDATE member SET accepted = 1 WHERE id = ?1 AND user_did = ?2",
+                [id, did],
+            )
+            .await?;
+        Ok(accepted > 0)
     }
 
     /// How many members of a context hold voting rights: a poll's turnout is

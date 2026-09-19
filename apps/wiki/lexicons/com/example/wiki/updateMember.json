@@ -1,0 +1,71 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.updateMember",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "An owner changes a row of their roster. Absent fields are left as they are. `active` is voting rights; `owner` is the role. A context must keep an owner who can sign in, so the last one cannot be demoted.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": {
+						"id": {
+							"type": "string"
+						},
+						"name": {
+							"type": "string"
+						},
+						"email": {
+							"type": "string"
+						},
+						"owner": {
+							"type": "boolean"
+						},
+						"active": {
+							"type": "boolean"
+						},
+						"hidden": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["ok"],
+					"properties": {
+						"ok": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such member, or the caller is not a member of that context."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is a member of the context but not an owner."
+				},
+				{
+					"name": "LastOwner",
+					"description": "The change would leave the context with no owner who can sign in."
+				},
+				{
+					"name": "EmailTaken",
+					"description": "Another unclaimed invitation to this context has that address."
+				}
+			]
+		}
+	}
+}

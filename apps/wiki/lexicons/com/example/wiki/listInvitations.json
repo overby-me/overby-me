@@ -1,0 +1,56 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.listInvitations",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "The invitations the caller has not answered, newest first. Only those made out to their account: one made out to an address reaches them as a claim link.",
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["invitations"],
+					"properties": {
+						"invitations": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"required": [
+									"id",
+									"context_id",
+									"context_kind",
+									"context_name",
+									"context_path"
+								],
+								"properties": {
+									"id": {
+										"type": "string",
+										"description": "The member row: what acceptInvitation and removeMember take."
+									},
+									"context_id": {
+										"type": "string"
+									},
+									"context_kind": {
+										"type": "string"
+									},
+									"context_name": {
+										"type": "string"
+									},
+									"context_path": {
+										"type": "string"
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				}
+			]
+		}
+	}
+}

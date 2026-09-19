@@ -575,6 +575,189 @@ pub async fn list_members(
     }
 }
 
+/// An owner of a context, or the response to send instead.
+async fn owner_of(
+    state: &AppState,
+    context_id: &str,
+    did: &str,
+    what: &str,
+) -> Result<(), Response> {
+    match member_of(state, context_id, did, what).await? {
+        membership if owns(membership) => Ok(()),
+        _ => Err(forbidden("only an owner of the context may do that")),
+    }
+}
+
+/// More than any roster here holds, and few enough to stay one quick transaction.
+const MAX_INVITES: usize = 2000;
+
+#[derive(Debug, Deserialize)]
+pub struct InviteMembersBody {
+    pub context_id: String,
+    pub invites: Vec<crate::store::Invite>,
+}
+
+/// `com.example.wiki.inviteMembers` (procedure) — put people on a context's
+/// roster: one invitation, or a whole imported spreadsheet.
+pub async fn invite_members(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Json(body): Json<InviteMembersBody>,
+) -> Response {
+    if let Err(refusal) = owner_of(&state, &body.context_id, &did, "inviteMembers").await {
+        return refusal;
+    }
+    if body.invites.len() > MAX_INVITES {
+        return invalid("too many invitations in one call");
+    }
+    match crate::Store::new(state.db.clone())
+        .invite(&body.context_id, &body.invites)
+        .await
+    {
+        Ok(outcome) => (StatusCode::OK, Json(outcome)).into_response(),
+        Err(e) => write_failed("inviteMembers", e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateMemberBody {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub owner: Option<bool>,
+    #[serde(default)]
+    pub active: Option<bool>,
+    #[serde(default)]
+    pub hidden: Option<bool>,
+}
+
+/// A member row, with whether the caller owns the context it is in. To someone
+/// who is not a member of that context the row does not exist, whether or not
+/// it does: they have no business learning which ids are on a roster.
+async fn member_row(
+    state: &AppState,
+    id: &str,
+    did: &str,
+    what: &str,
+) -> Result<(crate::store::MemberMeta, bool), Response> {
+    let missing = || err(StatusCode::NOT_FOUND, "NotFound", "no such member");
+    let meta = match crate::Store::new(state.db.clone()).member_meta(id).await {
+        Ok(Some(meta)) => meta,
+        Ok(None) => return Err(missing()),
+        Err(e) => return Err(write_failed(what, e)),
+    };
+    match Authz::new(state.db.clone())
+        .membership(&meta.context_id, did)
+        .await
+    {
+        Ok(Some(membership)) => Ok((meta, owns(membership))),
+        Ok(None) => Err(missing()),
+        Err(e) => Err(write_failed(what, e)),
+    }
+}
+
+fn refused_write(what: &str, refused: crate::store::WriteError) -> Response {
+    use crate::store::WriteError;
+    match refused {
+        WriteError::Db(e) => write_failed(what, e),
+        WriteError::LastOwner => conflict("LastOwner", &refused.to_string()),
+        WriteError::EmailTaken => conflict("EmailTaken", &refused.to_string()),
+        other => invalid(&other.to_string()),
+    }
+}
+
+/// `com.example.wiki.updateMember` (procedure) — an owner changes a row of their
+/// roster: the name, the address, the role, voting rights, whether it is hidden.
+pub async fn update_member(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Json(body): Json<UpdateMemberBody>,
+) -> Response {
+    match member_row(&state, &body.id, &did, "updateMember").await {
+        Ok((_, true)) => {}
+        Ok((_, false)) => return forbidden("only an owner of the context may do that"),
+        Err(refusal) => return refusal,
+    }
+    let patch = crate::store::MemberPatch {
+        name: body.name.as_deref(),
+        email: body.email.as_deref(),
+        owner: body.owner,
+        active: body.active,
+        hidden: body.hidden,
+    };
+    match crate::Store::new(state.db.clone())
+        .update_member(&body.id, &patch)
+        .await
+    {
+        Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(refused) => refused_write("updateMember", refused),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MemberIdBody {
+    pub id: String,
+}
+
+/// `com.example.wiki.removeMember` (procedure) — take someone off a roster. An
+/// owner removes anyone; anyone removes themselves, which is also how an
+/// invitation is declined and how a member leaves.
+pub async fn remove_member(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Json(body): Json<MemberIdBody>,
+) -> Response {
+    match member_row(&state, &body.id, &did, "removeMember").await {
+        Ok((meta, is_owner)) if is_owner || meta.user_did.as_deref() == Some(did.as_str()) => {}
+        Ok(_) => return forbidden("only an owner may remove someone else"),
+        Err(refusal) => return refusal,
+    }
+    match crate::Store::new(state.db.clone())
+        .remove_member(&body.id)
+        .await
+    {
+        Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(refused) => refused_write("removeMember", refused),
+    }
+}
+
+/// `com.example.wiki.listInvitations` — the invitations the caller has not
+/// answered. Only those made out to their account: one made out to an address
+/// reaches them as a claim link.
+pub async fn list_invitations(State(state): State<AppState>, Caller { did }: Caller) -> Response {
+    match crate::Store::new(state.db.clone())
+        .list_invitations(&did)
+        .await
+    {
+        Ok(invitations) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "invitations": invitations })),
+        )
+            .into_response(),
+        Err(e) => write_failed("listInvitations", e),
+    }
+}
+
+/// `com.example.wiki.acceptInvitation` (procedure) — say yes. Declining is
+/// `removeMember` on the same row.
+pub async fn accept_invitation(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Json(body): Json<MemberIdBody>,
+) -> Response {
+    match crate::Store::new(state.db.clone())
+        .accept_invitation(&body.id, &did)
+        .await
+    {
+        Ok(true) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Ok(false) => err(StatusCode::NOT_FOUND, "NotFound", "no such invitation"),
+        Err(e) => write_failed("acceptInvitation", e),
+    }
+}
+
 /// `com.example.wiki.getVoterCount` — how many members of a context hold
 /// voting rights, which a poll's turnout is out of. A number and no names, so it
 /// is served to whoever may read the context.
@@ -2919,5 +3102,261 @@ mod tests {
             StatusCode::NOT_FOUND,
             "a closed group has no public turnout"
         );
+    }
+
+    // -- Administering the roster of c9 (alice owns it; `m-gs` is a hidden owner). --
+
+    async fn call(
+        state: &AppState,
+        method: &str,
+        who: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value) {
+        post(
+            router(state.clone()),
+            &format!("/xrpc/com.example.wiki.{method}"),
+            Some(who),
+            body,
+        )
+        .await
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_roster_import_skips_who_is_already_here_and_fails_nobody() {
+        let state = roster().await;
+        let alice = token_for(&state, "did:plc:alice").await;
+        let import = serde_json::json!({
+            "context_id": "c9",
+            "invites": [
+                {"name": "Eva Holm", "email": "  Eva@X.dk "},
+                {"name": "Eva again", "email": "eva@x.dk"},
+                {"name": "Carla Jensen", "email": "carla@x.dk"},
+                {"name": "Bob", "email": "bob@x.dk"},
+                {"name": "Finn"},
+                {"name": "Finn"},
+                {"name": "", "email": ""}
+            ]
+        });
+        let (status, v) = call(&state, "inviteMembers", &alice, import).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(
+            v,
+            serde_json::json!({"inserted": 3, "skipped": 3, "without_email": 2}),
+            "Eva once and two Finns go in; Eva again, Carla and Bob are already here"
+        );
+
+        let (_, list) = members(&state, &alice, "&q=eva").await;
+        assert_eq!(list["members"][0]["email"], "eva@x.dk", "stored normalized");
+        // Every new row can be claimed, the ones with no address included.
+        let finn = members(&state, &alice, "&q=Finn").await.1["members"][0]["id"]
+            .as_str()
+            .expect("id")
+            .to_string();
+        let (status, link) = get_as(
+            router(state.clone()),
+            &format!("/xrpc/com.example.wiki.getMemberClaimLink?member={finn}"),
+            &alice,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{link}");
+        assert!(link["token"].as_str().is_some_and(|t| t.len() >= 24));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_account_is_invited_bound_and_answers_for_itself() {
+        let state = roster().await;
+        let alice = token_for(&state, "did:plc:alice").await;
+        let nina = token_for(&state, "did:plc:nina").await;
+        let invite = serde_json::json!({
+            "context_id": "c9", "invites": [{"did": "did:plc:nina"}]
+        });
+        let (status, v) = call(&state, "inviteMembers", &alice, invite.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["inserted"], 1);
+        assert_eq!(
+            call(&state, "inviteMembers", &alice, invite).await.1["skipped"],
+            1
+        );
+
+        let (_, mine) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.listInvitations",
+            &nina,
+        )
+        .await;
+        let invitation = &mine["invitations"][0];
+        assert_eq!(invitation["context_name"], "Closed Group");
+        assert_eq!(invitation["context_path"], "closed");
+        let id = serde_json::json!({"id": invitation["id"]});
+
+        // Bob is a member here, and it is still not his to answer.
+        let bob = token_for(&state, "did:plc:bob").await;
+        assert_eq!(
+            call(&state, "acceptInvitation", &bob, id.clone()).await.0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            call(&state, "acceptInvitation", &nina, id.clone()).await.0,
+            StatusCode::OK
+        );
+        let (_, after) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.listInvitations",
+            &nina,
+        )
+        .await;
+        assert_eq!(after["invitations"].as_array().map(Vec::len), Some(0));
+        // The interim's accept once deleted the invitation it was accepting.
+        let (_, list) = members(&state, &alice, "&accepted=true").await;
+        assert!(
+            list.to_string().contains("did:plc:nina"),
+            "accepting an invitation must leave her a member: {list}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn declining_and_leaving_are_removing_oneself() {
+        let state = roster().await;
+        let alice = token_for(&state, "did:plc:alice").await;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let ivan = serde_json::json!({"id": "m-ivan"});
+        assert_eq!(
+            call(&state, "removeMember", &bob, ivan.clone()).await.0,
+            StatusCode::FORBIDDEN,
+            "a member removed another member"
+        );
+        assert_eq!(
+            call(
+                &state,
+                "removeMember",
+                &bob,
+                serde_json::json!({"id": "m-bob"})
+            )
+            .await
+            .0,
+            StatusCode::OK,
+            "anyone may leave"
+        );
+        let secret = "/xrpc/com.example.wiki.getDocument?id=s1";
+        assert_eq!(
+            get_as(router(state.clone()), secret, &bob).await.0,
+            StatusCode::NOT_FOUND,
+            "he left, and can still read the group"
+        );
+        assert_eq!(
+            call(&state, "removeMember", &alice, ivan).await.0,
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_owner_edits_a_row_and_a_member_edits_none() {
+        let state = roster().await;
+        let alice = token_for(&state, "did:plc:alice").await;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let promote = serde_json::json!({"id": "m-ivan", "owner": true, "active": true});
+        assert_eq!(
+            call(&state, "updateMember", &bob, promote.clone()).await.0,
+            StatusCode::FORBIDDEN,
+            "a member handed out the owner role"
+        );
+        assert_eq!(
+            call(&state, "updateMember", &alice, promote).await.0,
+            StatusCode::OK
+        );
+        let authz = crate::authz::Authz::new(state.db.clone());
+        assert!(
+            authz
+                .is_active_owner("c9", "did:plc:ivan")
+                .await
+                .expect("q")
+        );
+
+        let fix =
+            serde_json::json!({"id": "inv-2", "name": " Dennis Møller ", "email": "Dennis@X.dk"});
+        assert_eq!(
+            call(&state, "updateMember", &alice, fix).await.0,
+            StatusCode::OK
+        );
+        let (_, list) = members(&state, &alice, "&q=dennis").await;
+        assert_eq!(list["members"][0]["name"], "Dennis Møller");
+        assert_eq!(list["members"][0]["email"], "dennis@x.dk");
+
+        // One unclaimed invitation per address per context.
+        let clash = serde_json::json!({"id": "inv-2", "email": "carla@x.dk"});
+        let (status, v) = call(&state, "updateMember", &alice, clash).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{v}");
+        assert_eq!(v["error"], "EmailTaken");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_context_keeps_an_owner_who_can_sign_in() {
+        let state = roster().await;
+        let alice = token_for(&state, "did:plc:alice").await;
+        // Two owners: alice and the hidden one. The first may go.
+        let demote_gs = serde_json::json!({"id": "m-gs", "owner": false});
+        assert_eq!(
+            call(&state, "updateMember", &alice, demote_gs).await.0,
+            StatusCode::OK
+        );
+        // An unclaimed invitation made owner cannot sign in, so it does not count.
+        let invited_owner = serde_json::json!({"id": "inv-1", "owner": true});
+        assert_eq!(
+            call(&state, "updateMember", &alice, invited_owner).await.0,
+            StatusCode::OK
+        );
+
+        for (method, body) in [
+            (
+                "updateMember",
+                serde_json::json!({"id": "m-alice", "owner": false}),
+            ),
+            ("removeMember", serde_json::json!({"id": "m-alice"})),
+        ] {
+            let (status, v) = call(&state, method, &alice, body).await;
+            assert_eq!(status, StatusCode::CONFLICT, "{method}: {v}");
+            assert_eq!(v["error"], "LastOwner");
+        }
+        let authz = crate::authz::Authz::new(state.db.clone());
+        assert!(
+            authz
+                .is_active_owner("c9", "did:plc:alice")
+                .await
+                .expect("q"),
+            "a refused change must change nothing"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_roster_is_the_owners_to_change_and_invisible_to_outsiders() {
+        let state = roster().await;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let mallory = token_for(&state, "did:plc:mallory").await;
+        let invite = serde_json::json!({"context_id": "c9", "invites": [{"name": "X"}]});
+        assert_eq!(
+            call(&state, "inviteMembers", &bob, invite.clone()).await.0,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            call(&state, "inviteMembers", &mallory, invite).await.0,
+            StatusCode::NOT_FOUND
+        );
+        // A real member id and an invented one look the same to her.
+        let real = call(
+            &state,
+            "removeMember",
+            &mallory,
+            serde_json::json!({"id": "m-bob"}),
+        )
+        .await;
+        let fake = call(
+            &state,
+            "removeMember",
+            &mallory,
+            serde_json::json!({"id": "nope"}),
+        )
+        .await;
+        assert_eq!(real, fake);
+        assert_eq!(real.0, StatusCode::NOT_FOUND);
     }
 }

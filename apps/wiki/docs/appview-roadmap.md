@@ -203,8 +203,14 @@ The steps:
   reported, not loaded.
 - [x] Paged, filtered member list, for members only, with addresses and hidden
   rows for owners only; the voter count.
-- [ ] Invite by email and by user, bulk roster import, update, remove.
-- [ ] Invitations for the caller: list, accept, decline; claim links.
+- [x] Invite by address, by name and by account, as one invitation or a whole
+  roster, skipping whoever is already there; update and remove, with a context
+  always keeping an owner who can sign in.
+- [x] The caller's invitations: list, accept, and decline or leave by removing
+  oneself; claim links for every roster row.
+- [ ] Reaching an invited address. Nothing sends mail yet, so an owner hands out
+  claim links by hand; binding by the account's confirmed address (M2) would
+  make most of that unnecessary.
 - [ ] Author chips (`set_node_authors`).
 
 ### M5: meetings
