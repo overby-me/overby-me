@@ -5,6 +5,7 @@
 #[cfg(feature = "appview")]
 mod appview;
 mod backend_api;
+mod bsky;
 mod build_info;
 mod components;
 mod crash;

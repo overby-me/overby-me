@@ -15,7 +15,8 @@
 //! `DECISIONS.md` (pending owner sign-off), not silently frozen in tests.
 
 pub use blind_rsa_signatures::{
-    BlindSignature, BlindingResult, DefaultRng, MessageRandomizer, PSS, Signature,
+    BlindMessage, BlindSignature, BlindingResult, DefaultRng, Error as CryptoError,
+    MessageRandomizer, PSS, Secret, Signature,
 };
 use blind_rsa_signatures::{KeyPair, PublicKey, Randomized, SecretKey, Sha384};
 use std::collections::{BTreeMap, BTreeSet};

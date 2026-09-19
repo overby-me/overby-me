@@ -23,6 +23,8 @@ exclude = ["crates", "vendor"]
 # `appview` feature, which swaps the data layer over to it; the build that ships
 # does not compile it.
 appview-client = { path = "crates/appview-client", optional = true }
+# A secret ballot is blinded and unblinded by the voter, so in the browser.
+ballot-spec = { path = "crates/ballot-spec", optional = true }
 # (xlsx roster parsing moved to the backend to keep calamine/zip/inflate out of
 # the wasm bundle — see nhost::parse_roster / backend roster.rs.)
 # Pictures embedded in a Word document become `data:` urls, which is base64.
@@ -147,7 +149,7 @@ tokio = { version = "1", features = ["macros", "net", "rt", "time"] }
 default = ["web"]
 # The data layer on the atproto AppView instead of NHost and Hasura (roadmap M9,
 # `docs/appview-roadmap.md`). Off, which is what ships, nothing changes.
-appview = ["dep:appview-client"]
+appview = ["dep:appview-client", "dep:ballot-spec"]
 # Ship warn/error logs (with interaction breadcrumbs, user/session enrichment and
 # panics) to Better Stack / Logtail. Reads BETTERSTACK_SOURCE_TOKEN at build time.
 remote-logging = []

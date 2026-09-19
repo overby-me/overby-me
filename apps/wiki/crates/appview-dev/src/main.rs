@@ -26,9 +26,16 @@ async fn main() {
         std::process::exit(2);
     }
 
+    // Bound first: the links the AppView hands out name where it listens.
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+        .await
+        .expect("a port");
+    let url = format!("http://{}", listener.local_addr().expect("an address"));
+
     let db = Db::open(":memory:").await.expect("an in-memory datastore");
     db.init_schema().await.expect("the schema");
     let config = Config {
+        public_url: url.clone(),
         site_name: "Dev Wiki".to_string(),
         site_owner: dids.first().cloned(),
         // So that a frontend served from elsewhere on this machine may call it
@@ -54,10 +61,6 @@ async fn main() {
         sessions.insert(did.clone(), serde_json::Value::String(session));
     }
 
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
-        .await
-        .expect("a port");
-    let url = format!("http://{}", listener.local_addr().expect("an address"));
     println!(
         "{}",
         serde_json::json!({ "url": url, "sessions": sessions })

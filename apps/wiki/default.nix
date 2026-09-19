@@ -70,10 +70,13 @@
           # Path dependencies: the OOXML parsers and the patched dioxus-core.
           # Cargo cannot resolve the manifest without them.
           ./vendor
-          # And the AppView client, which is optional and not compiled into what
-          # ships, but whose manifest cargo reads all the same.
+          # And the AppView client and the ballot it casts, which are optional
+          # and not compiled into what ships, but whose manifests cargo reads
+          # all the same.
           ./crates/appview-client/Cargo.toml
           ./crates/appview-client/src
+          ./crates/ballot-spec/Cargo.toml
+          ./crates/ballot-spec/src
           # The scripts `just build` runs, named one by one rather than as the
           # whole scripts/ directory, so editing an unrelated script does not
           # rebuild the frontend. Every script the recipe calls has to be here:

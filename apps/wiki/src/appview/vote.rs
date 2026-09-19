@@ -6,7 +6,7 @@
 //! so a poll is read there and dressed as that node.
 
 use super::seen::saw_node;
-use super::{ask, ask_quiet, client};
+use super::{ask, ask_quiet, client, reported};
 use crate::model::{BallotRules, InsertedNode, Jsonb, PollSummaryFields, Timestamptz, Uuid};
 use appview_client::{cast_open_ballot, close_poll, defs, get_poll, list_polls, open_poll};
 
@@ -103,8 +103,12 @@ pub async fn cast_vote(
             .filter_map(|choice| i64::try_from(*choice).ok())
             .collect(),
     };
-    ask("castOpenBallot", false, || client.cast_open_ballot(&ballot)).await?;
-    Ok(true)
+    match ask_quiet(false, || client.cast_open_ballot(&ballot)).await {
+        Ok(_) => Ok(true),
+        // In the words the poll screen takes to mean the ballot is in.
+        Err(error) if error.name() == Some("AlreadyVoted") => Err("already voted".to_string()),
+        Err(error) => Err(reported("castOpenBallot", &error)),
+    }
 }
 
 /// How a poll stands: the count per option, the ballots cast, and whether the

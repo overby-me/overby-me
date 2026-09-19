@@ -568,3 +568,25 @@ pub fn delete_node_deep(
         Ok(())
     })
 }
+
+/// Copy a node and what is under it to `parent_id`. The AppView does the whole
+/// subtree in one call, as whoever asks: it takes what they can read, their own
+/// unsubmitted work included and nobody else's.
+pub fn deep_copy_node(
+    access_token: Option<String>,
+    copy_id: String,
+    parent_id: String,
+    _context_id: Option<String>,
+    _is_root: bool,
+    _user_id: String,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>>>> {
+    Box::pin(async move {
+        let client = client(access_token.as_deref());
+        let copy = appview_client::copy_document::Input {
+            id: copy_id,
+            parent_id,
+        };
+        ask("copyDocument", false, || client.copy_document(&copy)).await?;
+        Ok(())
+    })
+}

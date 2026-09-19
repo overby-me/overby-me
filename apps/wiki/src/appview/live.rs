@@ -26,6 +26,9 @@ impl Drop for Server {
     fn drop(&mut self) {
         let _ = self.process.kill();
         let _ = self.process.wait();
+        // Where an in-memory AppView keeps the files it is given.
+        let files = std::env::temp_dir().join(format!("appview-{}", self.process.id()));
+        let _ = std::fs::remove_dir_all(files);
     }
 }
 
@@ -858,4 +861,206 @@ async fn a_queue_is_joined_reordered_and_served_as_the_speak_screen_does_it() {
     assert!(super::delete_node(Some(&carol), &list.id.0)
         .await
         .expect("the list goes"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_file_is_kept_shown_and_reported_with_as_the_file_and_feedback_screens_do_it() {
+    use super::api;
+    let server = Server::start();
+    let (carol, alice) = (server.session(CAROL), server.session(ALICE));
+    let (group, page) = a_group_with_a_page(&carol).await;
+
+    let minutes = b"%PDF-1.7 referat".to_vec();
+    let kept = api::upload(
+        Some(&carol),
+        Some(&group),
+        minutes.clone(),
+        "referat.pdf",
+        "application/pdf",
+    )
+    .await
+    .expect("uploadBlob");
+    assert_eq!(
+        (kept.mime.as_str(), kept.name.as_deref()),
+        ("application/pdf", Some("referat.pdf"))
+    );
+    assert_eq!(api::file_bytes(&kept.id, &carol).await, Ok(minutes.clone()));
+    assert_eq!(
+        api::file_bytes(&kept.id, &alice).await,
+        Err("no such file, or not ours to read".to_string()),
+        "a closed group's file, to someone outside it"
+    );
+    // What an <iframe> is given: it cannot send the session, so the link is one.
+    let link = api::presigned_file_url(&kept.id, &carol)
+        .await
+        .expect("getBlobLink");
+    let fetched = reqwest::get(&link).await.expect("the link answers");
+    assert_eq!(fetched.bytes().await.expect("bytes").to_vec(), minutes);
+    assert_eq!(api::presigned_file_url(&kept.id, &alice).await, None);
+
+    // A report's screenshot belongs to no page, so it goes where its sender
+    // belongs, and someone who belongs nowhere has nowhere to put one.
+    let shot = b"\x89PNG a screenshot".to_vec();
+    let nowhere = api::upload(Some(&alice), None, shot.clone(), "skaerm.png", "image/png").await;
+    assert_eq!(nowhere.expect_err("in no group").name(), Some("Forbidden"));
+    super::invite_member_by_node(Some(&carol), &group, ALICE, "Alice")
+        .await
+        .expect("invite");
+    let waiting = super::query_invitations(Some(&alice), ALICE, "")
+        .await
+        .expect("invitations");
+    super::accept_invitation(Some(&alice), &waiting[0].id.0, ALICE)
+        .await
+        .expect("accept");
+    let shot = api::upload(Some(&alice), None, shot, "skaerm.png", "")
+        .await
+        .expect("a screenshot");
+    assert_eq!(shot.context_id, group);
+
+    super::insert_feedback(
+        Some(&alice),
+        "bug",
+        "Knappen er grå",
+        Some(&shot.id),
+        "/hb/referat",
+        "0.0.0",
+        "en browser",
+    )
+    .await
+    .expect("submitFeedback");
+    api::report_error(Some(&alice), "kunne ikke gemme", "/hb").await;
+    api::report_error(Some(&alice), "kunne ikke gemme", "/hb").await;
+
+    let hers = super::query_feedback(Some(&alice)).await.expect("hers");
+    let all = super::query_feedback(Some(&carol)).await.expect("all");
+    assert_eq!(
+        (hers.len(), all.len()),
+        (2, 2),
+        "a failure that repeats files once"
+    );
+    let report = all.iter().find(|r| r.kind == "bug").expect("the report");
+    assert_eq!(report.message, "Knappen er grå");
+    assert_eq!(report.image.as_deref(), Some(shot.id.as_str()));
+    assert_eq!(report.owner_id.as_deref(), Some(ALICE));
+    assert_eq!(report.user_agent, "en browser");
+    assert_eq!(report.commit, crate::build_info::COMMIT);
+    assert!(all.iter().any(|r| r.kind == "error"));
+
+    // The feedback app clears a report with the same call that deletes a node.
+    assert!(super::delete_node(Some(&carol), &report.id)
+        .await
+        .expect("deleteFeedback"));
+    assert_eq!(
+        super::query_feedback(Some(&carol))
+            .await
+            .expect("all")
+            .len(),
+        1
+    );
+
+    // Paste: the page again, beside itself.
+    super::deep_copy_node(
+        Some(carol.clone()),
+        page,
+        group.clone(),
+        Some(group.clone()),
+        true,
+        CAROL.to_string(),
+    )
+    .await
+    .expect("copyDocument");
+    let mut names: Vec<String> = super::query_children(Some(&carol), &group, CAROL)
+        .await
+        .expect("children")
+        .into_iter()
+        .map(|child| child.key)
+        .collect();
+    names.sort();
+    assert_eq!(names, ["referat", "referat-2"]);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_secret_ballot_is_cast_blind_and_only_once_as_the_poll_screen_does_it() {
+    use super::api;
+    use crate::model::BallotRules;
+    let server = Server::start();
+    let (carol, alice) = (server.session(CAROL), server.session(ALICE));
+    let (group, _) = a_group_with_a_page(&carol).await;
+    super::invite_member_by_node(Some(&carol), &group, ALICE, "Alice")
+        .await
+        .expect("invite");
+    let waiting = super::query_invitations(Some(&alice), ALICE, "")
+        .await
+        .expect("invitations");
+    super::accept_invitation(Some(&alice), &waiting[0].id.0, ALICE)
+        .await
+        .expect("accept");
+    let folder = super::insert_node(Some(&carol), a_node("wiki/folder", "Valg", &group, &group))
+        .await
+        .expect("a folder")
+        .expect("inserted");
+    let mut motion = a_node("vote/policy", "Dirigent", &folder.id.0, &group);
+    motion.mutable = Some(false);
+    let motion = super::insert_node(Some(&carol), motion)
+        .await
+        .expect("a motion")
+        .expect("inserted");
+
+    let options = ["for", "imod", "blank"].map(str::to_string);
+    let secret = BallotRules {
+        secret: true,
+        ..Default::default()
+    };
+    let poll = super::create_poll(
+        Some(&carol),
+        &motion.id.0,
+        &group,
+        "Valg af dirigent",
+        "",
+        &options,
+        1,
+        1,
+        secret,
+    )
+    .await
+    .expect("a secret poll")
+    .id
+    .0;
+
+    assert!(!api::vote_status(&alice, &poll).await);
+    assert_eq!(
+        api::vote_cast_secret(&alice, &poll, Some(&group), &[1]).await,
+        Ok(())
+    );
+    assert!(api::vote_status(&alice, &poll).await);
+    assert_eq!(
+        api::vote_cast_secret(&alice, &poll, Some(&group), &[0]).await,
+        Err("already voted".to_string()),
+        "the screen's word for it, so a second tap reads as voted and not as broken"
+    );
+    let (counts, ballots, _) = super::poll_tally(Some(&carol), &poll, 3, None)
+        .await
+        .expect("the tally");
+    assert_eq!((counts, ballots), (vec![0, 1, 0], 1));
+
+    // Carol's reply was lost on the way twice over: once with her tokens signed
+    // and never received, once with her ballot landed and never confirmed. What
+    // she kept is what lets her ask again; forgetting it here stands for both.
+    assert_eq!(
+        api::vote_cast_secret(&carol, &poll, Some(&group), &[0]).await,
+        Ok(())
+    );
+    super::ballot::forget_the_cast(CAROL, &poll);
+    assert_eq!(
+        api::vote_cast_secret(&carol, &poll, Some(&group), &[1]).await,
+        Err("an earlier try had already landed with another choice, and that one counts".into()),
+    );
+    let (counts, ballots, _) = super::poll_tally(Some(&carol), &poll, 3, None)
+        .await
+        .expect("the tally");
+    assert_eq!(
+        (counts, ballots),
+        (vec![1, 1, 0], 2),
+        "one ballot each, whatever was retried"
+    );
 }

@@ -9,11 +9,14 @@
 // part before the whole stands in for `crate::graphql`. Goes with the switch.
 #![allow(dead_code)]
 
+pub mod api;
+mod ballot;
 mod bin;
 mod canvas;
 pub mod map;
 mod nodes;
 mod people;
+mod reports;
 mod screen;
 mod seen;
 mod speak;
@@ -29,6 +32,8 @@ pub use nodes::*;
 #[allow(unused_imports)]
 pub use people::*;
 #[allow(unused_imports)]
+pub use reports::*;
+#[allow(unused_imports)]
 pub use screen::*;
 #[allow(unused_imports)]
 pub use speak::*;
@@ -41,15 +46,34 @@ use appview_client::{Client, Error};
 
 /// Where the AppView is. Set at build time, as the interim's endpoints are
 /// (`WIKI_APPVIEW_URL`); unset, a dev instance on this machine.
+pub const APPVIEW_URL: &str = match option_env!("WIKI_APPVIEW_URL") {
+    Some(url) => url,
+    None => "http://127.0.0.1:8080",
+};
+
 pub fn appview_url() -> String {
     #[cfg(test)]
     if let Some(url) = tests::URL.with(|url| url.borrow().clone()) {
         return url;
     }
-    option_env!("WIKI_APPVIEW_URL")
-        .unwrap_or("http://127.0.0.1:8080")
-        .trim_end_matches('/')
-        .to_string()
+    APPVIEW_URL.trim_end_matches('/').to_string()
+}
+
+/// How long to wait before asking a read again that got no answer. A venue's
+/// wifi drops for a moment far more often than for a minute.
+pub(crate) const RETRY_DELAYS_MS: &[u32] = &[300, 900];
+
+/// Where signing in as `handle` starts. The browser comes back to the page it
+/// left, with `#code=<code>` for `createSession`.
+pub fn login_url(handle: &str) -> String {
+    #[cfg(target_arch = "wasm32")]
+    let here = web_sys::window()
+        .and_then(|w| w.location().href().ok())
+        .unwrap_or_default();
+    #[cfg(not(target_arch = "wasm32"))]
+    let here = String::new();
+    let here = here.split_once('#').map_or(here.as_str(), |(page, _)| page);
+    client(None).login_url(handle, here)
 }
 
 /// Remember the answer to a read, for the tunnel. In a browser only: under
@@ -68,6 +92,28 @@ pub(crate) fn client(access_token: Option<&str>) -> Client {
         Some(token) => client.with_session(token),
         None => client,
     }
+}
+
+thread_local! {
+    /// Whose each session is, as the AppView said when first asked.
+    static HOLDERS: std::cell::RefCell<std::collections::HashMap<String, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// The DID a session is for. Asked once per session and remembered: it does
+/// not change, and a session says nothing about its holder by itself.
+pub(crate) async fn whoami(access_token: &str) -> Option<String> {
+    if let Some(did) = HOLDERS.with(|holders| holders.borrow().get(access_token).cloned()) {
+        return Some(did);
+    }
+    let client = client(Some(access_token));
+    let me = ask_quiet(true, || client.get_session()).await.ok()?;
+    HOLDERS.with(|holders| {
+        holders
+            .borrow_mut()
+            .insert(access_token.to_string(), me.did.clone());
+    });
+    Some(me.did)
 }
 
 /// A failure in the words `crate::errors::classify` sorts by. "No" and "not
@@ -139,8 +185,12 @@ where
 {
     let mut result = call().await;
     if read {
-        for delay in crate::graphql::RETRY_DELAYS_MS {
-            if !matches!(result, Err(Error::Transport(_))) {
+        for delay in RETRY_DELAYS_MS {
+            // No answer, or a gateway's instead of one: the same to a reader.
+            let unanswered = result.as_ref().is_err_and(|error| {
+                crate::errors::classify(&said(error)) == crate::errors::Failure::Offline
+            });
+            if !unanswered {
                 break;
             }
             gloo_timers::future::TimeoutFuture::new(*delay).await;

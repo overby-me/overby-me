@@ -126,6 +126,20 @@ impl Client {
         format!("{}/blob/{id}", self.base)
     }
 
+    /// A file's bytes, as whoever this client is.
+    pub async fn get_blob(&self, id: &str) -> Result<Binary, Error> {
+        let request = self.http.get(self.blob_url(id));
+        Ok(self.send(request).await?.binary())
+    }
+
+    /// Where a browser goes to sign in as `handle`. It comes back to
+    /// `return_to` with `#code=<code>`, which `create_session` takes.
+    pub fn login_url(&self, handle: &str, return_to: &str) -> String {
+        let login = format!("{}/login", self.base);
+        let pairs = [("handle", handle), ("return", return_to)];
+        reqwest::Url::parse_with_params(&login, pairs).map_or(login, String::from)
+    }
+
     pub(crate) async fn call(
         &self,
         verb: Verb,
@@ -134,21 +148,25 @@ impl Client {
         body: Body,
     ) -> Result<Answer, Error> {
         let url = format!("{}/xrpc/{nsid}", self.base);
-        let mut request = match verb {
+        let request = match verb {
             Verb::Get => self.http.get(url),
             Verb::Post => self.http.post(url),
         }
         .query(&pairs);
-        if let Some(session) = &self.session {
-            request = request.bearer_auth(session);
-        }
-        request = match body {
+        self.send(match body {
             Body::None => request,
             Body::Json(value) => request.json(&value),
             Body::Bytes(bytes, content_type) => {
                 request.header("content-type", content_type).body(bytes)
             }
-        };
+        })
+        .await
+    }
+
+    async fn send(&self, mut request: reqwest::RequestBuilder) -> Result<Answer, Error> {
+        if let Some(session) = &self.session {
+            request = request.bearer_auth(session);
+        }
         let response = request
             .send()
             .await
