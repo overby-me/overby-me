@@ -48,7 +48,7 @@
 				},
 				{
 					"name": "InvalidRequest",
-					"description": "`context_id` names a context the node is not in."
+					"description": "`context_id` names a context the node is not in, or the node is a container (a folder), which takes no comments."
 				}
 			]
 		}

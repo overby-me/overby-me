@@ -58,6 +58,96 @@ pub fn readable_comment(alias: &str, caller: usize) -> String {
     )
 }
 
+// -- The write model: who may create which kind under which parent. --
+//
+// The interim keeps this per context, as `permissions` rows seeded from one
+// template (`context_permission_objects` in the frontend's `graphql/nodes.rs`).
+// That template is the rule in practice, so it is carried here as one table.
+// It says who may CREATE. It says nothing about reading, and must never be made
+// to: that is the mistake `migrations/0024` records.
+
+/// The parent kind every context kind (group, event, site) answers to.
+pub const CONTEXT: &str = "context";
+
+const CONTAINERS: &[&str] = &[CONTEXT, "folder"];
+
+/// (kind, the role it takes, the parent kinds it may be created under).
+const CREATE_RULES: &[(&str, Role, &[&str])] = &[
+    ("folder", Role::Owner, CONTAINERS),
+    ("document", Role::Owner, CONTAINERS),
+    ("file", Role::Owner, CONTAINERS),
+    ("position", Role::Owner, &["folder"]),
+    ("policy", Role::Member, &["folder"]),
+    ("candidate", Role::Member, &["position"]),
+    ("change", Role::Member, &["policy", "change", "file"]),
+    ("question", Role::Member, &["position", "file"]),
+];
+
+/// What a comment may be written on: content, never a container.
+pub const COMMENTABLE: &[&str] = &[
+    "policy",
+    "change",
+    "document",
+    "file",
+    "position",
+    "candidate",
+];
+
+/// Discussion is not an addition to what was locked: closing a resolution to new
+/// amendments must not stop people asking about it.
+const EXEMPT_FROM_LOCK: &[&str] = &["question"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// Not a kind anyone creates this way.
+    UnknownKind,
+    /// That kind does not go under that parent.
+    WrongParent,
+    /// That kind is an owner's to create.
+    NeedsOwner,
+    /// The parent is locked against new children.
+    Locked,
+}
+
+impl Refusal {
+    pub fn message(self) -> &'static str {
+        match self {
+            Refusal::UnknownKind => "not a kind that can be created",
+            Refusal::WrongParent => "that kind cannot be created under that parent",
+            Refusal::NeedsOwner => "only an owner of the context may create that",
+            Refusal::Locked => "the parent is locked against new content",
+        }
+    }
+}
+
+/// Whether a member may create a `kind` under a parent of `parent_kind`.
+///
+/// An owner may add to a locked parent: the lock is theirs, and a chair who
+/// closes candidature and then has to enter a late one by hand should not have
+/// to unlock the position to do it.
+pub fn may_create(
+    kind: &str,
+    parent_kind: &str,
+    parent_attachable: bool,
+    membership: Membership,
+) -> Result<(), Refusal> {
+    let (_, role, parents) = CREATE_RULES
+        .iter()
+        .find(|(k, _, _)| *k == kind)
+        .ok_or(Refusal::UnknownKind)?;
+    if !parents.contains(&parent_kind) {
+        return Err(Refusal::WrongParent);
+    }
+    let is_owner = membership.role == Role::Owner;
+    if *role == Role::Owner && !is_owner {
+        return Err(Refusal::NeedsOwner);
+    }
+    if !parent_attachable && !is_owner && !EXEMPT_FROM_LOCK.contains(&kind) {
+        return Err(Refusal::Locked);
+    }
+    Ok(())
+}
+
 /// A person's standing in a context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Membership {
@@ -185,6 +275,75 @@ mod tests {
         assert!(a.is_active_owner("c1", "did:plc:owner").await.expect("q"));
         assert!(a.is_active_member("c1", "did:plc:member").await.expect("q"));
         assert!(!a.is_active_owner("c1", "did:plc:member").await.expect("q"));
+    }
+
+    const MEMBER: Membership = Membership {
+        role: Role::Member,
+        active: true,
+    };
+    const OWNER: Membership = Membership {
+        role: Role::Owner,
+        active: true,
+    };
+
+    #[test]
+    fn members_write_motions_and_owners_make_the_structure() {
+        assert_eq!(may_create("policy", "folder", true, MEMBER), Ok(()));
+        assert_eq!(may_create("candidate", "position", true, MEMBER), Ok(()));
+        assert_eq!(may_create("change", "policy", true, MEMBER), Ok(()));
+        for structural in ["folder", "document", "file"] {
+            assert_eq!(
+                may_create(structural, CONTEXT, true, MEMBER),
+                Err(Refusal::NeedsOwner),
+                "{structural}"
+            );
+            assert_eq!(may_create(structural, CONTEXT, true, OWNER), Ok(()));
+        }
+        assert_eq!(
+            may_create("position", "folder", true, MEMBER),
+            Err(Refusal::NeedsOwner)
+        );
+    }
+
+    #[test]
+    fn a_kind_goes_only_where_it_belongs() {
+        assert_eq!(
+            may_create("policy", CONTEXT, true, OWNER),
+            Err(Refusal::WrongParent),
+            "a motion belongs in a folder, even for an owner"
+        );
+        assert_eq!(
+            may_create("candidate", "folder", true, OWNER),
+            Err(Refusal::WrongParent)
+        );
+        assert_eq!(
+            may_create("poll", "policy", true, OWNER),
+            Err(Refusal::UnknownKind),
+            "a poll is opened, not created as a document"
+        );
+    }
+
+    #[test]
+    fn a_lock_stops_members_but_not_the_owner_or_a_question() {
+        assert_eq!(
+            may_create("candidate", "position", false, MEMBER),
+            Err(Refusal::Locked)
+        );
+        assert_eq!(may_create("candidate", "position", false, OWNER), Ok(()));
+        assert_eq!(
+            may_create("question", "position", false, MEMBER),
+            Ok(()),
+            "closing candidature must not stop people asking about it"
+        );
+    }
+
+    #[test]
+    fn voting_rights_have_no_say_in_what_a_member_may_write() {
+        let inactive = Membership {
+            active: false,
+            ..MEMBER
+        };
+        assert_eq!(may_create("policy", "folder", true, inactive), Ok(()));
     }
 
     #[tokio::test(flavor = "current_thread")]

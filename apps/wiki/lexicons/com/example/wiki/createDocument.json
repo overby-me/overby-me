@@ -65,11 +65,11 @@
 				},
 				{
 					"name": "Forbidden",
-					"description": "The caller is not a member of that context."
+					"description": "The caller is not a member of that context, the kind is an owner's to create (folder, document, file, position), or the parent is locked and the caller is not an owner."
 				},
 				{
 					"name": "InvalidRequest",
-					"description": "`parent_id` names no live node, or one in another context."
+					"description": "`parent_id` names no live node or one in another context, the kind is not one that is created this way, or that kind does not go under that parent (a policy goes in a folder, a candidate under a position)."
 				}
 			]
 		}

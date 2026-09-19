@@ -212,11 +212,14 @@ impl From<turso::Error> for WriteError {
     }
 }
 
-/// Where a new child would hang: the parent's path and the context it is in
-/// (a context is in itself).
-struct Parent {
-    path: String,
-    context_id: String,
+/// A live node, as somewhere to hang a child or a comment.
+pub struct Parent {
+    pub path: String,
+    /// The context it is in. A context is in itself.
+    pub context_id: String,
+    /// [`crate::authz::CONTEXT`] for any context, else the document's kind.
+    pub kind: String,
+    pub attachable: bool,
 }
 
 impl Store {
@@ -225,16 +228,29 @@ impl Store {
     }
 
     /// The live context or document `id` names, as a place to hang a child.
+    /// Ungated: it answers a write check, and says nothing to the caller.
+    pub async fn parent_of(&self, id: &str) -> Result<Option<Parent>, DbError> {
+        let conn = self.db.acquire().await?;
+        self.parent(&conn, id).await
+    }
+
     async fn parent(&self, conn: &turso::Connection, id: &str) -> Result<Option<Parent>, DbError> {
+        let context = crate::authz::CONTEXT;
         for sql in [
-            format!("SELECT path, id FROM context WHERE id = ?1 AND {LIVE}"),
-            format!("SELECT path, context_id FROM document WHERE id = ?1 AND {LIVE}"),
+            format!(
+                "SELECT path, id, '{context}', attachable FROM context WHERE id = ?1 AND {LIVE}"
+            ),
+            format!(
+                "SELECT path, context_id, kind, attachable FROM document WHERE id = ?1 AND {LIVE}"
+            ),
         ] {
             let mut rows = conn.query(&sql, [id]).await?;
             if let Some(row) = rows.next().await? {
                 return Ok(Some(Parent {
                     path: row.get::<String>(0)?,
                     context_id: row.get::<String>(1)?,
+                    kind: row.get::<String>(2)?,
+                    attachable: row.get::<i64>(3)? != 0,
                 }));
             }
         }
@@ -304,28 +320,30 @@ impl Store {
         Ok(None)
     }
 
-    /// The context of a node (a document or a comment) that `caller` may read.
-    /// `None` covers both "no such node" and "not theirs to read".
-    pub async fn readable_node_context(
+    /// The context and kind of a node (a document, or a comment as `"comment"`)
+    /// that `caller` may read. `None` covers both "no such node" and "not theirs
+    /// to read".
+    pub async fn readable_subject(
         &self,
         node_id: &str,
         caller: Option<&str>,
-    ) -> Result<Option<String>, DbError> {
+    ) -> Result<Option<(String, String)>, DbError> {
         let conn = self.db.acquire().await?;
         let params = || vec![Value::Text(node_id.to_string()), opt_str_val(caller)];
         for sql in [
             format!(
-                "SELECT d.context_id FROM document d WHERE d.id = ?1 AND d.{LIVE} AND {}",
+                "SELECT d.context_id, d.kind FROM document d \
+                 WHERE d.id = ?1 AND d.{LIVE} AND {}",
                 readable_document("d", 2)
             ),
             format!(
-                "SELECT k.context_id FROM comment k WHERE k.id = ?1 AND {}",
+                "SELECT k.context_id, 'comment' FROM comment k WHERE k.id = ?1 AND {}",
                 readable_comment("k", 2)
             ),
         ] {
             let mut rows = conn.query(&sql, params()).await?;
             if let Some(row) = rows.next().await? {
-                return Ok(opt_text(&row, 0));
+                return Ok(Some((row.get::<String>(0)?, row.get::<String>(1)?)));
             }
         }
         Ok(None)

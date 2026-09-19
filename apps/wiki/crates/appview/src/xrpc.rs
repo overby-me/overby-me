@@ -329,6 +329,10 @@ fn forbidden(message: &str) -> Response {
     err(StatusCode::FORBIDDEN, "Forbidden", message)
 }
 
+fn invalid(message: &str) -> Response {
+    err(StatusCode::BAD_REQUEST, "InvalidRequest", message)
+}
+
 /// `Ok` if `did` is a member of `context_id`, else the response to send.
 async fn require_member(state: &AppState, context_id: &str, did: &str) -> Result<(), Response> {
     match Authz::new(state.db.clone())
@@ -469,8 +473,30 @@ pub async fn create_document(
     Caller { did }: Caller,
     Json(body): Json<CreateDocumentBody>,
 ) -> Response {
-    if let Err(refusal) = require_member(&state, &body.context_id, &did).await {
-        return refusal;
+    let store = crate::Store::new(state.db.clone());
+    let parent_id = body.parent_id.as_deref().unwrap_or(&body.context_id);
+    let parent = match store.parent_of(parent_id).await {
+        Ok(Some(parent)) if parent.context_id == body.context_id => parent,
+        Ok(Some(_)) => return invalid("parent is not in that context"),
+        Ok(None) => return invalid("no such parent"),
+        Err(e) => return write_failed("createDocument", e),
+    };
+    let membership = match Authz::new(state.db.clone())
+        .membership(&body.context_id, &did)
+        .await
+    {
+        Ok(Some(membership)) => membership,
+        Ok(None) => return forbidden("not a member of that context"),
+        Err(e) => return write_failed("createDocument", e),
+    };
+    if let Err(refusal) =
+        crate::authz::may_create(&body.kind, &parent.kind, parent.attachable, membership)
+    {
+        use crate::authz::Refusal;
+        return match refusal {
+            Refusal::UnknownKind | Refusal::WrongParent => invalid(refusal.message()),
+            Refusal::NeedsOwner | Refusal::Locked => forbidden(refusal.message()),
+        };
     }
     let content = body.content.as_ref().map(|v| v.to_string());
     let data = body.data.as_ref().map(|v| v.to_string());
@@ -483,10 +509,7 @@ pub async fn create_document(
         data: data.as_deref(),
         author_did: &did,
     };
-    match crate::Store::new(state.db.clone())
-        .create_document(&new)
-        .await
-    {
+    match store.create_document(&new).await {
         Ok(id) => wrote(id),
         Err(crate::store::WriteError::Db(e)) => write_failed("createDocument", e),
         Err(refused) => err(
@@ -515,11 +538,15 @@ pub async fn post_comment(
 ) -> Response {
     let store = crate::Store::new(state.db.clone());
     // A node the caller may not read answers as missing, as it does to a read.
-    let context_id = match store.readable_node_context(&body.on_id, Some(&did)).await {
-        Ok(Some(context_id)) => context_id,
+    let (context_id, kind) = match store.readable_subject(&body.on_id, Some(&did)).await {
+        Ok(Some(subject)) => subject,
         Ok(None) => return err(StatusCode::NOT_FOUND, "NotFound", "no such node"),
         Err(e) => return write_failed("postComment", e),
     };
+    // Content and replies, never a container: a folder has no thread to show it.
+    if kind != "comment" && !crate::authz::COMMENTABLE.contains(&kind.as_str()) {
+        return invalid("that kind of node takes no comments");
+    }
     if body.context_id.as_ref().is_some_and(|c| *c != context_id) {
         return err(
             StatusCode::BAD_REQUEST,
@@ -677,11 +704,15 @@ mod tests {
 
     /// Make `did` (who must have a user row) an active member of `context`.
     async fn join(state: &AppState, did: &str, context: &str) {
+        join_as(state, did, context, "member").await;
+    }
+
+    async fn join_as(state: &AppState, did: &str, context: &str, role: &str) {
         let conn = state.db.acquire().await.expect("conn");
         conn.execute(
             "INSERT INTO member (id, user_did, context_id, role, active) \
-             VALUES (?1, ?2, ?3, 'member', 1)",
-            [format!("m-{did}-{context}").as_str(), did, context],
+             VALUES (?1, ?2, ?3, ?4, 1)",
+            [format!("m-{did}-{context}").as_str(), did, context, role],
         )
         .await
         .expect("join");
@@ -843,7 +874,7 @@ mod tests {
     async fn create_document_by_a_did_then_read_it_back() {
         let state = seeded_state().await;
         let carol = token_for(&state, "did:plc:carol").await;
-        join(&state, "did:plc:carol", "c1").await;
+        join_as(&state, "did:plc:carol", "c1", "owner").await;
         let (status, v) = post(
             router(state.clone()),
             "/xrpc/com.example.wiki.createDocument",
@@ -1507,7 +1538,7 @@ mod tests {
     async fn the_server_gives_a_new_document_the_cleanest_free_key() {
         let state = seeded_state().await;
         let carol = token_for(&state, "did:plc:carol").await;
-        join(&state, "did:plc:carol", "c1").await;
+        join_as(&state, "did:plc:carol", "c1", "owner").await;
         fn named(title: &str, parent: Option<&str>) -> serde_json::Value {
             serde_json::json!({
                 "context_id": "c1", "parent_id": parent, "kind": "folder", "title": title
@@ -1590,11 +1621,11 @@ mod tests {
         }
 
         let carol = token_for(&state, "did:plc:carol").await;
-        join(&state, "did:plc:carol", "c1").await;
+        join_as(&state, "did:plc:carol", "c1", "owner").await;
         let again = create(
             &state,
             &carol,
-            serde_json::json!({"context_id": "c1", "kind": "policy", "title": "Motion"}),
+            serde_json::json!({"context_id": "c1", "kind": "document", "title": "Motion"}),
         )
         .await;
         assert_eq!(
@@ -1625,5 +1656,99 @@ mod tests {
             .filter_map(|d| d["id"].as_str())
             .collect();
         assert_eq!(ids, ["d2", "d1"]);
+    }
+
+    // -- The write model, end to end. `fold` is a folder in the public group. --
+
+    async fn with_a_folder(attachable: i64) -> AppState {
+        let state = seeded_state().await;
+        let conn = state.db.acquire().await.expect("conn");
+        conn.execute(
+            "INSERT INTO document (id, context_id, parent_id, kind, title, slug, path, attachable) \
+             VALUES ('fold', 'c1', 'c1', 'folder', 'Resolutioner', 'resolutioner', \
+                     'group-one/resolutioner', ?1)",
+            [attachable],
+        )
+        .await
+        .expect("folder");
+        state
+    }
+
+    async fn try_create(
+        state: &AppState,
+        token: &str,
+        kind: &str,
+        parent: &str,
+    ) -> (StatusCode, serde_json::Value) {
+        post(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.createDocument",
+            Some(token),
+            serde_json::json!({
+                "context_id": "c1", "parent_id": parent, "kind": kind, "title": "Forslag"
+            }),
+        )
+        .await
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_member_files_a_motion_but_does_not_make_the_folder_for_it() {
+        let state = with_a_folder(1).await;
+        let dave = token_for(&state, "did:plc:dave").await;
+        join(&state, "did:plc:dave", "c1").await;
+
+        let (status, v) = try_create(&state, &dave, "policy", "fold").await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        let (status, v) = try_create(&state, &dave, "folder", "c1").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+        let (status, v) = try_create(&state, &dave, "policy", "c1").await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "a motion belongs in a folder: {v}"
+        );
+        let (status, v) = try_create(&state, &dave, "poll", "fold").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_locked_folder_takes_the_owners_motion_and_nobody_elses() {
+        let state = with_a_folder(0).await;
+        let dave = token_for(&state, "did:plc:dave").await;
+        join(&state, "did:plc:dave", "c1").await;
+        let (status, v) = try_create(&state, &dave, "policy", "fold").await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+
+        let chair = token_for(&state, "did:plc:chair").await;
+        join_as(&state, "did:plc:chair", "c1", "owner").await;
+        let (status, v) = try_create(&state, &chair, "policy", "fold").await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_comment_goes_on_content_or_a_comment_never_on_a_container() {
+        let state = with_a_folder(1).await;
+        let dave = token_for(&state, "did:plc:dave").await;
+        join(&state, "did:plc:dave", "c1").await;
+        let comment = |on: &'static str| {
+            let (state, dave) = (state.clone(), dave.clone());
+            async move {
+                post(
+                    router(state),
+                    "/xrpc/com.example.wiki.postComment",
+                    Some(&dave),
+                    serde_json::json!({"on_id": on, "text": "hej"}),
+                )
+                .await
+            }
+        };
+        assert_eq!(comment("d1").await.0, StatusCode::OK, "a motion");
+        assert_eq!(
+            comment("k1").await.0,
+            StatusCode::OK,
+            "a reply to a comment"
+        );
+        let (status, v) = comment("fold").await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "a folder: {v}");
     }
 }

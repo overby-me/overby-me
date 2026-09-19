@@ -164,8 +164,10 @@ The steps:
 - [x] The server picks a new document's slug, in one write transaction, across
   both tables' namespace.
 - [ ] Crumbs for a path; path from an id.
-- [ ] The write model: which kind a role may create under which parent, the
-  folder lock with its owner and discussion exemptions, a closed poll.
+- [x] The write model: which kind a role may create under which parent, and the
+  folder lock with its owner and discussion exemptions. One static table,
+  carried over from the interim's per-context template. (A closed poll refusing
+  votes belongs to M6.)
 - [ ] Node read model in the `src/model.rs` shape (node with children, members,
   permission flags).
 - [ ] Create, update, delete, move, reorder, copy; the bin (soft delete,
