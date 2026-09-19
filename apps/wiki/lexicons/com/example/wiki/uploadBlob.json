@@ -50,6 +50,10 @@
 				{
 					"name": "BlobTooLarge",
 					"description": "The file is larger than this AppView accepts (HTTP 413)."
+				},
+				{
+					"name": "StorageFull",
+					"description": "The caller, or the context, has stored as much as is allowed (HTTP 413). Deleting files gives the room back."
 				}
 			]
 		}

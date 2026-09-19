@@ -247,12 +247,36 @@ fn verify(config: &Config, id: &str, expires: u64, signature: &str, now: u64) ->
     }
 }
 
+/// What `did` and `context_id` have left to store: the smaller of the two
+/// ceilings' remainders. A file stored twice counts twice; what is rationed is
+/// what people put here, not what the disk happens to share.
+async fn room_left(state: &AppState, context_id: &str, did: &str) -> Result<u64, DbError> {
+    let conn = state.db.acquire().await?;
+    let mut rows = conn
+        .query(
+            "SELECT coalesce((SELECT sum(size) FROM blob WHERE owner_did = ?1), 0), \
+                    coalesce((SELECT sum(size) FROM blob WHERE context_id = ?2), 0)",
+            [did, context_id],
+        )
+        .await?;
+    let Some(row) = rows.next().await? else {
+        return Ok(0);
+    };
+    let used = |i: usize| u64::try_from(row.get::<i64>(i).unwrap_or(0)).unwrap_or(0);
+    Ok(state
+        .config
+        .max_member_blob_bytes
+        .saturating_sub(used(0))
+        .min(state.config.max_context_blob_bytes.saturating_sub(used(1))))
+}
+
 /// Stream `body` into `incoming`, hashing it on the way. `None` when it outgrew
-/// the limit.
+/// `limit`.
 async fn receive(
     config: &Config,
     incoming: &std::path::Path,
     body: Body,
+    limit: u64,
 ) -> Result<Option<(String, u64)>, Failure> {
     tokio::fs::create_dir_all(&config.blob_dir).await?;
     let mut file = tokio::fs::File::create(incoming).await?;
@@ -262,7 +286,7 @@ async fn receive(
     while let Some(chunk) = chunks.next().await {
         let chunk = chunk?;
         size += chunk.len() as u64;
-        if size > config.max_blob_bytes {
+        if size > limit {
             return Ok(None);
         }
         hasher.update(&chunk);
@@ -351,24 +375,38 @@ pub async fn upload_blob(
     if let Err(refusal) = member_of(&state, &p.context, &did, what).await {
         return refusal;
     }
+    let room = match room_left(&state, &p.context, &did).await {
+        Ok(room) => room,
+        Err(e) => return write_failed(what, e),
+    };
+    let limit = state.config.max_blob_bytes.min(room);
+    // Which ceiling a file over `limit` has hit. Both are 413.
     let too_large = || {
-        err(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "BlobTooLarge",
-            "the file is too large",
-        )
+        if room < state.config.max_blob_bytes {
+            err(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "StorageFull",
+                "there is no room left for that: you, or this group, have stored as much as is allowed",
+            )
+        } else {
+            err(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "BlobTooLarge",
+                "the file is too large",
+            )
+        }
     };
     let declared = headers
         .get(CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<u64>().ok());
-    if declared.is_some_and(|len| len > state.config.max_blob_bytes) {
+    if declared.is_some_and(|len| len > limit) {
         return too_large();
     }
 
     let incoming = PathBuf::from(&state.config.blob_dir)
         .join(format!("incoming-{}", crate::util::random_token(12)));
-    let (sha256, size) = match receive(&state.config, &incoming, body).await {
+    let (sha256, size) = match receive(&state.config, &incoming, body, limit).await {
         Ok(Some(received)) if received.1 > 0 => received,
         outcome => {
             let _ = tokio::fs::remove_file(&incoming).await;
@@ -743,6 +781,43 @@ mod tests {
         assert!(
             left.next_entry().await.expect("entry").is_none(),
             "a refused upload left its bytes on disk"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn what_a_member_and_a_group_may_store_has_a_ceiling() {
+        let mut state = state().await;
+        state.config.max_member_blob_bytes = 10;
+        state.config.max_context_blob_bytes = 14;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let alice = token_for(&state, "did:plc:alice").await;
+
+        assert_eq!(
+            upload(&state, &bob, "c9", "text/plain", b"123456").await.0,
+            StatusCode::OK
+        );
+        let (status, v) = upload(&state, &bob, "c9", "text/plain", b"12345").await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{v}");
+        assert_eq!(
+            v["error"], "StorageFull",
+            "bob has 4 bytes left, and sent 5"
+        );
+        assert_eq!(
+            upload(&state, &bob, "c9", "text/plain", b"1234").await.0,
+            StatusCode::OK
+        );
+
+        // The group has 4 left of its 14, whoever asks.
+        let (status, v) = upload(&state, &alice, "c9", "text/plain", b"12345").await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "{v}");
+        assert_eq!(v["error"], "StorageFull");
+        let (_, kept) = upload(&state, &alice, "c9", "text/plain", b"1234").await;
+
+        // Deleting gives the room back.
+        assert_eq!(delete(&state, &alice, &kept["id"]).await, StatusCode::OK);
+        assert_eq!(
+            upload(&state, &alice, "c9", "text/plain", b"12").await.0,
+            StatusCode::OK
         );
     }
 

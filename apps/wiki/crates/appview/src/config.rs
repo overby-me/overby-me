@@ -74,6 +74,10 @@ pub struct Config {
     pub blob_dir: String,
     /// The largest file accepted (`APPVIEW_MAX_BLOB_BYTES`).
     pub max_blob_bytes: u64,
+    /// What one member, and one context, may store in all
+    /// (`APPVIEW_MAX_MEMBER_BLOB_BYTES`, `APPVIEW_MAX_CONTEXT_BLOB_BYTES`).
+    pub max_member_blob_bytes: u64,
+    pub max_context_blob_bytes: u64,
     /// Keys the signed blob links (`APPVIEW_SECRET`). Unset, one is made on
     /// first start and kept beside the database file.
     pub secret: Secret,
@@ -81,6 +85,11 @@ pub struct Config {
 
 /// Room for scanned minutes or a short video.
 const DEFAULT_MAX_BLOB_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Far past what a member or a group has needed (the interim holds 322 Office
+/// files in all), and short of what would fill a small host's disk unnoticed.
+const DEFAULT_MAX_MEMBER_BLOB_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const DEFAULT_MAX_CONTEXT_BLOB_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 
 impl Config {
     /// Whether a login may hand control back to `url`. An open redirect here
@@ -127,6 +136,12 @@ impl Config {
             max_blob_bytes: env("APPVIEW_MAX_BLOB_BYTES")
                 .parse()
                 .unwrap_or(DEFAULT_MAX_BLOB_BYTES),
+            max_member_blob_bytes: env("APPVIEW_MAX_MEMBER_BLOB_BYTES")
+                .parse()
+                .unwrap_or(DEFAULT_MAX_MEMBER_BLOB_BYTES),
+            max_context_blob_bytes: env("APPVIEW_MAX_CONTEXT_BLOB_BYTES")
+                .parse()
+                .unwrap_or(DEFAULT_MAX_CONTEXT_BLOB_BYTES),
             secret,
             db_path,
             firehose_url: std::env::var("JETSTREAM_URL")
@@ -214,6 +229,8 @@ impl Default for Config {
             app_origin: String::new(),
             blob_dir: blobs_beside(":memory:"),
             max_blob_bytes: DEFAULT_MAX_BLOB_BYTES,
+            max_member_blob_bytes: DEFAULT_MAX_MEMBER_BLOB_BYTES,
+            max_context_blob_bytes: DEFAULT_MAX_CONTEXT_BLOB_BYTES,
             secret: Secret::new(crate::util::random_token(32)),
         }
     }

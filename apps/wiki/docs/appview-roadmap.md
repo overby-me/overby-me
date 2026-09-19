@@ -306,8 +306,9 @@ Decided here without the owner, and cheap to change now:
   read by whoever may read that context. The bytes sit on disk under their
   SHA-256, streamed both ways, with ranges for a player. Only types that cannot
   run are shown in place; a page, an SVG or any XML is a download.
-- [ ] A ceiling on what one member or one context may store. A single file is
-  capped; their sum is not, as it is not in the interim.
+- [x] A ceiling on what one member and what one context may store, beside the
+  cap on a single file (`StorageFull`). The interim has neither. Deleting gives
+  the room back.
 - [ ] Copying the interim's files across, each under its old storage id so that
   `data.fileId` on a node keeps working (a cutover step, listed here because
   the blob table is its target).
