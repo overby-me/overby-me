@@ -1,13 +1,10 @@
-//! The atproto AppView service (the stateful process the interim NHost/Hasura
-//! backend evolves into). This is the kickoff skeleton: config, the Turso pool
-//! with the FK-pragma helper, the in-process broadcast channel, and one `/ws`
-//! plus `/healthz`. Every transferable module (util, statecookie, push, the
-//! Store seam, XRPC handlers, the firehose consumer, the OAuth callback) lands
-//! into this crate from here.
+//! The atproto AppView: the backend that replaces NHost, Hasura and the
+//! serverless sidecar. `docs/appview-roadmap.md` says what it does today and
+//! what is left.
 //!
 //! It is a single stateful always-on process (Turso core+view, a firehose
 //! connection, the broadcast channel, the WebSocket server), so it CANNOT run
-//! on scale-to-zero serverless like the interim backend; see the deploy item.
+//! on scale-to-zero serverless like the interim backend.
 
 pub mod authz;
 pub mod ballot;

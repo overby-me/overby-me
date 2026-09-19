@@ -6,18 +6,18 @@
 //! query bodies changed from GraphQL to SQL. This is the seam class where at
 //! cutover only this module was ever meant to be rewritten.
 //!
-//! DELIBERATELY NOT PORTED here (see `docs/rewrite-kickoff-plan.md` item 4):
-//! - `is_active_member` / `is_active_owner`: the interim keys authz on the NHost
-//!   `uid`, but the target keys it on `user_did`, and 0 DIDs are linked with no
-//!   uid->DID resolution yet. They are a DID-keyed rewrite that waits on the
-//!   DID-binding flow, NOT a mechanical body swap.
-//! - `poll_meta` and any voting query: deferred with the voting shapes.
+//! Who may read or write a row is not decided here: `crate::authz` owns that
+//! rule, as SQL the reads below compose in and as predicates the handlers ask.
+//! Voting queries arrive with the voting procedures.
 //!
 //! Schema shifts from the interim GraphQL these queries reconcile to:
-//! - the universal `node` table split into `document`/`comment`/`context`, so a
-//!   "node's owner + context" is now read from `document`/`comment` with the
-//!   owner realized as the document's first author DID (`author_did` in the
-//!   `document_author` join), free-text-only authors having no notifiable DID;
+//! - the universal `node` table split into `document`/`comment`/`context`. The
+//!   first two are the spines of one tree and share a `Place` (a stored path,
+//!   the parent, the order, the bin), so a path resolves in one lookup;
+//! - a "node's owner + context" for a reply notification is read from
+//!   `document`/`comment` with the owner realized as the document's first
+//!   author DID (`author_did` in the `document_author` join), free-text-only
+//!   authors having no notifiable DID;
 //! - `members.nodeId`/`parentId`/`accepted` became `member.user_did`/
 //!   `context_id` and the folded-in active state (there is no `accepted`);
 //! - `push_subscriptions` is AppView runtime infra (`RUNTIME_DDL`), keyed by

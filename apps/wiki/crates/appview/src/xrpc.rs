@@ -1,9 +1,8 @@
-//! The native XRPC serving layer (read side). Methods live at `/xrpc/{nsid}`
-//! following the atproto convention (queries are GET with query-string params)
-//! and return the canonical domain types as JSON, so there is no premature
-//! frontend-shape decision: the AppView serves its real, reconciled entities
-//! (`document`, `context`, ...) and the frontend seam that consumes them is a
-//! separate, deferred change (nothing here touches the frontend).
+//! The XRPC serving layer. Methods live at `/xrpc/{nsid}` following the atproto
+//! convention (queries are GET with query-string params, procedures POST JSON)
+//! and return the canonical domain types as JSON. `getNode` is what a screen of
+//! the frontend loads; the frontend's own data layer moves onto these methods
+//! at M9 and is untouched until then.
 //!
 //! Single-item reads return the entity object directly; LIST reads wrap the
 //! array in a named field (`{ documents: [...] }`, `{ contexts: [...] }`, ...) so

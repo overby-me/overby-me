@@ -34,10 +34,12 @@ tested.
   unit with a persistent `StateDirectory` for the Turso file, restart-on-failure,
   and `/healthz`). Acceptance (`nixos-rebuild build-vm` behind Ferron, restart
   soak) is the operator step.
-- **TO-BE-BUILT**: the AppView read/write handlers behind the env seams (the
-  Store seam port in `crates/appview` is started, the read/write XRPC handlers are
-  not). Until those serve, the flip target does not answer queries — this runbook
-  is rehearsed against staging first.
+- **PARTLY BUILT**: the AppView itself. `docs/appview-roadmap.md` tracks what it
+  serves (sessions, the read and write gates, the node tree) and what it does
+  not yet (membership, meetings, voting, live updates, blobs, and the
+  frontend's own data layer). Until the roadmap is done the flip target does not
+  answer everything the app asks, so this runbook is rehearsed against staging
+  first.
 
 ## Ordered checklist
 
@@ -82,6 +84,11 @@ All must be green before the flip:
   (`context_id, email` where `user_did IS NULL`): the count of pending-invite
   rows equals the distinct `(context, normalized-email)` pairs, with no duplicate
   pending invite per context.
+- **Every node is where its URL says.** Each loaded context and document has a
+  non-empty `path`, no two live rows share one across the two tables, and a
+  sample of the interim's most-visited paths resolves through `getNode` to the
+  row with the same `legacy_id`. A node the extractor re-rooted appears in
+  `report.json` under `nodes.parentId -> <kind>`, and that list is triaged.
 - **Authorship preserved.** `document_author` row count ≥ document count and no
   document with a source author chip has zero author rows (the free-text authors
   — ~42% — survived rather than being dropped by the old scalar `author_did`).
