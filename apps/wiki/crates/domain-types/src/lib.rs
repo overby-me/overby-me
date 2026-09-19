@@ -263,10 +263,27 @@ pub struct Comment {
     pub id: String,
     /// The document or comment it replies to.
     pub on_id: String,
+    /// The document its whole thread hangs on: `on_id`, or for a reply its
+    /// parent's.
+    #[serde(default)]
+    pub root_id: String,
     pub context_id: String,
     pub author: Author,
     pub text: String,
+    /// An attached picture's file id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// Emptied by its author or an owner, and kept because replies hang on it:
+    /// no text, no author, no picture.
+    #[serde(default)]
+    pub tombstone: bool,
     pub created_at: Option<String>,
+    /// Set while it is in the bin, along with the comment whose deletion took
+    /// it there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_root: Option<String>,
     pub legacy_id: Option<String>,
 }
 

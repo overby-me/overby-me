@@ -163,11 +163,13 @@ async fn list(
     }
     if let Some(comments) = comments {
         let sql = format!(
-            "SELECT k.id, k.text, k.context_id, k.author_did, k.author_text, k.created_at, k.on_id \
-             FROM comment k WHERE {} AND {comments} AND {} \
+            // About the document its thread is on, so a reply is news of that
+            // document too. An emptied comment is nobody's news.
+            "SELECT k.id, k.text, k.context_id, k.author_did, k.author_text, k.created_at, k.root_id \
+             FROM comment k WHERE {} AND {comments} AND {} AND k.tombstone = 0 \
              ORDER BY k.created_at DESC, k.id DESC LIMIT {take}",
             readable_comment("k", 1),
-            placed("k.on_id"),
+            placed("k.root_id"),
         );
         let mut rows = conn.query(&sql, vec![who, Value::Text(subject)]).await?;
         while let Some(row) = rows.next().await? {
@@ -342,11 +344,14 @@ pub async fn list_orphans(State(state): State<AppState>, Caller { did }: Caller)
                     nowhere("c.parent_id")
                 ),
             ),
+            // By what its thread is on: an answer's own parent is a comment,
+            // which is no node, and every answer would be listed as astray.
             (
                 "comment",
                 format!(
-                    "SELECT k.id, 'comment', k.text, k.on_id FROM comment k WHERE {}",
-                    nowhere("k.on_id")
+                    "SELECT k.id, 'comment', k.text, k.root_id FROM comment k WHERE {} \
+                       AND NOT EXISTS (SELECT 1 FROM post p WHERE p.id = k.root_id)",
+                    nowhere("k.root_id")
                 ),
             ),
         ] {
@@ -451,6 +456,16 @@ mod tests {
         )
         .await;
         assert_eq!(ids(&v), ["s1"], "the second page of one");
+
+        // An answer is news of the document its thread is on, as the comment it
+        // answers is. It used to be news of nothing, and was left out.
+        let answer = json!({"on_id": "ks", "text": "Enig"});
+        let said = "/xrpc/com.example.wiki.postComment";
+        let (status, said) = post(router(state.clone()), said, Some(&bob), answer).await;
+        assert_eq!(status, StatusCode::OK, "{said}");
+        let (_, v) = get_as(router(state.clone()), &of_closed, &bob).await;
+        assert_eq!(v["items"][0]["id"], said["id"], "{v}");
+        assert_eq!(v["items"][0]["about"]["title"], "Secret Minutes", "{v}");
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -535,8 +550,10 @@ mod tests {
             "INSERT INTO context (id, kind, name, slug, path) VALUES ('home', 'site', 'Home', 'home', 'home');
              INSERT INTO document (id, context_id, parent_id, kind, title, slug, path) \
                VALUES ('lost', 'c1', 'gone', 'document', 'Lost Page', 'lost', 'group-one/lost');
-             INSERT INTO comment (id, on_id, context_id, author_did, text) \
-               VALUES ('kl', 'gone-too', 'c1', 'did:plc:alice', 'On nothing');",
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, text) \
+               VALUES ('kl', 'gone-too', 'gone-too', 'c1', 'did:plc:alice', 'On nothing');
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, text) \
+               VALUES ('ka', 'k1', 'd1', 'c1', 'did:plc:alice', 'An answer, which is in its place');",
         )
         .await
         .expect("seed");

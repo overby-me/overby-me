@@ -143,17 +143,26 @@ CREATE UNIQUE INDEX member_pending ON member(context_id, email)    WHERE user_di
 CREATE INDEX member_by_context ON member(context_id, active);
 
 -- Comments: internal discussion, threaded via on_id. Free-text-capable author.
+-- root_id is the document the whole thread hangs on (a reply's is its parent's):
+-- a move, a purge and the feed find a thread by it without walking the replies.
 CREATE TABLE comment (
-  id          TEXT PRIMARY KEY,
-  on_id       TEXT NOT NULL,
-  context_id  TEXT NOT NULL REFERENCES context(id),
-  author_did  TEXT REFERENCES user(did),
-  author_text TEXT,
-  text        TEXT NOT NULL,
-  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  legacy_id   TEXT UNIQUE,
+  id           TEXT PRIMARY KEY,
+  on_id        TEXT NOT NULL,
+  root_id      TEXT NOT NULL,
+  context_id   TEXT NOT NULL REFERENCES context(id),
+  author_did   TEXT REFERENCES user(did),
+  author_text  TEXT,
+  text         TEXT NOT NULL,
+  image        TEXT,                                       -- a blob id
+  tombstone    INTEGER NOT NULL DEFAULT 0,                 -- emptied, and kept for the replies that hang on it
+  created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  deleted_at   TEXT,
+  deleted_root TEXT,
+  legacy_id    TEXT UNIQUE,
   CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
 );
+CREATE INDEX comment_by_on ON comment(on_id, created_at);
+CREATE INDEX comment_by_root ON comment(root_id);
 
 -- Emoji reactions: a member's on a comment or a document (subject_uri is its
 -- id), or one mirrored from a public reaction record (subject_uri is the

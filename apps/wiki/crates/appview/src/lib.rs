@@ -10,6 +10,7 @@ pub mod authz;
 pub mod ballot;
 pub mod blob;
 pub mod canvas;
+pub mod comment;
 pub mod config;
 pub mod context;
 pub mod db;
@@ -368,6 +369,18 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.postComment",
             post(xrpc::post_comment),
+        )
+        .route(
+            "/xrpc/com.example.wiki.deleteComment",
+            post(comment::delete_comment),
+        )
+        .route(
+            "/xrpc/com.example.wiki.restoreComment",
+            post(comment::restore_comment),
+        )
+        .route(
+            "/xrpc/com.example.wiki.purgeComment",
+            post(comment::purge_comment),
         )
         .route(
             "/xrpc/com.example.wiki.addReaction",

@@ -41,7 +41,7 @@ fn ddl_executes_and_rows_round_trip_on_sqlite() {
          INSERT INTO document_author (document_id, author_did, ord) VALUES ('d1', 'did:plc:alice', 0);
          INSERT INTO post (id, author_did, group_id, text) VALUES ('p1', 'did:plc:alice', 'c1', 'hello');
          INSERT INTO member (id, user_did, context_id, role) VALUES ('m1', 'did:plc:alice', 'c1', 'owner');
-         INSERT INTO comment (id, on_id, context_id, author_did, text) VALUES ('k1', 'd1', 'c1', 'did:plc:alice', 'nice');",
+         INSERT INTO comment (id, on_id, root_id, context_id, author_did, text) VALUES ('k1', 'd1', 'd1', 'c1', 'did:plc:alice', 'nice');",
     )
     .expect("inserts");
     let authors: i64 = conn
@@ -128,14 +128,14 @@ fn multi_author_and_free_text_authorship_on_sqlite() {
     // A free-text comment (no account) is now valid; the old NOT NULL author_did
     // would have rejected it.
     conn.execute(
-        "INSERT INTO comment (id, on_id, context_id, author_text, text) VALUES ('k1', 'd1', 'c1', 'A Guest', 'nice')",
+        "INSERT INTO comment (id, on_id, root_id, context_id, author_text, text) VALUES ('k1', 'd1', 'd1', 'c1', 'A Guest', 'nice')",
         [],
     )
     .expect("free-text comment insert");
     // But a comment with NEITHER a DID nor a text author is rejected by the CHECK.
     assert!(
         conn.execute(
-            "INSERT INTO comment (id, on_id, context_id, text) VALUES ('k2', 'd1', 'c1', 'orphan')",
+            "INSERT INTO comment (id, on_id, root_id, context_id, text) VALUES ('k2', 'd1', 'd1', 'c1', 'orphan')",
             [],
         )
         .is_err(),

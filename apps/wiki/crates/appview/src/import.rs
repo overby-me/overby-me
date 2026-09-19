@@ -341,6 +341,9 @@ mod tests {
                 node("x2", "canvas/pixel", "p_0_0", "cv", json!({"ownerId": "u-gone", "data": {"c": 2}})),
                 node("x3", "canvas/pixel", "p_9_9", "cv", json!({"data": {"c": 1}})),
                 node("k1", "vote/comment", "k1", "mo", json!({"data": {"text": "Godt forslag"}})),
+                node("k2", "vote/comment", "k2", "mo", json!({
+                    "data": {"text": "Fortrudt"}, "deleted_at": at, "deleted_root": "k2"
+                })),
                 node("r1", "vote/reaction", "r1", "k1", json!({"name": "🎉", "data": {"emoji": "🎉"}})),
                 node("fb", "wiki/feedback", "fb", "home", json!({
                     "contextId": null, "ownerId": "u-gone",
@@ -378,7 +381,7 @@ mod tests {
                     documents: 3,
                     document_authors: 0,
                     members: 2,
-                    comments: 1,
+                    comments: 2,
                     reactions: 1,
                 },
                 accounts: 1,
@@ -432,6 +435,16 @@ mod tests {
         let (status, v) = read("/xrpc/com.example.wiki.getComments?on=mo").await;
         assert_eq!(status, StatusCode::OK, "{v}");
         assert_eq!(v["comments"][0]["text"], "Godt forslag", "{v}");
+        assert_eq!(
+            v["comments"].as_array().expect("comments").len(),
+            1,
+            "what she had deleted came back: {v}"
+        );
+        let (_, v) = read("/xrpc/com.example.wiki.listDeleted?context=hb").await;
+        assert_eq!(
+            v["deleted"][0]["title"], "Fortrudt",
+            "it is in the bin, as it was: {v}"
+        );
         let (_, v) = read("/xrpc/com.example.wiki.getReactions?subject=k1").await;
         assert_eq!(v["reactions"][0]["emoji"], "🎉", "{v}");
 

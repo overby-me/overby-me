@@ -33,8 +33,8 @@
 								"properties": {
 									"node": {
 										"type": "string",
-										"knownValues": ["document", "context"],
-										"description": "Which of `restoreDocument` and `restoreContext` brings it back. A group or an event is listed in the bin of the context it sat in."
+										"knownValues": ["document", "context", "comment"],
+										"description": "Which of `restoreDocument`, `restoreContext` and `restoreComment` brings it back. A group or an event is listed in the bin of the context it sat in. A comment is titled by how it begins, and its `path` is that of the document it was on."
 									},
 									"id": { "type": "string" },
 									"kind": { "type": "string" },

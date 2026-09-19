@@ -152,6 +152,28 @@ pub struct ClaimMember {
     pub parent_id: Option<String>,
 }
 
+/// What a write to a comment has to know about it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommentMeta {
+    pub context_id: String,
+    pub author_did: Option<String>,
+    pub on_id: String,
+    pub tombstone: bool,
+    pub binned: bool,
+    /// It is what was deleted, and not something that went along with that.
+    pub bin_entry: bool,
+}
+
+/// How a deleted comment went.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommentGone {
+    Binned,
+    /// Emptied in place. The picture it held is the caller's to forget.
+    Emptied {
+        image: Option<String>,
+    },
+}
+
 /// A member's context + secret claim token (for the owner claim-link flow).
 pub struct MemberClaimInfo {
     pub parent_id: Option<String>,
@@ -1690,7 +1712,7 @@ impl Store {
             .query(
                 &format!(
                     "SELECT k.id, k.on_id, k.context_id, k.author_did, k.author_text, k.text, \
-                            k.created_at \
+                            k.created_at, k.root_id, k.image, k.tombstone \
                      FROM comment k WHERE k.on_id = ?1 AND {} ORDER BY k.created_at",
                     readable_comment("k", 2)
                 ),
@@ -1708,10 +1730,15 @@ impl Store {
             out.push(Comment {
                 id: row.get::<String>(0)?,
                 on_id: row.get::<String>(1)?,
+                root_id: row.get::<String>(7)?,
                 context_id: row.get::<String>(2)?,
                 author,
                 text: row.get::<String>(5)?,
+                image: opt_text(&row, 8),
+                tombstone: row.get::<i64>(9)? != 0,
                 created_at: opt_text(&row, 6),
+                deleted_at: None,
+                deleted_root: None,
                 legacy_id: None,
             });
         }
@@ -1951,8 +1978,17 @@ impl Store {
             under("d.path", 4)
         );
         let args = [to, from, id, path];
+        // By root, so that the replies go too and not only what they answer.
         conn.execute(
-            &format!("UPDATE comment SET context_id = ?1 WHERE on_id IN ({moved})"),
+            &format!(
+                "UPDATE blob SET context_id = ?1 WHERE context_id = ?2 AND id IN \
+                   (SELECT k.image FROM comment k WHERE k.root_id IN ({moved}))"
+            ),
+            args,
+        )
+        .await?;
+        conn.execute(
+            &format!("UPDATE comment SET context_id = ?1 WHERE root_id IN ({moved})"),
             args,
         )
         .await?;
@@ -2061,6 +2097,28 @@ impl Store {
                 path: row.get::<String>(3)?,
                 owner_did: opt_text(&row, 4),
                 deleted_at: row.get::<String>(5)?,
+            });
+        }
+        // A comment, shown by how it begins and filed under what it was on.
+        let mut rows = conn
+            .query(
+                "SELECT k.id, substr(k.text, 1, 80), k.author_did, k.deleted_at, \
+                        coalesce((SELECT d.path FROM document d WHERE d.id = k.root_id), '') \
+                 FROM comment k \
+                 WHERE k.context_id = ?1 AND k.deleted_root = k.id AND k.deleted_at IS NOT NULL \
+                   AND (?2 IS NULL OR k.author_did = ?2)",
+                vec![Value::Text(context_id.to_string()), opt_str_val(owner)],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            out.push(Binned {
+                node: "comment",
+                id: row.get::<String>(0)?,
+                kind: "comment".to_string(),
+                title: row.get::<String>(1)?,
+                path: row.get::<String>(4)?,
+                owner_did: opt_text(&row, 2),
+                deleted_at: row.get::<String>(3)?,
             });
         }
         out.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
@@ -2184,22 +2242,174 @@ impl Store {
     }
 
     /// Create a comment on `on_id` authored by `author_did`. Returns its id.
+    /// Its thread hangs on what `on_id`'s does, or on `on_id` itself.
     pub async fn create_comment(
         &self,
         on_id: &str,
         context_id: &str,
         author_did: &str,
         text: &str,
+        image: Option<&str>,
     ) -> Result<String, DbError> {
         let id = format!("k-{}", crate::util::random_token(16));
         let conn = self.db.acquire().await?;
         conn.execute(
-            "INSERT INTO comment (id, on_id, context_id, author_did, text) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            [id.as_str(), on_id, context_id, author_did, text],
+            "INSERT INTO comment (id, on_id, root_id, context_id, author_did, text, image) \
+             VALUES (?1, ?2, coalesce((SELECT up.root_id FROM comment up WHERE up.id = ?2), ?2), \
+                     ?3, ?4, ?5, ?6)",
+            vec![
+                Value::Text(id.clone()),
+                Value::Text(on_id.to_string()),
+                Value::Text(context_id.to_string()),
+                Value::Text(author_did.to_string()),
+                Value::Text(text.to_string()),
+                opt_str_val(image),
+            ],
         )
         .await?;
         Ok(id)
+    }
+
+    /// A comment's authorization facts, in the bin or out of it. Ungated: it
+    /// answers a write check, and says nothing to the caller.
+    pub async fn comment_meta(&self, id: &str) -> Result<Option<CommentMeta>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT context_id, author_did, on_id, tombstone, deleted_at IS NOT NULL, \
+                        coalesce(deleted_root = id, 0) \
+                 FROM comment WHERE id = ?1",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(CommentMeta {
+            context_id: row.get::<String>(0)?,
+            author_did: opt_text(&row, 1),
+            on_id: row.get::<String>(2)?,
+            tombstone: row.get::<i64>(3)? != 0,
+            binned: row.get::<i64>(4)? != 0,
+            bin_entry: row.get::<i64>(5)? != 0,
+        }))
+    }
+
+    /// Delete a live comment. One that has been answered is emptied and stays,
+    /// since its replies hang on it; any other goes to the bin, where it can be
+    /// brought back from. `None` if it was not there to delete.
+    pub async fn delete_comment(&self, id: &str) -> Result<Option<CommentGone>, DbError> {
+        let _turn = self.db.write_turn().await;
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let gone = self.delete_comment_in(&conn, id).await;
+        conn.execute(if gone.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())
+            .await?;
+        gone
+    }
+
+    async fn delete_comment_in(
+        &self,
+        conn: &turso::Connection,
+        id: &str,
+    ) -> Result<Option<CommentGone>, DbError> {
+        let mut rows = conn
+            .query(
+                "SELECT image, EXISTS (SELECT 1 FROM comment r \
+                                       WHERE r.on_id = k.id AND r.deleted_at IS NULL) \
+                 FROM comment k WHERE k.id = ?1 AND k.deleted_at IS NULL AND k.tombstone = 0",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        let (image, answered) = (opt_text(&row, 0), row.get::<i64>(1)? != 0);
+        drop(rows);
+        if !answered {
+            conn.execute(
+                "UPDATE comment SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), \
+                   deleted_root = id WHERE id = ?1",
+                [id],
+            )
+            .await?;
+            return Ok(Some(CommentGone::Binned));
+        }
+        // The reactions go too: they were to something that now says nothing.
+        conn.execute("DELETE FROM reaction WHERE subject_uri = ?1", [id])
+            .await?;
+        conn.execute(
+            "UPDATE comment SET text = '', author_did = NULL, author_text = '', image = NULL, \
+               tombstone = 1 WHERE id = ?1",
+            [id],
+        )
+        .await?;
+        Ok(Some(CommentGone::Emptied { image }))
+    }
+
+    /// Bring back what one bin entry holds. Returns how many comments that was.
+    pub async fn restore_comment(&self, id: &str) -> Result<u64, DbError> {
+        let conn = self.db.acquire().await?;
+        Ok(conn
+            .execute(
+                "UPDATE comment SET deleted_at = NULL, deleted_root = NULL \
+                 WHERE deleted_root = ?1 AND deleted_at IS NOT NULL",
+                [id],
+            )
+            .await?)
+    }
+
+    /// Whether a comment can be shown again where it was: what it answers is
+    /// still there, and is not itself a comment in the bin.
+    pub async fn comment_parent_stands(&self, on_id: &str) -> Result<bool, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM comment WHERE id = ?1 AND deleted_at IS NULL \
+                 UNION ALL SELECT 1 FROM document WHERE id = ?1 LIMIT 1",
+                [on_id],
+            )
+            .await?;
+        Ok(rows.next().await?.is_some())
+    }
+
+    /// Delete for good what one bin entry holds, with the reactions to it.
+    /// Returns how many comments went, and the pictures they held.
+    pub async fn purge_comment(&self, id: &str) -> Result<(u64, Vec<String>), DbError> {
+        let _turn = self.db.write_turn().await;
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let purged = async {
+            let going = "SELECT id FROM comment WHERE deleted_root = ?1 AND deleted_at IS NOT NULL";
+            let mut images = Vec::new();
+            let mut rows = conn
+                .query(
+                    "SELECT image FROM comment WHERE deleted_root = ?1 AND deleted_at IS NOT NULL \
+                       AND image IS NOT NULL",
+                    [id],
+                )
+                .await?;
+            while let Some(row) = rows.next().await? {
+                images.extend(opt_text(&row, 0));
+            }
+            drop(rows);
+            conn.execute(
+                &format!("DELETE FROM reaction WHERE subject_uri IN ({going})"),
+                [id],
+            )
+            .await?;
+            let comments = conn
+                .execute(
+                    "DELETE FROM comment WHERE deleted_root = ?1 AND deleted_at IS NOT NULL",
+                    [id],
+                )
+                .await?;
+            Ok::<_, DbError>((comments, images))
+        }
+        .await;
+        conn.execute(if purged.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())
+            .await?;
+        purged
     }
 
     /// Add `reactor_did`'s `emoji` reaction to `subject_uri` (idempotent via
@@ -2354,9 +2564,10 @@ impl Store {
     ) -> Result<(), DbError> {
         let conn = self.db.acquire().await?;
         conn.execute(
-            "INSERT INTO comment (id, on_id, context_id, author_did, text, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-             ON CONFLICT(id) DO UPDATE SET on_id = excluded.on_id, \
+            "INSERT INTO comment (id, on_id, root_id, context_id, author_did, text, created_at) \
+             VALUES (?1, ?2, coalesce((SELECT up.root_id FROM comment up WHERE up.id = ?2), ?2), \
+                     ?3, ?4, ?5, ?6) \
+             ON CONFLICT(id) DO UPDATE SET on_id = excluded.on_id, root_id = excluded.root_id, \
                context_id = excluded.context_id, author_did = excluded.author_did, \
                text = excluded.text, created_at = excluded.created_at",
             [uri, on_id, context_id, author_did, text, created_at],
@@ -2499,8 +2710,8 @@ mod tests {
                VALUES ('d1', 'did:plc:alice', NULL, 0);
              INSERT INTO document_author (document_id, author_did, author_text, ord) \
                VALUES ('d1', NULL, 'Guest', 1);
-             INSERT INTO comment (id, on_id, context_id, author_did, author_text, text, legacy_id) \
-               VALUES ('k1', 'd1', 'c1', 'did:plc:alice', NULL, 'nice', NULL);
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, author_text, text, legacy_id) \
+               VALUES ('k1', 'd1', 'd1', 'c1', 'did:plc:alice', NULL, 'nice', NULL);
              INSERT INTO member (id, user_did, context_id, role, active, email, claim_token, legacy_id) \
                VALUES ('m1', 'did:plc:alice', 'c1', 'owner', 1, 'alice@x.dk', 'tok-a', NULL);
              INSERT INTO member (id, user_did, context_id, role, active, email, claim_token, legacy_id) \

@@ -271,8 +271,8 @@ mod tests {
              INSERT INTO member (id, user_did, context_id, role, active, accepted) \
                VALUES ('seat-1', '{OLD}', 'c1', 'member', 1, 1);
              INSERT INTO document_author (document_id, author_did, ord) VALUES ('s1', '{OLD}', 0);
-             INSERT INTO comment (id, on_id, context_id, author_did, text) \
-               VALUES ('k-old', 's1', 'c9', '{OLD}', 'Enig');
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, text) \
+               VALUES ('k-old', 's1', 's1', 'c9', '{OLD}', 'Enig');
              INSERT INTO reaction (id, subject_uri, reactor_did, emoji) \
                VALUES ('r-old', 'ks', '{OLD}', '🎉');
              INSERT INTO feedback (id, kind, message, digest, owner_did) \

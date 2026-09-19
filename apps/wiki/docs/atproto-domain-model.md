@@ -329,15 +329,21 @@ CREATE UNIQUE INDEX member_bound   ON member(context_id, user_did) WHERE user_di
 CREATE UNIQUE INDEX member_pending ON member(context_id, email)    WHERE user_did IS NULL;
 CREATE INDEX member_by_context ON member(context_id, active);
 
--- Comments: internal discussion, threaded via on_id.
+-- Comments: internal discussion, threaded via on_id. root_id is the document the
+-- whole thread is on: a move, a purge and the feed find a thread by it.
 CREATE TABLE comment (
-  id          TEXT PRIMARY KEY,
-  on_id       TEXT NOT NULL,                             -- document/comment it replies to
-  context_id  TEXT NOT NULL REFERENCES context(id),
-  author_did  TEXT REFERENCES user(did),                -- DID-or-free-text (a migrated
-  author_text TEXT,                                     --   comment may have no account)
-  text        TEXT NOT NULL,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  id           TEXT PRIMARY KEY,
+  on_id        TEXT NOT NULL,                            -- document/comment it replies to
+  root_id      TEXT NOT NULL,
+  context_id   TEXT NOT NULL REFERENCES context(id),
+  author_did   TEXT REFERENCES user(did),               -- DID-or-free-text (a migrated
+  author_text  TEXT,                                    --   comment may have no account)
+  text         TEXT NOT NULL,
+  image        TEXT,                                    -- a blob id
+  tombstone    INTEGER NOT NULL DEFAULT 0,              -- emptied, kept for its answers
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at   TEXT,                                    -- in the bin
+  deleted_root TEXT,
   CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
 );
 

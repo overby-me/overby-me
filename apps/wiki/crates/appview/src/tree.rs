@@ -336,12 +336,31 @@ async fn purge_in(conn: &Connection, id: &str) -> Result<(u64, Vec<String>), Wri
         }
     }
     let going = "SELECT id FROM document WHERE deleted_root = ?1";
+    // By root: the replies go with what they answer, and not only the comments
+    // that sit on a document directly.
+    let threads = format!("SELECT k.id FROM comment k WHERE k.root_id IN ({going})");
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT k.image FROM comment k \
+                 WHERE k.root_id IN ({going}) AND k.image IS NOT NULL"
+            ),
+            [id],
+        )
+        .await?;
+    while let Some(row) = rows.next().await? {
+        blobs.extend(text(&row, 0));
+    }
+    drop(rows);
     for sql in [
         format!("DELETE FROM canvas_cell WHERE canvas_id IN ({going})"),
         format!("DELETE FROM canvas_painter WHERE canvas_id IN ({going})"),
         format!("DELETE FROM canvas WHERE id IN ({going})"),
         format!("DELETE FROM document_author WHERE document_id IN ({going})"),
-        format!("DELETE FROM comment WHERE on_id IN ({going})"),
+        format!(
+            "DELETE FROM reaction WHERE subject_uri IN ({going}) OR subject_uri IN ({threads})"
+        ),
+        format!("DELETE FROM comment WHERE root_id IN ({going})"),
         format!("DELETE FROM search_index WHERE node_id IN ({going})"),
     ] {
         conn.execute(&sql, [id]).await?;
@@ -354,8 +373,8 @@ async fn purge_in(conn: &Connection, id: &str) -> Result<(u64, Vec<String>), Wri
 
 /// `com.example.wiki.purgeDocument` (procedure): the way out of the bin that
 /// restoring is not. An owner of the context deletes for good what one bin entry
-/// holds: the documents, their author chips, the comments on them, and the files
-/// nothing else points at. A vote's record, and a group, are nobody's to purge.
+/// holds: the documents, their author chips, the threads on them with their
+/// reactions and pictures, and the files nothing else points at. A vote's record, and a group, are nobody's to purge.
 pub async fn purge_document(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -428,7 +447,8 @@ mod tests {
     }
 
     /// The closed group c9 with a folder in it: a page, a file with its bytes
-    /// uploaded, and a comment on the page. Alice also owns a second closed
+    /// uploaded, and on the page a comment, an answer to it that shows a
+    /// picture, and a reaction to the answer. Alice also owns a second closed
     /// group, c11, which carol alone is a member of.
     async fn state() -> (AppState, String) {
         let state = blob_state().await;
@@ -438,6 +458,9 @@ mod tests {
             upload(&state, &alice, "c9", "application/pdf", b"%PDF the agenda").await;
         assert_eq!(status, StatusCode::OK, "{up}");
         let blob = up["id"].as_str().expect("id").to_string();
+        let (status, up) = upload(&state, &alice, "c9", "image/png", b"a picture").await;
+        assert_eq!(status, StatusCode::OK, "{up}");
+        let picture = up["id"].as_str().expect("id").to_string();
         let conn = state.db.acquire().await.expect("conn");
         conn.execute_batch(&format!(
             "INSERT INTO document (id, context_id, parent_id, kind, title, slug, path, created_at) \
@@ -449,8 +472,12 @@ mod tests {
                VALUES ('fi', 'c9', 'fo', 'file', 'Agenda.pdf', 'agenda_pdf', 'closed/bilag/agenda_pdf', \
                        '{{\"fileId\":\"{blob}\",\"type\":\"application/pdf\"}}');
              INSERT INTO document_author (document_id, author_text, ord) VALUES ('pg', 'Sekretariatet', 0);
-             INSERT INTO comment (id, on_id, context_id, author_did, text) \
-               VALUES ('kp', 'pg', 'c9', 'did:plc:bob', 'Punkt 3 mangler');
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, text) \
+               VALUES ('kp', 'pg', 'pg', 'c9', 'did:plc:bob', 'Punkt 3 mangler');
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, text, image) \
+               VALUES ('kr', 'kp', 'pg', 'c9', 'did:plc:alice', 'Rettet', '{picture}');
+             INSERT INTO reaction (id, subject_uri, reactor_did, emoji) \
+               VALUES ('rr', 'kr', 'did:plc:bob', '👍');
              INSERT INTO context (id, kind, name, slug, path) \
                VALUES ('c11', 'group', 'Other Group', 'other', 'other');"
         ))
@@ -530,10 +557,8 @@ mod tests {
         let (_, _, bytes) =
             fetch(&state, &format!("/blob/{copied_blob}"), Some(&alice), None).await;
         assert_eq!(bytes, b"%PDF the agenda");
-        assert_eq!(
-            count(&state, "SELECT count(DISTINCT sha256) FROM blob").await,
-            1
-        );
+        let agendas = "SELECT count(DISTINCT sha256) FROM blob WHERE mime = 'application/pdf'";
+        assert_eq!(count(&state, agendas).await, 1);
 
         let (_, found) = get_as(
             router(state.clone()),
@@ -656,8 +681,12 @@ mod tests {
                 "SELECT count(*) FROM document_author WHERE document_id = 'pg'",
             ),
             (
-                "comments",
-                "SELECT count(*) FROM comment WHERE on_id = 'pg'",
+                "comments, the answers to them too",
+                "SELECT count(*) FROM comment WHERE root_id = 'pg'",
+            ),
+            (
+                "reactions",
+                "SELECT count(*) FROM reaction WHERE subject_uri IN ('kp', 'kr')",
             ),
             (
                 "index rows",
@@ -773,8 +802,8 @@ mod tests {
                 "SELECT count(*) FROM document WHERE id IN ('fo','pg','fi') AND context_id <> 'c11'",
             ),
             (
-                "comments",
-                "SELECT count(*) FROM comment WHERE id = 'kp' AND context_id <> 'c11'",
+                "comments, the answers to them too",
+                "SELECT count(*) FROM comment WHERE root_id = 'pg' AND context_id <> 'c11'",
             ),
             (
                 "files",
@@ -802,6 +831,18 @@ mod tests {
             1,
             "{comments}"
         );
+        // An answer used to stay in the old group: read there, and not here.
+        let (_, answers) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.getComments?on=kp",
+            &carol,
+        )
+        .await;
+        let answers = answers["comments"].as_array().expect("answers");
+        assert_eq!(answers.len(), 1, "{answers:?}");
+        let picture = answers[0]["image"].as_str().expect("its picture");
+        let (status, _, _) = fetch(&state, &format!("/blob/{picture}"), Some(&carol), None).await;
+        assert_eq!(status, StatusCode::OK, "the picture in it went along");
     }
 
     #[tokio::test(flavor = "current_thread")]

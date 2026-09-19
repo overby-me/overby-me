@@ -93,8 +93,9 @@ All must be green before the flip:
   `unmapped_*` means a source field or mime had no home and must be triaged
   (mapping rule, interim junk sweep, or schema amendment) before flipping.
   `left_behind` is not a gap and need not be empty: it counts what is dropped on
-  purpose (deleted comments, spent claim links, speaker lists, addresses nobody
-  verified). Read it, and see that each count is one you expected.
+  purpose (deleted reactions and reports, spent claim links, speaker lists,
+  addresses nobody verified). Read it, and see that each count is one you
+  expected.
 - **People can get back in.** The count under `users.email, not verified` is how
   many account holders cannot be recognized by address and will need a claim
   link for each seat. If it is most of them, the interim never verified

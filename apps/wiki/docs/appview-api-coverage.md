@@ -73,7 +73,9 @@ The frontend's data layer is `src/graphql/*.rs` (Hasura), `src/backend_api.rs`
 
 | Frontend | AppView |
 |-|-|
-| `insert_comment`, `query_comments` | `postComment`, `getComments` |
+| `insert_comment` (with its `data.image`), `query_comments` | `postComment` (`image`), `getComments` |
+| `tombstone_comment`, `delete_comment_subtree` (`bin_node` on a comment) | `deleteComment`, which empties an answered comment and bins any other |
+| a comment in the bin (`query_deleted`, `restore_node`, `purge_node`) | `listDeleted`, `restoreComment`, `purgeComment` |
 | `insert_reaction`, `query_reactions` | `addReaction`, `removeReaction`, `getReactions` |
 | `insert_feedback`, `query_feedback`, `report_error` (sidecar) | `submitFeedback`, `listFeedback`, `deleteFeedback` |
 | `push_subscribe`, `push_unsubscribe`, `push_notify`, `push_reply` (sidecar) | `subscribePush`, `unsubscribePush`, `notifyContext`, `notifyReply` |

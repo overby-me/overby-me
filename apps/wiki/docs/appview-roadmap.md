@@ -88,9 +88,22 @@ the profile read and posting to a PDS.
   inbox, claims it. Spent tokens are left behind, and an owner mints a new one
   for a seat that needs it.
 - **What was deleted would have come back.** The interim bins a comment by
-  stamping it; the new tables delete. Every comment, reaction and report
-  somebody had deleted was extracted as live. They are left behind now, unless
-  binned along with a document, which has a bin here and restores them with it.
+  stamping it, and the extractor took no notice of the stamp, so every comment
+  somebody had deleted was extracted as live. A comment now comes across in the
+  bin it was in. A reaction or a report in the bin is left behind.
+- **The first audit of the API read the data layer and not its callers.** The
+  frontend deletes a comment through the same `bin_node` and `update_node` it
+  uses for a page, from inside the comments component, so the table had a
+  comment as something one posts and reads. It can also show a picture, be
+  deleted, be emptied in place when it has been answered (deleting it would
+  take everyone who answered along), and come back from the bin. None of that
+  existed here, and the extractor dropped the picture without a word. Building
+  it found three more: a move to another group left every ANSWER in the old
+  group, read there and not in the new; a purge deleted the comments on a page
+  and left the answers to them, and every reaction, in the database for good;
+  and an answer was news of nothing, so the feed left answers out and the list
+  of what has gone astray listed every one of them. A comment now knows the
+  document its thread is on (`root_id`), which is what all three go by.
 - **Nothing could run a load.** The loader was a library with no binary, and
   what a poll came to, a canvas and the reports live in tables it cannot know.
   `appview import` is the load step: one transaction, the same twice, and
@@ -261,6 +274,11 @@ The steps:
   file rows of its own over the same bytes; a purge takes the files nothing
   else points at. A purge refuses a bin entry that holds a poll, and a running
   poll does not change groups.
+- [x] A comment's whole life (`crates/appview/src/comment.rs`): posted with a
+  picture of its author's from the same context; deleted by its author or an
+  owner, which empties it where it stands if it has been answered and bins it
+  otherwise; listed in the context's bin, restored from it, purged from it
+  with its reactions and its picture.
 - [x] Search, the recent feed, contributions, orphans
   (`crates/appview/src/search.rs`, `feed.rs`). Search runs over an index of each
   document's WORDS, lowercased by Unicode's rules: over the stored Slate JSON
@@ -430,9 +448,10 @@ asks Bluesky's public API itself. The steps:
 - [x] The extractor and the load cover every kind the interim holds: the tree,
   members, comments, reactions, what each poll came to, canvases with their
   cells, reports, which contexts are open to everyone, and the address each
-  account is recognized by. What is left behind on purpose (a deleted comment,
-  a spent claim link, a speaker list, an address nobody verified) is counted in
-  the report under `left_behind`, so none of it is silent.
+  account is recognized by. A comment comes with its picture, emptied if it
+  was, and in the bin if it was. What is left behind on purpose (a deleted
+  reaction, a spent claim link, a speaker list, an address nobody verified) is
+  counted in the report under `left_behind`, so none of it is silent.
 - [x] `appview import <extraction.json>`, the load step as a command, proven
   from an interim-shaped snapshot through the real extractor to the AppView's
   own reads.

@@ -1276,7 +1276,13 @@ pub struct PostCommentBody {
     #[serde(default)]
     pub context_id: Option<String>,
     pub text: String,
+    /// A picture the caller uploaded to the same context.
+    #[serde(default)]
+    pub image: Option<String>,
 }
+
+/// Far more than an argument runs to, and a cap on what one row can hold.
+const MAX_COMMENT_CHARS: usize = 10_000;
 
 /// `com.example.wiki.postComment` (procedure): the caller comments on a node.
 pub async fn post_comment(
@@ -1305,8 +1311,27 @@ pub async fn post_comment(
     if let Err(refusal) = require_member(&state, &context_id, &did).await {
         return refusal;
     }
+    let image = body.image.as_deref().filter(|id| !id.is_empty());
+    if body.text.trim().is_empty() && image.is_none() {
+        return invalid("a comment says something, or shows something");
+    }
+    if body.text.chars().count() > MAX_COMMENT_CHARS {
+        return invalid("that is too long for a comment");
+    }
+    if let Some(id) = image {
+        // Theirs, and already where the comment's readers can read it: a
+        // comment must not be a way to show a file from somewhere else.
+        match crate::blob::meta(&state, id).await {
+            Ok(Some(blob))
+                if blob.context_id == context_id
+                    && blob.owner_did.as_deref() == Some(did.as_str())
+                    && blob.mime.starts_with("image/") => {}
+            Ok(_) => return invalid("no such picture of yours in that context"),
+            Err(e) => return write_failed("postComment", e),
+        }
+    }
     match store
-        .create_comment(&body.on_id, &context_id, &did, &body.text)
+        .create_comment(&body.on_id, &context_id, &did, &body.text, image)
         .await
     {
         Ok(id) => {
@@ -1453,8 +1478,8 @@ pub(crate) mod tests {
                VALUES ('d1', 'did:plc:alice', NULL, 0);
              INSERT INTO document_author (document_id, author_did, author_text, ord) \
                VALUES ('d1', NULL, 'Guest', 1);
-             INSERT INTO comment (id, on_id, context_id, author_did, text) \
-               VALUES ('k1', 'd1', 'c1', 'did:plc:alice', 'Nice motion');
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, text) \
+               VALUES ('k1', 'd1', 'd1', 'c1', 'did:plc:alice', 'Nice motion');
              INSERT INTO context (id, kind, name, slug, path) \
                VALUES ('c9', 'group', 'Closed Group', 'closed', 'closed');
              INSERT INTO context (id, kind, name, slug, path, parent_id) \
@@ -1471,8 +1496,8 @@ pub(crate) mod tests {
              INSERT INTO document (id, context_id, parent_id, kind, title, slug, path) \
                VALUES ('s1', 'c9', 'c9', 'document', 'Secret Minutes', 'secret_minutes', \
                        'closed/secret_minutes');
-             INSERT INTO comment (id, on_id, context_id, author_did, text) \
-               VALUES ('ks', 's1', 'c9', 'did:plc:alice', 'Secret remark');",
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, text) \
+               VALUES ('ks', 's1', 's1', 'c9', 'did:plc:alice', 'Secret remark');",
         )
         .await
         .expect("seed");

@@ -272,12 +272,13 @@ fn a_spent_claim_link_is_not_carried() {
     assert_eq!(ex.report.left_behind["members.claim_token, spent"], 1);
 }
 
-/// The interim bins a comment where the new table deletes it, so a comment
-/// somebody deleted would have come back at the cutover. One binned along with
-/// its document is another matter: it is hidden with the document, and has to
-/// be there when the document is restored.
+/// A comment somebody deleted sits in the interim's bin, stamped. Extracted as
+/// live it would have come back at the cutover, for everyone to read again. It
+/// comes across IN the bin, under the comment whose deletion took it there. One
+/// binned along with its document is another matter: there the document hides
+/// it, so it comes across unstamped and is there when the document is restored.
 #[test]
-fn what_was_deleted_stays_deleted() {
+fn a_deleted_comment_comes_across_in_the_bin_and_not_back_to_life() {
     let binned = |id: &str, mime: &str, parent: &str, root: &str| {
         node_with(
             id,
@@ -299,21 +300,44 @@ fn what_was_deleted_stays_deleted() {
         node_with("k-live", "vote/comment", json!({"parentId": "doc"})),
         binned("k-deleted", "vote/comment", "doc", "k-deleted"),
         binned("k-reply", "vote/comment", "k-deleted", "k-deleted"),
-        binned("r-deleted", "vote/reaction", "k-deleted", "k-deleted"),
+        binned("r-in-thread", "vote/reaction", "k-reply", "k-deleted"),
+        binned("r-alone", "vote/reaction", "k-live", "r-alone"),
         binned("k-with-doc", "vote/comment", "gone", "gone"),
         binned("r-with-doc", "vote/reaction", "k-with-doc", "gone"),
         binned("fb-deleted", "wiki/feedback", "home", "fb-deleted"),
     ];
     let ex = extract(&nodes, &[], &[]);
 
-    let mut carried: Vec<&str> = ex.comments.iter().map(|k| k.id.as_str()).collect();
-    carried.sort_unstable();
-    assert_eq!(carried, ["k-live", "k-with-doc"]);
-    assert_eq!(ex.reactions.len(), 1);
-    assert_eq!(ex.reactions[0].id, "r-with-doc");
-    assert!(ex.feedback.is_empty());
+    let comment = |id: &str| ex.comments.iter().find(|k| k.id == id).expect("carried");
+    assert_eq!(ex.comments.len(), 4, "every comment is carried, as it was");
+    assert_eq!(comment("k-live").deleted_at, None);
+    assert_eq!(
+        comment("k-with-doc").deleted_at,
+        None,
+        "its document is what hides it"
+    );
+    for id in ["k-deleted", "k-reply"] {
+        assert!(comment(id).deleted_at.is_some(), "{id}");
+        assert_eq!(
+            comment(id).deleted_root.as_deref(),
+            Some("k-deleted"),
+            "{id}"
+        );
+    }
+    assert_eq!(
+        comment("k-reply").root_id,
+        "doc",
+        "a reply hangs on the document its thread is on"
+    );
 
-    assert_eq!(ex.report.left_behind["vote/comment, deleted"], 2);
+    let mut reactions: Vec<&str> = ex.reactions.iter().map(|r| r.id.as_str()).collect();
+    reactions.sort_unstable();
+    assert_eq!(
+        reactions,
+        ["r-in-thread", "r-with-doc"],
+        "hidden with what they are on, and back with it"
+    );
+    assert!(ex.feedback.is_empty());
     assert_eq!(ex.report.left_behind["vote/reaction, deleted"], 1);
     assert_eq!(ex.report.left_behind["wiki/feedback, deleted"], 1);
     assert!(
@@ -321,6 +345,48 @@ fn what_was_deleted_stays_deleted() {
         "left behind on purpose is not a gap: {:?}",
         ex.report
     );
+}
+
+/// A comment can hold a picture, which the extractor dropped without a word.
+/// And one that was answered is not deleted but emptied, so the answers keep
+/// what they hang on. The interim could not null the account on such a row, so
+/// an emptied comment still named who wrote it: the scrub is finished here.
+#[test]
+fn a_comment_keeps_its_picture_and_an_emptied_one_names_nobody() {
+    let nodes = vec![
+        node_with("doc", "wiki/document", json!({})),
+        node_with(
+            "k-pic",
+            "vote/comment",
+            json!({"parentId": "doc", "ownerId": "u-bob", "data": {"text": "Se her", "image": "file-7"}}),
+        ),
+        node_with(
+            "k-emptied",
+            "vote/comment",
+            json!({"parentId": "doc", "ownerId": "u-bob", "name": "", "data": {"deleted": true}}),
+        ),
+        node_with(
+            "k-answer",
+            "vote/comment",
+            json!({"parentId": "k-emptied", "data": {"text": "Uenig"}}),
+        ),
+    ];
+    let ex = extract(&nodes, &[], &[]);
+    let comment = |id: &str| ex.comments.iter().find(|k| k.id == id).expect("carried");
+    assert_eq!(comment("k-pic").image.as_deref(), Some("file-7"));
+
+    let emptied = comment("k-emptied");
+    assert!(emptied.tombstone);
+    assert_eq!(emptied.text, "");
+    assert_eq!(
+        emptied.author,
+        Author::FreeText {
+            display: String::new()
+        },
+        "who wrote what is gone is gone with it"
+    );
+    assert_eq!(comment("k-answer").root_id, "doc");
+    assert!(ex.report.unfilled_required.is_empty(), "{:?}", ex.report);
 }
 
 /// The new table holds one row per crash. The interim looks a crash up and then

@@ -72,7 +72,7 @@ pub struct BlobMeta {
     pub name: Option<String>,
 }
 
-async fn meta(state: &AppState, id: &str) -> Result<Option<BlobMeta>, DbError> {
+pub(crate) async fn meta(state: &AppState, id: &str) -> Result<Option<BlobMeta>, DbError> {
     let conn = state.db.acquire().await?;
     let mut rows = conn
         .query(
@@ -362,7 +362,8 @@ pub(crate) async fn forget_if_unreferenced(state: &AppState, id: &str) -> Result
             .query(
                 "SELECT 1 FROM document \
                  WHERE json_extract(data, '$.fileId') = ?1 OR json_extract(data, '$.image') = ?1 \
-                 UNION ALL SELECT 1 FROM feedback WHERE image = ?1 LIMIT 1",
+                 UNION ALL SELECT 1 FROM feedback WHERE image = ?1 \
+                 UNION ALL SELECT 1 FROM comment WHERE image = ?1 LIMIT 1",
                 [id],
             )
             .await?;

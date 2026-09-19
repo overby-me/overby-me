@@ -404,19 +404,36 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
         let mut cols = vec![
             "id",
             "on_id",
+            "root_id",
             "context_id",
             "author_did",
             "author_text",
             "text",
+            "image",
+            "tombstone",
+            "deleted_at",
+            "deleted_root",
             "legacy_id",
         ];
+        // An extraction from before threads had a root: top-level is the guess
+        // that is right for most, and wrong for a reply only until it is moved.
+        let root = if k.root_id.is_empty() {
+            &k.on_id
+        } else {
+            &k.root_id
+        };
         let mut params = vec![
             text(&k.id),
             text(&k.on_id),
+            text(root),
             text(&k.context_id),
             opt_str(k.author.did()),
             opt_str(k.author.text()),
             text(&k.text),
+            opt(&k.image),
+            boolv(k.tombstone),
+            opt(&k.deleted_at),
+            opt(&k.deleted_root),
             opt(&k.legacy_id),
         ];
         push_created_at(&mut cols, &mut params, &k.created_at);
@@ -541,7 +558,12 @@ mod tests {
                     display: "A Guest".into(),
                 },
                 text: "nice".into(),
+                image: Some("file-9".into()),
+                tombstone: false,
+                root_id: "d1".into(),
                 created_at: None,
+                deleted_at: Some("2026-05-05 00:00:00".into()),
+                deleted_root: Some("k1".into()),
                 legacy_id: Some("k1".into()),
             }],
             reactions: vec![
@@ -619,6 +641,23 @@ mod tests {
         assert_eq!(count(&conn, "member").await, 1);
         assert_eq!(count(&conn, "comment").await, 1);
         assert_eq!(count(&conn, "reaction").await, 2);
+
+        let mut rows = conn
+            .query(
+                "SELECT root_id || '|' || image || '|' || tombstone || '|' || deleted_root \
+                 FROM comment WHERE id = 'k1' AND deleted_at IS NOT NULL",
+                (),
+            )
+            .await
+            .expect("q");
+        let comment: String = rows
+            .next()
+            .await
+            .expect("row")
+            .expect("the comment, in the bin")
+            .get(0)
+            .expect("text");
+        assert_eq!(comment, "d1|file-9|0|k1");
 
         let mut rows = conn
             .query("SELECT reactor_did FROM reaction WHERE id = 'r2'", ())

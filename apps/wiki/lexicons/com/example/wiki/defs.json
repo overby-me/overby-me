@@ -204,31 +204,38 @@
 					"type": "string",
 					"description": "The document or comment this replies to."
 				},
+				"root_id": {
+					"type": "string",
+					"description": "The document its whole thread is on: `on_id`, or for an answer what the comment it answers is on."
+				},
 				"context_id": { "type": "string" },
 				"author": { "type": "ref", "ref": "#authorView" },
 				"text": { "type": "string" },
+				"image": {
+					"type": "string",
+					"description": "A picture shown with it: a blob id, read as any file is."
+				},
+				"tombstone": {
+					"type": "boolean",
+					"description": "Deleted after it was answered: emptied of its text, author and picture, and kept because the answers hang on it. Show it as deleted."
+				},
 				"created_at": { "type": "string", "format": "datetime" },
 				"legacy_id": { "type": "string" }
 			}
 		},
 		"reactionView": {
 			"type": "object",
-			"description": "An emoji reaction to a subject, addressed by the subject's at-uri.",
+			"description": "An emoji reaction to a subject: a comment or a document, or a post mirrored from the public network.",
 			"required": ["id", "subject_uri", "emoji"],
 			"properties": {
-				"id": {
-					"type": "string",
-					"description": "The reaction record's at-uri (its primary key)."
-				},
+				"id": { "type": "string" },
 				"subject_uri": {
 					"type": "string",
-					"format": "at-uri",
-					"description": "The at-uri of the record being reacted to."
+					"description": "What is reacted to: the id of a comment or a document, or the at-uri of a mirrored post."
 				},
 				"reactor_did": {
 					"type": "string",
-					"format": "did",
-					"description": "The reactor's DID (absent only for a not-yet-realized user)."
+					"description": "Who reacted: a DID, or the interim id of an account nobody has taken over yet. Absent for a reactor whose account did not come across."
 				},
 				"emoji": {
 					"type": "string",

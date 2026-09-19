@@ -86,10 +86,14 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   in and out of the bin.
 - `createDocument` and `postComment` return `{ id }` and need membership of the context written to;
   `addReaction` returns `{ id }` (idempotent) and `removeReaction` returns `{ ok: true }` (idempotent
-  toggle-off).
+  toggle-off). A comment may show a picture its author uploaded to the same context.
+- `deleteComment` is its author's or an owner's. A comment that has been answered is emptied and
+  stays (`tombstone`), since deleting it would take everyone who answered along; any other goes to
+  the context's bin, where `listDeleted` shows it, `restoreComment` brings it back and `purgeComment`
+  deletes it for good.
 - `setDocumentAuthors` replaces a document's author chips: accounts, or names with no account.
 - `moveDocument` takes a document and its subtree to another parent, rewriting every path in it; into
-  another context it takes an owner of both, and the comments, files and closed polls go along.
+  another context it takes an owner of both, and the threads, files and closed polls go along.
   `copyDocument` makes the same content somewhere else, with files of its own.
 - `updateDocument` changes a document (never its slug); `deleteDocument` puts it and its subtree in
   the bin, `restoreDocument` brings back exactly what went together, `purgeDocument` deletes a bin

@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "procedure",
-			"description": "Post a comment on a node (document or comment). Requires a session, and membership of the node's context; the caller's DID is the comment's author.",
+			"description": "Post a comment on a node (document or comment). Requires a session, and membership of the node's context; the caller's DID is the comment's author. It says something, shows a picture, or both.",
 			"input": {
 				"encoding": "application/json",
 				"schema": {
@@ -19,7 +19,11 @@
 							"type": "string",
 							"description": "Optional, and only checked: a comment's context is always the one its node is in."
 						},
-						"text": { "type": "string" }
+						"text": { "type": "string", "maxGraphemes": 10000 },
+						"image": {
+							"type": "string",
+							"description": "A picture to show with it: the id of a blob the caller uploaded to the same context."
+						}
 					}
 				}
 			},
@@ -48,7 +52,7 @@
 				},
 				{
 					"name": "InvalidRequest",
-					"description": "`context_id` names a context the node is not in, or the node is a container (a folder), which takes no comments."
+					"description": "`context_id` names a context the node is not in; the node is a container (a folder), which takes no comments; there is neither text nor a picture, or too much text; or `image` is not a picture the caller uploaded to that context."
 				}
 			]
 		}

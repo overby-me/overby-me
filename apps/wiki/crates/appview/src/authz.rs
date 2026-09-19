@@ -48,13 +48,14 @@ pub fn readable_document(alias: &str, caller: usize) -> String {
     )
 }
 
-/// Holds for the rows of comment `alias` the caller may read.
+/// Holds for the rows of comment `alias` the caller may read. One in the bin is
+/// nobody's to read, its author included: the bin lists it, and nothing else.
 pub fn readable_comment(alias: &str, caller: usize) -> String {
     format!(
-        "({alias}.author_did = ?{caller} \
+        "({alias}.deleted_at IS NULL AND ({alias}.author_did = ?{caller} \
          OR EXISTS (SELECT 1 FROM context c \
                     WHERE c.id = {alias}.context_id AND c.visibility = 'public') \
-         OR EXISTS ({MEMBER_OF} = ?{caller} AND m.context_id = {alias}.context_id))"
+         OR EXISTS ({MEMBER_OF} = ?{caller} AND m.context_id = {alias}.context_id)))"
     )
 }
 
@@ -83,7 +84,9 @@ const CREATE_RULES: &[(&str, Role, &[&str])] = &[
     ("question", Role::Member, &["position", "file"]),
 ];
 
-/// What a comment may be written on: content, never a container.
+/// What a comment may be written on: content, never a container. The interim's
+/// template, and the canvas, whose page has shown a thread since it was made
+/// while the template never let anyone write in it.
 pub const COMMENTABLE: &[&str] = &[
     "policy",
     "change",
@@ -91,6 +94,7 @@ pub const COMMENTABLE: &[&str] = &[
     "file",
     "position",
     "candidate",
+    "canvas",
 ];
 
 /// Discussion is not an addition to what was locked: closing a resolution to new

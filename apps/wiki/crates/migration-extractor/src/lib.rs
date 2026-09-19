@@ -430,25 +430,13 @@ pub fn extract(
                 published_uri: None,
                 legacy_id: Some(n.id.clone()),
             });
-        } else if [COMMENT_MIME, "wiki/feedback", "vote/reaction"].contains(&mime)
-            && deleted_alone(n, &migrated)
+        } else if mime == COMMENT_MIME {
+            let comment = comment_of(n, &tree, &migrated, &mut out.report);
+            out.comments.push(comment);
+        } else if ["wiki/feedback", "vote/reaction"].contains(&mime)
+            && deleted_alone(n, &tree, &migrated)
         {
             out.report.note_left_behind(&format!("{mime}, deleted"));
-        } else if mime == COMMENT_MIME {
-            out.comments.push(Comment {
-                id: n.id.clone(),
-                on_id: n.parent_id.clone().unwrap_or_default(),
-                context_id: n.context_id.clone().unwrap_or_default(),
-                author: match &n.owner_id {
-                    Some(uid) => Author::User { did: uid.clone() },
-                    None => Author::FreeText {
-                        display: n.name.clone().unwrap_or_default(),
-                    },
-                },
-                text: comment_text(n, &mut out.report),
-                created_at: n.created_at.clone(),
-                legacy_id: Some(n.id.clone()),
-            });
         } else if mime == POLL_MIME || mime == CANVAS_MIME {
             // Its place in the tree. What it IS follows below.
             out.documents.push(Document {
@@ -527,16 +515,93 @@ pub fn extract(
     out
 }
 
-/// In the bin on its own account, and not along with a node that is carried.
-/// Comments, reactions and reports have no bin where they are going, so carrying
-/// one of these would bring back what somebody deleted. One binned WITH its
-/// document stays: it is hidden with the document and restored with it.
-fn deleted_alone(n: &InterimNode, migrated: &BTreeSet<&str>) -> bool {
-    let with_its_node = n
+/// Whether `n` went into the bin along with `root`, something that is carried
+/// and has a bin where it is going: a node of the tree, or a comment.
+fn binned_with(
+    n: &InterimNode,
+    tree: &BTreeMap<&str, &InterimNode>,
+    migrated: &BTreeSet<&str>,
+) -> bool {
+    n.deleted_root.as_deref().is_some_and(|root| {
+        let a_comment = tree
+            .get(root)
+            .is_some_and(|r| r.mime_id.as_deref() == Some(COMMENT_MIME));
+        root != n.id && (migrated.contains(root) || a_comment)
+    })
+}
+
+/// In the bin on its own account. Reactions and reports have no bin where they
+/// are going, so carrying one of these would bring back what somebody deleted.
+/// One binned WITH its comment or document stays: it is hidden with that, and
+/// has to be there when that is restored.
+fn deleted_alone(
+    n: &InterimNode,
+    tree: &BTreeMap<&str, &InterimNode>,
+    migrated: &BTreeSet<&str>,
+) -> bool {
+    n.deleted_at.is_some() && !binned_with(n, tree, migrated)
+}
+
+/// A comment, with the document its thread hangs on and its place in the bin.
+///
+/// One binned along with its DOCUMENT comes across live: where it is going a
+/// document's comments are not stamped, the document hides them. One deleted on
+/// its own, or with the thread it was in, comes across in the bin, under the
+/// comment whose deletion took it there.
+fn comment_of(
+    n: &InterimNode,
+    tree: &BTreeMap<&str, &InterimNode>,
+    migrated: &BTreeSet<&str>,
+    report: &mut FieldGapReport,
+) -> Comment {
+    let mut root = n.parent_id.clone().unwrap_or_default();
+    // Bounded, so a cycle in the dump cannot hang the extraction.
+    for _ in 0..tree.len() {
+        match tree.get(root.as_str()) {
+            Some(up) if up.mime_id.as_deref() == Some(COMMENT_MIME) => {
+                root = up.parent_id.clone().unwrap_or_default();
+            }
+            _ => break,
+        }
+    }
+    let with_its_document = n
         .deleted_root
         .as_deref()
-        .is_some_and(|root| root != n.id && migrated.contains(root));
-    n.deleted_at.is_some() && !with_its_node
+        .is_some_and(|root| migrated.contains(root));
+    let binned = n.deleted_at.is_some() && !with_its_document;
+    // Emptied in place because replies hang on it. The interim could not null
+    // the account on the row, so the scrub is finished here.
+    let tombstone = data_of(n, "deleted").and_then(|v| v.as_bool()) == Some(true);
+    Comment {
+        id: n.id.clone(),
+        on_id: n.parent_id.clone().unwrap_or_default(),
+        root_id: root,
+        context_id: n.context_id.clone().unwrap_or_default(),
+        author: match &n.owner_id {
+            Some(uid) if !tombstone => Author::User { did: uid.clone() },
+            _ => Author::FreeText {
+                display: n.name.clone().filter(|_| !tombstone).unwrap_or_default(),
+            },
+        },
+        text: if tombstone {
+            String::new()
+        } else {
+            comment_text(n, report)
+        },
+        image: data_of(n, "image")
+            .and_then(|v| v.as_str())
+            .filter(|id| !id.is_empty() && !tombstone)
+            .map(str::to_string),
+        tombstone,
+        created_at: n.created_at.clone(),
+        deleted_at: n.deleted_at.clone().filter(|_| binned),
+        deleted_root: n
+            .deleted_root
+            .clone()
+            .or_else(|| Some(n.id.clone()))
+            .filter(|_| binned),
+        legacy_id: Some(n.id.clone()),
+    }
 }
 
 /// One row per crash, which the table insists on. The interim looks a crash up
