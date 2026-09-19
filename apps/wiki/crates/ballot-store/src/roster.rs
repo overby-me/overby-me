@@ -59,7 +59,7 @@ pub async fn init_schema(conn: &Connection) -> Result<(), turso::Error> {
 /// void, weight conserved), and write each voter's `resolved_weight` ONCE.
 ///
 /// Idempotent: if any row for the poll is already frozen (`resolved_weight` set),
-/// this is a no-op returning `false` — re-freezing an open poll must never move
+/// this is a no-op returning `false`: re-freezing an open poll must never move
 /// weight (delegation changes after open do not count). Returns `true` when it
 /// froze.
 pub async fn freeze_at_open(conn: &Connection, poll_id: &str) -> Result<bool, turso::Error> {

@@ -380,7 +380,7 @@ pub struct ContextParam {
     pub context: String,
 }
 
-/// `com.example.wiki.listSpeakerLists` — a context's lists with their queues, for
+/// `com.example.wiki.listSpeakerLists`: a context's lists with their queues, for
 /// whoever may read the context: the room follows it on the projector. `now` is
 /// the server's clock, so a countdown does not depend on the viewer's.
 pub async fn list_speaker_lists(
@@ -428,7 +428,7 @@ pub struct CreateListBody {
     pub name: String,
 }
 
-/// `com.example.wiki.createSpeakerList` (procedure) — an owner's.
+/// `com.example.wiki.createSpeakerList` (procedure): an owner's.
 pub async fn create_speaker_list(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -467,7 +467,7 @@ pub struct UpdateListBody {
     pub turn_secs: Option<i64>,
 }
 
-/// `com.example.wiki.updateSpeakerList` (procedure) — rename a list, open or
+/// `com.example.wiki.updateSpeakerList` (procedure): rename a list, open or
 /// close it to new speakers, or set the limit on a turn, which starts the clock
 /// afresh.
 pub async fn update_speaker_list(
@@ -511,7 +511,7 @@ pub struct ListIdBody {
     pub list_id: String,
 }
 
-/// `com.example.wiki.deleteSpeakerList` (procedure) — the list and its queue.
+/// `com.example.wiki.deleteSpeakerList` (procedure): the list and its queue.
 pub async fn delete_speaker_list(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -534,7 +534,7 @@ pub async fn delete_speaker_list(
     }
 }
 
-/// `com.example.wiki.clearSpeakerList` (procedure) — empty the queue.
+/// `com.example.wiki.clearSpeakerList` (procedure): empty the queue.
 pub async fn clear_speaker_list(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -561,7 +561,7 @@ pub async fn clear_speaker_list(
     }
 }
 
-/// `com.example.wiki.nextSpeaker` (procedure) — the floor passes on.
+/// `com.example.wiki.nextSpeaker` (procedure): the floor passes on.
 pub async fn next_speaker(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -595,7 +595,7 @@ pub struct JoinBody {
     pub kind: i64,
 }
 
-/// `com.example.wiki.joinSpeakerList` (procedure) — ask for the floor. A member
+/// `com.example.wiki.joinSpeakerList` (procedure): ask for the floor. A member
 /// of the context may while the list is open; an owner may regardless, to enter
 /// someone who cannot.
 pub async fn join_speaker_list(
@@ -666,7 +666,7 @@ async fn entry_for(
     }
 }
 
-/// `com.example.wiki.leaveSpeakerList` (procedure) — withdraw, or be removed by
+/// `com.example.wiki.leaveSpeakerList` (procedure): withdraw, or be removed by
 /// an owner.
 pub async fn leave_speaker_list(
     State(state): State<AppState>,
@@ -699,7 +699,7 @@ pub struct MoveBody {
     pub to: String,
 }
 
-/// `com.example.wiki.moveSpeaker` (procedure) — the chair puts someone ahead of
+/// `com.example.wiki.moveSpeaker` (procedure): the chair puts someone ahead of
 /// the queue or behind it.
 pub async fn move_speaker(
     State(state): State<AppState>,

@@ -7,8 +7,8 @@
 //!
 //! Item 12 built the durable board + the `ReplicationSink` seam; this adds the
 //! concrete append-only replica log and the rebuild-from-replica recovery path.
-//! [`ReplicaLog`] is an append-only JSONL file — one record per committed cast,
-//! written synchronously in the fire-and-forget hook — which IS the shippable
+//! [`ReplicaLog`] is an append-only JSONL file (one record per committed cast,
+//! written synchronously in the fire-and-forget hook), which IS the shippable
 //! artifact: an independent node mirrors this file (rsync / WAL-style shipping).
 //! The concrete incremental TRANSPORT of this file (a byte-offset cursor, ship
 //! only whole records) lives in the sibling [`crate::transport`] module; this

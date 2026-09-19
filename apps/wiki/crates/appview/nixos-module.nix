@@ -69,9 +69,9 @@ in {
       default = null;
       description = ''
         The domain Ferron serves. `null` keeps a plain-HTTP catch-all on :80
-        (no TLS) — the sensible default until the domain/name is chosen; setting
-        it switches Ferron to automatic HTTPS (which also needs :443 reachable
-        and a writable ACME cache — verify the state dir when a domain lands).
+        (no TLS), the sensible default until the domain/name is chosen. Setting
+        it switches Ferron to automatic HTTPS, which also needs :443 reachable
+        and a writable ACME cache: verify the state dir when a domain lands.
       '';
     };
 

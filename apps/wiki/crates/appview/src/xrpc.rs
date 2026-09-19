@@ -41,7 +41,7 @@ pub(crate) fn err(status: StatusCode, error: &str, message: &str) -> Response {
         .into_response()
 }
 
-/// `com.example.wiki.getDocument` — a content node (document/folder/file/
+/// `com.example.wiki.getDocument`: a content node (document/folder/file/
 /// proposal) by id, with its authors.
 pub async fn get_document(
     State(state): State<AppState>,
@@ -59,7 +59,7 @@ pub async fn get_document(
     }
 }
 
-/// `com.example.wiki.getContext` — a group/event context by id.
+/// `com.example.wiki.getContext`: a group/event context by id.
 pub async fn get_context(
     State(state): State<AppState>,
     caller: MaybeCaller,
@@ -76,13 +76,13 @@ pub async fn get_context(
     }
 }
 
-/// `?path=a/b/c` — the slugs from the root, as a URL carries them.
+/// `?path=a/b/c`: the slugs from the root, as a URL carries them.
 #[derive(Debug, Deserialize)]
 pub struct PathParam {
     pub path: String,
 }
 
-/// `com.example.wiki.resolveNode` — the context or document a path names.
+/// `com.example.wiki.resolveNode`: the context or document a path names.
 pub async fn resolve_node(
     State(state): State<AppState>,
     caller: MaybeCaller,
@@ -115,7 +115,7 @@ pub struct NodeParam {
     pub id: Option<String>,
 }
 
-/// `com.example.wiki.getNode` — a node with what every screen draws around it:
+/// `com.example.wiki.getNode`: a node with what every screen draws around it:
 /// its children of either kind, the way down to it, and what the caller may do
 /// here. One call where the interim makes several.
 pub async fn get_node(
@@ -207,7 +207,7 @@ pub struct ParentParam {
     pub parent: String,
 }
 
-/// `com.example.wiki.listChildren` — the child documents under a node.
+/// `com.example.wiki.listChildren`: the child documents under a node.
 pub async fn list_children(
     State(state): State<AppState>,
     caller: MaybeCaller,
@@ -227,7 +227,7 @@ pub async fn list_children(
     }
 }
 
-/// `com.example.wiki.listContexts` — the top-level groups/events.
+/// `com.example.wiki.listContexts`: the top-level groups/events.
 pub async fn list_contexts(State(state): State<AppState>, caller: MaybeCaller) -> Response {
     let store = crate::Store::new(state.db.clone());
     match store.list_root_contexts(caller.did()).await {
@@ -250,7 +250,7 @@ pub struct RecentParam {
     pub limit: Option<i64>,
 }
 
-/// `com.example.wiki.listRecent` — the newest documents across contexts.
+/// `com.example.wiki.listRecent`: the newest documents across contexts.
 pub async fn list_recent(
     State(state): State<AppState>,
     caller: MaybeCaller,
@@ -277,7 +277,7 @@ pub struct SearchParam {
     pub q: String,
 }
 
-/// `com.example.wiki.search` — documents matching a title/content substring.
+/// `com.example.wiki.search`: documents matching a title/content substring.
 pub async fn search(
     State(state): State<AppState>,
     caller: MaybeCaller,
@@ -303,7 +303,7 @@ pub struct OnParam {
     pub on: String,
 }
 
-/// `com.example.wiki.getComments` — the comment thread on a node.
+/// `com.example.wiki.getComments`: the comment thread on a node.
 pub async fn get_comments(
     State(state): State<AppState>,
     caller: MaybeCaller,
@@ -329,7 +329,7 @@ pub struct SubjectParam {
     pub subject: String,
 }
 
-/// `com.example.wiki.getReactions` — the reactions on a subject (by at-uri).
+/// `com.example.wiki.getReactions`: the reactions on a subject (by at-uri).
 pub async fn get_reactions(
     State(state): State<AppState>,
     Query(p): Query<SubjectParam>,
@@ -357,7 +357,7 @@ pub struct CreateSessionBody {
     pub code: String,
 }
 
-/// `com.example.wiki.createSession` (procedure) — redeem the one-time code
+/// `com.example.wiki.createSession` (procedure): redeem the one-time code
 /// `/callback` handed the browser for a session. The only unauthenticated
 /// procedure: the code is the credential.
 pub async fn create_session(
@@ -386,7 +386,7 @@ pub async fn create_session(
     }
 }
 
-/// `com.example.wiki.getSession` — who the presented session belongs to.
+/// `com.example.wiki.getSession`: who the presented session belongs to.
 pub async fn get_session(State(state): State<AppState>, caller: Caller) -> Response {
     let store = crate::Store::new(state.db.clone());
     match store.read_user(&caller.did).await {
@@ -400,7 +400,7 @@ pub async fn get_session(State(state): State<AppState>, caller: Caller) -> Respo
     }
 }
 
-/// `com.example.wiki.deleteSession` (procedure) — sign out: ends the presented
+/// `com.example.wiki.deleteSession` (procedure): sign out: ends the presented
 /// session and no other, so a phone stays signed in when a laptop signs out.
 pub async fn delete_session(
     State(state): State<AppState>,
@@ -458,7 +458,7 @@ pub struct ClaimMembershipBody {
     pub token: String,
 }
 
-/// `com.example.wiki.claimMembership` (procedure) — bind the invitation a
+/// `com.example.wiki.claimMembership` (procedure): bind the invitation a
 /// `?claim=<token>` link names to the caller. This is how a rostered member,
 /// known only by an email address, becomes a DID.
 ///
@@ -567,7 +567,7 @@ pub struct ListMembersParams {
     pub offset: Option<i64>,
 }
 
-/// `com.example.wiki.listMembers` — a page of a context's members, by name.
+/// `com.example.wiki.listMembers`: a page of a context's members, by name.
 /// For members only. An owner of the context is served the addresses and the
 /// hidden rows; nobody else is.
 pub async fn list_members(
@@ -624,7 +624,7 @@ pub struct InviteMembersBody {
     pub invites: Vec<crate::store::Invite>,
 }
 
-/// `com.example.wiki.inviteMembers` (procedure) — put people on a context's
+/// `com.example.wiki.inviteMembers` (procedure): put people on a context's
 /// roster: one invitation, or a whole imported spreadsheet.
 pub async fn invite_members(
     State(state): State<AppState>,
@@ -707,7 +707,7 @@ fn refused_write(what: &str, refused: crate::store::WriteError) -> Response {
     }
 }
 
-/// `com.example.wiki.updateMember` (procedure) — an owner changes a row of their
+/// `com.example.wiki.updateMember` (procedure): an owner changes a row of their
 /// roster: the name, the address, the role, voting rights, whether it is hidden.
 pub async fn update_member(
     State(state): State<AppState>,
@@ -743,7 +743,7 @@ pub struct MemberIdBody {
     pub id: String,
 }
 
-/// `com.example.wiki.removeMember` (procedure) — take someone off a roster. An
+/// `com.example.wiki.removeMember` (procedure): take someone off a roster. An
 /// owner removes anyone; anyone removes themselves, which is also how an
 /// invitation is declined and how a member leaves.
 pub async fn remove_member(
@@ -771,7 +771,7 @@ pub async fn remove_member(
     }
 }
 
-/// `com.example.wiki.listInvitations` — the invitations the caller has not
+/// `com.example.wiki.listInvitations`: the invitations the caller has not
 /// answered. Only those made out to their account: one made out to an address
 /// reaches them as a claim link.
 pub async fn list_invitations(State(state): State<AppState>, Caller { did }: Caller) -> Response {
@@ -788,7 +788,7 @@ pub async fn list_invitations(State(state): State<AppState>, Caller { did }: Cal
     }
 }
 
-/// `com.example.wiki.acceptInvitation` (procedure) — say yes. Declining is
+/// `com.example.wiki.acceptInvitation` (procedure): say yes. Declining is
 /// `removeMember` on the same row.
 pub async fn accept_invitation(
     State(state): State<AppState>,
@@ -808,7 +808,7 @@ pub async fn accept_invitation(
     }
 }
 
-/// `com.example.wiki.getVoterCount` — how many members of a context hold
+/// `com.example.wiki.getVoterCount`: how many members of a context hold
 /// voting rights, which a poll's turnout is out of. A number and no names, so it
 /// is served to whoever may read the context.
 pub async fn get_voter_count(
@@ -834,7 +834,7 @@ pub struct MemberParam {
     pub member: String,
 }
 
-/// `com.example.wiki.getMemberClaimLink` — a member's claim token, for an owner
+/// `com.example.wiki.getMemberClaimLink`: a member's claim token, for an owner
 /// of that member's context to hand out. An unknown member answers as a
 /// forbidden one does, so the method is no oracle for member ids.
 pub async fn get_member_claim_link(
@@ -876,7 +876,7 @@ pub struct CreateDocumentBody {
     pub data: Option<serde_json::Value>,
 }
 
-/// `com.example.wiki.createDocument` (procedure) — the caller authors a document.
+/// `com.example.wiki.createDocument` (procedure): the caller authors a document.
 pub async fn create_document(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -976,7 +976,7 @@ async fn standing_towards(
     Ok((meta, standing))
 }
 
-/// `com.example.wiki.updateDocument` (procedure) — change a document. The slug
+/// `com.example.wiki.updateDocument` (procedure): change a document. The slug
 /// stays: a rename keeps the URL people have linked to.
 pub async fn update_document(
     State(state): State<AppState>,
@@ -1029,7 +1029,7 @@ pub struct SetDocumentAuthorsBody {
     pub authors: Vec<wiki_domain_types::Author>,
 }
 
-/// `com.example.wiki.setDocumentAuthors` (procedure) — replace the author chips
+/// `com.example.wiki.setDocumentAuthors` (procedure): replace the author chips
 /// on a document, in order. Whoever may edit it may. An author is an account or
 /// a name with no account behind it, which is what 42 percent of them are.
 pub async fn set_document_authors(
@@ -1071,7 +1071,7 @@ pub struct MoveDocumentBody {
     pub parent_id: String,
 }
 
-/// `com.example.wiki.moveDocument` (procedure) — move a document, with
+/// `com.example.wiki.moveDocument` (procedure): move a document, with
 /// everything under it, to another parent in the same context.
 pub async fn move_document(
     State(state): State<AppState>,
@@ -1103,7 +1103,7 @@ pub struct DocumentIdBody {
     pub id: String,
 }
 
-/// `com.example.wiki.deleteDocument` (procedure) — put a document, and
+/// `com.example.wiki.deleteDocument` (procedure): put a document, and
 /// everything under it, in the bin.
 pub async fn delete_document(
     State(state): State<AppState>,
@@ -1133,7 +1133,7 @@ pub async fn delete_document(
     }
 }
 
-/// `com.example.wiki.restoreDocument` (procedure) — bring a document back from
+/// `com.example.wiki.restoreDocument` (procedure): bring a document back from
 /// the bin, with everything that went there with it.
 pub async fn restore_document(
     State(state): State<AppState>,
@@ -1192,7 +1192,7 @@ pub struct ContextParam {
     pub context: String,
 }
 
-/// `com.example.wiki.listDeleted` — the bin of a context. An owner of the
+/// `com.example.wiki.listDeleted`: the bin of a context. An owner of the
 /// context sees all of it; anyone else sees what they created and deleted.
 pub async fn list_deleted(
     State(state): State<AppState>,
@@ -1230,7 +1230,7 @@ pub struct PostCommentBody {
     pub text: String,
 }
 
-/// `com.example.wiki.postComment` (procedure) — the caller comments on a node.
+/// `com.example.wiki.postComment` (procedure): the caller comments on a node.
 pub async fn post_comment(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -1275,7 +1275,7 @@ pub struct ReactionBody {
     pub emoji: String,
 }
 
-/// `com.example.wiki.addReaction` (procedure) — the caller reacts to a subject.
+/// `com.example.wiki.addReaction` (procedure): the caller reacts to a subject.
 pub async fn add_reaction(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -1294,7 +1294,7 @@ pub async fn add_reaction(
     }
 }
 
-/// `com.example.wiki.removeReaction` (procedure) — the caller un-reacts.
+/// `com.example.wiki.removeReaction` (procedure): the caller un-reacts.
 pub async fn remove_reaction(
     State(state): State<AppState>,
     Caller { did }: Caller,
