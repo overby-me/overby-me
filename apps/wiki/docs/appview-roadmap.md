@@ -318,7 +318,10 @@ asks Bluesky's public API itself. The steps:
 
 - [x] Roster parsing (`parseRoster`): the office's .xlsx into the rows
   `inviteMembers` takes.
-- [ ] The log proxy, with symbolication of the wasm frames passing through.
+- [x] The log proxy (`POST /log`), with symbolication of the wasm frames passing
+  through. It takes no session, so what it remembers about builds is bounded:
+  made-up build hashes cannot push a real build's symbols out or grow without
+  limit.
 - [ ] Push: subscribe, unsubscribe, notify, reply.
 - [ ] Feedback and crash reports. The interim files them as nodes under the root
   node; here they need a table of their own.

@@ -107,7 +107,11 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
 - `claimMembership` binds a pending invitation to the caller by its claim token, and
   `getMemberClaimLink` (a query) gives an active owner the token to hand out.
 
-The richer write procedures are not built: `docs/appview-roadmap.md` tracks them.
+Two routes are plain HTTP and have no lexicon: `GET /blob/<id>` (above), and `POST /log`, which takes
+the frontend's batched log entries with no session, resolves the wasm frames in their stacks and
+forwards them to the log sink with a token the browser never sees.
+
+What is not built yet: `docs/appview-roadmap.md` tracks it.
 
 ## NSID
 

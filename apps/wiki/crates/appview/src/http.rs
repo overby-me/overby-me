@@ -56,6 +56,31 @@ impl RustlsHttpClient {
     }
 }
 
+impl RustlsHttpClient {
+    /// A request of the crate's own on the shared client, held to the same
+    /// reach as everything else it sends.
+    pub fn request(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+    ) -> Result<reqwest::RequestBuilder, BoxError> {
+        if self.reach == Reach::PublicOnly
+            && let Some(why) = refuse(&url.parse()?)
+        {
+            return Err(format!("refused {url}: {why}").into());
+        }
+        Ok(self.client.request(method, url))
+    }
+
+    pub fn get(&self, url: &str) -> Result<reqwest::RequestBuilder, BoxError> {
+        self.request(reqwest::Method::GET, url)
+    }
+
+    pub fn post(&self, url: &str) -> Result<reqwest::RequestBuilder, BoxError> {
+        self.request(reqwest::Method::POST, url)
+    }
+}
+
 impl HttpClient for RustlsHttpClient {
     async fn send_http(&self, request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, BoxError> {
         if self.reach == Reach::PublicOnly

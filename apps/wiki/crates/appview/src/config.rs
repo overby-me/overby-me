@@ -15,6 +15,15 @@ impl Secret {
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
     }
+
+    /// The value itself, for the one place it is sent.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl std::fmt::Debug for Secret {
@@ -32,9 +41,9 @@ pub struct Config {
     /// Jetstream firehose endpoint (consumed by the firehose task; a stub for
     /// now, the actual consumer is a later kickoff item).
     pub firehose_url: String,
-    /// BetterStack (Logtail) ingest host + token for structured server logs
-    /// (the same sink the frontend and interim backend ship to). Empty token
-    /// disables remote shipping.
+    /// BetterStack (Logtail) ingest host + token: where `/log` forwards what the
+    /// frontend ships (`crate::logs`). Empty token disables it. A host with a
+    /// scheme is used as the whole URL, for a test sink.
     pub betterstack_host: String,
     pub betterstack_token: Secret,
     /// Off-node ballot replica-log path. When set, every committed cast is
@@ -49,6 +58,9 @@ pub struct Config {
     /// redirect (`APPVIEW_FRONTEND_ORIGINS`, comma-separated). Empty keeps the
     /// API same-origin.
     pub frontend_origins: Vec<String>,
+    /// Where the frontend is served (`APPVIEW_APP_ORIGIN`): its builds publish
+    /// their debug symbols there. Unset, the first of `frontend_origins`.
+    pub app_origin: String,
     /// Where uploaded files are kept (`APPVIEW_BLOB_DIR`). Unset, they go beside
     /// the database file, or to a temporary directory when that is in memory.
     pub blob_dir: String,
@@ -89,6 +101,7 @@ impl Config {
         let env = |k: &str| std::env::var(k).unwrap_or_default();
         let db_path = std::env::var("APPVIEW_DB").unwrap_or_else(|_| ":memory:".to_string());
         let secret = Secret::new(secret_for(&db_path, env("APPVIEW_SECRET")));
+        let frontend_origins = parse_origins(&env("APPVIEW_FRONTEND_ORIGINS"));
         Config {
             port: std::env::var("PORT")
                 .ok()
@@ -110,7 +123,13 @@ impl Config {
             betterstack_token: Secret::new(env("BETTERSTACK_SOURCE_TOKEN")),
             ballot_replica_log: env("BALLOT_REPLICA_LOG"),
             public_url: env("APPVIEW_PUBLIC_URL").trim_end_matches('/').to_string(),
-            frontend_origins: parse_origins(&env("APPVIEW_FRONTEND_ORIGINS")),
+            app_origin: match env("APPVIEW_APP_ORIGIN") {
+                origin if origin.is_empty() => {
+                    frontend_origins.first().cloned().unwrap_or_default()
+                }
+                origin => origin.trim_end_matches('/').to_string(),
+            },
+            frontend_origins,
         }
     }
 }
@@ -173,6 +192,7 @@ impl Default for Config {
             ballot_replica_log: String::new(),
             public_url: String::new(),
             frontend_origins: Vec::new(),
+            app_origin: String::new(),
             blob_dir: blobs_beside(":memory:"),
             max_blob_bytes: DEFAULT_MAX_BLOB_BYTES,
             secret: Secret::new(crate::util::random_token(32)),

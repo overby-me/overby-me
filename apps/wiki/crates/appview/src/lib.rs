@@ -14,6 +14,7 @@ pub mod db;
 pub mod firehose;
 pub mod http;
 pub mod live;
+pub mod logs;
 pub mod oauth;
 pub mod poll;
 pub mod projector;
@@ -24,6 +25,7 @@ pub mod slug;
 pub mod speak;
 pub mod statecookie;
 pub mod store;
+pub mod symbolicate;
 pub mod util;
 pub mod xrpc;
 
@@ -54,6 +56,8 @@ pub struct AppState {
     pub oauth: Option<Arc<oauth::WikiOAuth>>,
     /// Live firehose status (updated by the consumer task, read by `/healthz`).
     pub firehose: Arc<firehose::FirehoseStatus>,
+    /// The shared outbound client, for the crate's own calls to other hosts.
+    pub http: http::RustlsHttpClient,
     /// The off-node ballot replica log, when one is configured (`crate::ballot`).
     pub replica: Option<Arc<ballot_store::ReplicaLog>>,
     /// What `crate::poll` keeps between requests.
@@ -65,7 +69,14 @@ impl AppState {
     /// no OAuth client (see [`AppState::with_oauth`]).
     pub fn new(db: Db, config: Config) -> Self {
         let (changes, _rx) = broadcast::channel(1024);
+        // As for the OAuth client: a deployed AppView reaches public hosts only.
+        let reach = if config.public_url.is_empty() {
+            http::Reach::Any
+        } else {
+            http::Reach::PublicOnly
+        };
         Self {
+            http: http::RustlsHttpClient::new(reach).expect("the rustls client builds"),
             db,
             changes,
             config,
@@ -130,6 +141,7 @@ fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/ws", get(live::ws_handler))
+        .route("/log", post(logs::ingest))
         .route("/login", get(oauth::login_handler))
         .route("/callback", get(oauth::callback_handler))
         .route(

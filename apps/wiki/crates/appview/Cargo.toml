@@ -12,6 +12,10 @@ name = "appview"
 path = "src/main.rs"
 
 [dependencies]
+# Crash symbolication: resolve the wasm code offsets in a reported stack back to
+# `file:line` against the DWARF sidecar the frontend build publishes. `addr2line`
+# wraps `gimli` with the lookup logic; `object` parses the wasm container.
+addr2line = "0.24"
 atrium-api = { version = "0.25.8", default-features = false, features = [
   "agent"
 ] }
@@ -40,6 +44,10 @@ hkdf = "0.12"
 # Signs the links that let an <img> or a document viewer fetch one blob.
 hmac = "0.12"
 http = "1"
+object = { version = "0.36", default-features = false, features = [
+  "read",
+  "wasm"
+] }
 rand = "0.8"
 # Same 0.12 line atrium resolves, so the two share one connection pool.
 reqwest = { version = "0.12", default-features = false, features = [
