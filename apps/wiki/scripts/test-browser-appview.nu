@@ -513,11 +513,13 @@ def main [
         log-fail $"the app logged ($errors | length) errors, the first: ($errors | first | str substring 0..300)"
     }
 
-    log-info $"($passed) passed, ($failed) failed. Logs: ($logs)"
+    log-info $"($passed) passed, ($failed) failed."
     if $keep {
-        log-info $"Left running: the app on (app), the AppView on :($API_PORT), WebDriver on :($WD_PORT), session ($sid)"
+        log-info $"Left running: the app on (app), the AppView on :($API_PORT), WebDriver on :($WD_PORT), session ($sid). Logs: ($logs)"
     } else {
         cleanup $sid $pids
+        # The logs are for a failure, and a run that had none leaves nothing behind.
+        if $failed == 0 { rm -rf $logs } else { log-info $"Logs: ($logs)" }
     }
     if $failed > 0 { exit 1 }
 }
