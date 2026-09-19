@@ -216,10 +216,6 @@ pub async fn sweep_incoming(config: &Config) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Signed links.
-// ---------------------------------------------------------------------------
-
 type HmacSha256 = Hmac<Sha256>;
 
 fn mac(config: &Config, id: &str, expires: u64) -> Option<HmacSha256> {
@@ -250,10 +246,6 @@ fn verify(config: &Config, id: &str, expires: u64, signature: &str, now: u64) ->
         _ => false,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Storing and forgetting.
-// ---------------------------------------------------------------------------
 
 /// Stream `body` into `incoming`, hashing it on the way. `None` when it outgrew
 /// the limit.
@@ -336,10 +328,6 @@ async fn forget(state: &AppState, blob: &BlobMeta) -> Result<(), DbError> {
     }
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// The handlers.
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
 pub struct UploadParams {

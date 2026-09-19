@@ -348,10 +348,6 @@ pub async fn get_reactions(
     }
 }
 
-// ---------------------------------------------------------------------------
-// The session itself.
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Deserialize)]
 pub struct CreateSessionBody {
     pub code: String,
@@ -415,10 +411,6 @@ pub async fn delete_session(
         Err(e) => write_failed("deleteSession", e),
     }
 }
-
-// ---------------------------------------------------------------------------
-// Write side: the caller authors content in a context they are a member of.
-// ---------------------------------------------------------------------------
 
 pub(crate) fn forbidden(message: &str) -> Response {
     err(StatusCode::FORBIDDEN, "Forbidden", message)

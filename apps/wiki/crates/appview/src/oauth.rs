@@ -44,10 +44,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-// ---------------------------------------------------------------------------
-// Durable stores: atrium's `Store<K, V>` over a SQLite (Turso) JSON-KV table.
-// ---------------------------------------------------------------------------
-
 /// A store failure: a datastore error or a (de)serialization error. atrium's
 /// `Store` trait requires the error to be `std::error::Error`.
 #[derive(Debug)]
@@ -223,10 +219,6 @@ impl Store<Did, Session> for SqliteSessionStore {
 
 impl SessionStore for SqliteSessionStore {}
 
-// ---------------------------------------------------------------------------
-// The OAuth client wrapper.
-// ---------------------------------------------------------------------------
-
 type HttpClient = RustlsHttpClient;
 type DidRes = CommonDidResolver<HttpClient>;
 type HandleRes = AtprotoHandleResolver<DohDnsTxtResolver<HttpClient>, HttpClient>;
@@ -382,10 +374,6 @@ impl WikiOAuth {
         doc
     }
 }
-
-// ---------------------------------------------------------------------------
-// The HTTP handlers.
-// ---------------------------------------------------------------------------
 
 use crate::session::Sessions;
 use axum::Json;
