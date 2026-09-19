@@ -18,6 +18,12 @@
 # stdout -> journald; set BETTERSTACK_SOURCE_TOKEN to also ship them to the
 # existing sink.
 #
+# The cutover's load runs here too. The service is a DynamicUser with a private
+# state directory, so nobody can run `appview import` against it by hand: set
+# `import.extraction` (and `import.files`) and `systemctl start
+# wiki-appview-import`, which stops the service, loads, and leaves it to be
+# started again.
+#
 # Ferron (nixpkgs `ferron`, a Rust web server) has no upstream NixOS module, so
 # this module defines its systemd unit directly with a generated KDL config.
 {
@@ -27,6 +33,43 @@
   ...
 }: let
   cfg = config.services.wiki-appview;
+  appviewEnvironment = {
+    PORT = toString cfg.port;
+    # StateDirectory is exported by systemd; the Turso file lives under it so
+    # it survives restarts.
+    APPVIEW_DB = "/var/lib/wiki-appview/appview.db";
+    JETSTREAM_URL = cfg.firehoseUrl;
+    RUST_LOG = cfg.logFilter;
+    APPVIEW_PUBLIC_URL = lib.optionalString (cfg.publicUrl != null) cfg.publicUrl;
+    APPVIEW_FRONTEND_ORIGINS = lib.concatStringsSep "," cfg.frontendOrigins;
+    APPVIEW_TRUSTED_EMAIL_PDS = lib.concatStringsSep "," cfg.trustedEmailPds;
+    APPVIEW_SITE_NAME = cfg.siteName;
+    APPVIEW_SITE_OWNER = lib.optionalString (cfg.siteOwner != null) cfg.siteOwner;
+    VAPID_PUBLIC_KEY = cfg.vapidPublicKey;
+    VAPID_SUBJECT = cfg.vapidSubject;
+  };
+  # What the service and the cutover's load share: the same state, the same
+  # secrets, the same confinement.
+  appviewSandbox = {
+    # Persistent state for the Turso core+view file. StateDirectory creates and
+    # chowns /var/lib/wiki-appview to the DynamicUser.
+    StateDirectory = "wiki-appview";
+    StateDirectoryMode = "0700";
+
+    EnvironmentFile = lib.filter (file: file != null) [cfg.secretsFile cfg.betterstackTokenFile];
+
+    # Hardening: an unprivileged, sandboxed service with no host access beyond
+    # its state dir and the network.
+    DynamicUser = true;
+    NoNewPrivileges = true;
+    ProtectSystem = "strict";
+    ProtectHome = true;
+    PrivateTmp = true;
+    PrivateDevices = true;
+    ProtectKernelTunables = true;
+    ProtectControlGroups = true;
+    RestrictAddressFamilies = ["AF_INET" "AF_INET6"];
+  };
   # The Ferron host block: a catch-all `:80` (plain HTTP) until a domain is
   # chosen; a domain name switches Ferron to automatic HTTPS (Let's Encrypt).
   ferronHost =
@@ -175,6 +218,33 @@ in {
       '';
     };
 
+    import = {
+      extraction = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "/root/cutover/extraction.json";
+        description = ''
+          Where on this host the `extraction.json` to load is
+          (`docs/cutover-runbook.md`). Setting it defines
+          `wiki-appview-import.service`, which nothing starts but you. A string
+          and not a Nix path, on purpose: a path would copy every member's
+          address into the world-readable store.
+        '';
+      };
+
+      files = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "/root/cutover/files";
+        description = ''
+          The directory `scripts/dump-interim-files.nu` downloaded the interim's
+          files into, filed after the load by the same unit. The files in it
+          have to be readable by others (the unit runs as nobody in particular);
+          the directories above them need not be.
+        '';
+      };
+    };
+
     betterstackTokenFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
@@ -193,54 +263,46 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    systemd.services.wiki-appview-import = lib.mkIf (cfg.import.extraction != null) {
+      description = "Load a migrated wiki into the AppView's datastore";
+      # Never beside the service: starting this stops it, and it stays stopped
+      # until someone has looked at what was loaded.
+      conflicts = ["wiki-appview.service"];
+      environment = appviewEnvironment;
+
+      serviceConfig =
+        appviewSandbox
+        // {
+          Type = "oneshot";
+          # As credentials and a bind mount, because the unit's own user can
+          # read neither /root nor anything else the files are likely to be in.
+          LoadCredential = ["extraction.json:${cfg.import.extraction}"];
+          BindReadOnlyPaths = lib.optional (cfg.import.files != null) "${cfg.import.files}:/run/wiki-appview-import-files";
+          ExecStart =
+            ["${lib.getExe cfg.package} import %d/extraction.json"]
+            ++ lib.optional (cfg.import.files != null)
+            "${lib.getExe cfg.package} import-files %d/extraction.json /run/wiki-appview-import-files";
+        };
+    };
+
     systemd.services.wiki-appview = {
       description = "wiki atproto AppView (stateful)";
       wantedBy = ["multi-user.target"];
       after = ["network-online.target"];
       wants = ["network-online.target"];
 
-      environment = {
-        PORT = toString cfg.port;
-        # StateDirectory is exported by systemd; the Turso file lives under it so
-        # it survives restarts.
-        APPVIEW_DB = "/var/lib/wiki-appview/appview.db";
-        JETSTREAM_URL = cfg.firehoseUrl;
-        RUST_LOG = cfg.logFilter;
-        APPVIEW_PUBLIC_URL = lib.optionalString (cfg.publicUrl != null) cfg.publicUrl;
-        APPVIEW_FRONTEND_ORIGINS = lib.concatStringsSep "," cfg.frontendOrigins;
-        APPVIEW_TRUSTED_EMAIL_PDS = lib.concatStringsSep "," cfg.trustedEmailPds;
-        APPVIEW_SITE_NAME = cfg.siteName;
-        APPVIEW_SITE_OWNER = lib.optionalString (cfg.siteOwner != null) cfg.siteOwner;
-        VAPID_PUBLIC_KEY = cfg.vapidPublicKey;
-        VAPID_SUBJECT = cfg.vapidSubject;
-      };
+      environment = appviewEnvironment;
 
-      serviceConfig = {
-        ExecStart = "${lib.getExe cfg.package}";
-        # A stateful always-on process: restart on any exit so a crashed firehose
-        # or panicked task self-heals (the /healthz signal catches a wedged one).
-        Restart = "always";
-        RestartSec = 2;
-
-        # Persistent state for the Turso core+view file. StateDirectory creates
-        # and chowns /var/lib/wiki-appview to the DynamicUser.
-        StateDirectory = "wiki-appview";
-        StateDirectoryMode = "0700";
-
-        EnvironmentFile = lib.filter (file: file != null) [cfg.secretsFile cfg.betterstackTokenFile];
-
-        # Hardening: an unprivileged, sandboxed service with no host access
-        # beyond its state dir and the network.
-        DynamicUser = true;
-        NoNewPrivileges = true;
-        ProtectSystem = "strict";
-        ProtectHome = true;
-        PrivateTmp = true;
-        PrivateDevices = true;
-        ProtectKernelTunables = true;
-        ProtectControlGroups = true;
-        RestrictAddressFamilies = ["AF_INET" "AF_INET6"];
-      };
+      serviceConfig =
+        appviewSandbox
+        // {
+          ExecStart = "${lib.getExe cfg.package}";
+          # A stateful always-on process: restart on any exit so a crashed
+          # firehose or panicked task self-heals (the /healthz signal catches a
+          # wedged one).
+          Restart = "always";
+          RestartSec = 2;
+        };
     };
 
     # The bundled Ferron reverse proxy: TLS-terminate (once a domain is set) and

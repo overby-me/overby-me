@@ -1,9 +1,11 @@
 //! What has happened lately: the feed, what a person or a group has put
 //! forward, and the admin's list of nodes that lost their parent.
 //!
-//! A feed row is light. It says what happened and what it is about, and the
-//! interim's rows each carried their whole document, which is what made three
-//! letters in a search box cost 1.5 MB.
+//! A feed row is light. It says what happened and what it is about: a title or
+//! a comment's words or an emoji, how a page begins, the picture that goes with
+//! it, and for an answer or a reaction the comment it is to. The interim's rows
+//! each carried their whole document, which is what made three letters in a
+//! search box cost 1.5 MB.
 
 use crate::AppState;
 use crate::authz::{Authz, readable_comment, readable_document};
@@ -19,9 +21,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use turso::Value;
 
-/// What counts as activity worth listing. The interim's list, less reactions,
-/// which here only ever mirror public records and have no context to be in.
+/// The kinds of page that are activity worth listing: the interim's list.
+/// Comments and reactions are listed beside them.
 const FEED_KINDS: &str = "'document','policy','change','position','candidate','file'";
+
+/// How much of a page's text a row shows.
+const EXCERPT_CHARS: usize = 240;
 
 /// What someone is credited with on their profile: what they put forward.
 const CONTRIBUTION_KINDS: &str = "'policy','change','candidate','question'";
@@ -30,15 +35,35 @@ const MAX_PAGE: i64 = 100;
 /// Paging is by offset, which costs what it skips; nobody pages this far.
 const MAX_OFFSET: i64 = 2000;
 
+/// The comment an answer or a reaction is to, so that the row stands on its own.
+#[derive(Debug, Serialize)]
+pub struct Quote {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub by_did: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub by_text: Option<String>,
+    pub text: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct Item {
-    /// `document` or `comment`.
+    /// `document`, `comment` or `reaction`.
     pub node: &'static str,
     pub id: String,
-    /// A document's kind; `comment` for a comment.
+    /// A document's kind; `comment` or `reaction` for those.
     pub kind: String,
-    /// A document's title, or a comment's text.
+    /// A document's title, a comment's text, or a reaction's emoji.
     pub text: String,
+    /// How a page begins.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub excerpt: Option<String>,
+    /// The picture that goes with the row, as a blob id: a page's cover, a
+    /// picture that was uploaded, a comment's, or for a reaction that of what
+    /// it is to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quote: Option<Quote>,
     /// A document's own path. A comment is reached through `about`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
@@ -134,12 +159,22 @@ async fn list(
     let conn = state.db.acquire().await?;
     let mut items = Vec::new();
 
+    // A page's cover, or the page itself where it is an uploaded picture.
+    let picture = |d: &str| {
+        format!(
+            "coalesce(json_extract({d}.data, '$.image'), \
+               CASE WHEN json_extract({d}.data, '$.type') LIKE 'image/%' \
+                    THEN json_extract({d}.data, '$.fileId') END)"
+        )
+    };
     let sql = format!(
-        "SELECT d.id, d.kind, d.title, d.path, d.context_id, d.owner_did, d.created_at, d.parent_id \
+        "SELECT d.id, d.kind, d.title, d.path, d.context_id, d.owner_did, d.created_at, \
+                d.parent_id, {} \
          FROM document d \
          WHERE d.deleted_at IS NULL AND d.kind IN ({kinds}) {submitted} AND {} AND {documents} \
            AND {} \
          ORDER BY d.created_at DESC, d.id DESC LIMIT {take}",
+        picture("d"),
         readable_document("d", 1),
         placed("d.parent_id"),
     );
@@ -159,19 +194,34 @@ async fn list(
             created_at: row.get(6)?,
             about: None,
             about_id: opt(&row, 7),
+            excerpt: None,
+            image: opt(&row, 8).filter(|id| !id.is_empty()),
+            quote: None,
         });
     }
     if let Some(comments) = comments {
+        let quoted = |row: &turso::Row, first: usize| -> Option<Quote> {
+            let text = opt(row, first + 2).filter(|t| !t.trim().is_empty())?;
+            Some(Quote {
+                by_did: opt(row, first),
+                by_text: opt(row, first + 1).filter(|name| !name.is_empty()),
+                text,
+            })
+        };
         let sql = format!(
             // About the document its thread is on, so a reply is news of that
             // document too. An emptied comment is nobody's news.
-            "SELECT k.id, k.text, k.context_id, k.author_did, k.author_text, k.created_at, k.root_id \
-             FROM comment k WHERE {} AND {comments} AND {} AND k.tombstone = 0 \
+            "SELECT k.id, k.text, k.context_id, k.author_did, k.author_text, k.created_at, \
+                    k.root_id, k.image, up.author_did, up.author_text, up.text \
+             FROM comment k LEFT JOIN comment up ON up.id = k.on_id AND up.deleted_at IS NULL \
+             WHERE {} AND {comments} AND {} AND k.tombstone = 0 \
              ORDER BY k.created_at DESC, k.id DESC LIMIT {take}",
             readable_comment("k", 1),
             placed("k.root_id"),
         );
-        let mut rows = conn.query(&sql, vec![who, Value::Text(subject)]).await?;
+        let mut rows = conn
+            .query(&sql, vec![who.clone(), Value::Text(subject.clone())])
+            .await?;
         while let Some(row) = rows.next().await? {
             items.push(Item {
                 node: "comment",
@@ -185,7 +235,54 @@ async fn list(
                 created_at: row.get(5)?,
                 about: None,
                 about_id: opt(&row, 6),
+                excerpt: None,
+                image: opt(&row, 7),
+                quote: quoted(&row, 8),
             });
+        }
+        // A reaction is news where what it is to is: a comment, or a page.
+        if !contributions {
+            let on_comments = format!(
+                "SELECT r.id, r.emoji, k.context_id, r.reactor_did, r.created_at, k.root_id, \
+                        k.image, k.author_did, k.author_text, k.text \
+                 FROM reaction r JOIN comment k ON k.id = r.subject_uri \
+                 WHERE {} AND {comments} AND {} AND k.tombstone = 0 \
+                 ORDER BY r.created_at DESC, r.id DESC LIMIT {take}",
+                readable_comment("k", 1),
+                placed("k.root_id"),
+            );
+            let on_pages = format!(
+                "SELECT r.id, r.emoji, d.context_id, r.reactor_did, r.created_at, d.id, \
+                        {}, NULL, NULL, NULL \
+                 FROM reaction r JOIN document d ON d.id = r.subject_uri \
+                 WHERE d.deleted_at IS NULL AND {} AND {documents} \
+                 ORDER BY r.created_at DESC, r.id DESC LIMIT {take}",
+                picture("d"),
+                readable_document("d", 1),
+            );
+            for sql in [on_comments, on_pages] {
+                let mut rows = conn
+                    .query(&sql, vec![who.clone(), Value::Text(subject.clone())])
+                    .await?;
+                while let Some(row) = rows.next().await? {
+                    items.push(Item {
+                        node: "reaction",
+                        id: row.get(0)?,
+                        kind: "reaction".to_string(),
+                        text: row.get(1)?,
+                        path: None,
+                        context_id: row.get(2)?,
+                        by_did: opt(&row, 3),
+                        by_text: None,
+                        created_at: row.get(4)?,
+                        about: None,
+                        about_id: opt(&row, 5),
+                        excerpt: None,
+                        image: opt(&row, 6).filter(|id| !id.is_empty()),
+                        quote: quoted(&row, 7),
+                    });
+                }
+            }
         }
     }
     // Two sorted lists into one: each was cut at `limit + offset`, so the first
@@ -204,8 +301,40 @@ async fn list(
     let about = node_refs(&conn, &about, caller).await?;
     for item in &mut page {
         item.about = item.about_id.as_ref().and_then(|id| about.get(id).cloned());
+        // Only for the rows that made the page: a page's text is read here, and
+        // is the one heavy thing a row is made from.
+        if item.node == "document" {
+            item.excerpt = excerpt_of(&conn, &item.id).await?;
+        }
     }
     Ok(page)
+}
+
+/// How the page `id` begins, on one line.
+async fn excerpt_of(conn: &turso::Connection, id: &str) -> Result<Option<String>, DbError> {
+    let mut rows = conn
+        .query("SELECT content FROM document WHERE id = ?1", [id])
+        .await?;
+    let Some(content) = rows.next().await?.and_then(|row| opt(&row, 0)) else {
+        return Ok(None);
+    };
+    let Ok(content) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Ok(None);
+    };
+    let text = crate::search::plain_text(&content);
+    let mut words = text.split_whitespace();
+    let mut excerpt = String::new();
+    for word in &mut words {
+        if excerpt.chars().count() + word.chars().count() + 1 > EXCERPT_CHARS {
+            excerpt.push('…');
+            break;
+        }
+        if !excerpt.is_empty() {
+            excerpt.push(' ');
+        }
+        excerpt.push_str(word);
+    }
+    Ok(Some(excerpt).filter(|e| !e.is_empty()))
 }
 
 /// A listing with the profile behind every DID in it.
@@ -469,6 +598,83 @@ mod tests {
         let (_, v) = get_as(router(state.clone()), &of_closed, &bob).await;
         assert_eq!(v["items"][0]["id"], said["id"], "{v}");
         assert_eq!(v["items"][0]["about"]["title"], "Secret Minutes", "{v}");
+    }
+
+    /// A row stands on its own: how the page begins, the picture that goes with
+    /// it, and for an answer or a reaction the comment it is to. And a reaction
+    /// is news, as it is in the interim's feed.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_row_says_enough_to_stand_on_its_own() {
+        let state = state().await;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let conn = state.db.acquire().await.expect("conn");
+        conn.execute_batch(
+            "UPDATE document SET data = '{\"image\":\"cover-1\"}', \
+               content = '[{\"children\":[{\"text\":\"Mødet blev åbnet \"},{\"text\":\"kl. 19\"}]}]' \
+             WHERE id = 's1';
+             UPDATE comment SET image = 'pic-1' WHERE id = 'ks';",
+        )
+        .await
+        .expect("seed");
+        let say = |body: serde_json::Value, method: &'static str| {
+            let (state, bob) = (state.clone(), bob.clone());
+            async move {
+                let uri = format!("/xrpc/com.example.wiki.{method}");
+                let (status, v) = post(router(state), &uri, Some(&bob), body).await;
+                assert_eq!(status, StatusCode::OK, "{v}");
+            }
+        };
+        say(json!({"on_id": "ks", "text": "Enig"}), "postComment").await;
+        say(json!({"subject": "ks", "emoji": "👍"}), "addReaction").await;
+        say(json!({"subject": "s1", "emoji": "🎉"}), "addReaction").await;
+
+        let (_, v) = get_as(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.listRecent?context=c9",
+            &bob,
+        )
+        .await;
+        let rows = v["items"].as_array().expect("items");
+        let row = |node: &str, text: &str| {
+            rows.iter()
+                .find(|r| r["node"] == node && r["text"] == text)
+                .unwrap_or_else(|| panic!("no {node} row saying {text}: {v}"))
+        };
+        let page = row("document", "Secret Minutes");
+        assert_eq!(page["excerpt"], "Mødet blev åbnet kl. 19");
+        assert_eq!(page["image"], "cover-1");
+
+        let answer = row("comment", "Enig");
+        assert_eq!(answer["quote"]["text"], "Secret remark", "{answer}");
+        assert_eq!(answer["quote"]["by_did"], "did:plc:alice");
+        assert!(
+            row("comment", "Secret remark").get("quote").is_none(),
+            "it answers nobody"
+        );
+        assert_eq!(row("comment", "Secret remark")["image"], "pic-1");
+
+        let thumb = row("reaction", "👍");
+        assert_eq!(thumb["by_did"], "did:plc:bob");
+        assert_eq!(thumb["quote"]["text"], "Secret remark");
+        assert_eq!(
+            thumb["image"], "pic-1",
+            "the picture its comment makes its point with"
+        );
+        assert_eq!(thumb["about"]["title"], "Secret Minutes");
+        let cheer = row("reaction", "🎉");
+        assert_eq!(cheer["about"]["title"], "Secret Minutes");
+        assert_eq!(cheer["image"], "cover-1");
+
+        let (_, v) = get(
+            router(state.clone()),
+            "/xrpc/com.example.wiki.listRecent?context=c9",
+        )
+        .await;
+        assert_eq!(
+            v["items"],
+            json!([]),
+            "a closed group's reactions, to the signed out"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

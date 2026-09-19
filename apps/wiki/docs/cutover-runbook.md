@@ -73,6 +73,15 @@ tested.
    what is already there is passed over. `import-files` exits non-zero and lists
    every file it did not copy (never downloaded, or short of the size storage
    reported), and lists without copying every file that nothing points at.
+   On the NixOS host, steps 4 and 5 are one unit. The service runs as a systemd
+   DynamicUser with a private state directory, so `appview import` cannot be run
+   against it by hand. Set `services.wiki-appview.import.extraction` and
+   `.files` to where the two are ON THE HOST (strings, never Nix paths: a path
+   would copy every member's address into the world-readable store), rebuild,
+   and `systemctl start wiki-appview-import`. It stops the service, loads, files
+   the files, and leaves the service stopped for the gates below;
+   `journalctl -u wiki-appview-import` has what it printed. The VM test
+   (`crates/appview/nixos-test.nix`) runs exactly this.
 6. **Verification gates** (below): go/no-go. Any red gate stops the cutover.
 7. **Flip.** Build the frontend with `WIKI_GRAPHQL_URL` / `WIKI_BACKEND_URL`
    pointed at the AppView, and change the `backend_api::file_url` body to the

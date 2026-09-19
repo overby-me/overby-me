@@ -469,18 +469,39 @@
 		},
 		"feedItemView": {
 			"type": "object",
-			"description": "One thing that happened. Light on purpose: it never carries a document's content.",
+			"description": "One thing that happened: a page submitted, a comment, a reaction. Light on purpose: it never carries a document's content, only how it begins.",
 			"required": ["node", "id", "kind", "text", "context_id", "created_at"],
 			"properties": {
-				"node": { "type": "string", "knownValues": ["document", "comment"] },
+				"node": {
+					"type": "string",
+					"knownValues": ["document", "comment", "reaction"]
+				},
 				"id": { "type": "string" },
 				"kind": {
 					"type": "string",
-					"description": "A document's kind; `comment` for a comment."
+					"description": "A document's kind; `comment` or `reaction` for those."
 				},
 				"text": {
 					"type": "string",
-					"description": "A document's title, or a comment's text."
+					"description": "A document's title, a comment's text, or a reaction's emoji."
+				},
+				"excerpt": {
+					"type": "string",
+					"description": "How a page begins, on one line."
+				},
+				"image": {
+					"type": "string",
+					"description": "The picture that goes with the row, as a blob id: a page's cover, a picture that was uploaded, a comment's picture, or for a reaction that of what it is to."
+				},
+				"quote": {
+					"type": "object",
+					"description": "The comment an answer or a reaction is to, so that the row stands on its own.",
+					"required": ["text"],
+					"properties": {
+						"by_did": { "type": "string" },
+						"by_text": { "type": "string" },
+						"text": { "type": "string" }
+					}
 				},
 				"path": {
 					"type": "string",
@@ -496,7 +517,7 @@
 				"about": {
 					"type": "ref",
 					"ref": "#nodeRef",
-					"description": "Where a document sits, or what a comment is on, if the caller may read it."
+					"description": "Where a document sits, or the page a comment's or a reaction's thread is on, if the caller may read it."
 				}
 			}
 		},

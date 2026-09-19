@@ -133,8 +133,8 @@ pub async fn purge_comment(
     Json(body): Json<CommentIdBody>,
 ) -> Response {
     let what = "purgeComment";
-    match deletable_comment(&state, &body.id, &did, what).await {
-        Ok(meta) if meta.bin_entry => {}
+    let meta = match deletable_comment(&state, &body.id, &did, what).await {
+        Ok(meta) if meta.bin_entry => meta,
         Ok(_) => {
             return err(
                 StatusCode::NOT_FOUND,
@@ -143,7 +143,7 @@ pub async fn purge_comment(
             );
         }
         Err(refusal) => return refusal,
-    }
+    };
     match crate::Store::new(state.db.clone())
         .purge_comment(&body.id)
         .await
@@ -154,6 +154,8 @@ pub async fn purge_comment(
                     tracing::warn!("a purged comment left blob {image} behind: {e}");
                 }
             }
+            // For whoever has the bin open.
+            state.publish(Topic::Context(meta.context_id), "comment", &meta.on_id);
             (
                 StatusCode::OK,
                 Json(serde_json::json!({ "purged": purged })),

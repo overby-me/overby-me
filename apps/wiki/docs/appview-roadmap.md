@@ -313,8 +313,11 @@ The steps:
   only, so `årsmøde` did not find `Årsmøde`. The index is derived, rebuilt at
   every start and kept fresh by writes, so the loader need not know of it. A
   title match is ranked before the cut, not after. The feed is the interim's
-  predicate (submitted content and comments, where the caller belongs) over
-  light rows; the interim's rows each carried their whole document.
+  predicate (submitted content, comments and reactions, where the caller
+  belongs) over light rows; the interim's rows each carried their whole
+  document. A row carries what the frontend draws one from: how the page
+  begins, the picture that goes with it, and for an answer or a reaction the
+  comment it is to.
 
 ### M4: membership and roster
 
@@ -490,6 +493,11 @@ asks Bluesky's public API itself. The steps:
 - [x] A person takes their interim account over at sign-in, or a seat at a time
   by claim link (`crates/appview/src/legacy.rs`). A test reads the schema, so a
   table that names an account and is not handed over fails the tests.
+- [x] The load as the deployment runs it: `wiki-appview-import`, a one-shot unit
+  in the NixOS module that shares the service's private state directory and
+  confinement, takes the extraction as a systemd credential and the files as a
+  read-only bind, and stops the service while it loads. The VM test loads a
+  made-up wiki this way and reads it back over HTTP.
 - [ ] The field-gap report empty on a real dump, which is the owner's to take.
 - [ ] Staging rehearsal of the runbook; browser suite green against the AppView.
 

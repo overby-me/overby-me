@@ -821,6 +821,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// What the NixOS VM test loads (`nixos-test.nix`). Loaded here too, so that
+    /// a change to what an extraction looks like fails in seconds and not only
+    /// where a VM has to boot to find out. Made by `extract` from a made-up
+    /// snapshot: run that again when this fails.
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_extraction_the_vm_test_loads_still_loads() {
+        let ex: Extraction = serde_json::from_str(include_str!("../fixtures/extraction.json"))
+            .expect("the fixture parses");
+        let mut state = fresh().await;
+        let blobs =
+            std::env::temp_dir().join(format!("fixture-blobs-{}", crate::util::random_token(8)));
+        state.config.blob_dir = blobs.to_string_lossy().into_owned();
+        let stats = import(&state.db, &ex).await.expect("import");
+        assert_eq!(
+            (
+                stats.entities.contexts,
+                stats.entities.documents,
+                stats.accounts
+            ),
+            (2, 2, 1)
+        );
+        let files = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/files"));
+        let copied = import_files(&state, &ex, files).await.expect("files");
+        assert_eq!((copied.copied, copied.failed.len()), (1, 0), "{copied:?}");
+        let _ = std::fs::remove_dir_all(&blobs);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn a_load_that_fails_leaves_nothing_behind() {
         let mut ex = interim();
