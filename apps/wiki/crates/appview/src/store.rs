@@ -52,6 +52,11 @@ const DOC_COLS: &str = concat!(
 /// The `context` columns the read side selects (order matches [`ctx_from_row`]).
 const CTX_COLS: &str = concat!("id, kind, name, visibility, published_uri, ", place_cols!());
 
+/// The present, as every timestamp here is written: ISO-8601, UTC, milliseconds.
+/// Matches the DDL's defaults and the migrated rows, so timestamps compare as
+/// text and parse in a browser. SQLite's `datetime('now')` has no zone.
+const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+
 /// A row is live unless it is in the bin. Every read but the bin's own asks.
 const LIVE: &str = "deleted_at IS NULL";
 
@@ -1806,7 +1811,7 @@ impl Store {
             conn.execute(
                 &format!(
                     "UPDATE {table} SET path = ?1 || substr(path, length(?2) + 1), \
-                       updated_at = datetime('now') \
+                       updated_at = {NOW} \
                      WHERE substr(path, 1, length(?2) + 1) = ?2 || '/'"
                 ),
                 [new_path.as_str(), old_path.as_str()],
@@ -1814,8 +1819,10 @@ impl Store {
             .await?;
         }
         conn.execute(
-            "UPDATE document SET parent_id = ?1, slug = ?2, path = ?3, \
-               updated_at = datetime('now') WHERE id = ?4",
+            &format!(
+                "UPDATE document SET parent_id = ?1, slug = ?2, path = ?3, \
+                   updated_at = {NOW} WHERE id = ?4"
+            ),
             [new_parent_id, new_slug.as_str(), new_path.as_str(), id],
         )
         .await?;
@@ -1916,7 +1923,7 @@ impl Store {
         let changed = conn
             .execute(
                 &format!(
-                    "UPDATE document SET {}updated_at = datetime('now') \
+                    "UPDATE document SET {}updated_at = {NOW} \
                      WHERE id = ?{} AND {LIVE}",
                     sets.iter().map(|s| format!("{s}, ")).collect::<String>(),
                     params.len()
@@ -1938,8 +1945,8 @@ impl Store {
             binned += conn
                 .execute(
                     &format!(
-                        "UPDATE {table} SET deleted_at = datetime('now'), deleted_root = ?1, \
-                           updated_at = datetime('now') \
+                        "UPDATE {table} SET deleted_at = {NOW}, deleted_root = ?1, \
+                           updated_at = {NOW} \
                          WHERE {LIVE} AND {SUBTREE}"
                     ),
                     [id, path],
@@ -1983,7 +1990,7 @@ impl Store {
                 .execute(
                     &format!(
                         "UPDATE {table} SET deleted_at = NULL, deleted_root = NULL, \
-                           updated_at = datetime('now') \
+                           updated_at = {NOW} \
                          WHERE deleted_root = ?1"
                     ),
                     [id],
@@ -2067,12 +2074,14 @@ impl Store {
             None => slug.to_string(),
         };
         conn.execute(
-            "INSERT INTO context \
-             (id, kind, name, slug, path, parent_id, visibility, published_uri, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'public', ?1, ?7) \
-             ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, \
-               slug = excluded.slug, path = excluded.path, parent_id = excluded.parent_id, \
-               created_at = excluded.created_at, updated_at = datetime('now')",
+            &format!(
+                "INSERT INTO context \
+                 (id, kind, name, slug, path, parent_id, visibility, published_uri, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'public', ?1, ?7) \
+                 ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, \
+                   slug = excluded.slug, path = excluded.path, parent_id = excluded.parent_id, \
+                   created_at = excluded.created_at, updated_at = {NOW}"
+            ),
             vec![
                 Value::Text(uri.to_string()),
                 Value::Text(kind.to_string()),
@@ -2192,14 +2201,16 @@ impl Store {
         let slug = uri.rsplit('/').next().unwrap_or(uri);
         let path = format!("{}/{slug}", parent.path);
         conn.execute(
-            "INSERT INTO document \
-             (id, context_id, parent_id, kind, title, slug, path, owner_did, content, \
-              visibility, published_uri, created_at) \
-             VALUES (?1, ?2, ?2, 'resolution', ?3, ?4, ?5, ?6, ?7, 'public', ?1, ?8) \
-             ON CONFLICT(id) DO UPDATE SET context_id = excluded.context_id, \
-               parent_id = excluded.parent_id, title = excluded.title, path = excluded.path, \
-               content = excluded.content, created_at = excluded.created_at, \
-               updated_at = datetime('now')",
+            &format!(
+                "INSERT INTO document \
+                 (id, context_id, parent_id, kind, title, slug, path, owner_did, content, \
+                  visibility, published_uri, created_at) \
+                 VALUES (?1, ?2, ?2, 'resolution', ?3, ?4, ?5, ?6, ?7, 'public', ?1, ?8) \
+                 ON CONFLICT(id) DO UPDATE SET context_id = excluded.context_id, \
+                   parent_id = excluded.parent_id, title = excluded.title, \
+                   path = excluded.path, content = excluded.content, \
+                   created_at = excluded.created_at, updated_at = {NOW}"
+            ),
             [
                 uri,
                 context_id,

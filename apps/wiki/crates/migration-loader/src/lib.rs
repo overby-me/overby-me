@@ -101,7 +101,7 @@ fn boolv(b: bool) -> Value {
 }
 
 /// Append the `created_at` column + param ONLY when a source timestamp exists.
-/// Omitting it lets the `NOT NULL DEFAULT (datetime('now'))` fire; passing an
+/// Omitting it lets the column's `NOT NULL DEFAULT` fire; passing an
 /// explicit NULL would violate the NOT NULL constraint (default notwithstanding).
 fn push_created_at(
     cols: &mut Vec<&'static str>,

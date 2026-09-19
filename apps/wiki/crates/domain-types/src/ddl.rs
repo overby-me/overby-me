@@ -19,6 +19,10 @@
 //! are intentionally NOT here: they settle with the ballot spec and are added by
 //! the ballot service, not the content/membership migration.
 
+// Timestamps default to ISO-8601 in UTC with milliseconds, which is what the
+// migrated rows carry and what the frontend parses. SQLite's own `datetime()`
+// writes `2026-09-19 12:18:24`, with no zone, which a browser reads as local.
+
 /// The reconciled entity-subset schema, in the SQLite dialect (Turso's primary
 /// frontend and the bridge target). Its foreign keys bind only on a connection
 /// that has set `PRAGMA foreign_keys=ON`; both engines default it off.
@@ -47,8 +51,8 @@ CREATE TABLE context (
   owner_did     TEXT REFERENCES user(did),
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
   published_uri TEXT,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   deleted_at    TEXT,
   deleted_root  TEXT,
   legacy_id     TEXT UNIQUE
@@ -75,8 +79,8 @@ CREATE TABLE document (
   data          TEXT,
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
   published_uri TEXT,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   deleted_at    TEXT,
   deleted_root  TEXT,
   legacy_id     TEXT UNIQUE
@@ -107,7 +111,7 @@ CREATE TABLE post (
   text          TEXT NOT NULL,
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
   published_uri TEXT,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   legacy_id     TEXT UNIQUE,
   CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
 );
@@ -126,7 +130,7 @@ CREATE TABLE member (
   name        TEXT,
   hidden      INTEGER NOT NULL DEFAULT 0,
   accepted    INTEGER NOT NULL DEFAULT 0,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   email       TEXT,
   claim_token TEXT UNIQUE,
   legacy_id   TEXT UNIQUE
@@ -143,7 +147,7 @@ CREATE TABLE comment (
   author_did  TEXT REFERENCES user(did),
   author_text TEXT,
   text        TEXT NOT NULL,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   legacy_id   TEXT UNIQUE,
   CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
 );
@@ -158,7 +162,7 @@ CREATE TABLE reaction (
   subject_uri TEXT NOT NULL,                       -- the reacted-to record's at-uri
   reactor_did TEXT REFERENCES user(did),
   emoji       TEXT NOT NULL,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   legacy_id   TEXT UNIQUE
 );
 CREATE INDEX reaction_by_subject ON reaction(subject_uri);

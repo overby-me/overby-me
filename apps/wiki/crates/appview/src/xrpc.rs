@@ -2166,6 +2166,32 @@ mod tests {
         assert_eq!(v["id"], nested["id"]);
     }
 
+    /// SQLite's own `datetime('now')` writes `2026-09-19 12:18:24`: no zone, so a
+    /// browser reads it as local time, and it sorts wrongly against migrated rows.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_timestamp_is_iso_8601_in_utc() {
+        let state = seeded_state().await;
+        let carol = token_for(&state, "did:plc:carol").await;
+        join_as(&state, "did:plc:carol", "c1", "owner").await;
+        let doc = create(
+            &state,
+            &carol,
+            serde_json::json!({"context_id": "c1", "kind": "folder", "title": "Tid"}),
+        )
+        .await;
+        for field in ["created_at", "updated_at"] {
+            let at = doc[field].as_str().expect("a timestamp");
+            let shaped = at.len() == 24
+                && at.as_bytes()[10] == b'T'
+                && at.ends_with('Z')
+                && at.starts_with("20");
+            assert!(
+                shaped,
+                "{field} is {at:?}, not like 2026-09-19T12:18:24.689Z"
+            );
+        }
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn a_document_needs_a_parent_that_is_there() {
         let state = seeded_state().await;
@@ -2189,7 +2215,7 @@ mod tests {
         let state = seeded_state().await;
         let conn = state.db.acquire().await.expect("conn");
         conn.execute(
-            "UPDATE document SET deleted_at = datetime('now') WHERE id = 'd1'",
+            "UPDATE document SET deleted_at = '2026-01-01T00:00:00.000Z' WHERE id = 'd1'",
             (),
         )
         .await
