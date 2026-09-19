@@ -684,3 +684,63 @@ async fn a_show_of_hands_is_opened_cast_in_and_closed_as_the_vote_screens_do_it(
         .expect("clear"));
     assert_eq!(super::active_node_id(Some(&carol), &group).await, Ok(None));
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_board_is_made_painted_and_locked_as_the_canvas_screen_does_it() {
+    let server = Server::start();
+    let carol = server.session(CAROL);
+    let (group, _page) = a_group_with_a_page(&carol).await;
+
+    let board = super::create_canvas(Some(&carol), &group, "Tavlen", 500, 4, 3600)
+        .await
+        .expect("createCanvas");
+    assert_eq!(board.key, "tavlen");
+    let node = super::query_node_by_id(Some(&carol), &board.id.0, CAROL)
+        .await
+        .expect("read")
+        .expect("the board");
+    assert_eq!(node.mime_id.as_deref(), Some("canvas/canvas"));
+    assert!(node.mutable, "open to the room");
+    let data = node.data.expect("data").0;
+    assert_eq!(
+        (&data["w"], &data["h"]),
+        (&serde_json::json!(128), &serde_json::json!(4)),
+        "a side is capped"
+    );
+
+    assert_eq!(
+        super::my_last_paint(Some(&carol), &board.id.0, CAROL).await,
+        None
+    );
+    super::paint_cell(Some(&carol), &board.id.0, &group, CAROL, 3, 2, 7)
+        .await
+        .expect("paintCell");
+    let cells = super::load_canvas(Some(&carol), &board.id.0)
+        .await
+        .expect("cells");
+    assert_eq!(cells.len(), 1);
+    assert_eq!((cells[0].at, cells[0].colour), ((3, 2), 7));
+    assert_eq!(cells[0].owner.as_deref(), Some(CAROL));
+    let last = super::my_last_paint(Some(&carol), &board.id.0, CAROL)
+        .await
+        .expect("she has painted");
+    assert_eq!(
+        &last[..4],
+        &cells[0].when.as_ref().expect("when")[..4],
+        "{last}"
+    );
+
+    let too_soon = super::paint_cell(Some(&carol), &board.id.0, &group, CAROL, 0, 0, 1).await;
+    assert!(too_soon
+        .expect_err("an hour's cooldown")
+        .contains("TooSoon"));
+
+    super::set_canvas_open(Some(&carol), &board.id.0, false)
+        .await
+        .expect("lock");
+    let node = super::query_node_by_id(Some(&carol), &board.id.0, CAROL)
+        .await
+        .expect("read")
+        .expect("the board");
+    assert!(!node.mutable, "locked");
+}

@@ -10,6 +10,7 @@
 #![allow(dead_code)]
 
 mod bin;
+mod canvas;
 pub mod map;
 mod nodes;
 mod people;
@@ -20,6 +21,8 @@ mod vote;
 
 #[allow(unused_imports)]
 pub use bin::*;
+#[allow(unused_imports)]
+pub use canvas::*;
 #[allow(unused_imports)]
 pub use nodes::*;
 #[allow(unused_imports)]

@@ -57,6 +57,14 @@ async fn read_node(
             }
         }
     }
+    // And a canvas: its size and cooldown in `data`, open while `mutable`.
+    if node.mime_id.as_deref() == Some("canvas/canvas") {
+        let no_cells = Some(super::canvas::NO_CELLS);
+        if let Ok(board) = super::canvas::read_canvas(access_token, &node.id.0, no_cells).await {
+            node.data = Some(crate::model::Jsonb(super::canvas::canvas_data(&board)));
+            node.mutable = board.open;
+        }
+    }
     // The home lists who runs the site, which no other page does of its members.
     if matches!(&read.node, get_node::OutputNode::Context(c) if c.kind == "home") {
         let members = list_members::Params {
