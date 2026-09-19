@@ -186,3 +186,182 @@ async fn a_group_is_made_written_in_and_read_back_as_the_components_read_it() {
     );
     assert_eq!(super::purge_node(Some(&carol), &folder.id.0).await, Ok(2));
 }
+
+/// A group carol made, with a submitted page in it. Returns their ids.
+async fn a_group_with_a_page(carol: &str) -> (String, String) {
+    let home = super::query_root_node(Some(carol), CAROL)
+        .await
+        .expect("the home")
+        .expect("is there");
+    let group = super::create_context(
+        Some(carol),
+        &home.id.0,
+        &home.id.0,
+        "wiki/group",
+        "HB",
+        None,
+    )
+    .await
+    .expect("a group");
+    let mut page = a_node("wiki/document", "Referat", &group.id.0, &group.id.0);
+    page.mutable = Some(false);
+    page.data = Some(crate::model::Jsonb(serde_json::json!({
+        "content": [{"children": [{"text": "Mødet blev åbnet kl. 19"}]}]
+    })));
+    let page = super::insert_node(Some(carol), page)
+        .await
+        .expect("a page")
+        .expect("inserted");
+    (group.id.0, page.id.0)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_thread_is_written_read_and_taken_back_as_the_comments_component_does_it() {
+    let server = Server::start();
+    let carol = server.session(CAROL);
+    let (group, page) = a_group_with_a_page(&carol).await;
+
+    assert!(super::insert_comment(
+        Some(&carol),
+        &page,
+        Some(&group),
+        "k",
+        "Carol",
+        "Punkt 3 mangler",
+        None
+    )
+    .await
+    .expect("a comment"));
+    let thread = super::query_comments(Some(&carol), &page)
+        .await
+        .expect("the thread");
+    assert_eq!(thread.len(), 1);
+    let first = &thread[0];
+    assert_eq!(first.mime_id.as_deref(), Some("vote/comment"));
+    assert_eq!(
+        first.data.as_ref().expect("data").0["text"],
+        "Punkt 3 mangler"
+    );
+    assert_eq!(
+        (first.is_owner, first.is_context_owner),
+        (Some(true), Some(true))
+    );
+
+    assert!(super::insert_comment(
+        Some(&carol),
+        &first.id.0,
+        Some(&group),
+        "k2",
+        "Carol",
+        "Rettet",
+        None
+    )
+    .await
+    .expect("an answer"));
+    assert!(
+        super::insert_reaction(Some(&carol), &first.id.0, Some(&group), "👍")
+            .await
+            .expect("a reaction")
+    );
+    let reactions = super::query_reactions(Some(&carol), &first.id.0)
+        .await
+        .expect("reactions");
+    assert_eq!(reactions.len(), 1);
+    assert_eq!(reactions[0].data.as_ref().expect("data").0["emoji"], "👍");
+    assert_eq!(
+        reactions[0].owner_id,
+        Some(Uuid(CAROL.into())),
+        "whose it is, to mark it as hers"
+    );
+
+    // The feed draws a row from the node it is handed: what happened, the
+    // comment it was to, and where.
+    let feed = super::query_recent_nodes(Some(&carol), 20, 0, CAROL, Some(&group)).await;
+    let kinds: Vec<&str> = feed
+        .iter()
+        .filter_map(|row| row.mime_id.as_deref())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "vote/reaction",
+            "vote/comment",
+            "vote/comment",
+            "wiki/document"
+        ]
+    );
+    let reaction = &feed[0];
+    let quoted = reaction.parent.as_ref().expect("what it is to");
+    assert_eq!(quoted.mime_id.as_deref(), Some("vote/comment"));
+    assert_eq!(
+        quoted.data.as_ref().expect("data").0["text"],
+        "Punkt 3 mangler"
+    );
+    assert_eq!(quoted.parent.as_ref().expect("where").name, "Referat");
+    let opening =
+        crate::components::content::slate_plain_text(&feed[3].data.as_ref().expect("data").0);
+    assert_eq!(
+        opening.trim(),
+        "Mødet blev åbnet kl. 19",
+        "how the page begins"
+    );
+    assert_eq!(
+        super::thread_host(Some(&carol), &first.id.0).await,
+        (page.clone(), Some("Referat".to_string()))
+    );
+
+    // Un-reacting is `delete_node` on the reaction's row, to the component.
+    assert!(super::delete_node(Some(&carol), &reactions[0].id.0)
+        .await
+        .expect("un-react"));
+    assert!(super::query_reactions(Some(&carol), &first.id.0)
+        .await
+        .expect("reactions")
+        .is_empty());
+
+    // An answered comment is emptied by an `update_node`, an unanswered one is
+    // binned by a `bin_node`. Both are one method here, which decides itself.
+    let answer = super::query_comments(Some(&carol), &first.id.0)
+        .await
+        .expect("answers")[0]
+        .id
+        .0
+        .clone();
+    let emptied = NodesSetInput {
+        name: Some(String::new()),
+        data: Some(crate::model::Jsonb(serde_json::json!({"deleted": true}))),
+        ..Default::default()
+    };
+    assert!(super::update_node(Some(&carol), &first.id.0, emptied)
+        .await
+        .expect("emptied"));
+    let thread = super::query_comments(Some(&carol), &page)
+        .await
+        .expect("the thread");
+    assert_eq!(thread[0].data.as_ref().expect("data").0["deleted"], true);
+    assert_eq!(
+        super::bin_node(Some(&carol), &answer, None, None).await,
+        Ok(1)
+    );
+    let bin = super::query_deleted(Some(&carol), &group, &group)
+        .await
+        .expect("the bin");
+    assert_eq!(bin[0].mime_id.as_deref(), Some("vote/comment"));
+    assert_eq!(super::restore_node(Some(&carol), &answer).await, Ok(1));
+
+    let found = super::search_nodes(Some(&carol), "åbnet", None)
+        .await
+        .expect("search");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].parent.as_ref().expect("in").name, "HB");
+    let hers = super::query_user_contributions(Some(&carol), CAROL, 10).await;
+    assert!(
+        hers.iter()
+            .any(|row| row.mime_id.as_deref() == Some("vote/comment")),
+        "{hers:?}"
+    );
+    assert!(super::query_orphans(Some(&carol))
+        .await
+        .expect("orphans")
+        .is_empty());
+}

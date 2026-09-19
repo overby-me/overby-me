@@ -318,10 +318,41 @@ pub async fn get_comments(
     Query(p): Query<OnParam>,
 ) -> Response {
     let store = crate::Store::new(state.db.clone());
-    match store.get_comments(&p.on, caller.did()).await {
-        Ok(comments) => (
+    let read = async {
+        let comments = store.get_comments(&p.on, caller.did()).await?;
+        let dids: std::collections::BTreeSet<String> = comments
+            .iter()
+            .filter_map(|k| k.author.did().map(str::to_string))
+            .collect();
+        let profiles = store.profiles(&dids).await?;
+        // Where the caller stands in the thread's context, which is what says
+        // who may delete what: its author, or an owner.
+        let context = match store.readable_subject(&p.on, caller.did()).await? {
+            Some((context_id, _)) => Some(context_id),
+            None => comments.first().map(|k| k.context_id.clone()),
+        };
+        let membership = match (context, caller.did()) {
+            (Some(context), Some(did)) => {
+                Authz::new(state.db.clone())
+                    .membership(&context, did)
+                    .await?
+            }
+            _ => None,
+        };
+        Ok::<_, crate::DbError>((comments, profiles, membership))
+    };
+    match read.await {
+        Ok((comments, profiles, membership)) => (
             StatusCode::OK,
-            Json(serde_json::json!({ "comments": comments })),
+            Json(serde_json::json!({
+                "comments": comments,
+                "profiles": profiles,
+                "viewer": {
+                    "did": caller.did(),
+                    "is_member": membership.is_some(),
+                    "is_context_owner": membership.is_some_and(owns),
+                },
+            })),
         )
             .into_response(),
         Err(e) => {

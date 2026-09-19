@@ -19,13 +19,30 @@
 				"encoding": "application/json",
 				"schema": {
 					"type": "object",
-					"required": ["comments"],
+					"required": ["comments", "profiles", "viewer"],
 					"properties": {
 						"comments": {
 							"type": "array",
 							"items": {
 								"type": "ref",
 								"ref": "com.example.wiki.defs#commentView"
+							}
+						},
+						"profiles": {
+							"type": "unknown",
+							"description": "An object from DID to profileView, for everyone who wrote one of these."
+						},
+						"viewer": {
+							"type": "object",
+							"description": "Where the caller stands in the thread's context, which says what they may delete: what they wrote, or as an owner anything.",
+							"required": ["is_member", "is_context_owner"],
+							"properties": {
+								"did": {
+									"type": "string",
+									"description": "The caller. Absent for someone not signed in."
+								},
+								"is_member": { "type": "boolean" },
+								"is_context_owner": { "type": "boolean" }
 							}
 						}
 					}

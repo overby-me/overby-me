@@ -1057,6 +1057,21 @@ pub mod get_comments {
     #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
     pub struct Output {
         pub comments: Vec<defs::CommentView>,
+        /// An object from DID to profileView, for everyone who wrote one of these.
+        pub profiles: serde_json::Value,
+        /// Where the caller stands in the thread's context, which says what they may delete: what they wrote, or as an owner anything.
+        pub viewer: OutputViewer,
+    }
+
+    /// Where the caller stands in the thread's context, which says what they may delete: what they wrote, or as an owner anything.
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
+    pub struct OutputViewer {
+        /// The caller. Absent for someone not signed in.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub did: Option<String>,
+        pub is_context_owner: bool,
+        pub is_member: bool,
     }
 
     #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

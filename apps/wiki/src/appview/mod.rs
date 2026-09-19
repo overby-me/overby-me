@@ -13,11 +13,14 @@ mod bin;
 pub mod map;
 mod nodes;
 mod seen;
+mod talk;
 
 #[allow(unused_imports)]
 pub use bin::*;
 #[allow(unused_imports)]
 pub use nodes::*;
+#[allow(unused_imports)]
+pub use talk::*;
 
 use appview_client::{Client, Error};
 
