@@ -61,6 +61,10 @@ hkdf = "0.12"
 # Signs the links that let an <img> or a document viewer fetch one blob.
 hmac = "0.12"
 http = "1"
+# `appview import` is the load step of the cutover: the loader for the entity
+# tables, the extractor for the shape of what it is handed.
+migration-extractor = { path = "../migration-extractor" }
+migration-loader = { path = "../migration-loader" }
 object = { version = "0.36", default-features = false, features = [
   "read",
   "wasm"

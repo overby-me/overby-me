@@ -270,31 +270,89 @@ pub struct Comment {
     pub legacy_id: Option<String>,
 }
 
-/// A poll (the question + options + open/secret state). The ONLY voting entity
-/// that migrates: a `vote/poll` node carries reconstructable metadata, whereas a
-/// cast ballot (`vote/vote`) is unmigratable (no eligibility/tokens survive). The
-/// per-poll issuer key is minted fresh at open, not carried, so it is absent here.
+/// A poll as it is carried over: what was asked, under which rules, and how it
+/// went. Its ballots are not carried (the tokens that made them anonymous do not
+/// survive), so its `counts` are: the outcome of every past vote is a record the
+/// organisation keeps. A poll also has a place in the tree, which is a
+/// [`Document`] of kind [`DocumentKind::Poll`] with the same id.
+///
+/// Always migrated CLOSED. One that was open at the dump cannot take another
+/// ballot in the new scheme, and its issuer key is minted at opening, not carried.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Poll {
     pub id: String,
     pub context_id: String,
     pub question: String,
     pub options: Vec<String>,
-    pub open: bool,
+    pub min: u32,
+    pub max: u32,
+    /// The last option is the abstention, which the interim always appends.
+    pub blank: bool,
     pub secret: bool,
+    /// Counts are for the context's owners (the interim's `hidden`).
+    pub hide_tally: bool,
+    /// One count per option.
+    pub counts: Vec<u64>,
+    pub ballots: u64,
     pub created_at: Option<String>,
+    pub closed_at: Option<String>,
     pub legacy_id: Option<String>,
 }
 
-/// An emoji reaction to a content item, addressed by the subject's at-uri.
-/// Net-new (no interim source); one per `(subject_uri, reactor_did, emoji)`.
+/// A shared pixel canvas and what was painted on it. Its place in the tree is a
+/// [`Document`] of kind [`DocumentKind::Canvas`] with the same id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Canvas {
+    pub id: String,
+    pub width: u32,
+    pub height: u32,
+    /// Seconds between one person's placements.
+    pub cooldown: u32,
+    pub open: bool,
+    pub cells: Vec<CanvasCell>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CanvasCell {
+    pub x: u32,
+    pub y: u32,
+    /// An index into the client's palette.
+    pub colour: u8,
+    pub painter_did: Option<String>,
+    pub painted_at: Option<String>,
+}
+
+/// A report: a person's account of a bug or a wish, or a crash folded from every
+/// time it was seen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Feedback {
+    pub id: String,
+    pub kind: String,
+    pub message: String,
+    pub path: String,
+    pub app_version: String,
+    pub commit: String,
+    pub user_agent: String,
+    /// A screenshot's file id.
+    pub image: Option<String>,
+    /// What a crash is folded by.
+    pub digest: Option<String>,
+    pub seen: u64,
+    /// Everyone who has hit a folded crash: DIDs, and `anonymous` at most once.
+    pub reporters: Vec<String>,
+    pub owner_did: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+/// An emoji reaction, one per `(subject_uri, reactor_did, emoji)`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reaction {
-    /// The reaction record's at-uri (the primary key).
     pub id: String,
-    /// The at-uri of the record being reacted to.
+    /// The id of the comment or document reacted to, or the at-uri of a public
+    /// record.
     pub subject_uri: String,
-    /// The reactor's DID (`None` only for a not-yet-realized user).
+    /// `None` for a reactor whose account did not come across.
     pub reactor_did: Option<String>,
     /// A single emoji grapheme.
     pub emoji: String,

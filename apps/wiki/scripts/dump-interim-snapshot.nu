@@ -1,10 +1,10 @@
 #!/usr/bin/env nu
 # Read-only dump of the interim Hasura/Postgres surface into the
-# `{ nodes, members, users }` snapshot the migration extractor consumes
+# `{ nodes, members, users, permissions }` snapshot the migration extractor consumes
 # (crates/migration-extractor). This is the FRONT of the migration pipeline:
 #
 #   dump-interim-snapshot.nu  ->  snapshot.json  ->  `extract`  ->  extraction.json
-#                                                                ->  migration-loader
+#                                                                ->  `appview import`
 #
 # It is READ-ONLY (only GraphQL queries, never a mutation) and PII-free by
 # construction only in the sense that it commits NOTHING: the admin secret is
@@ -45,11 +45,18 @@ if ($url | is-empty) or ($secret | is-empty) {
 # deserialize (camelCase; `claim_token` aliased to the extractor's `claimToken`).
 let nodes_q = "query { nodes { id name key path mimeId parentId contextId ownerId data index mutable attachable createdAt updatedAt deleted_at deleted_root } }"
 let members_q = "query { members { id name email nodeId parentId accepted active owner hidden claimToken: claim_token } }"
-let users_q = "query { users { id displayName avatarUrl } }"
+# The address and whether the interim VERIFIED it: a person takes their old
+# account over by signing in with that address, so an unverified one is not carried.
+let users_q = "query { users { id displayName avatarUrl email emailVerified } }"
+# Only the rows that open a context to everyone: a context is public when it has
+# an ACTIVE `public` row granting select, and that row is the setting. Without
+# these every context is extracted closed, the public pages included.
+let permissions_q = "query { permissions(where: {role: {_eq: \"public\"}}) { contextId role select active } }"
 
 let nodes = (gql $url $secret $nodes_q | get nodes)
 let members = (gql $url $secret $members_q | get members)
 let users = (gql $url $secret $users_q | get users)
+let permissions = (gql $url $secret $permissions_q | get permissions)
 
-print -e $"dumped ($nodes | length) nodes, ($members | length) members, ($users | length) users"
-{nodes: $nodes, members: $members, users: $users} | to json
+print -e $"dumped ($nodes | length) nodes, ($members | length) members, ($users | length) users, ($permissions | length) public permission rows"
+{nodes: $nodes, members: $members, users: $users, permissions: $permissions} | to json

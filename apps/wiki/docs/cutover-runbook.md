@@ -9,19 +9,26 @@ tested.
 
 ## Pieces (all EXISTING and tested unless marked)
 
-- **Read-only dump**: `scripts/dump-interim-snapshot.nu` — queries the interim
-  Hasura surface into the `{ nodes, members, users }` snapshot (admin secret
-  from the environment, never committed).
-- **Extractor**: `crates/migration-extractor` — maps the snapshot into the
-  canonical domain types + emits a `FieldGapReport`; `extract` binary writes
+- **Read-only dump**: `scripts/dump-interim-snapshot.nu`, which queries the
+  interim Hasura surface into the `{ nodes, members, users, permissions }`
+  snapshot (admin secret from the environment, never committed). `users` holds
+  each account's address and whether the interim verified it; `permissions`
+  holds the rows that open a context to everyone.
+- **Extractor**: `crates/migration-extractor`, which maps the snapshot into the
+  canonical domain types and emits a `FieldGapReport`; `extract` binary writes
   `extraction.json` + `report.json`.
 - **Generated schema**: `crates/domain-types::DDL` (re-exported as
   `wiki_schema::ENTITY_SCHEMA`), validated on rusqlite + turso by
   `crates/schema/tests/roundtrip.rs`. Every entity table carries
   `legacy_id TEXT UNIQUE` for idempotent load.
-- **Loader**: `crates/migration-loader` — writes an `Extraction` into a staging
-  Turso db under `ENTITY_SCHEMA`, in FK order and idempotently by primary key +
-  `legacy_id` (a re-run is a no-op).
+- **Load**: `appview import <extraction.json>` (`crates/appview/src/import.rs`).
+  It runs `crates/migration-loader` for the entity tables (FK order, idempotent
+  by primary key), then loads what lives in the AppView's own tables: what each
+  poll came to, canvases and their cells, reports, and the address each interim
+  account is recognized by. One transaction, so a load that fails leaves the
+  datastore as it found it. It refuses a datastore somebody has signed in to,
+  where loading again would bring back whatever was deleted since.
+- **Accounts**: `crates/appview/src/legacy.rs`. See "Who people are afterwards".
 - **Env seams (the flip)**: `WIKI_GRAPHQL_URL` (`src/nhost.rs:13`) and
   `WIKI_BACKEND_URL` (`src/backend_api.rs:18`), both `option_env!` compile-time
   overrides; the file-blob path flips at the single `backend_api::file_url` seam.
@@ -53,9 +60,11 @@ tested.
 3. **Extract.** `cargo run -p migration-extractor -- snapshot.json` → produces
    `extraction.json` + `report.json`. This step is PII-bearing; run it in the
    owner-approved environment, not CI.
-4. **Load to staging Turso.** Apply `ENTITY_SCHEMA` to a fresh staging Turso db,
-   then run the loader over `extraction.json`. The load is idempotent, so a
-   partial run can be safely re-run.
+4. **Load.** With the service stopped and `APPVIEW_DB` naming a datastore file
+   that does not exist yet: `appview import extraction.json`. It creates the
+   schema, loads everything or nothing, and prints what it loaded. Set the
+   printed counts against those `extract` printed. The search index is built
+   when the service next starts.
 5. **Copy the files.** NOT BUILT (`docs/appview-roadmap.md`, M8). Every file in
    NHost storage goes into the AppView's blob store under its OLD storage id,
    filed under the context of the node that points at it, so `data.fileId` on a
@@ -79,10 +88,17 @@ All must be green before the flip:
   and the count of distinct `legacy_id`s per table equals the source uuid count
   for that table (no row silently dropped or merged).
 - **Field-gap report is clean.** `report.json`'s `unmapped_source`,
-  `unmapped_mimes`, and `unfilled_required` are all empty — a non-empty
-  `unfilled_required` means a NOT NULL / meaning was dropped; a non-empty
+  `unmapped_mimes`, and `unfilled_required` are all empty. A non-empty
+  `unfilled_required` means a NOT NULL or a meaning was dropped; a non-empty
   `unmapped_*` means a source field or mime had no home and must be triaged
   (mapping rule, interim junk sweep, or schema amendment) before flipping.
+  `left_behind` is not a gap and need not be empty: it counts what is dropped on
+  purpose (deleted comments, spent claim links, speaker lists, addresses nobody
+  verified). Read it, and see that each count is one you expected.
+- **People can get back in.** The count under `users.email, not verified` is how
+  many account holders cannot be recognized by address and will need a claim
+  link for each seat. If it is most of them, the interim never verified
+  addresses, and that is a decision to take before the flip, not after.
 - **Membership dedup landed.** The census's ~1962 distinct invite emails behind
   ~17655 roster rows collapse under the `member_pending` partial unique
   (`context_id, email` where `user_did IS NULL`): the count of pending-invite
@@ -98,8 +114,31 @@ All must be green before the flip:
   hash to its `sha256`. A sample opens through `/blob/<id>` as a member of its
   context, and is refused to a stranger.
 - **Authorship preserved.** `document_author` row count ≥ document count and no
-  document with a source author chip has zero author rows (the free-text authors
-  — ~42% — survived rather than being dropped by the old scalar `author_did`).
+  document with a source author chip has zero author rows (the free-text authors,
+  about 42 percent, survived rather than being dropped by the old scalar
+  `author_did`).
+
+## Who people are afterwards
+
+The interim knew a person by an account id; the AppView knows them by their
+DID. An interim account comes across under its old id, which no login produces:
+it keeps its seats, its name and what it wrote, and cannot sign in.
+
+- **By address.** Whoever signs in with the address an account was registered
+  under takes all of it over, in one transaction: seats (the better of each
+  grant where they hold two in one context), authorship, comments, reactions,
+  cells and reports. Both ends have to vouch for the address. The extractor
+  carries only addresses the interim had VERIFIED, and the AppView believes
+  only a PDS configured as trusted (`APPVIEW_TRUSTED_EMAIL_PDS`) that says the
+  address is confirmed. The same sign-in hands over the invitations sent to
+  that address, as before.
+- **By claim link**, for everyone else. An owner asks for a member's link
+  (`getMemberClaimLink`) and hands it over. It gives the seat in that owner's
+  context and nothing else the old account holds, because a seat in their own
+  context is all an owner has to give.
+- **Spent claim links stay spent.** The interim keeps a token on its row after
+  the seat is taken. Those are not carried, or an old invitation in somebody's
+  inbox would open a seat again; a seat that needs a link gets a new one.
 
 ## Rollback
 

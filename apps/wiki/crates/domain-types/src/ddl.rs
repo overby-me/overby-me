@@ -155,14 +155,12 @@ CREATE TABLE comment (
   CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
 );
 
--- Emoji reactions on content (a member's react to a comment/post/resolution),
--- addressed by the subject's at-uri. NET-NEW (no interim source rows): the old
--- wiki had no reactions, so nothing migrates here; rows arrive from the public
--- reaction records via the firehose. One reaction per (subject, reactor, emoji);
--- deleting the record removes the row (toggle).
+-- Emoji reactions: a member's on a comment or a document (subject_uri is its
+-- id), or one mirrored from a public reaction record (subject_uri is the
+-- record's at-uri). One per (subject, reactor, emoji); taking it back deletes it.
 CREATE TABLE reaction (
-  id          TEXT PRIMARY KEY,                    -- the reaction record's at-uri
-  subject_uri TEXT NOT NULL,                       -- the reacted-to record's at-uri
+  id          TEXT PRIMARY KEY,
+  subject_uri TEXT NOT NULL,
   reactor_did TEXT REFERENCES user(did),
   emoji       TEXT NOT NULL,
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),

@@ -11,6 +11,9 @@
 //! lies would walk its owner into another person's invitations, voting rights
 //! included. So the word is taken only from the hosts configured as trusted
 //! (`Config::trusted_email_pds`), and everyone else uses a claim link.
+//!
+//! The same address hands over the account its holder had in the interim
+//! ([`crate::legacy`]), on the same terms.
 
 use crate::AppState;
 use crate::config::Config;
@@ -88,8 +91,8 @@ pub fn trusts_email_of(config: &Config, pds: &str) -> bool {
         })
 }
 
-/// Record what the PDS said, and hand `did` the invitations sent to their
-/// address. Returns how many invitations that was.
+/// Record what the PDS said, and hand `did` the account they had in the interim
+/// and the invitations sent to their address. Returns how many seats that was.
 pub async fn apply(state: &AppState, did: &str, account: &PdsAccount) -> Result<u64, DbError> {
     let conn = state.db.acquire().await?;
     let or_keep = |value: &Option<String>| value.clone().map_or(Value::Null, Value::Text);
@@ -114,6 +117,12 @@ pub async fn apply(state: &AppState, did: &str, account: &PdsAccount) -> Result<
     else {
         return Ok(0);
     };
+    // First, so that an invitation to a context they are seated in through
+    // their old account is left alone by the guard below.
+    let carried = crate::legacy::adopt(state, did, email).await?;
+    for (context_id, member_id) in &carried {
+        state.publish(Topic::Context(context_id.clone()), "member", member_id);
+    }
     // Not where they already have a seat: a context holds a person once.
     let bound = conn
         .execute(
@@ -125,10 +134,11 @@ pub async fn apply(state: &AppState, did: &str, account: &PdsAccount) -> Result<
             [did, email],
         )
         .await?;
-    if bound > 0 {
+    let seats = bound + carried.len() as u64;
+    if seats > 0 {
         state.publish(Topic::User(did.to_string()), "invitation", did);
     }
-    Ok(bound)
+    Ok(seats)
 }
 
 /// Ask `did`'s PDS who they are, and act on it. Run beside a login and never in
@@ -146,7 +156,7 @@ pub async fn hydrate(state: AppState, did: String) {
     };
     match apply(&state, &did, &account).await {
         Ok(0) => {}
-        Ok(bound) => tracing::info!("{did} signed in and found {bound} invitations waiting"),
+        Ok(seats) => tracing::info!("{did} signed in and found {seats} seats waiting"),
         Err(e) => tracing::error!("could not record the account of {did}: {e}"),
     }
 }

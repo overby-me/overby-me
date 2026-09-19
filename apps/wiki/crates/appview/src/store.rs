@@ -155,6 +155,8 @@ pub struct ClaimMember {
 /// A member's context + secret claim token (for the owner claim-link flow).
 pub struct MemberClaimInfo {
     pub parent_id: Option<String>,
+    /// Who holds the seat, if anyone.
+    pub node_id: Option<String>,
     pub claim_token: Option<String>,
 }
 
@@ -635,8 +637,9 @@ impl Store {
         }))
     }
 
-    /// Bind a pending member row to a user, guarded on `user_did` still NULL so a
-    /// race cannot double-claim. Returns whether a row was actually bound. The
+    /// Bind a member row to a user, guarded on no PERSON holding it yet (an
+    /// interim account is not one, `crate::legacy`), so a race cannot
+    /// double-claim. Returns whether a row was actually bound. The
     /// `member_bound` partial unique additionally rejects binding a DID already
     /// active in the context (surfaces as a constraint error). Claiming an
     /// invitation is saying yes to it, so the row is accepted too.
@@ -649,11 +652,29 @@ impl Store {
         let affected = conn
             .execute(
                 "UPDATE member SET user_did = ?1, accepted = 1 \
-                 WHERE id = ?2 AND user_did IS NULL",
+                 WHERE id = ?2 AND (user_did IS NULL OR user_did NOT LIKE 'did:%')",
                 [user_did, member_id],
             )
             .await?;
         Ok(affected > 0)
+    }
+
+    /// Give a member row that has no claim token one, and return the one it
+    /// has then: two owners asking at once are handed the same link.
+    pub async fn mint_claim_token(&self, member_id: &str) -> Result<String, DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute(
+            "UPDATE member SET claim_token = ?1 WHERE id = ?2 AND claim_token IS NULL",
+            [crate::util::random_token(24).as_str(), member_id],
+        )
+        .await?;
+        let mut rows = conn
+            .query("SELECT claim_token FROM member WHERE id = ?1", [member_id])
+            .await?;
+        match rows.next().await? {
+            Some(row) => Ok(row.get::<String>(0)?),
+            None => Err(DbError::Turso(turso::Error::QueryReturnedNoRows)),
+        }
     }
 
     /// Fetch a member's context id + claim token by member id.
@@ -664,7 +685,7 @@ impl Store {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
-                "SELECT context_id, claim_token FROM member WHERE id = ?1 LIMIT 1",
+                "SELECT context_id, claim_token, user_did FROM member WHERE id = ?1 LIMIT 1",
                 [member_id],
             )
             .await?;
@@ -674,6 +695,7 @@ impl Store {
         Ok(Some(MemberClaimInfo {
             parent_id: opt_text(&row, 0),
             claim_token: opt_text(&row, 1),
+            node_id: opt_text(&row, 2),
         }))
     }
 

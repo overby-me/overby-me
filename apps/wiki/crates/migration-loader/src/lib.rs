@@ -17,8 +17,9 @@
 //!   never duplicates a row. A document's author-join rows load only when the
 //!   document itself is new, so they are idempotent as a unit.
 //!
-//! What this does NOT do: apply the DDL (the caller runs `ENTITY_SCHEMA` once)
-//! and the voting entities (excluded from the content/membership migration).
+//! What this does NOT do: apply the DDL (the caller runs `ENTITY_SCHEMA` once),
+//! or load what lives in the AppView's own tables (a poll's result, a canvas's
+//! cells, feedback). `appview import` does both, and calls this for the rest.
 
 use migration_extractor::Extraction;
 use std::collections::BTreeSet;
@@ -35,6 +36,7 @@ pub struct LoadStats {
     pub document_authors: usize,
     pub members: usize,
     pub comments: usize,
+    pub reactions: usize,
 }
 
 #[derive(Debug)]
@@ -422,6 +424,29 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
         stats.comments += 1;
     }
 
+    // 6. Reactions. One by an account the dump does not hold is kept without
+    //    its reactor, which the column allows and the foreign key would not.
+    for r in &ex.reactions {
+        if exists(conn, "reaction", "id", &r.id).await? {
+            continue;
+        }
+        let reactor = match r.reactor_did.as_deref() {
+            Some(did) if exists(conn, "user", "did", did).await? => Some(did),
+            _ => None,
+        };
+        let mut cols = vec!["id", "subject_uri", "reactor_did", "emoji", "legacy_id"];
+        let mut params = vec![
+            text(&r.id),
+            text(&r.subject_uri),
+            opt_str(reactor),
+            text(&r.emoji),
+            opt(&r.legacy_id),
+        ];
+        push_created_at(&mut cols, &mut params, &r.created_at);
+        insert(conn, "reaction", &cols, params).await?;
+        stats.reactions += 1;
+    }
+
     Ok(stats)
 }
 
@@ -429,8 +454,8 @@ pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadE
 mod tests {
     use super::*;
     use wiki_domain_types::{
-        Author, Comment, Context, ContextKind, Document, DocumentKind, Member, Role, User,
-        Visibility,
+        Author, Comment, Context, ContextKind, Document, DocumentKind, Member, Reaction, Role,
+        User, Visibility,
     };
 
     fn place(slug: &str, path: &str, parent: Option<&str>) -> Place {
@@ -519,7 +544,22 @@ mod tests {
                 created_at: None,
                 legacy_id: Some("k1".into()),
             }],
+            reactions: vec![
+                reaction("r1", Some("did:plc:alice")),
+                reaction("r2", Some("did:plc:gone")),
+            ],
             ..Default::default()
+        }
+    }
+
+    fn reaction(id: &str, reactor: Option<&str>) -> Reaction {
+        Reaction {
+            id: id.into(),
+            subject_uri: "d1".into(),
+            reactor_did: reactor.map(str::to_string),
+            emoji: "🎉".into(),
+            created_at: Some("2026-04-04 00:00:00".into()),
+            legacy_id: Some(id.into()),
         }
     }
 
@@ -558,6 +598,7 @@ mod tests {
                 document_authors: 3,
                 members: 1,
                 comments: 1,
+                reactions: 2,
             },
             "first load inserts every row"
         );
@@ -577,6 +618,17 @@ mod tests {
         assert_eq!(count(&conn, "document_author").await, 3);
         assert_eq!(count(&conn, "member").await, 1);
         assert_eq!(count(&conn, "comment").await, 1);
+        assert_eq!(count(&conn, "reaction").await, 2);
+
+        let mut rows = conn
+            .query("SELECT reactor_did FROM reaction WHERE id = 'r2'", ())
+            .await
+            .expect("q");
+        let reactor = rows.next().await.expect("row").expect("some");
+        assert!(
+            matches!(reactor.get_value(0).expect("value"), Value::Null),
+            "a reaction by an account the dump does not hold keeps no reactor"
+        );
 
         // Spot-check the free-text-vs-DID authorship landed correctly.
         let mut rows = conn

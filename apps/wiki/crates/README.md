@@ -26,16 +26,19 @@ workspace when the rewrite starts.
   PDS-agnostic server-side login (handle to DID to PDS resolution, PAR, DPoP,
   PKCE) against independent non-Bluesky PDSes. Its network test is `#[ignore]`
   (run with `--ignored`); findings in `oauth-spike/FINDINGS.md`.
-- `domain-types`: the canonical backend serde types for the content and
-  membership half (user, context, document, post, member, comment). Voting
-  entities excluded until the ballot spec and voting SQL settle.
+- `domain-types`: the canonical backend serde types (user, context, document,
+  post, member, comment, reaction), and the shapes a migrated poll, canvas and
+  report travel in.
 - `migration-extractor`: the read-only interim-to-domain-types mapping with a
-  field-gap report. Pure and hermetic (tested on synthetic fixtures; a live
-  dump is an owner-approved separate step). The `extract` binary reads a
-  dumped snapshot and emits fixtures + `report.json`.
-- `migration-loader`: writes an extraction into a staging Turso db, parents
-  first and idempotently, with foreign keys enforced so a dump that points at
-  a row it does not contain fails at the rehearsal.
+  field-gap report, which also counts what is left behind on purpose. Pure and
+  hermetic (tested on synthetic fixtures; a live dump is an owner-approved
+  separate step). The `extract` binary reads a dumped snapshot and writes
+  `extraction.json` + `report.json`.
+- `migration-loader`: writes an extraction's entity rows into a Turso db,
+  parents first and idempotently, with foreign keys enforced so a dump that
+  points at a row it does not contain fails at the rehearsal. A library: the
+  command that runs it is `appview import`, which also loads what lives in the
+  AppView's own tables.
 - `ballot-store`: the durable half of the ballot scheme: every poll's public
   board in one store, with its kill-9-proven atomic cast and a seal that ends
   it; the private roster DDL; and the off-node replica log.

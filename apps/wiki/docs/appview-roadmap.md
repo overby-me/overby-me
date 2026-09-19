@@ -27,16 +27,19 @@ document is the phase after it: turning that skeleton into the backend.
 
 ## Where it stands (2026-09-19)
 
-Built and tested in `crates/appview`: config, the Turso handle, `/healthz`, a
-relay-only `/ws`, the atproto OAuth client with durable stores and `/callback`,
-the Jetstream consumer, nine identity-free XRPC reads, four write procedures, the
-ballot board and roster DDL wired into the datastore, and the NixOS unit with its
-VM test.
+Built and tested in `crates/appview`, milestone by milestone below: sessions on
+atproto OAuth, the read and write gates, the node tree the frontend routes by,
+membership and the roster, meetings (speaker lists, the projector, the canvas),
+voting with blind-signed secret ballots, live topics, files, every endpoint the
+interim sidecar served, search and the feeds, and `appview import`, which loads
+a migrated wiki. `docs/appview-api-coverage.md` sets every data call the
+frontend makes against the method that answers it, and none is left without.
 
-Not built: sessions, authorization, the membership surface, the node tree the
-frontend routes by, meetings (speaker lists, projector), the voting procedures,
-live topics, blobs, the carried-over sidecar endpoints, and the frontend's own
-data layer.
+Not built: the frontend's own data layer (M9), copying the interim's files
+across (M8), mail to an invited address (M4), and the parts of voting that wait
+on a decision that is the owner's to make (M6). What needs a person and cannot
+be tested from here: one real browser login, and with it the token exchange,
+the profile read and posting to a PDS.
 
 ## Findings that shape the plan
 
@@ -68,7 +71,30 @@ data layer.
   `data.open`, neither of which the interim writes (a poll's name is its node's
   name, and open is `mutable`), and `minVote`, `maxVote`, `hidden`, the place in
   the tree and the RESULT are not read at all. Ballots cannot be carried; the
-  outcome of every past vote can, and `poll.counts` is where it goes. M3 and M9.
+  outcome of every past vote can, and `poll.counts` is where it goes. M3 and M9,
+  where all of it is now carried.
+- **Nobody would have found their own account.** The extractor carries an
+  interim account under its interim id, "until the DID binding runs", and no
+  such binding existed. Everyone with an account, which is everyone who has
+  ever signed in, would have come back after the cutover as a stranger: their seats,
+  owner rights and authorship held by an account that can never sign in, and
+  not even open to a new invitation. A person now takes their old account over
+  by signing in with the address it was registered under, where the interim
+  had verified that address and a trusted PDS confirms it; anyone else is
+  handed a seat at a time by claim link (`crates/appview/src/legacy.rs`).
+- **A claim link the interim had spent would have opened its seat again.** The
+  interim keeps the token on the row after the seat is taken. Once a seat held
+  by a carried account can be claimed, that old link, sitting in somebody's
+  inbox, claims it. Spent tokens are left behind, and an owner mints a new one
+  for a seat that needs it.
+- **What was deleted would have come back.** The interim bins a comment by
+  stamping it; the new tables delete. Every comment, reaction and report
+  somebody had deleted was extracted as live. They are left behind now, unless
+  binned along with a document, which has a bin here and restores them with it.
+- **Nothing could run a load.** The loader was a library with no binary, and
+  what a poll came to, a canvas and the reports live in tables it cannot know.
+  `appview import` is the load step: one transaction, the same twice, and
+  refused on a datastore somebody has signed in to.
 - **There are no schema migrations.** The entity tables are plain
   `CREATE TABLE`, so a datastore file made by an older binary keeps its old
   columns. Until migrations exist the file records its schema version and a
@@ -282,7 +308,7 @@ The steps:
   interim keeps each cell as a node and the cooldown in a trigger. Here cells
   have a table, the cooldown is checked under the write lock, and a listener
   reads what was painted since its last answer rather than the board again.
-  Not migrated yet (M9): the boards that have been painted.
+  The boards that have been painted come across with their cells (M9).
 
 Speaker lists and the projector are not migrated, on purpose: a queue or a
 screen from a meeting that has ended is of no use to the next one, and a list
@@ -379,8 +405,8 @@ asks Bluesky's public API itself. The steps:
   files them as nodes under the root node; here they have a table. A crash seen
   again is one row with a count and its people, under the interim's digest, so
   a crash known before the cutover keeps its row once migrated. Reports need no
-  session, so those without one share a budget of ten a minute. Not migrated
-  yet: the interim's existing reports (M9).
+  session, so those without one share a budget of ten a minute. The interim's
+  reports come across, a crash it filed twice as one row (M9).
 - [x] Metafile rendering (`renderMetafile`): EMF and WMF figures in Word and
   PowerPoint files to SVG, or PNG where the SVG emitter declines. The PNG path
   draws text with whatever generic sans the host has, so a host with no fonts
@@ -401,7 +427,19 @@ asks Bluesky's public API itself. The steps:
 - [ ] An AppView client behind `src/model.rs`, replacing `src/graphql/*` and
   `src/nhost.rs`; the session module on AppView tokens. Written from that
   table.
-- [ ] Extractor and loader cover every migrated kind; field-gap report empty.
+- [x] The extractor and the load cover every kind the interim holds: the tree,
+  members, comments, reactions, what each poll came to, canvases with their
+  cells, reports, which contexts are open to everyone, and the address each
+  account is recognized by. What is left behind on purpose (a deleted comment,
+  a spent claim link, a speaker list, an address nobody verified) is counted in
+  the report under `left_behind`, so none of it is silent.
+- [x] `appview import <extraction.json>`, the load step as a command, proven
+  from an interim-shaped snapshot through the real extractor to the AppView's
+  own reads.
+- [x] A person takes their interim account over at sign-in, or a seat at a time
+  by claim link (`crates/appview/src/legacy.rs`). A test reads the schema, so a
+  table that names an account and is not handed over fails the tests.
+- [ ] The field-gap report empty on a real dump, which is the owner's to take.
 - [ ] Staging rehearsal of the runbook; browser suite green against the AppView.
 
 ## Working rules

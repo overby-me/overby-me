@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "A member's claim token, for an owner of that member's context to hand out as a `?claim=<token>` link. An unknown member answers Forbidden too, so the method is no oracle for member ids.",
+			"description": "A member's claim token, for an owner of that member's context to hand out as a `?claim=<token>` link. A seat that an account carried over from the interim holds has no token, its old one being spent, and is given one the first time an owner asks. An unknown member answers Forbidden too, so the method is no oracle for member ids.",
 			"parameters": {
 				"type": "params",
 				"required": ["member"],

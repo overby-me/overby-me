@@ -142,6 +142,8 @@ dependencies = [
  "hkdf",
  "hmac",
  "http",
+ "migration-extractor",
+ "migration-loader",
  "object",
  "p256",
  "rand 0.8.7",

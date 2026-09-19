@@ -490,6 +490,9 @@ pub async fn claim_membership(
     };
     match member.node_id.as_deref() {
         Some(bound) if bound == did => return claimed(),
+        // A seat an interim account holds is still waiting for its person. The
+        // link hands over that seat alone, which is all its owner may give.
+        Some(bound) if crate::legacy::is_carried(bound) => {}
         Some(_) => return conflict("AlreadyClaimed", "this invitation has been claimed"),
         None => {}
     }
@@ -834,6 +837,9 @@ pub struct MemberParam {
 /// `com.example.wiki.getMemberClaimLink`: a member's claim token, for an owner
 /// of that member's context to hand out. An unknown member answers as a
 /// forbidden one does, so the method is no oracle for member ids.
+///
+/// A seat an interim account holds comes across without a token, its old one
+/// being spent, and gets a new one here the first time an owner asks.
 pub async fn get_member_claim_link(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -846,17 +852,32 @@ pub async fn get_member_claim_link(
         Ok(None) => return refused(),
         Err(e) => return write_failed("getMemberClaimLink", e),
     };
-    let (Some(context_id), Some(token)) = (info.parent_id, info.claim_token) else {
+    let Some(context_id) = info.parent_id else {
         return refused();
     };
     match Authz::new(state.db.clone())
         .is_active_owner(&context_id, &did)
         .await
     {
-        Ok(true) => (StatusCode::OK, Json(serde_json::json!({ "token": token }))).into_response(),
-        Ok(false) => refused(),
-        Err(e) => write_failed("getMemberClaimLink", e),
+        Ok(true) => {}
+        Ok(false) => return refused(),
+        Err(e) => return write_failed("getMemberClaimLink", e),
     }
+    let token = match info.claim_token {
+        Some(token) => token,
+        None if info
+            .node_id
+            .as_deref()
+            .is_some_and(crate::legacy::is_carried) =>
+        {
+            match store.mint_claim_token(&p.member).await {
+                Ok(token) => token,
+                Err(e) => return write_failed("getMemberClaimLink", e),
+            }
+        }
+        None => return refused(),
+    };
+    (StatusCode::OK, Json(serde_json::json!({ "token": token }))).into_response()
 }
 
 #[derive(Debug, Deserialize)]

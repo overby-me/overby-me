@@ -1,5 +1,7 @@
 //! AppView entrypoint: open the Turso datastore, build the router, and serve on
 //! `$PORT` as a long-running process (NOT scale-to-zero serverless).
+//!
+//! `appview import <extraction.json>` loads a migrated wiki instead, and exits.
 
 use appview::oauth::WikiOAuth;
 use appview::{AppState, Config, Db, router};
@@ -30,6 +32,15 @@ async fn main() {
     if let Err(e) = db.init_schema().await {
         tracing::error!("failed to initialize schema: {e}");
         std::process::exit(1);
+    }
+    let mut args = std::env::args().skip(1);
+    match (args.next().as_deref(), args.next()) {
+        (None, _) => {}
+        (Some("import"), Some(path)) => import(&db, &path).await,
+        _ => {
+            eprintln!("usage: appview [import <extraction.json>]");
+            std::process::exit(2);
+        }
     }
     // The atproto OAuth client (durable SQLite stores). A build failure here is
     // fatal: identity is load-bearing, so the process must not serve `/callback`
@@ -85,5 +96,35 @@ async fn main() {
     if let Err(e) = axum::serve(listener, app).await {
         tracing::error!("server error: {e}");
         std::process::exit(1);
+    }
+}
+
+async fn import(db: &Db, path: &str) -> ! {
+    match appview::import::import_file(db, path).await {
+        Ok(stats) => {
+            let loaded = &stats.entities;
+            println!(
+                "loaded: {} users ({} to be recognized by address), {} contexts, {} documents \
+                 ({} author rows), {} members, {} comments, {} reactions, {} polls, \
+                 {} canvases ({} cells), {} reports",
+                loaded.users,
+                stats.accounts,
+                loaded.contexts,
+                loaded.documents,
+                loaded.document_authors,
+                loaded.members,
+                loaded.comments,
+                loaded.reactions,
+                stats.polls,
+                stats.canvases,
+                stats.cells,
+                stats.feedback
+            );
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("import failed, nothing was loaded: {e}");
+            std::process::exit(1);
+        }
     }
 }

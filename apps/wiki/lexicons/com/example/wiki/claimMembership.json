@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "procedure",
-			"description": "Bind the invitation a `?claim=<token>` link names to the caller. This is how a rostered member, known only by an email address, becomes a DID. It binds and nothing more: voting rights stay as an owner set them. Repeating a claim the caller already made succeeds.",
+			"description": "Bind the invitation a `?claim=<token>` link names to the caller. This is how a rostered member, known only by an email address, becomes a DID. It binds and nothing more: voting rights stay as an owner set them. Repeating a claim the caller already made succeeds. A seat held by an account carried over from the interim counts as unclaimed: the link hands over that seat, and nothing else that account holds.",
 			"input": {
 				"encoding": "application/json",
 				"schema": {

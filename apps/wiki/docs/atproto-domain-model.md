@@ -507,6 +507,24 @@ The roster constraint is unchanged (Excel, keyed by email). Flow:
 `member.email` stays the invite address; the DID is the durable identity. This is
 the current `members.node_id` pattern, re-pointed at DIDs.
 
+As built, the 17 percent of rows that already had an interim account do not
+import as pending. They stay bound to that account, carried under its interim id
+as a `user` row that no login can produce, so that its name, its authorship and
+its comments stay attached to it:
+
+```sql
+CREATE TABLE legacy_account (
+  id    TEXT PRIMARY KEY REFERENCES user(did),   -- the interim account id
+  email TEXT NOT NULL                            -- only if the interim had VERIFIED it
+);
+```
+
+At sign-in, a DID whose trusted PDS confirms that address takes the account
+over: every column that names it is pointed at the DID, in one transaction, and
+the carried `user` row is deleted (`crates/appview/src/legacy.rs`). A claim
+token on a seat held by a carried account hands over that one seat, for people
+whose address cannot be vouched for.
+
 ## AppView / materialisation
 
 - Consume **Jetstream**, filtered to `com.example.wiki.*` + relevant `app.bsky.*`.

@@ -126,7 +126,10 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   viewer, none of which can send a header. The bytes themselves are `GET /blob/<id>`, which is plain
   HTTP with ranges and so has no lexicon.
 - `claimMembership` binds a pending invitation to the caller by its claim token, and
-  `getMemberClaimLink` (a query) gives an active owner the token to hand out.
+  `getMemberClaimLink` (a query) gives an active owner the token to hand out. A seat held by an
+  account carried over from the interim counts as pending for both: its person takes the whole
+  account over by signing in with the address it was registered under, and everyone else is handed
+  that one seat by link.
 
 Two routes are plain HTTP and have no lexicon: `GET /blob/<id>` (above), and `POST /log`, which takes
 the frontend's batched log entries with no session, resolves the wasm frames in their stacks and

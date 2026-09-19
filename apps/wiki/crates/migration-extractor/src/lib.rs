@@ -81,8 +81,9 @@ pub struct InterimMember {
 
 /// An interim `users` row (the account behind a `node_id`). Realized into a
 /// domain `User` so the FK targets every author/member/comment references
-/// actually exist. During migration `did` holds the interim user id until the
-/// atproto DID binding runs (0 DIDs are linked today).
+/// actually exist. Its `did` is the interim user id, which no login produces:
+/// the account holds its seats and cannot sign in, until the person whose
+/// address it was registered under takes it over ([`LegacyAccount`]).
 #[derive(Debug, Clone, Deserialize)]
 pub struct InterimUser {
     pub id: String,
@@ -92,9 +93,43 @@ pub struct InterimUser {
     pub avatar_url: Option<String>,
     #[serde(default)]
     pub handle: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(rename = "emailVerified", default)]
+    pub email_verified: Option<bool>,
+}
+
+/// The address an interim account was registered under, which is how its
+/// person is recognized when they sign in with a DID. Carried only where the
+/// interim had VERIFIED it: an unverified address is one somebody typed, and
+/// whoever typed it would otherwise inherit the account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LegacyAccount {
+    pub id: String,
+    /// Trimmed and lowercased, as member addresses are.
+    pub email: String,
+}
+
+/// An interim `permissions` row, as far as it says who may READ a context. A
+/// context is open to everyone when it has an ACTIVE row for the `public` role
+/// that grants `select`: that row is the setting (`src/graphql/public.rs`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct InterimPermission {
+    #[serde(rename = "contextId", default)]
+    pub context_id: Option<String>,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub select: Option<bool>,
+    #[serde(default)]
+    pub active: Option<bool>,
 }
 
 const CONTEXT_MIMES: &[&str] = &["wiki/group", "wiki/event", "wiki/site"];
+/// Nodes that become a document for their place in the tree, and a row of their
+/// own for what they are.
+const POLL_MIME: &str = "vote/poll";
+const CANVAS_MIME: &str = "canvas/canvas";
 const CONTENT_MIMES: &[&str] = &[
     "wiki/document",
     "vote/policy",
@@ -110,7 +145,7 @@ const COMMENT_MIME: &str = "vote/comment";
 /// A field-gap: something in the source that the mapping did NOT carry into a
 /// target type, or a required target field that had no source. Each becomes an
 /// interim-admin junk sweep, an extractor mapping rule, or a schema amendment.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct FieldGapReport {
     /// Source `table.column` or `mime.data-key` seen but not mapped, with a
     /// count and a one-line disposition note.
@@ -120,9 +155,13 @@ pub struct FieldGapReport {
     /// Required target fields that had no source value, with counts (a nonzero
     /// count means the import would violate a NOT NULL or drop meaning).
     pub unfilled_required: BTreeMap<String, u64>,
+    /// Rows left behind ON PURPOSE, with counts. Not gaps: each is a decision,
+    /// listed so that none of them is a silent one.
+    #[serde(default)]
+    pub left_behind: BTreeMap<String, u64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GapEntry {
     pub count: u64,
     pub note: String,
@@ -141,6 +180,9 @@ impl FieldGapReport {
     }
     fn note_mime(&mut self, mime: &str) {
         *self.unmapped_mimes.entry(mime.to_string()).or_insert(0) += 1;
+    }
+    fn note_left_behind(&mut self, what: &str) {
+        *self.left_behind.entry(what.to_string()).or_insert(0) += 1;
     }
     fn note_unfilled(&mut self, target: &str) {
         *self
@@ -162,20 +204,63 @@ pub struct Snapshot {
     pub members: Vec<InterimMember>,
     #[serde(default)]
     pub users: Vec<InterimUser>,
+    /// Absent from a dump made before visibility was carried, in which case
+    /// every context comes out closed, and the report says so.
+    #[serde(default)]
+    pub permissions: Option<Vec<InterimPermission>>,
 }
 
 /// The extracted domain rows plus the gap report.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Extraction {
     pub users: Vec<User>,
     pub contexts: Vec<Context>,
     pub documents: Vec<Document>,
     pub members: Vec<Member>,
     pub comments: Vec<Comment>,
-    /// The migratable voting entity: poll metadata. Cast ballots (`vote/vote`) are
-    /// unmigratable and only reported.
+    #[serde(default)]
+    pub accounts: Vec<LegacyAccount>,
+    #[serde(default)]
+    pub reactions: Vec<Reaction>,
+    /// Each poll's rules and RESULT. Its ballots are counted here and not
+    /// carried; its place in the tree is among `documents`.
+    #[serde(default)]
     pub polls: Vec<Poll>,
+    #[serde(default)]
+    pub canvases: Vec<Canvas>,
+    #[serde(default)]
+    pub feedback: Vec<Feedback>,
+    #[serde(default)]
     pub report: FieldGapReport,
+}
+
+/// [`extract`] over a whole snapshot, with each context opened to the public or
+/// not as its permission rows say.
+pub fn extract_snapshot(snap: &Snapshot) -> Extraction {
+    let mut out = extract(&snap.nodes, &snap.members, &snap.users);
+    match &snap.permissions {
+        Some(permissions) => {
+            let open: BTreeSet<&str> = permissions
+                .iter()
+                .filter(|p| {
+                    p.role.as_deref() == Some("public")
+                        && p.select == Some(true)
+                        && p.active == Some(true)
+                })
+                .filter_map(|p| p.context_id.as_deref())
+                .collect();
+            for context in &mut out.contexts {
+                if open.contains(context.id.as_str()) {
+                    context.visibility = Visibility::Public;
+                }
+            }
+        }
+        None => out.report.note_source(
+            "permissions",
+            "not in this dump: every context is extracted closed, the public ones too",
+        ),
+    }
+    out
 }
 
 /// Map interim rows into the canonical content/membership domain types. `users`
@@ -201,6 +286,17 @@ pub fn extract(
         users: realized_users,
         ..Default::default()
     };
+    for u in users {
+        let email = u.email.as_deref().map(normalized).filter(|e| !e.is_empty());
+        match (email, u.email_verified) {
+            (Some(email), Some(true)) => out.accounts.push(LegacyAccount {
+                id: u.id.clone(),
+                email,
+            }),
+            // Their seats are handed over one by one, by claim link.
+            _ => out.report.note_left_behind("users.email, not verified"),
+        }
+    }
 
     // A member row is one of two things, told apart by what it hangs on. On a
     // CONTENT node it is an author chip, and becomes one of that document's
@@ -253,11 +349,18 @@ pub fn extract(
             continue;
         }
         // Normalize the email (census: 11 case/space variant clusters).
-        let email = m
-            .email
-            .as_ref()
-            .map(|e| e.trim().to_lowercase())
-            .filter(|e| !e.is_empty());
+        let email = m.email.as_deref().map(normalized).filter(|e| !e.is_empty());
+        // A claim link is spent once its seat is taken. Carried along, it would
+        // open that seat again to whoever still has the old invitation.
+        let claim_token = match &m.node_id {
+            Some(_) => {
+                if m.claim_token.is_some() {
+                    out.report.note_left_behind("members.claim_token, spent");
+                }
+                None
+            }
+            None => m.claim_token.clone(),
+        };
         out.members.push(Member {
             id: m.id.clone(),
             user_did: m.node_id.clone(),
@@ -268,7 +371,7 @@ pub fn extract(
             hidden: m.hidden,
             accepted: m.accepted,
             email,
-            claim_token: m.claim_token.clone(),
+            claim_token,
             legacy_id: Some(m.id.clone()),
         });
     }
@@ -281,7 +384,9 @@ pub fn extract(
         .iter()
         .filter(|n| {
             let mime = n.mime_id.as_deref().unwrap_or("");
-            CONTEXT_MIMES.contains(&mime) || CONTENT_MIMES.contains(&mime)
+            CONTEXT_MIMES.contains(&mime)
+                || CONTENT_MIMES.contains(&mime)
+                || [POLL_MIME, CANVAS_MIME].contains(&mime)
         })
         .map(|n| n.id.as_str())
         .collect();
@@ -325,6 +430,10 @@ pub fn extract(
                 published_uri: None,
                 legacy_id: Some(n.id.clone()),
             });
+        } else if [COMMENT_MIME, "wiki/feedback", "vote/reaction"].contains(&mime)
+            && deleted_alone(n, &migrated)
+        {
+            out.report.note_left_behind(&format!("{mime}, deleted"));
         } else if mime == COMMENT_MIME {
             out.comments.push(Comment {
                 id: n.id.clone(),
@@ -340,49 +449,68 @@ pub fn extract(
                 created_at: n.created_at.clone(),
                 legacy_id: Some(n.id.clone()),
             });
-        } else if mime == "vote/poll" {
-            // The one migratable voting entity: the poll's question/options/state.
-            let obj = n.data.as_ref().and_then(|d| d.as_object());
-            let str_key = |k: &str| {
-                obj.and_then(|m| m.get(k))
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string)
-            };
-            let bool_key = |k: &str| obj.and_then(|m| m.get(k)).and_then(|v| v.as_bool());
-            let options = obj
-                .and_then(|m| m.get("options"))
-                .and_then(|v| v.as_array())
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|o| o.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default();
-            out.polls.push(Poll {
+        } else if mime == POLL_MIME || mime == CANVAS_MIME {
+            // Its place in the tree. What it IS follows below.
+            out.documents.push(Document {
                 id: n.id.clone(),
                 context_id: n.context_id.clone().unwrap_or_default(),
-                question: str_key("question").unwrap_or_default(),
-                options,
-                open: bool_key("open").unwrap_or(false),
-                secret: bool_key("secret").unwrap_or(false),
-                created_at: n.created_at.clone(),
+                kind: if mime == POLL_MIME {
+                    DocumentKind::Poll
+                } else {
+                    DocumentKind::Canvas
+                },
+                title: n.name.clone().unwrap_or_default(),
+                place: place_of(n, &tree, &migrated, &mut out.report),
+                mutable: false,
+                content: None,
+                data: None,
+                authors: Vec::new(),
+                visibility: Visibility::Private,
+                published_uri: None,
                 legacy_id: Some(n.id.clone()),
             });
+            if mime == POLL_MIME {
+                let poll = poll_of(n, nodes, &mut out.report);
+                out.polls.push(poll);
+            } else {
+                let canvas = canvas_of(n, nodes);
+                out.canvases.push(canvas);
+            }
+        } else if mime == "wiki/feedback" {
+            out.feedback.push(feedback_of(n));
+        } else if mime == "vote/reaction" {
+            match reaction_of(n) {
+                Some(reaction) => out.reactions.push(reaction),
+                None => out.report.note_source(
+                    "nodes(vote/reaction)",
+                    "a reaction with no emoji, or on nothing",
+                ),
+            }
         } else if !mime.is_empty() {
             match mime {
-                // A cast ballot is unmigratable: the eligibility/tokens that gave
-                // it weight and anonymity do not survive, so it is reported, never
-                // carried.
-                "vote/vote" => out.report.note_source(
-                    "nodes(vote/vote)",
-                    "historical cast ballot: unmigratable (no eligibility/tokens survive)",
-                ),
-                // Speaker lists/entries are ephemeral projector state, dropped.
-                "speak/list" | "speak/speak" => {}
+                // Counted into their poll's result by `poll_of`, and canvas cells
+                // into their canvas by `canvas_of`.
+                "vote/vote" | "canvas/pixel" => {}
+                // What a projector showed while a meeting ran, and nothing after.
+                "speak/list" | "speak/speak" => out.report.note_left_behind(mime),
+                // The root every path starts under, which has no row of its own.
+                "wiki/home" => {}
                 other => out.report.note_mime(other),
             }
         }
     }
+    // One reaction per person per emoji per subject, which the table insists on
+    // and the interim did not.
+    let mut seen = BTreeSet::new();
+    out.reactions.retain(|r| {
+        seen.insert((
+            r.subject_uri.clone(),
+            r.reactor_did.clone(),
+            r.emoji.clone(),
+        ))
+    });
+
+    out.feedback = folded_by_digest(std::mem::take(&mut out.feedback));
 
     // Author chips whose content node was excluded (e.g. hung on a poll):
     // record so none are silently dropped.
@@ -397,6 +525,222 @@ pub fn extract(
     }
 
     out
+}
+
+/// In the bin on its own account, and not along with a node that is carried.
+/// Comments, reactions and reports have no bin where they are going, so carrying
+/// one of these would bring back what somebody deleted. One binned WITH its
+/// document stays: it is hidden with the document and restored with it.
+fn deleted_alone(n: &InterimNode, migrated: &BTreeSet<&str>) -> bool {
+    let with_its_node = n
+        .deleted_root
+        .as_deref()
+        .is_some_and(|root| root != n.id && migrated.contains(root));
+    n.deleted_at.is_some() && !with_its_node
+}
+
+/// One row per crash, which the table insists on. The interim looks a crash up
+/// and then files it, in two steps, so two people crashing at once file two.
+fn folded_by_digest(reports: Vec<Feedback>) -> Vec<Feedback> {
+    let mut at: BTreeMap<String, usize> = BTreeMap::new();
+    let mut out: Vec<Feedback> = Vec::new();
+    for report in reports {
+        let kept = report.digest.as_ref().and_then(|d| at.get(d)).copied();
+        match kept {
+            Some(i) => {
+                let kept = &mut out[i];
+                kept.seen += report.seen;
+                kept.updated_at = kept.updated_at.take().max(report.updated_at);
+                for reporter in report.reporters {
+                    if !kept.reporters.contains(&reporter) {
+                        kept.reporters.push(reporter);
+                    }
+                }
+            }
+            None => {
+                if let Some(digest) = &report.digest {
+                    at.insert(digest.clone(), out.len());
+                }
+                out.push(report);
+            }
+        }
+    }
+    out
+}
+
+fn normalized(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
+fn data_of<'a>(n: &'a InterimNode, key: &str) -> Option<&'a serde_json::Value> {
+    n.data.as_ref().and_then(|d| d.get(key))
+}
+
+fn live_children<'a>(
+    nodes: &'a [InterimNode],
+    parent: &'a str,
+    mime: &'a str,
+) -> impl Iterator<Item = &'a InterimNode> {
+    nodes.iter().filter(move |c| {
+        c.parent_id.as_deref() == Some(parent)
+            && c.mime_id.as_deref() == Some(mime)
+            && c.deleted_at.is_none()
+    })
+}
+
+/// A poll's rules, and its result counted from the ballots under it.
+///
+/// The interim has no `question`: a poll is named after what it is on, and that
+/// name is what was voted on. It has no `open` either: a poll is open while its
+/// node is `mutable`. One still open at the dump comes across closed, since what
+/// it had taken is all it will ever take here, and the report says so.
+fn poll_of(n: &InterimNode, nodes: &[InterimNode], report: &mut FieldGapReport) -> Poll {
+    let options: Vec<String> = data_of(n, "options")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|o| o.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let number = |key: &str| {
+        data_of(n, key)
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(1)
+    };
+    let flag = |key: &str| data_of(n, key).and_then(|v| v.as_bool()).unwrap_or(false);
+    if n.mutable == Some(true) {
+        report.note_source(
+            "nodes(vote/poll).mutable",
+            "a poll open at the dump is migrated closed, with what it had taken",
+        );
+    }
+    let mut counts = vec![0u64; options.len()];
+    let mut ballots = 0;
+    for vote in live_children(nodes, &n.id, "vote/vote") {
+        ballots += 1;
+        let chosen = vote.data.as_ref().and_then(|d| d.as_array());
+        for index in chosen.into_iter().flatten().filter_map(|i| i.as_u64()) {
+            match counts.get_mut(index as usize) {
+                Some(count) => *count += 1,
+                None => report.note_source(
+                    "nodes(vote/vote).data",
+                    "a ballot for an option its poll does not have",
+                ),
+            }
+        }
+    }
+    Poll {
+        id: n.id.clone(),
+        context_id: n.context_id.clone().unwrap_or_default(),
+        question: n.name.clone().unwrap_or_default(),
+        // The interim always appends the abstention, and knows it by position.
+        blank: options.len() > 1,
+        options,
+        min: number("minVote"),
+        max: number("maxVote"),
+        secret: flag("secret"),
+        hide_tally: flag("hidden"),
+        counts,
+        ballots,
+        created_at: n.created_at.clone(),
+        closed_at: n.updated_at.clone(),
+        legacy_id: Some(n.id.clone()),
+    }
+}
+
+/// A canvas and the cells painted on it: each a hidden child keyed `p_<x>_<y>`
+/// whose `data.c` is the colour and whose owner is the last painter.
+fn canvas_of(n: &InterimNode, nodes: &[InterimNode]) -> Canvas {
+    let side = |key: &str, otherwise: u32| {
+        data_of(n, key)
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(otherwise)
+    };
+    let cells = live_children(nodes, &n.id, "canvas/pixel")
+        .filter_map(|cell| {
+            let (x, y) = cell
+                .key
+                .as_deref()?
+                .strip_prefix("p_")?
+                .split_once('_')
+                .and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))?;
+            Some(CanvasCell {
+                x,
+                y,
+                colour: u8::try_from(data_of(cell, "c")?.as_u64()?).ok()?,
+                painter_did: cell.owner_id.clone(),
+                painted_at: cell.updated_at.clone().or_else(|| cell.created_at.clone()),
+            })
+        })
+        .collect();
+    Canvas {
+        id: n.id.clone(),
+        width: side("w", 32).clamp(1, 128),
+        height: side("h", 32).clamp(1, 128),
+        cooldown: side("cooldown", 60),
+        open: n.mutable.unwrap_or(true),
+        cells,
+    }
+}
+
+fn feedback_of(n: &InterimNode) -> Feedback {
+    let text = |key: &str| {
+        data_of(n, key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let kind = text("kind");
+    Feedback {
+        id: n.id.clone(),
+        kind: match kind.as_str() {
+            "bug" | "feature" | "crash" | "error" => kind,
+            _ => "other".to_string(),
+        },
+        message: Some(text("message"))
+            .filter(|m| !m.is_empty())
+            .or_else(|| n.name.clone())
+            .unwrap_or_default(),
+        path: text("path"),
+        app_version: text("appVersion"),
+        commit: text("commit"),
+        user_agent: text("userAgent"),
+        image: Some(text("image")).filter(|i| !i.is_empty()),
+        digest: Some(text("crashDigest")).filter(|d| !d.is_empty()),
+        seen: data_of(n, "seen").and_then(|v| v.as_u64()).unwrap_or(1),
+        reporters: data_of(n, "reporters")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|r| r.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        owner_did: n.owner_id.clone(),
+        created_at: n.created_at.clone(),
+        updated_at: n.updated_at.clone(),
+    }
+}
+
+/// A reaction is a node under what it reacts to, holding its emoji in
+/// `data.emoji` and as its name.
+fn reaction_of(n: &InterimNode) -> Option<Reaction> {
+    let emoji = data_of(n, "emoji")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or_else(|| n.name.clone())
+        .filter(|e| !e.is_empty())?;
+    Some(Reaction {
+        id: n.id.clone(),
+        subject_uri: n.parent_id.clone()?,
+        reactor_did: n.owner_id.clone(),
+        emoji,
+        created_at: n.created_at.clone(),
+        legacy_id: Some(n.id.clone()),
+    })
 }
 
 /// Whoever made a context owns it, whether or not a member row says so: the

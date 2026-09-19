@@ -17,6 +17,8 @@ pub mod feed;
 pub mod feedback;
 pub mod firehose;
 pub mod http;
+pub mod import;
+pub mod legacy;
 pub mod live;
 pub mod logs;
 pub mod metafile;

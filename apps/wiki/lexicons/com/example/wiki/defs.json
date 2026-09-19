@@ -363,7 +363,7 @@
 				},
 				"eligible": {
 					"type": "integer",
-					"description": "The sum of the weights frozen at opening: what `ballots` is out of."
+					"description": "The sum of the weights frozen at opening: what `ballots` is out of. 0 for a poll carried over from the interim, which froze no roster, so there a turnout cannot be shown."
 				},
 				"counts": {
 					"type": "array",

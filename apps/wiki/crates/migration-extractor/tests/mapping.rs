@@ -27,36 +27,400 @@ fn member(id: &str, parent: &str, node_id: Option<&str>, email: Option<&str>) ->
     .unwrap()
 }
 
+/// A node with more said about it than [`node`] says: `more` is merged over it.
+fn node_with(id: &str, mime: &str, more: serde_json::Value) -> InterimNode {
+    let mut row = json!({
+        "id": id, "name": format!("name-{id}"), "key": format!("key-{id}"),
+        "mimeId": mime, "parentId": "ctx1", "contextId": "ctx1",
+        "ownerId": null, "data": null, "createdAt": "2026-01-01T00:00:00Z"
+    });
+    for (key, value) in more.as_object().expect("an object") {
+        row[key] = value.clone();
+    }
+    serde_json::from_value(row).unwrap()
+}
+
+/// A poll comes across as what was asked and HOW IT WENT. The interim keeps the
+/// question in the node's name and the open state in `mutable`; the extractor
+/// read `data.question` and `data.open`, which nothing writes, so every poll
+/// came out unnamed, and its result was reported as unmigratable and dropped.
 #[test]
-fn poll_extracts_and_cast_ballot_is_reported() {
+fn a_poll_is_carried_with_its_result_and_never_its_ballots() {
+    let ballot = |id: &str, poll: &str, chosen: serde_json::Value| {
+        node_with(id, "vote/vote", json!({"parentId": poll, "data": chosen}))
+    };
+    let mut binned = ballot("v4", "p1", json!([1]));
+    binned.deleted_at = Some("2026-02-01T00:00:00Z".into());
     let nodes = vec![
-        node(
+        node_with("mo", "vote/policy", json!({"name": "Forslag 1"})),
+        node_with(
             "p1",
             "vote/poll",
-            json!({"question": "Farve?", "options": ["Rod", "Gron"], "open": true, "secret": false}),
+            json!({
+                "name": "Forslag 1", "parentId": "mo", "mutable": false,
+                "updatedAt": "2026-01-02T00:00:00Z",
+                "data": {"options": ["for", "against", "blank"], "minVote": 1, "maxVote": 1,
+                         "hidden": true, "secret": true, "voters": ["someone"]}
+            }),
         ),
-        node("v1", "vote/vote", json!({})),
+        ballot("v1", "p1", json!([0])),
+        ballot("v2", "p1", json!([0])),
+        ballot("v3", "p1", json!([2])),
+        binned,
+        ballot("v5", "another-poll", json!([1])),
     ];
     let ex = extract(&nodes, &[], &[]);
-    assert_eq!(
-        ex.polls.len(),
-        1,
-        "the poll is the one migratable voting entity"
-    );
+
+    assert_eq!(ex.polls.len(), 1);
     let poll = &ex.polls[0];
-    assert_eq!(poll.question, "Farve?");
-    assert_eq!(poll.options, vec!["Rod".to_string(), "Gron".to_string()]);
-    assert!(poll.open);
-    assert!(!poll.secret);
-    assert_eq!(poll.context_id, "ctx1");
-    // The cast ballot is reported as unmigratable, not extracted.
+    assert_eq!(poll.question, "Forslag 1");
+    assert_eq!(
+        poll.counts,
+        [2, 0, 1],
+        "a binned ballot, or another poll's, was counted"
+    );
+    assert_eq!(poll.ballots, 3);
+    assert!(poll.blank && poll.secret && poll.hide_tally);
+    assert_eq!((poll.min, poll.max), (1, 1));
+    assert_eq!(poll.closed_at.as_deref(), Some("2026-01-02T00:00:00Z"));
+
+    // And it has its place in the tree, under the motion it was on.
+    let place = ex
+        .documents
+        .iter()
+        .find(|d| d.id == "p1")
+        .expect("its document");
+    assert_eq!(place.kind, DocumentKind::Poll);
+    assert_eq!(place.place.parent_id.as_deref(), Some("mo"));
+    assert!(
+        ex.report.unmapped_mimes.is_empty(),
+        "{:?}",
+        ex.report.unmapped_mimes
+    );
+    assert!(
+        ex.report.unmapped_source.is_empty(),
+        "{:?}",
+        ex.report.unmapped_source
+    );
+}
+
+#[test]
+fn a_poll_open_at_the_dump_comes_across_closed_and_is_reported() {
+    let nodes = vec![node_with(
+        "p1",
+        "vote/poll",
+        json!({
+            "mutable": true, "data": {"options": ["a", "b"]}
+        }),
+    )];
+    let ex = extract(&nodes, &[], &[]);
+    assert_eq!(ex.polls[0].ballots, 0);
     assert!(
         ex.report
             .unmapped_source
-            .keys()
-            .any(|k| k.contains("vote/vote")),
-        "the cast ballot is reported unmigratable"
+            .contains_key("nodes(vote/poll).mutable"),
+        "{:?}",
+        ex.report.unmapped_source
     );
+}
+
+#[test]
+fn a_canvas_is_carried_with_what_was_painted_on_it() {
+    let cell = |id: &str, key: &str, colour: u64, by: &str| {
+        node_with(
+            id,
+            "canvas/pixel",
+            json!({
+                "parentId": "cv", "key": key, "ownerId": by, "data": {"c": colour},
+                "updatedAt": "2026-01-03T00:00:00Z"
+            }),
+        )
+    };
+    let nodes = vec![
+        node_with(
+            "cv",
+            "canvas/canvas",
+            json!({
+                "name": "Tavlen", "mutable": false, "data": {"w": 16, "h": 500, "cooldown": 20}
+            }),
+        ),
+        cell("x1", "p_3_4", 7, "u-bob"),
+        cell("x2", "p_0_0", 25, "u-alice"),
+        cell("x3", "not-a-cell", 1, "u-bob"),
+    ];
+    let ex = extract(&nodes, &[], &[]);
+    let canvas = &ex.canvases[0];
+    assert_eq!(
+        (canvas.width, canvas.height, canvas.cooldown),
+        (16, 128, 20),
+        "a side is capped"
+    );
+    assert!(!canvas.open);
+    assert_eq!(canvas.cells.len(), 2, "what is not a cell is not painted");
+    let cell = canvas
+        .cells
+        .iter()
+        .find(|c| (c.x, c.y) == (3, 4))
+        .expect("the cell");
+    assert_eq!(
+        (cell.colour, cell.painter_did.as_deref()),
+        (7, Some("u-bob"))
+    );
+    assert_eq!(ex.documents[0].kind, DocumentKind::Canvas);
+    assert!(
+        ex.report.unmapped_mimes.is_empty(),
+        "{:?}",
+        ex.report.unmapped_mimes
+    );
+}
+
+#[test]
+fn feedback_and_reactions_are_carried() {
+    let react = |id: &str, by: &str, emoji: &str| {
+        node_with(
+            id,
+            "vote/reaction",
+            json!({
+                "parentId": "k1", "ownerId": by, "name": emoji, "data": {"emoji": emoji}
+            }),
+        )
+    };
+    let nodes = vec![
+        node_with(
+            "fb",
+            "wiki/feedback",
+            json!({
+                "name": "panicked at poll.rs", "ownerId": "u-bob", "updatedAt": "2026-01-09T00:00:00Z",
+                "data": {"kind": "crash", "message": "panicked at poll.rs:412", "path": "/closed",
+                         "appVersion": "1.2.3", "commit": "abc", "userAgent": "Firefox",
+                         "crashDigest": "00ff", "seen": 5, "reporters": ["u-bob", "anonymous"]}
+            }),
+        ),
+        react("r1", "u-bob", "🎉"),
+        react("r2", "u-bob", "🎉"),
+        react("r3", "u-alice", "🎉"),
+        node_with("r4", "vote/reaction", json!({"parentId": "k1", "name": ""})),
+    ];
+    let ex = extract(&nodes, &[], &[]);
+    let report = &ex.feedback[0];
+    assert_eq!((report.kind.as_str(), report.seen), ("crash", 5));
+    assert_eq!(
+        report.digest.as_deref(),
+        Some("00ff"),
+        "a known crash keeps its row"
+    );
+    assert_eq!(report.reporters, ["u-bob", "anonymous"]);
+    assert_eq!(report.updated_at.as_deref(), Some("2026-01-09T00:00:00Z"));
+
+    assert_eq!(ex.reactions.len(), 2, "one per person per emoji");
+    assert!(ex.reactions.iter().all(|r| r.subject_uri == "k1"));
+    assert_eq!(ex.report.unmapped_source["nodes(vote/reaction)"].count, 1);
+}
+
+/// An interim account cannot sign in here: a person is their DID now. It is
+/// handed to whoever proves the address it was registered under, so only an
+/// address the interim had VERIFIED may be carried. An unverified one is an
+/// address somebody typed, and they would inherit the account.
+#[test]
+fn an_account_is_recognized_by_a_verified_address_only() {
+    let users: Vec<InterimUser> = serde_json::from_value(json!([
+        {"id": "u-alice", "displayName": "Alice", "email": " Alice@X.dk ", "emailVerified": true},
+        {"id": "u-bob", "email": "bob@x.dk", "emailVerified": false},
+        {"id": "u-old-dump"},
+    ]))
+    .unwrap();
+    let ex = extract(&[], &[], &users);
+    assert_eq!(
+        ex.users.len(),
+        3,
+        "every account keeps its name and its work"
+    );
+    assert_eq!(
+        ex.accounts,
+        [LegacyAccount {
+            id: "u-alice".into(),
+            email: "alice@x.dk".into()
+        }]
+    );
+    assert_eq!(ex.report.left_behind["users.email, not verified"], 2);
+}
+
+/// A claim link is spent once its seat is taken, and the interim keeps it on
+/// the row all the same. Here a seat held by a carried account can be claimed,
+/// so the old link would open it to whoever still has the invitation.
+#[test]
+fn a_spent_claim_link_is_not_carried() {
+    let row = |id: &str, account: Option<&str>| -> InterimMember {
+        serde_json::from_value(json!({
+            "id": id, "email": format!("{id}@x.dk"), "nodeId": account, "parentId": "ctx1",
+            "accepted": account.is_some(), "active": true, "claimToken": format!("tok-{id}"),
+        }))
+        .unwrap()
+    };
+    let nodes = vec![node_with("ctx1", "wiki/group", json!({"parentId": null}))];
+    let ex = extract(
+        &nodes,
+        &[row("seated", Some("u-alice")), row("waiting", None)],
+        &[],
+    );
+    let token = |id: &str| {
+        let member = ex.members.iter().find(|m| m.id == id).expect("member");
+        member.claim_token.clone()
+    };
+    assert_eq!(token("seated"), None);
+    assert_eq!(token("waiting").as_deref(), Some("tok-waiting"));
+    assert_eq!(ex.report.left_behind["members.claim_token, spent"], 1);
+}
+
+/// The interim bins a comment where the new table deletes it, so a comment
+/// somebody deleted would have come back at the cutover. One binned along with
+/// its document is another matter: it is hidden with the document, and has to
+/// be there when the document is restored.
+#[test]
+fn what_was_deleted_stays_deleted() {
+    let binned = |id: &str, mime: &str, parent: &str, root: &str| {
+        node_with(
+            id,
+            mime,
+            json!({
+                "parentId": parent, "name": "🎉", "data": {"text": "x", "emoji": "🎉"},
+                "deleted_at": "2026-02-01T00:00:00Z", "deleted_root": root
+            }),
+        )
+    };
+    let nodes = vec![
+        node_with("ctx1", "wiki/group", json!({"parentId": null})),
+        node_with("doc", "wiki/document", json!({})),
+        node_with(
+            "gone",
+            "wiki/document",
+            json!({"deleted_at": "2026-02-01T00:00:00Z", "deleted_root": "gone"}),
+        ),
+        node_with("k-live", "vote/comment", json!({"parentId": "doc"})),
+        binned("k-deleted", "vote/comment", "doc", "k-deleted"),
+        binned("k-reply", "vote/comment", "k-deleted", "k-deleted"),
+        binned("r-deleted", "vote/reaction", "k-deleted", "k-deleted"),
+        binned("k-with-doc", "vote/comment", "gone", "gone"),
+        binned("r-with-doc", "vote/reaction", "k-with-doc", "gone"),
+        binned("fb-deleted", "wiki/feedback", "home", "fb-deleted"),
+    ];
+    let ex = extract(&nodes, &[], &[]);
+
+    let mut carried: Vec<&str> = ex.comments.iter().map(|k| k.id.as_str()).collect();
+    carried.sort_unstable();
+    assert_eq!(carried, ["k-live", "k-with-doc"]);
+    assert_eq!(ex.reactions.len(), 1);
+    assert_eq!(ex.reactions[0].id, "r-with-doc");
+    assert!(ex.feedback.is_empty());
+
+    assert_eq!(ex.report.left_behind["vote/comment, deleted"], 2);
+    assert_eq!(ex.report.left_behind["vote/reaction, deleted"], 1);
+    assert_eq!(ex.report.left_behind["wiki/feedback, deleted"], 1);
+    assert!(
+        ex.report.unmapped_source.is_empty() && ex.report.unmapped_mimes.is_empty(),
+        "left behind on purpose is not a gap: {:?}",
+        ex.report
+    );
+}
+
+/// The new table holds one row per crash. The interim looks a crash up and then
+/// files it, so two people hitting it at once left two rows behind.
+#[test]
+fn a_crash_filed_twice_comes_across_once() {
+    let crash = |id: &str, seen: u64, reporters: serde_json::Value, updated: &str| {
+        node_with(
+            id,
+            "wiki/feedback",
+            json!({
+                "updatedAt": updated,
+                "data": {"kind": "crash", "message": "panicked", "crashDigest": "00ff",
+                         "seen": seen, "reporters": reporters}
+            }),
+        )
+    };
+    let nodes = vec![
+        crash(
+            "fb1",
+            5,
+            json!(["u-bob", "anonymous"]),
+            "2026-01-09T00:00:00Z",
+        ),
+        crash(
+            "fb2",
+            2,
+            json!(["u-alice", "anonymous"]),
+            "2026-03-09T00:00:00Z",
+        ),
+        node_with(
+            "fb3",
+            "wiki/feedback",
+            json!({"data": {"kind": "bug", "message": "the button is grey"}}),
+        ),
+        node_with(
+            "fb4",
+            "wiki/feedback",
+            json!({"data": {"kind": "bug", "message": "the button is grey"}}),
+        ),
+    ];
+    let ex = extract(&nodes, &[], &[]);
+    let ids: Vec<&str> = ex.feedback.iter().map(|f| f.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["fb1", "fb3", "fb4"],
+        "what two people wrote is two reports"
+    );
+    let crash = &ex.feedback[0];
+    assert_eq!(crash.seen, 7);
+    assert_eq!(crash.reporters, ["u-bob", "anonymous", "u-alice"]);
+    assert_eq!(crash.updated_at.as_deref(), Some("2026-03-09T00:00:00Z"));
+}
+
+/// A context is open to everyone when it has an ACTIVE permission row for the
+/// `public` role that grants `select`. Without the rows every context came out
+/// closed, so a cutover would have shut the public pages.
+#[test]
+fn a_context_is_as_open_as_its_permission_rows_say() {
+    let ctx = |id: &str| {
+        node_with(
+            id,
+            "wiki/group",
+            json!({"parentId": "root", "contextId": null}),
+        )
+    };
+    let row = |ctx: &str, role: &str, select: bool, active: bool| json!({"contextId": ctx, "role": role, "select": select, "active": active});
+    let mut snap: Snapshot = serde_json::from_value(json!({
+        "nodes": [], "members": [], "users": [],
+        "permissions": [
+            row("open", "public", true, true),
+            row("open", "member", true, true),
+            row("shut-again", "public", true, false),
+            row("members-only", "member", true, true),
+            row("no-select", "public", false, true),
+        ]
+    }))
+    .unwrap();
+    snap.nodes = ["open", "shut-again", "members-only", "no-select"]
+        .map(ctx)
+        .into();
+    let ex = extract_snapshot(&snap);
+    let public: Vec<&str> = ex
+        .contexts
+        .iter()
+        .filter(|c| c.visibility == Visibility::Public)
+        .map(|c| c.id.as_str())
+        .collect();
+    assert_eq!(public, ["open"]);
+    assert!(ex.report.unmapped_source.is_empty());
+
+    // An older dump has no rows at all, and says what that costs.
+    snap.permissions = None;
+    let ex = extract_snapshot(&snap);
+    assert!(
+        ex.contexts
+            .iter()
+            .all(|c| c.visibility == Visibility::Private)
+    );
+    assert!(ex.report.unmapped_source.contains_key("permissions"));
 }
 
 #[test]
@@ -161,7 +525,7 @@ fn non_content_data_is_carried_and_unknown_mimes_hit_the_report() {
             json!({"fileId": "x", "type": "image/png"}),
         ),
         node("x1", "conference/conference", json!(null)), // legacy one-off
-        node("p1", "vote/poll", json!({"options": ["a"], "voters": []})), // excluded, not unknown
+        node("sl", "speak/list", json!(null)),            // known, and left behind on purpose
     ];
     let ex = extract(&nodes, &[], &[]);
 
@@ -182,14 +546,15 @@ fn non_content_data_is_carried_and_unknown_mimes_hit_the_report() {
         ex.report.unmapped_source.keys().collect::<Vec<_>>()
     );
 
-    // The legacy mime is unknown; the poll is a known-excluded mime (not flagged).
+    // The legacy mime is unknown; a speaker list is known and not carried, so it
+    // is not flagged.
     assert!(
         ex.report
             .unmapped_mimes
             .contains_key("conference/conference")
     );
-    assert!(!ex.report.unmapped_mimes.contains_key("vote/poll"));
-    // Two content docs extracted (candidate + file); poll and conference excluded.
+    assert!(!ex.report.unmapped_mimes.contains_key("speak/list"));
+    // Two content docs extracted (candidate + file).
     assert_eq!(ex.documents.len(), 2);
 }
 
@@ -287,10 +652,10 @@ fn a_node_under_a_kind_that_does_not_migrate_is_reported_not_silently_rerooted()
     let mut nodes = tree();
     nodes.push(
         serde_json::from_value(json!({
-            "id": "p", "name": "p", "key": "afstemning", "mimeId": "vote/poll",
+            "id": "p", "name": "p", "key": "talerliste", "mimeId": "speak/list",
             "parentId": "d", "contextId": "g", "data": {}
         }))
-        .expect("poll"),
+        .expect("speaker list"),
     );
     nodes.push(
         serde_json::from_value(json!({
@@ -305,7 +670,7 @@ fn a_node_under_a_kind_that_does_not_migrate_is_reported_not_silently_rerooted()
     assert!(
         ex.report
             .unmapped_source
-            .contains_key("nodes.parentId -> vote/poll"),
+            .contains_key("nodes.parentId -> speak/list"),
         "{:?}",
         ex.report.unmapped_source.keys().collect::<Vec<_>>()
     );
