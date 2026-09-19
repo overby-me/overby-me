@@ -20,15 +20,36 @@ use atrium_identity::handle::{
 use atrium_oauth::store::session::MemorySessionStore;
 use atrium_oauth::store::state::MemoryStateStore;
 use atrium_oauth::{
-    AtprotoLocalhostClientMetadata, AuthorizeOptions, DefaultHttpClient, KnownScope, OAuthClient,
-    OAuthClientConfig, OAuthResolverConfig, Scope,
+    AtprotoLocalhostClientMetadata, AuthorizeOptions, KnownScope, OAuthClient, OAuthClientConfig,
+    OAuthResolverConfig, Scope,
 };
+use atrium_xrpc::http::{Request, Response};
 use std::sync::Arc;
 
-type HttpClient = DefaultHttpClient;
+/// reqwest on rustls. atrium-oauth's own `DefaultHttpClient` links OpenSSL, which
+/// the stack decision rules out; `crates/appview/src/http.rs` is the kept copy.
+#[derive(Clone, Default)]
+pub struct HttpClient {
+    client: reqwest::Client,
+}
+
+impl atrium_xrpc::HttpClient for HttpClient {
+    async fn send_http(
+        &self,
+        request: Request<Vec<u8>>,
+    ) -> Result<Response<Vec<u8>>, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let response = self.client.execute(request.try_into()?).await?;
+        let mut builder = Response::builder().status(response.status());
+        for (name, value) in response.headers() {
+            builder = builder.header(name, value);
+        }
+        Ok(builder.body(response.bytes().await?.to_vec())?)
+    }
+}
+
 type DidRes = CommonDidResolver<HttpClient>;
 type HandleRes = AtprotoHandleResolver<DohDnsTxtResolver<HttpClient>, HttpClient>;
-type Client = OAuthClient<MemoryStateStore, MemorySessionStore, DidRes, HandleRes>;
+type Client = OAuthClient<MemoryStateStore, MemorySessionStore, DidRes, HandleRes, HttpClient>;
 
 /// The wiki's atproto OAuth client. Construct once; `begin_login` per member.
 pub struct WikiOAuth {
@@ -41,7 +62,8 @@ impl WikiOAuth {
     /// transitional-generic scopes the app needs, Cloudflare DoH for handle
     /// TXT resolution, and the default PLC directory for DID resolution.
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let http_client = Arc::new(DefaultHttpClient::default());
+        let http = HttpClient::default();
+        let http_client = Arc::new(http.clone());
         let config = OAuthClientConfig {
             client_metadata: AtprotoLocalhostClientMetadata {
                 redirect_uris: Some(vec![String::from("http://127.0.0.1/callback")]),
@@ -68,6 +90,7 @@ impl WikiOAuth {
             },
             state_store: MemoryStateStore::default(),
             session_store: MemorySessionStore::default(),
+            http_client: http,
         };
         Ok(Self {
             client: OAuthClient::new(config)?,

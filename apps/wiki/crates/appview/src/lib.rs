@@ -13,6 +13,7 @@ pub mod ballot;
 pub mod config;
 pub mod db;
 pub mod firehose;
+pub mod http;
 pub mod oauth;
 pub mod schema;
 pub mod statecookie;

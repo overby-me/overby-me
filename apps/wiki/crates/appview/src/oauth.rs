@@ -21,6 +21,7 @@
 //!    Record how far the exchange + refresh get (per the spike's honest limits).
 
 use crate::db::{Db, DbError};
+use crate::http::RustlsHttpClient;
 use atrium_api::agent::SessionManager;
 use atrium_api::types::string::Did;
 use atrium_common::store::Store;
@@ -31,8 +32,8 @@ use atrium_identity::handle::{
 use atrium_oauth::store::session::{Session, SessionStore};
 use atrium_oauth::store::state::{InternalStateData, StateStore};
 use atrium_oauth::{
-    AtprotoLocalhostClientMetadata, AuthorizeOptions, CallbackParams, DefaultHttpClient,
-    KnownScope, OAuthClient, OAuthClientConfig, OAuthResolverConfig, Scope,
+    AtprotoLocalhostClientMetadata, AuthorizeOptions, CallbackParams, KnownScope, OAuthClient,
+    OAuthClientConfig, OAuthResolverConfig, Scope,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -232,10 +233,10 @@ impl SessionStore for SqliteSessionStore {}
 // The OAuth client wrapper.
 // ---------------------------------------------------------------------------
 
-type HttpClient = DefaultHttpClient;
+type HttpClient = RustlsHttpClient;
 type DidRes = CommonDidResolver<HttpClient>;
 type HandleRes = AtprotoHandleResolver<DohDnsTxtResolver<HttpClient>, HttpClient>;
-type Client = OAuthClient<SqliteStateStore, SqliteSessionStore, DidRes, HandleRes>;
+type Client = OAuthClient<SqliteStateStore, SqliteSessionStore, DidRes, HandleRes, HttpClient>;
 
 /// The result of a completed callback: the resolved account DID (if the session
 /// exposes it) and the app-state the authorize call round-tripped.
@@ -256,7 +257,8 @@ impl WikiOAuth {
     /// transitional-generic scopes, Cloudflare DoH for handle TXT resolution, and
     /// the default PLC directory for DID resolution (mirrors `oauth-spike`).
     pub fn new(db: Db) -> Result<Self, Box<dyn std::error::Error>> {
-        let http_client = Arc::new(DefaultHttpClient::default());
+        let http = RustlsHttpClient::new()?;
+        let http_client = Arc::new(http.clone());
         let config = OAuthClientConfig {
             client_metadata: AtprotoLocalhostClientMetadata {
                 redirect_uris: Some(vec![String::from("http://127.0.0.1/callback")]),
@@ -283,6 +285,7 @@ impl WikiOAuth {
             },
             state_store: SqliteStateStore::new(db.clone()),
             session_store: SqliteSessionStore::new(db),
+            http_client: http,
         };
         Ok(Self {
             client: OAuthClient::new(config)?,

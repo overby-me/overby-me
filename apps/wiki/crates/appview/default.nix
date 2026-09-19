@@ -6,14 +6,11 @@
 # unit behind Ferron), not serverless. This file provides the native binary
 # package; `./nixos-module.nix` is the systemd/NixOS unit that runs it.
 {
-  # The native appview binary, built from the `crates/` workspace. Depends on the
-  # atrium-oauth tree (reqwest -> TLS) and turso, so it needs pkg-config + openssl
-  # at build time.
+  # The native appview binary, built from the `crates/` workspace. TLS is rustls
+  # throughout (src/http.rs), so the build needs no OpenSSL and no pkg-config.
   packages.wiki-appview = {
     lib,
     rustPlatform,
-    pkg-config,
-    openssl,
     ...
   }:
     rustPlatform.buildRustPackage {
@@ -46,9 +43,6 @@
       # Build (and install) ONLY the appview binary out of the workspace.
       cargoBuildFlags = ["--package" "appview"];
       buildAndTestSubdir = null;
-
-      nativeBuildInputs = [pkg-config];
-      buildInputs = [openssl];
 
       # The workspace unit tests run locally and in the migration crates' own
       # checks; the deploy build only produces the serving binary (some workspace
