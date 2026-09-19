@@ -393,6 +393,9 @@ pub struct DocumentMeta {
 /// A row of the bin: the root of a subtree that was deleted together.
 #[derive(Debug, serde::Serialize)]
 pub struct Binned {
+    /// `document`, restored with `restoreDocument`, or `context`, with
+    /// `restoreContext`.
+    pub node: &'static str,
     pub id: String,
     pub kind: String,
     pub title: String,
@@ -1959,6 +1962,7 @@ impl Store {
         let mut out = Vec::new();
         while let Some(row) = rows.next().await? {
             out.push(Binned {
+                node: "document",
                 id: row.get::<String>(0)?,
                 kind: row.get::<String>(1)?,
                 title: row.get::<String>(2)?,
@@ -1967,6 +1971,29 @@ impl Store {
                 deleted_at: row.get::<String>(5)?,
             });
         }
+        // A group or an event that sat in this context. It is its own context,
+        // so it is found by where it sat.
+        let mut rows = conn
+            .query(
+                "SELECT c.id, c.kind, c.name, c.path, c.owner_did, c.deleted_at FROM context c \
+                 WHERE c.deleted_root = c.id AND (?2 IS NULL OR c.owner_did = ?2) \
+                   AND (c.parent_id = ?1 OR c.parent_id IN \
+                        (SELECT d.id FROM document d WHERE d.context_id = ?1))",
+                vec![Value::Text(context_id.to_string()), opt_str_val(owner)],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            out.push(Binned {
+                node: "context",
+                id: row.get::<String>(0)?,
+                kind: row.get::<String>(1)?,
+                title: row.get::<String>(2)?,
+                path: row.get::<String>(3)?,
+                owner_did: opt_text(&row, 4),
+                deleted_at: row.get::<String>(5)?,
+            });
+        }
+        out.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
         Ok(out)
     }
 

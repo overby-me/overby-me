@@ -47,8 +47,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use turso::Value;
 
-/// What a poll may be opened on: the kinds that put something to a vote.
-pub const POLLABLE: &[&str] = &["policy", "position", "change", "question"];
+/// What a poll may be opened on: the interim's rule for `vote/poll`.
+pub const POLLABLE: &[&str] = &["policy", "change", "position"];
 
 const MAX_OPTIONS: usize = 100;
 const MAX_TEXT_CHARS: usize = 300;
@@ -624,7 +624,7 @@ pub async fn open_poll(
         return refusal;
     }
     if !POLLABLE.contains(&parent.kind.as_str()) {
-        return invalid("a poll is opened on a motion, an amendment, a question or a position");
+        return invalid("a poll is opened on a motion, an amendment or a position");
     }
     let (options, title, question) = match rules_of(&body) {
         Ok(rules) => rules,

@@ -22,8 +22,20 @@
 							"type": "array",
 							"items": {
 								"type": "object",
-								"required": ["id", "kind", "title", "path", "deleted_at"],
+								"required": [
+									"node",
+									"id",
+									"kind",
+									"title",
+									"path",
+									"deleted_at"
+								],
 								"properties": {
+									"node": {
+										"type": "string",
+										"knownValues": ["document", "context"],
+										"description": "Which of `restoreDocument` and `restoreContext` brings it back. A group or an event is listed in the bin of the context it sat in."
+									},
 									"id": { "type": "string" },
 									"kind": { "type": "string" },
 									"title": { "type": "string" },

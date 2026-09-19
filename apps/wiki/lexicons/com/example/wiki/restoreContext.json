@@ -1,0 +1,52 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.restoreContext",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Bring a context back from the bin, with everything that went with it. Whoever could have deleted it may. One that went along with something else is restored by restoring that.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": {
+						"id": {
+							"type": "string"
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["restored"],
+					"properties": {
+						"restored": {
+							"type": "integer"
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such context in the bin, or none the caller may restore."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "It went to the bin along with what it is in."
+				},
+				{
+					"name": "PathTaken",
+					"description": "A live node has since taken its path (HTTP 409)."
+				}
+			]
+		}
+	}
+}

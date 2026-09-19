@@ -210,6 +210,13 @@ The steps:
 - [x] The parent reference on a node ("in <parent>"), for the feed rows that
   quote what they are about: every feed row and search hit carries it, when the
   caller may read the parent too.
+- [x] Groups and events (`crates/appview/src/context.rs`): made, renamed,
+  opened to the public, locked, binned and restored. This was missing from the
+  plan altogether: a context could only arrive by migration or off the
+  firehose, so no group could have been started after the cutover. Making one
+  is a single transaction where the interim needs four writes from the
+  browser, and needs no permission template: the one rule every context had is
+  `crates/appview/src/authz.rs`.
 - [x] Update, with the interim's edit rule (an author edits a draft, an owner of
   the context edits and arranges anything); reorder and the lock with it.
 - [x] The bin: soft delete of a subtree, restore of exactly what went together,

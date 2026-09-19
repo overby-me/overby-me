@@ -10,6 +10,7 @@ pub mod authz;
 pub mod ballot;
 pub mod blob;
 pub mod config;
+pub mod context;
 pub mod db;
 pub mod feed;
 pub mod feedback;
@@ -302,6 +303,22 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.moveDocument",
             post(xrpc::move_document),
+        )
+        .route(
+            "/xrpc/com.example.wiki.createContext",
+            post(context::create_context),
+        )
+        .route(
+            "/xrpc/com.example.wiki.updateContext",
+            post(context::update_context),
+        )
+        .route(
+            "/xrpc/com.example.wiki.deleteContext",
+            post(context::delete_context),
+        )
+        .route(
+            "/xrpc/com.example.wiki.restoreContext",
+            post(context::restore_context),
         )
         .route(
             "/xrpc/com.example.wiki.copyDocument",

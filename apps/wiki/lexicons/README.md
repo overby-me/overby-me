@@ -79,6 +79,9 @@ navigations, not XRPC, so they have no lexicon.
 
 Procedures (POST, authenticated; the caller's DID comes from the session, never the body):
 
+- `createContext` makes a group or an event, with the caller as its first owner; `updateContext`
+  renames it, opens it to the public or locks it; `deleteContext` and `restoreContext` are its way
+  in and out of the bin.
 - `createDocument` and `postComment` return `{ id }` and need membership of the context written to;
   `addReaction` returns `{ id }` (idempotent) and `removeReaction` returns `{ ok: true }` (idempotent
   toggle-off).

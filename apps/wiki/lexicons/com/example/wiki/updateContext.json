@@ -1,0 +1,63 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.updateContext",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "An owner renames a context, opens it to the public or closes it, or locks it against direct additions. An absent field stays as it is. A rename keeps the address: the slug is what links point at. `public` opens the context and what is in it to everyone, signed in or not.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": {
+						"id": {
+							"type": "string"
+						},
+						"name": {
+							"type": "string",
+							"maxLength": 200
+						},
+						"visibility": {
+							"type": "string",
+							"enum": ["public", "private"]
+						},
+						"attachable": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["ok"],
+					"properties": {
+						"ok": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such context, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is not an owner of the context."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "An empty name, or a visibility that is neither."
+				}
+			]
+		}
+	}
+}
