@@ -162,6 +162,28 @@ pub async fn get_node(
         },
         None => None,
     };
+    // Everyone the page names by DID, so it can show a face without asking again.
+    let mut dids: std::collections::BTreeSet<String> = children
+        .iter()
+        .filter_map(|c| c.owner_did.clone())
+        .chain(node.place().owner_did.clone())
+        .collect();
+    let mut ordinal = None;
+    if let crate::store::Node::Document(doc) = &node {
+        dids.extend(
+            doc.authors
+                .iter()
+                .filter_map(|a| a.did().map(str::to_string)),
+        );
+        ordinal = match store.ordinal_of(&doc.id).await {
+            Ok(ordinal) => ordinal,
+            Err(e) => return failed(e),
+        };
+    }
+    let profiles = match store.profiles(&dids).await {
+        Ok(profiles) => profiles,
+        Err(e) => return failed(e),
+    };
     let viewer = serde_json::json!({
         "is_owner": caller.did().is_some() && caller.did() == node.place().owner_did.as_deref(),
         "is_member": membership.is_some(),
@@ -171,7 +193,8 @@ pub async fn get_node(
     (
         StatusCode::OK,
         Json(serde_json::json!({
-            "node": node, "children": children, "crumbs": crumbs, "viewer": viewer
+            "node": node, "ordinal": ordinal, "children": children, "crumbs": crumbs,
+            "profiles": profiles, "viewer": viewer
         })),
     )
         .into_response()
@@ -964,6 +987,45 @@ pub async fn update_document(
         Ok(true) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
         Ok(false) => err(StatusCode::NOT_FOUND, "NotFound", "no such document"),
         Err(e) => write_failed("updateDocument", e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetDocumentAuthorsBody {
+    pub id: String,
+    pub authors: Vec<wiki_domain_types::Author>,
+}
+
+/// `com.example.wiki.setDocumentAuthors` (procedure) — replace the author chips
+/// on a document, in order. Whoever may edit it may. An author is an account or
+/// a name with no account behind it, which is what 42 percent of them are.
+pub async fn set_document_authors(
+    State(state): State<AppState>,
+    Caller { did }: Caller,
+    Json(body): Json<SetDocumentAuthorsBody>,
+) -> Response {
+    let (meta, standing) =
+        match standing_towards(&state, &body.id, &did, "setDocumentAuthors").await {
+            Ok(found) => found,
+            Err(refusal) => return refusal,
+        };
+    if !standing.may_edit(meta.mutable) {
+        return forbidden("not yours to edit");
+    }
+    if body.authors.len() > crate::store::MAX_AUTHORS {
+        return invalid("too many authors");
+    }
+    let blank =
+        |a: &wiki_domain_types::Author| a.did().or(a.text()).is_none_or(|s| s.trim().is_empty());
+    if body.authors.iter().any(blank) {
+        return invalid("an author needs a DID or a name");
+    }
+    match crate::Store::new(state.db.clone())
+        .set_document_authors(&body.id, &body.authors)
+        .await
+    {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "ok": true }))).into_response(),
+        Err(e) => write_failed("setDocumentAuthors", e),
     }
 }
 
@@ -3384,5 +3446,145 @@ mod tests {
         .await;
         assert_eq!(real, fake);
         assert_eq!(real.0, StatusCode::NOT_FOUND);
+    }
+
+    // -- Author chips, faces, and the letters on submitted motions. --
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn whoever_may_edit_a_document_names_its_authors() {
+        let m = meeting().await;
+        let authors = serde_json::json!({
+            "id": m.motion,
+            "authors": [
+                {"kind": "user", "did": "did:plc:dave"},
+                {"kind": "free_text", "display": "Radikal Ungdom Aarhus"},
+                {"kind": "user", "did": "did:plc:newcomer"}
+            ]
+        });
+        assert_eq!(
+            m.call("setDocumentAuthors", &m.dave, authors.clone()).await,
+            StatusCode::OK
+        );
+        let (_, doc) = m.read(&m.dave).await;
+        let chips = doc["authors"].as_array().expect("authors");
+        assert_eq!(chips.len(), 3, "replaced, in the order given: {doc}");
+        assert_eq!(chips[1]["display"], "Radikal Ungdom Aarhus");
+        assert_eq!(
+            chips[2]["did"], "did:plc:newcomer",
+            "an author nobody has seen yet"
+        );
+
+        let carol = token_for(&m.state, "did:plc:carol").await;
+        join(&m.state, "did:plc:carol", "c1").await;
+        assert_eq!(
+            m.call("setDocumentAuthors", &carol, authors).await,
+            StatusCode::FORBIDDEN,
+            "a bystander put her name on it"
+        );
+        let nameless = serde_json::json!({
+            "id": m.motion, "authors": [{"kind": "free_text", "display": "  "}]
+        });
+        assert_eq!(
+            m.call("setDocumentAuthors", &m.dave, nameless).await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_node_brings_the_faces_of_everyone_it_names() {
+        let m = meeting().await;
+        let conn = m.state.db.acquire().await.expect("conn");
+        conn.execute(
+            "UPDATE user SET display_name = 'Dave D.', handle = 'dave.test', \
+               avatar_url = 'https://cdn.example/dave.jpg' WHERE did = 'did:plc:dave'",
+            (),
+        )
+        .await
+        .expect("profile");
+        let (_, v) = get_as(
+            router(m.state.clone()),
+            &format!("/xrpc/com.example.wiki.getNode?id={}", m.motion),
+            &m.dave,
+        )
+        .await;
+        assert_eq!(v["profiles"]["did:plc:dave"]["display_name"], "Dave D.");
+        assert_eq!(v["profiles"]["did:plc:dave"]["handle"], "dave.test");
+
+        // In a listing, the creator of each child.
+        let (_, folder) = get_as(
+            router(m.state.clone()),
+            "/xrpc/com.example.wiki.getNode?id=fold",
+            &m.dave,
+        )
+        .await;
+        assert!(folder["profiles"].get("did:plc:dave").is_some(), "{folder}");
+    }
+
+    /// The letters belong to what was submitted. A draft has none, and the
+    /// letters of the others do not count it.
+    #[tokio::test(flavor = "current_thread")]
+    async fn submitted_motions_are_lettered_and_a_page_agrees_with_the_listing() {
+        let m = meeting().await;
+        let mut ids = vec![m.motion.clone()];
+        for _ in 0..2 {
+            let (_, v) = try_create(&m.state, &m.dave, "policy", "fold").await;
+            ids.push(v["id"].as_str().expect("id").to_string());
+        }
+        // Submit the third, then the first. The second stays a draft.
+        for id in [&ids[2], &ids[0]] {
+            let submit = serde_json::json!({"id": id, "mutable": false});
+            assert_eq!(
+                m.call("updateDocument", &m.dave, submit).await,
+                StatusCode::OK
+            );
+        }
+        // The chair puts the first ahead by hand, which outranks the clock.
+        let first = serde_json::json!({"id": ids[0], "idx": -1});
+        assert_eq!(
+            m.call("updateDocument", &m.chair, first).await,
+            StatusCode::OK
+        );
+
+        let (_, folder) = get_as(
+            router(m.state.clone()),
+            "/xrpc/com.example.wiki.getNode?id=fold",
+            &m.dave,
+        )
+        .await;
+        let listed = |id: &str| {
+            folder["children"]
+                .as_array()
+                .expect("children")
+                .iter()
+                .find(|c| c["id"] == id)
+                .expect("child")["ordinal"]
+                .clone()
+        };
+        assert_eq!(listed(&ids[0]), 1);
+        assert_eq!(listed(&ids[2]), 2);
+        assert!(listed(&ids[1]).is_null(), "a draft was given a letter");
+
+        for (id, expected) in [
+            (&ids[0], serde_json::json!(1)),
+            (&ids[2], serde_json::json!(2)),
+        ] {
+            let (_, page) = get_as(
+                router(m.state.clone()),
+                &format!("/xrpc/com.example.wiki.getNode?id={id}"),
+                &m.dave,
+            )
+            .await;
+            assert_eq!(
+                page["ordinal"], expected,
+                "the page and the listing disagree"
+            );
+        }
+        let (_, draft) = get_as(
+            router(m.state.clone()),
+            &format!("/xrpc/com.example.wiki.getNode?id={}", ids[1]),
+            &m.dave,
+        )
+        .await;
+        assert!(draft["ordinal"].is_null());
     }
 }

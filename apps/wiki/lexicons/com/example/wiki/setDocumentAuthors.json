@@ -1,0 +1,60 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.setDocumentAuthors",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Replace the author chips on a document, in the order given. Whoever may edit the document may. An author is an account (a DID) or a name with no account behind it, which is what 42 percent of them are.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id", "authors"],
+					"properties": {
+						"id": {
+							"type": "string"
+						},
+						"authors": {
+							"type": "array",
+							"maxLength": 16,
+							"items": {
+								"type": "ref",
+								"ref": "com.example.wiki.defs#authorView"
+							}
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["ok"],
+					"properties": {
+						"ok": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such document, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller may read it but may not edit it."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "More than 16 authors, or one with neither a DID nor a name."
+				}
+			]
+		}
+	}
+}

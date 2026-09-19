@@ -55,7 +55,8 @@ the caller wrote it. A row the caller may not read answers exactly as a missing 
 `getReactions` alone is ungated, because reactions only ever mirror public records.
 
 - `getNode` is what a screen loads: a node by path or id with its children of either kind, its
-  breadcrumbs, and what the caller may do there.
+  breadcrumbs, the profile behind every DID it names, the letter a submitted motion carries, and
+  what the caller may do there.
 - `listMembers` is a context's roster, for its members only, with addresses for its owners only;
   `getVoterCount` is the number a poll's turnout is out of.
 - `getDocument` / `getContext` return a single entity; `resolveNode` returns the context or document
@@ -76,6 +77,7 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
 - `createDocument` and `postComment` return `{ id }` and need membership of the context written to;
   `addReaction` returns `{ id }` (idempotent) and `removeReaction` returns `{ ok: true }` (idempotent
   toggle-off).
+- `setDocumentAuthors` replaces a document's author chips: accounts, or names with no account.
 - `moveDocument` takes a document and its subtree to another parent in the same context, rewriting
   every path in it.
 - `updateDocument` changes a document (never its slug); `deleteDocument` puts it and its subtree in

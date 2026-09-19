@@ -182,8 +182,13 @@ The steps:
   folder lock with its owner and discussion exemptions. One static table,
   carried over from the interim's per-context template. (A closed poll refusing
   votes belongs to M6.)
-- [ ] The rest of the `src/model.rs` node shape: the members and author chips
-  on a node, the parent reference, `get_index` (the A/B/C of a policy).
+- [x] The ordinal that letters submitted motions (the interim's `get_index`,
+  by its rule: submitted nodes only, by index, then last update, then id), on
+  the page and in the listing alike; the profile behind every DID a page names.
+  It inherits the interim's weakness: an edit bumps `updated_at`, so correcting
+  a submitted motion can change its letter unless the chair has set the order.
+- [ ] The parent reference on a node ("in <parent>"), for the feed rows that
+  quote what they are about.
 - [x] Update, with the interim's edit rule (an author edits a draft, an owner of
   the context edits and arranges anything); reorder and the lock with it.
 - [x] The bin: soft delete of a subtree, restore of exactly what went together,
@@ -211,7 +216,7 @@ The steps:
 - [ ] Reaching an invited address. Nothing sends mail yet, so an owner hands out
   claim links by hand; binding by the account's confirmed address (M2) would
   make most of that unnecessary.
-- [ ] Author chips (`set_node_authors`).
+- [x] Author chips (`setDocumentAuthors`): accounts, or names with no account.
 
 ### M5: meetings
 

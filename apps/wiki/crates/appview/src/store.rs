@@ -215,11 +215,26 @@ pub struct Child {
     pub attachable: bool,
     pub owner_did: Option<String>,
     pub created_at: Option<String>,
+    pub updated_at: Option<String>,
     /// A file's id and type, a cover image: what a row needs to draw itself.
     pub data: Option<serde_json::Value>,
     /// Live children, so the drawer offers to expand only what has some.
     pub child_count: i64,
+    /// Its number among the submitted siblings of its kind: the A, B, C of a
+    /// motion. A draft has none. See [`Store::ordinal_of`].
+    pub ordinal: Option<i64>,
 }
+
+/// The name and picture behind a DID.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Profile {
+    pub handle: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+/// More authors than any node has had (the census found eight at most).
+pub const MAX_AUTHORS: usize = 16;
 
 /// One segment of the way down to a node.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -1381,7 +1396,7 @@ impl Store {
                 "context",
                 format!(
                     "SELECT c.id, c.kind, c.name, c.slug, c.path, c.idx, 0, c.attachable, \
-                            c.owner_did, c.created_at, NULL, {} \
+                            c.owner_did, c.created_at, NULL, {}, c.updated_at \
                      FROM context c WHERE c.parent_id = ?1 AND c.{LIVE} AND {}",
                     counted("c"),
                     readable_context("c", 2)
@@ -1391,7 +1406,7 @@ impl Store {
                 "document",
                 format!(
                     "SELECT d.id, d.kind, d.title, d.slug, d.path, d.idx, d.mutable, d.attachable, \
-                            d.owner_did, d.created_at, d.data, {} \
+                            d.owner_did, d.created_at, d.data, {}, d.updated_at \
                      FROM document d WHERE d.parent_id = ?1 AND d.{LIVE} AND {}",
                     counted("d"),
                     readable_document("d", 2)
@@ -1422,11 +1437,122 @@ impl Store {
                     created_at: opt_text(&row, 9),
                     data: opt_text(&row, 10).and_then(|s| serde_json::from_str(&s).ok()),
                     child_count: row.get::<i64>(11)?,
+                    updated_at: opt_text(&row, 12),
+                    ordinal: None,
                 });
             }
         }
+        number_the_submitted(&mut out);
         out.sort_by(|a, b| (a.idx, &a.created_at, &a.id).cmp(&(b.idx, &b.created_at, &b.id)));
         Ok(out)
+    }
+
+    /// A document's number among the submitted siblings of its kind, from 1: the
+    /// A, B, C of a motion and the 1, 2, 3 of an amendment, for a page that loads
+    /// no sibling list. `None` for a draft, which is not numbered until it is
+    /// submitted, and for a root.
+    ///
+    /// The order is the interim's (`migrations/0017`): manual index, then last
+    /// update, then id, which makes it total, so two motions never swap letters
+    /// between one read and the next. A count of what sorts earlier, not a
+    /// ranking of everything.
+    pub async fn ordinal_of(&self, id: &str) -> Result<Option<i64>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT (SELECT count(*) + 1 FROM document s \
+                             WHERE s.parent_id = d.parent_id AND s.kind = d.kind \
+                               AND s.mutable = 0 AND s.{LIVE} \
+                               AND (s.idx, s.updated_at, s.id) < (d.idx, d.updated_at, d.id)) \
+                     FROM document d \
+                     WHERE d.id = ?1 AND d.mutable = 0 AND d.parent_id IS NOT NULL"
+                ),
+                [id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => Ok(Some(row.get::<i64>(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// The profiles of those `dids` the view knows. A DID it has never seen is
+    /// simply absent.
+    pub async fn profiles(
+        &self,
+        dids: &std::collections::BTreeSet<String>,
+    ) -> Result<std::collections::BTreeMap<String, Profile>, DbError> {
+        let mut out = std::collections::BTreeMap::new();
+        if dids.is_empty() {
+            return Ok(out);
+        }
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT did, handle, display_name, avatar_url FROM user WHERE did IN ({})",
+                    in_placeholders(dids.len())
+                ),
+                turso::params_from_iter(dids.iter().cloned()),
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            out.insert(
+                row.get::<String>(0)?,
+                Profile {
+                    handle: opt_text(&row, 1),
+                    display_name: opt_text(&row, 2),
+                    avatar_url: opt_text(&row, 3),
+                },
+            );
+        }
+        Ok(out)
+    }
+
+    /// Replace a document's authors, in the order given. An author with a DID
+    /// gets a user row if they have none, since the author table points at one.
+    pub async fn set_document_authors(&self, id: &str, authors: &[Author]) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let written = async {
+            conn.execute("DELETE FROM document_author WHERE document_id = ?1", [id])
+                .await?;
+            for (ord, author) in authors.iter().enumerate() {
+                if let Some(did) = author.did() {
+                    conn.execute("INSERT OR IGNORE INTO user (did) VALUES (?1)", [did])
+                        .await?;
+                }
+                conn.execute(
+                    "INSERT INTO document_author (document_id, author_did, author_text, ord) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                    vec![
+                        Value::Text(id.to_string()),
+                        opt_str_val(author.did()),
+                        opt_str_val(author.text()),
+                        Value::Integer(i64::try_from(ord).unwrap_or(i64::MAX)),
+                    ],
+                )
+                .await?;
+            }
+            conn.execute(
+                &format!("UPDATE document SET updated_at = {NOW} WHERE id = ?1"),
+                [id],
+            )
+            .await?;
+            Ok::<(), DbError>(())
+        }
+        .await;
+        conn.execute(
+            if written.is_ok() {
+                "COMMIT"
+            } else {
+                "ROLLBACK"
+            },
+            (),
+        )
+        .await?;
+        written
     }
 
     /// The way down to `path`, a crumb per segment. A segment the caller may not
@@ -2241,6 +2367,24 @@ impl Store {
         conn.execute("DELETE FROM document WHERE id = ?1", [uri])
             .await?;
         Ok(())
+    }
+}
+
+/// Number the submitted documents among `children`, per kind, in the order
+/// [`Store::ordinal_of`] counts in, so a listing and a page agree on a letter.
+fn number_the_submitted(children: &mut [Child]) {
+    let mut order: Vec<usize> = (0..children.len())
+        .filter(|&i| children[i].node == "document" && !children[i].mutable)
+        .collect();
+    order.sort_by(|&a, &b| {
+        let key = |c: &Child| (c.idx, c.updated_at.clone(), c.id.clone());
+        key(&children[a]).cmp(&key(&children[b]))
+    });
+    let mut counted = std::collections::BTreeMap::new();
+    for i in order {
+        let n = counted.entry(children[i].kind.clone()).or_insert(0);
+        *n += 1;
+        children[i].ordinal = Some(*n);
     }
 }
 

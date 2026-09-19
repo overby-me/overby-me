@@ -198,6 +198,10 @@ fn build_router(state: AppState) -> Router {
             post(xrpc::update_document),
         )
         .route(
+            "/xrpc/com.example.wiki.setDocumentAuthors",
+            post(xrpc::set_document_authors),
+        )
+        .route(
             "/xrpc/com.example.wiki.moveDocument",
             post(xrpc::move_document),
         )
