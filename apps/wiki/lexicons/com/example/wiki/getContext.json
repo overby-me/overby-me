@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "Fetch a group/event context by id. Identity-free.",
+			"description": "Fetch a group/event context by id. Serves only what the caller may read.",
 			"parameters": {
 				"type": "params",
 				"required": ["id"],

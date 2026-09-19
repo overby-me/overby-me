@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "Search documents by a title/content substring. Identity-free.",
+			"description": "Search documents by a title/content substring. Serves only what the caller may read.",
 			"parameters": {
 				"type": "params",
 				"required": ["q"],

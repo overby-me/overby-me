@@ -9,6 +9,7 @@
 //! connection, the broadcast channel, the WebSocket server), so it CANNOT run
 //! on scale-to-zero serverless like the interim backend; see the deploy item.
 
+pub mod authz;
 pub mod ballot;
 pub mod config;
 pub mod db;
@@ -151,6 +152,14 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.deleteSession",
             post(xrpc::delete_session),
+        )
+        .route(
+            "/xrpc/com.example.wiki.claimMembership",
+            post(xrpc::claim_membership),
+        )
+        .route(
+            "/xrpc/com.example.wiki.getMemberClaimLink",
+            get(xrpc::get_member_claim_link),
         )
         // The write procedures (the session's DID authors content).
         .route(

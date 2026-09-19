@@ -23,6 +23,7 @@
 //! - `push_subscriptions` is AppView runtime infra (`RUNTIME_DDL`), keyed by
 //!   endpoint, with `user_id` now `user_did`.
 
+use crate::authz::{readable_comment, readable_context, readable_document};
 use crate::db::{Db, DbError};
 use turso::Value;
 use wiki_domain_types::{
@@ -176,6 +177,33 @@ impl Store {
                 owner_id: opt_text(&row, 0),
                 context_id: opt_text(&row, 1),
             }));
+        }
+        Ok(None)
+    }
+
+    /// The context of a node (a document or a comment) that `caller` may read.
+    /// `None` covers both "no such node" and "not theirs to read".
+    pub async fn readable_node_context(
+        &self,
+        node_id: &str,
+        caller: Option<&str>,
+    ) -> Result<Option<String>, DbError> {
+        let conn = self.db.acquire().await?;
+        let params = || vec![Value::Text(node_id.to_string()), opt_str_val(caller)];
+        for sql in [
+            format!(
+                "SELECT d.context_id FROM document d WHERE d.id = ?1 AND {}",
+                readable_document("d", 2)
+            ),
+            format!(
+                "SELECT k.context_id FROM comment k WHERE k.id = ?1 AND {}",
+                readable_comment("k", 2)
+            ),
+        ] {
+            let mut rows = conn.query(&sql, params()).await?;
+            if let Some(row) = rows.next().await? {
+                return Ok(opt_text(&row, 0));
+            }
         }
         Ok(None)
     }
@@ -494,14 +522,23 @@ impl Store {
     }
 
     /// A content node (document / folder / file / proposal) by id, with its
-    /// authors. `None` if no such document.
-    pub async fn read_document(&self, id: &str) -> Result<Option<Document>, DbError> {
+    /// authors. `None` if there is no such document, or none `caller` may read:
+    /// the two are not told apart, so a private document's existence is not
+    /// revealed.
+    pub async fn read_document(
+        &self,
+        id: &str,
+        caller: Option<&str>,
+    ) -> Result<Option<Document>, DbError> {
         let base = {
             let conn = self.db.acquire().await?;
             let mut rows = conn
                 .query(
-                    &format!("SELECT {DOC_COLS} FROM document WHERE id = ?1"),
-                    [id],
+                    &format!(
+                        "SELECT {DOC_COLS} FROM document d WHERE d.id = ?1 AND {}",
+                        readable_document("d", 2)
+                    ),
+                    vec![Value::Text(id.to_string()), opt_str_val(caller)],
                 )
                 .await?;
             match rows.next().await? {
@@ -532,13 +569,20 @@ impl Store {
         }))
     }
 
-    /// A context (group / event) by id. `None` if no such context.
-    pub async fn read_context(&self, id: &str) -> Result<Option<Context>, DbError> {
+    /// A context (group / event) by id. `None` if there is none `caller` may read.
+    pub async fn read_context(
+        &self,
+        id: &str,
+        caller: Option<&str>,
+    ) -> Result<Option<Context>, DbError> {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
-                &format!("SELECT {CTX_COLS} FROM context WHERE id = ?1"),
-                [id],
+                &format!(
+                    "SELECT {CTX_COLS} FROM context c WHERE c.id = ?1 AND {}",
+                    readable_context("c", 2)
+                ),
+                vec![Value::Text(id.to_string()), opt_str_val(caller)],
             )
             .await?;
         match rows.next().await? {
@@ -551,7 +595,15 @@ impl Store {
     /// no parent), each segment a child context's slug. `None` if the path breaks.
     /// Documents carry no slug in the reconciled schema, so they are id-addressed
     /// via `read_document`, not path-resolved.
-    pub async fn resolve_context(&self, slugs: &[String]) -> Result<Option<Context>, DbError> {
+    ///
+    /// Only the context the path ends at has to be readable. The ones it passes
+    /// through are walked whether or not they are, or a member of an event could
+    /// not reach it through a group they do not belong to.
+    pub async fn resolve_context(
+        &self,
+        slugs: &[String],
+        caller: Option<&str>,
+    ) -> Result<Option<Context>, DbError> {
         let conn = self.db.acquire().await?;
         let mut parent_id: Option<String> = None;
         let mut found: Option<Context> = None;
@@ -586,20 +638,29 @@ impl Store {
                 None => return Ok(None),
             }
         }
-        Ok(found)
+        match found {
+            Some(ctx) => self.read_context(&ctx.id, caller).await,
+            None => Ok(None),
+        }
     }
 
-    /// The child content nodes directly under `parent_id` (a context or folder),
-    /// oldest first, each with its authors.
-    pub async fn list_children(&self, parent_id: &str) -> Result<Vec<Document>, DbError> {
+    /// The child content nodes directly under `parent_id` (a context or folder)
+    /// that `caller` may read, oldest first, each with its authors.
+    pub async fn list_children(
+        &self,
+        parent_id: &str,
+        caller: Option<&str>,
+    ) -> Result<Vec<Document>, DbError> {
         let bases = {
             let conn = self.db.acquire().await?;
             let mut rows = conn
                 .query(
                     &format!(
-                        "SELECT {DOC_COLS} FROM document WHERE parent_id = ?1 ORDER BY created_at"
+                        "SELECT {DOC_COLS} FROM document d WHERE d.parent_id = ?1 AND {} \
+                         ORDER BY d.created_at",
+                        readable_document("d", 2)
                     ),
-                    [parent_id],
+                    vec![Value::Text(parent_id.to_string()), opt_str_val(caller)],
                 )
                 .await?;
             let mut v = Vec::new();
@@ -615,13 +676,18 @@ impl Store {
         Ok(out)
     }
 
-    /// The top-level contexts (groups/events with no parent), by name.
-    pub async fn list_root_contexts(&self) -> Result<Vec<Context>, DbError> {
+    /// The top-level contexts (groups/events with no parent) `caller` may read,
+    /// by name.
+    pub async fn list_root_contexts(&self, caller: Option<&str>) -> Result<Vec<Context>, DbError> {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
-                &format!("SELECT {CTX_COLS} FROM context WHERE parent_id IS NULL ORDER BY name"),
-                (),
+                &format!(
+                    "SELECT {CTX_COLS} FROM context c WHERE c.parent_id IS NULL AND {} \
+                     ORDER BY c.name",
+                    readable_context("c", 1)
+                ),
+                vec![opt_str_val(caller)],
             )
             .await?;
         let mut out = Vec::new();
@@ -631,19 +697,25 @@ impl Store {
         Ok(out)
     }
 
-    /// Documents whose title or content matches `query` (a case-insensitive
-    /// substring), most recent first, capped.
-    pub async fn search_documents(&self, query: &str) -> Result<Vec<Document>, DbError> {
+    /// Documents `caller` may read whose title or content matches `query` (a
+    /// case-insensitive substring), most recent first, capped.
+    pub async fn search_documents(
+        &self,
+        query: &str,
+        caller: Option<&str>,
+    ) -> Result<Vec<Document>, DbError> {
         let like = format!("%{query}%");
         let bases = {
             let conn = self.db.acquire().await?;
             let mut rows = conn
                 .query(
                     &format!(
-                        "SELECT {DOC_COLS} FROM document \
-                         WHERE title LIKE ?1 OR content LIKE ?1 ORDER BY created_at DESC LIMIT 50"
+                        "SELECT {DOC_COLS} FROM document d \
+                         WHERE (d.title LIKE ?1 OR d.content LIKE ?1) AND {} \
+                         ORDER BY d.created_at DESC LIMIT 50",
+                        readable_document("d", 2)
                     ),
-                    [like.as_str()],
+                    vec![Value::Text(like), opt_str_val(caller)],
                 )
                 .await?;
             let mut v = Vec::new();
@@ -659,14 +731,23 @@ impl Store {
         Ok(out)
     }
 
-    /// The most recently created documents across all contexts (the "newest" feed).
-    pub async fn list_recent(&self, limit: i64) -> Result<Vec<Document>, DbError> {
+    /// The most recently created documents `caller` may read, across all
+    /// contexts (the "newest" feed).
+    pub async fn list_recent(
+        &self,
+        limit: i64,
+        caller: Option<&str>,
+    ) -> Result<Vec<Document>, DbError> {
         let bases = {
             let conn = self.db.acquire().await?;
             let mut rows = conn
                 .query(
-                    &format!("SELECT {DOC_COLS} FROM document ORDER BY created_at DESC LIMIT ?1"),
-                    [limit],
+                    &format!(
+                        "SELECT {DOC_COLS} FROM document d WHERE {} \
+                         ORDER BY d.created_at DESC LIMIT ?2",
+                        readable_document("d", 1)
+                    ),
+                    vec![opt_str_val(caller), Value::Integer(limit)],
                 )
                 .await?;
             let mut v = Vec::new();
@@ -682,15 +763,23 @@ impl Store {
         Ok(out)
     }
 
-    /// The comment thread on a node (comments whose `on_id` is the node), oldest
-    /// first. Each carries a DID or free-text author.
-    pub async fn get_comments(&self, on_id: &str) -> Result<Vec<Comment>, DbError> {
+    /// The comments on a node (those whose `on_id` is the node) that `caller`
+    /// may read, oldest first. Each carries a DID or free-text author.
+    pub async fn get_comments(
+        &self,
+        on_id: &str,
+        caller: Option<&str>,
+    ) -> Result<Vec<Comment>, DbError> {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
-                "SELECT id, on_id, context_id, author_did, author_text, text, created_at \
-                 FROM comment WHERE on_id = ?1 ORDER BY created_at",
-                [on_id],
+                &format!(
+                    "SELECT k.id, k.on_id, k.context_id, k.author_did, k.author_text, k.text, \
+                            k.created_at \
+                     FROM comment k WHERE k.on_id = ?1 AND {} ORDER BY k.created_at",
+                    readable_comment("k", 2)
+                ),
+                vec![Value::Text(on_id.to_string()), opt_str_val(caller)],
             )
             .await?;
         let mut out = Vec::new();

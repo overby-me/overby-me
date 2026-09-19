@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "List the top-level (root) group/event contexts. Identity-free.",
+			"description": "List the top-level (root) group/event contexts. Serves only what the caller may read.",
 			"output": {
 				"encoding": "application/json",
 				"schema": {

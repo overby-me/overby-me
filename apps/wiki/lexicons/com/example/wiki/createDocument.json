@@ -55,6 +55,14 @@
 				{
 					"name": "AuthRequired",
 					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is not a member of that context."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "`parent_id` is neither the context nor a node in it."
 				}
 			]
 		}

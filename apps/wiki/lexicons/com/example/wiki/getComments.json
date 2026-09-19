@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "Fetch the comment thread on a node (document or comment). Identity-free.",
+			"description": "Fetch the comment thread on a node (document or comment). Serves only what the caller may read.",
 			"parameters": {
 				"type": "params",
 				"required": ["on"],

@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "Fetch a content node (document / folder / file / proposal) by id, with its authors. Identity-free (public content lookup).",
+			"description": "Fetch a content node (document / folder / file / proposal) by id, with its authors. Serves only what the caller may read; a document they may not read answers NotFound, exactly as a missing one does.",
 			"parameters": {
 				"type": "params",
 				"required": ["id"],

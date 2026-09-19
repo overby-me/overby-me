@@ -4,18 +4,21 @@
 	"defs": {
 		"main": {
 			"type": "procedure",
-			"description": "Post a comment on a node (document or comment). Requires authentication; the caller's DID is the comment's author, taken from the request's authorization.",
+			"description": "Post a comment on a node (document or comment). Requires a session, and membership of the node's context; the caller's DID is the comment's author.",
 			"input": {
 				"encoding": "application/json",
 				"schema": {
 					"type": "object",
-					"required": ["on_id", "context_id", "text"],
+					"required": ["on_id", "text"],
 					"properties": {
 						"on_id": {
 							"type": "string",
 							"description": "The node the comment replies to."
 						},
-						"context_id": { "type": "string" },
+						"context_id": {
+							"type": "string",
+							"description": "Optional, and only checked: a comment's context is always the one its node is in."
+						},
 						"text": { "type": "string" }
 					}
 				}
@@ -34,6 +37,18 @@
 				{
 					"name": "AuthRequired",
 					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such node, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller may read the node but is not a member of its context."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "`context_id` names a context the node is not in."
 				}
 			]
 		}

@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "List the child documents directly under a node. Identity-free.",
+			"description": "List the child documents directly under a node. Serves only what the caller may read.",
 			"parameters": {
 				"type": "params",
 				"required": ["parent"],

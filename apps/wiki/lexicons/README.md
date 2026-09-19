@@ -49,7 +49,10 @@ NOT the published repo records above; `com.example.wiki.defs` holds the shared v
 why a `documentView` exists even though the `document` RECORD is excluded: the served entity shape is
 settled, but its public rich-text record shape is not.
 
-Queries (GET, identity-free public reads):
+Queries (GET). Every read serves only what the caller may read (`crates/appview/src/authz.rs`): a
+row is readable when it or its context is public, when the caller is a member of its context, or when
+the caller wrote it. A row the caller may not read answers exactly as a missing one does.
+`getReactions` alone is ungated, because reactions only ever mirror public records.
 
 - `getDocument` / `getContext` return a single entity; `resolveNode` walks a slug path to a context.
 - `listChildren`, `listContexts`, `listRecent`, `search`, `getComments`, `getReactions` return an
@@ -65,11 +68,13 @@ navigations, not XRPC, so they have no lexicon.
 
 Procedures (POST, authenticated; the caller's DID comes from the session, never the body):
 
-- `createDocument` and `postComment` return `{ id }`; `addReaction` returns `{ id }` (idempotent) and
-  `removeReaction` returns `{ ok: true }` (idempotent toggle-off).
+- `createDocument` and `postComment` return `{ id }` and need membership of the context written to;
+  `addReaction` returns `{ id }` (idempotent) and `removeReaction` returns `{ ok: true }` (idempotent
+  toggle-off).
+- `claimMembership` binds a pending invitation to the caller by its claim token, and
+  `getMemberClaimLink` (a query) gives an active owner the token to hand out.
 
-Reads are not yet gated on visibility or membership, and the richer write procedures are not built:
-`docs/appview-roadmap.md` tracks both.
+The richer write procedures are not built: `docs/appview-roadmap.md` tracks them.
 
 ## NSID
 

@@ -1,0 +1,37 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.getMemberClaimLink",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "A member's claim token, for an owner of that member's context to hand out as a `?claim=<token>` link. An unknown member answers Forbidden too, so the method is no oracle for member ids.",
+			"parameters": {
+				"type": "params",
+				"required": ["member"],
+				"properties": {
+					"member": { "type": "string", "description": "The member id." }
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["token"],
+					"properties": {
+						"token": { "type": "string" }
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is not an active owner of that member's context, or there is no such member."
+				}
+			]
+		}
+	}
+}

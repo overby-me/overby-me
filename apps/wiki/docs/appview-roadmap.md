@@ -64,8 +64,12 @@ data layer.
   node that owns a context without holding a membership row in it (a real case:
   `docs/read-permissions.md`) gets no owner row. Interim public contexts are all
   extracted as private. Extracted polls are never loaded. M3 and M9.
-- **Reads are ungated.** Every read serves private content to anyone. M2 gates
-  them on visibility and membership.
+- **Reads were ungated.** Every read served private content to anyone. Gated in
+  M2 on visibility and membership.
+- **`active` is voting rights, not a read gate.** The interim reads by
+  membership alone, and `migrations/0024` records what reinterpreting a write
+  model as a read model cost: a context went dark for its own members. The
+  AppView's gate follows the same line.
 - **A document cannot be addressed by path.** The entity schema gives `context`
   a slug and `document` none, while the frontend routes every node by its key
   path (`/a/b/c`). Without a slug on documents every existing link breaks at
@@ -111,11 +115,20 @@ is merged and its tests pass.
 
 ### M2: authorization core
 
-- [ ] DID-keyed `is_active_member` and `is_active_owner`, one module, one role
-  enum (the predicates the kickoff plan deferred).
-- [ ] Reads gated: public context, or active member, or author.
-- [ ] Writes gated: membership to create, authorship or ownership to change.
-- [ ] Invite binding: claim token, then confirmed-email match, on login.
+- [x] DID-keyed `is_member`, `is_active_member` and `is_active_owner`, one module
+  (the predicates the kickoff plan deferred). Membership reads and writes;
+  `active` is voting rights and gates only what the interim predicates gated.
+- [x] Reads gated in SQL, before any `LIMIT`: public, or member, or author. A row
+  the caller may not read is indistinguishable from a missing one.
+- [x] Writes gated: membership to create or comment; a comment's context comes
+  from its subject, a document's parent must be in its context.
+- [x] Invite binding by claim token (`claimMembership`), and the owner's claim
+  link.
+- [ ] Invite binding by email. Needs the account's confirmed address from its
+  PDS (`transition:email` and an authenticated `getSession`), so it waits on
+  the first authenticated PDS call.
+- [ ] Authorship or ownership to CHANGE a node: arrives with update and delete
+  in M3, which is where those procedures are.
 
 ### M3: the node tree the frontend routes by
 

@@ -202,6 +202,12 @@ pub struct Caller {
 /// served the signed-out view.
 pub struct MaybeCaller(pub Option<Caller>);
 
+impl MaybeCaller {
+    pub fn did(&self) -> Option<&str> {
+        self.0.as_ref().map(|caller| caller.did.as_str())
+    }
+}
+
 impl FromRequestParts<AppState> for MaybeCaller {
     type Rejection = Response;
 

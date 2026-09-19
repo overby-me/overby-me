@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "query",
-			"description": "List the newest documents across all contexts, most recent first. Identity-free.",
+			"description": "List the newest documents across all contexts, most recent first. Serves only what the caller may read.",
 			"parameters": {
 				"type": "params",
 				"properties": {
