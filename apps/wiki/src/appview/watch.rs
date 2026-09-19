@@ -35,7 +35,7 @@ pub(crate) async fn topics_of(access_token: Option<&str>, scope: &Scope) -> Vec<
                 id: Some(node.clone()),
                 path: None,
             };
-            match ask_quiet(true, || client.get_node(&params)).await {
+            match super::get_node(access_token, params).await {
                 Ok(read) => {
                     let context = match &read.node {
                         get_node::OutputNode::Context(c) => &c.id,

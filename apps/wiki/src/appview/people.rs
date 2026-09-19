@@ -218,12 +218,11 @@ pub async fn is_active_member(
     context_id: &str,
     _user_id: &str,
 ) -> Option<bool> {
-    let client = client(access_token);
     let params = get_node::Params {
         id: Some(context_id.to_string()),
         ..Default::default()
     };
-    ask_quiet(true, || client.get_node(&params))
+    super::get_node(access_token, params)
         .await
         .ok()
         .map(|read| read.viewer.can_vote)

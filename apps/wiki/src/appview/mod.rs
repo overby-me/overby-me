@@ -208,6 +208,60 @@ where
     result
 }
 
+type Flight = futures_util::future::Shared<
+    futures_util::future::LocalBoxFuture<'static, Result<appview_client::get_node::Output, Error>>,
+>;
+
+thread_local! {
+    /// The node reads in the air, by who asks and for what.
+    static IN_THE_AIR: std::cell::RefCell<std::collections::HashMap<String, Flight>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    /// How many node reads have gone out, for the test that two askers share one.
+    #[cfg(test)]
+    pub(crate) static TAKEOFFS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// One `getNode`, shared with whoever asks the same at the same moment. Opening
+/// a page has the page and its crumbs read one path, and the drawer and the
+/// search box another, a hundred milliseconds apart: four requests for two
+/// answers. Shared only while in the air, as the interim's layer does it:
+/// nothing is remembered once the answer lands.
+pub(crate) async fn get_node(
+    access_token: Option<&str>,
+    params: appview_client::get_node::Params,
+) -> Result<appview_client::get_node::Output, Error> {
+    use futures_util::FutureExt;
+    let key = format!(
+        "{}\u{1}{:?}\u{1}{:?}",
+        access_token.unwrap_or_default(),
+        params.id,
+        params.path
+    );
+    let flight = IN_THE_AIR.with(|air| {
+        air.borrow_mut()
+            .entry(key.clone())
+            .or_insert_with(|| {
+                #[cfg(test)]
+                TAKEOFFS.with(|n| n.set(n.get() + 1));
+                let client = client(access_token);
+                async move { ask_quiet(true, || client.get_node(&params)).await }
+                    .boxed_local()
+                    .shared()
+            })
+            .clone()
+    });
+    let answer = flight.clone().await;
+    // Landed: taken down by whoever gets here first, and only if it is still
+    // this flight, since the next one may already be up under the same key.
+    IN_THE_AIR.with(|air| {
+        let mut air = air.borrow_mut();
+        if air.get(&key).is_some_and(|up| up.ptr_eq(&flight)) {
+            air.remove(&key);
+        }
+    });
+    answer
+}
+
 /// Make a failure known, and hand back the words for it.
 pub(crate) fn reported(what: &'static str, error: &Error) -> String {
     let message = said(error);

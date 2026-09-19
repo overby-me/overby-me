@@ -552,8 +552,12 @@ asks Bluesky's public API itself. The steps:
   through the functions they call, over a real socket where that matters
   (`cargo test --features appview`); both builds pass the wasm clippy gate; and
   `scripts/test-browser-appview.nu` drives the built app in headless Firefox.
-  Left as it was: the interim asks an identical read already in the air only
-  once, and this layer does not, which is a request or two more per page.
+  Like the interim's layer it asks for a node once when two views want it at
+  the same moment (a page and its crumbs, the drawer and the search box), and
+  remembers nothing once the answer lands. Left as it was: the home page's two
+  hints about which email to register with are the interim's words: here an invitation by address finds a person through the
+  address their provider confirms, else by claim link, which is for whoever
+  writes the site's copy to say.
 - [x] The extractor and the load cover every kind the interim holds: the tree,
   members, comments, reactions, what each poll came to, canvases with their
   cells, reports, which contexts are open to everyone, and the address each

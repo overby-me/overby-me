@@ -2,7 +2,7 @@
 //! it, its children, the way down to it.
 
 use super::seen::{placed, saw_node, seen, Seen};
-use super::{ask, ask_quiet, client, is_absent, map, offline_copy, reported};
+use super::{ask, client, is_absent, map, offline_copy, reported};
 use crate::model::{
     ChildNodeFields, Crumb, DrawerChildFields, InsertedNode, NodeWithChildren, NodesInsertInput,
     NodesSetInput, Uuid,
@@ -20,9 +20,8 @@ async fn read_node(
     params: get_node::Params,
     user_id: &str,
 ) -> Result<Option<NodeWithChildren>, String> {
-    let client = client(access_token);
     // Quiet only so that "not there" is an answer and no fault.
-    let read = match ask_quiet(true, || client.get_node(&params)).await {
+    let read = match super::get_node(access_token, params).await {
         Ok(read) => read,
         Err(e) if is_absent(&e) => return Ok(None),
         Err(e) => return Err(reported("getNode", &e)),
@@ -91,7 +90,7 @@ async fn read_node(
             context: node.id.0.clone(),
             ..Default::default()
         };
-        if let Ok(roster) = client.list_members(&members).await {
+        if let Ok(roster) = client(access_token).list_members(&members).await {
             node.members = roster.members.iter().map(map::member).collect();
         }
     }
@@ -164,12 +163,11 @@ pub async fn path_crumbs(
         return Ok(Vec::new());
     }
     let key = format!("crumbs:{}", segments.join("/"));
-    let client = client(access_token);
     let params = get_node::Params {
         path: Some(segments.join("/")),
         ..Default::default()
     };
-    match ask_quiet(true, || client.get_node(&params)).await {
+    match super::get_node(access_token, params).await {
         Ok(read) => {
             let mut crumbs: Vec<Crumb> = read.crumbs.iter().map(map::crumb).collect();
             // The node's own number is the last crumb's: the A of a motion.
@@ -273,12 +271,11 @@ pub async fn node_path(access_token: Option<&str>, node_id: &str) -> Vec<String>
 /// The mimes the caller may create under a node, from the server's own rule
 /// (`viewer.can_create`), so a screen offers what will be accepted.
 pub async fn node_insert_mimes(access_token: Option<&str>, node_id: &str) -> Vec<String> {
-    let client = client(access_token);
     let params = get_node::Params {
         id: Some(node_id.to_string()),
         ..Default::default()
     };
-    match ask_quiet(true, || client.get_node(&params)).await {
+    match super::get_node(access_token, params).await {
         Ok(read) => read
             .viewer
             .can_create

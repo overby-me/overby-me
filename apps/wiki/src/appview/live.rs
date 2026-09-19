@@ -1292,3 +1292,29 @@ async fn a_change_is_heard_over_the_socket_and_handed_to_the_views_watching_it()
         .expect("its state");
     assert_eq!(pushed["nodes_stream"][0]["mutable"], false);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn two_views_asking_for_one_node_at_once_share_the_request() {
+    use appview_client::get_node::Params;
+    let server = Server::start();
+    let carol = server.session(CAROL);
+    let (_, page) = a_group_with_a_page(&carol).await;
+    let ask = || {
+        super::get_node(
+            Some(&carol),
+            Params {
+                id: Some(page.clone()),
+                ..Default::default()
+            },
+        )
+    };
+    let before = super::TAKEOFFS.with(std::cell::Cell::get);
+    // The page and its crumbs, as a navigation asks: together.
+    let (first, second) = futures_util::join!(ask(), ask());
+    assert_eq!(first.expect("the page"), second.expect("the same page"));
+    assert_eq!(super::TAKEOFFS.with(std::cell::Cell::get), before + 1);
+    // Nothing is remembered once it has landed: asked again is read again, or
+    // an edit made in between would never be seen.
+    ask().await.expect("the page again");
+    assert_eq!(super::TAKEOFFS.with(std::cell::Cell::get), before + 2);
+}
