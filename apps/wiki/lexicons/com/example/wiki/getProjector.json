@@ -1,0 +1,48 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.getProjector",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "What a context's projector shows, for whoever may read the context. A context nobody has set one for shows nothing.",
+			"parameters": {
+				"type": "params",
+				"required": ["context"],
+				"properties": {
+					"context": {
+						"type": "string"
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["show_comments", "show_feed"],
+					"properties": {
+						"active_id": {
+							"type": "string",
+							"description": "The node on screen. During a vote it is the open poll."
+						},
+						"focus": {
+							"type": "string",
+							"description": "A heading anchor within it, for a document too long to show whole."
+						},
+						"show_comments": {
+							"type": "boolean"
+						},
+						"show_feed": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "NotFound",
+					"description": "No such context, or none the caller may read."
+				}
+			]
+		}
+	}
+}

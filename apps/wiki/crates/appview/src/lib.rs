@@ -14,9 +14,11 @@ pub mod firehose;
 pub mod http;
 pub mod live;
 pub mod oauth;
+pub mod projector;
 pub mod schema;
 pub mod session;
 pub mod slug;
+pub mod speak;
 pub mod statecookie;
 pub mod store;
 pub mod util;
@@ -188,6 +190,50 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.acceptInvitation",
             post(xrpc::accept_invitation),
+        )
+        .route(
+            "/xrpc/com.example.wiki.getProjector",
+            get(projector::get_projector),
+        )
+        .route(
+            "/xrpc/com.example.wiki.setProjector",
+            post(projector::set_projector),
+        )
+        .route(
+            "/xrpc/com.example.wiki.listSpeakerLists",
+            get(speak::list_speaker_lists),
+        )
+        .route(
+            "/xrpc/com.example.wiki.createSpeakerList",
+            post(speak::create_speaker_list),
+        )
+        .route(
+            "/xrpc/com.example.wiki.updateSpeakerList",
+            post(speak::update_speaker_list),
+        )
+        .route(
+            "/xrpc/com.example.wiki.deleteSpeakerList",
+            post(speak::delete_speaker_list),
+        )
+        .route(
+            "/xrpc/com.example.wiki.clearSpeakerList",
+            post(speak::clear_speaker_list),
+        )
+        .route(
+            "/xrpc/com.example.wiki.nextSpeaker",
+            post(speak::next_speaker),
+        )
+        .route(
+            "/xrpc/com.example.wiki.joinSpeakerList",
+            post(speak::join_speaker_list),
+        )
+        .route(
+            "/xrpc/com.example.wiki.leaveSpeakerList",
+            post(speak::leave_speaker_list),
+        )
+        .route(
+            "/xrpc/com.example.wiki.moveSpeaker",
+            post(speak::move_speaker),
         )
         .route(
             "/xrpc/com.example.wiki.claimMembership",

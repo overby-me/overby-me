@@ -160,9 +160,10 @@ joins them:
   unique among live rows only, so a binned node does not hold its URL hostage.
 - The server picks the slug (`name`, then `name-2`, ...), because only it can
   see every sibling; the frontend finds collisions today by attempting inserts.
-- Kinds that are nodes in the frontend but have their own state (polls, speaker
-  lists, canvases) become `document` kinds with a side table keyed by the same
-  id, when their milestone arrives.
+- Kinds that are nodes in the frontend but have their own state and a URL of
+  their own (polls, canvases) become `document` kinds with a side table keyed by
+  the same id, when their milestone arrives. Speaker lists and the projector
+  have no URL, so they are plain tables beside the tree (M5).
 - Who may create what under what is the interim's per-context template
   (`context_permission_objects`), as one static table: (kind, role, parents).
   Reading stays by membership (M2); this is the write model only.
@@ -220,8 +221,15 @@ The steps:
 
 ### M5: meetings
 
-- [ ] Speaker lists and entries.
-- [ ] Projector state (`active`, screen comments, screen feed, focus).
+- [x] Speaker lists: several per context, a queue served by the chair's
+  override, then the kind of contribution, then arrival; a second tap takes no
+  second place; a per-turn clock anchored on the server's time.
+- [x] Projector state: one row per context (the node on screen, a focus anchor
+  that does not follow the screen to another node, comments and feed toggles),
+  where the interim packs it into relation names.
+
+Neither is migrated, on purpose: a queue or a screen from a meeting that has
+ended is of no use to the next one, and a list is one click to make again.
 
 ### M6: voting
 

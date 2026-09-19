@@ -88,6 +88,10 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   already there), `updateMember` and `removeMember` administer it, and a context always keeps an
   owner who can sign in. `listInvitations` and `acceptInvitation` are the caller's own; declining and
   leaving are `removeMember` on one's own row.
+- A meeting: `createSpeakerList`, `updateSpeakerList`, `deleteSpeakerList`, `clearSpeakerList`,
+  `nextSpeaker` and `moveSpeaker` are the chair's; `joinSpeakerList` and `leaveSpeakerList` are any
+  member's; `listSpeakerLists` (a query) is what the room follows. `setProjector` and
+  `getProjector` are what the projector shows.
 - `claimMembership` binds a pending invitation to the caller by its claim token, and
   `getMemberClaimLink` (a query) gives an active owner the token to hand out.
 

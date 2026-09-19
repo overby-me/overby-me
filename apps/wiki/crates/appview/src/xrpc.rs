@@ -420,11 +420,11 @@ pub async fn delete_session(
 // Write side: the caller authors content in a context they are a member of.
 // ---------------------------------------------------------------------------
 
-fn forbidden(message: &str) -> Response {
+pub(crate) fn forbidden(message: &str) -> Response {
     err(StatusCode::FORBIDDEN, "Forbidden", message)
 }
 
-fn invalid(message: &str) -> Response {
+pub(crate) fn invalid(message: &str) -> Response {
     err(StatusCode::BAD_REQUEST, "InvalidRequest", message)
 }
 
@@ -444,12 +444,12 @@ fn wrote(id: String) -> Response {
     (StatusCode::OK, Json(serde_json::json!({ "id": id }))).into_response()
 }
 
-fn write_failed(what: &str, e: impl std::fmt::Display) -> Response {
+pub(crate) fn write_failed(what: &str, e: impl std::fmt::Display) -> Response {
     tracing::error!("{what} failed: {e}");
     err(StatusCode::BAD_GATEWAY, "InternalError", "write failed")
 }
 
-fn conflict(error: &str, message: &str) -> Response {
+pub(crate) fn conflict(error: &str, message: &str) -> Response {
     err(StatusCode::CONFLICT, error, message)
 }
 
@@ -520,7 +520,7 @@ pub async fn claim_membership(
 /// The caller's membership of a context, or the response to send instead. To
 /// someone who may not even read the context it does not exist; to a reader
 /// who is not a member, its roster is none of their business.
-async fn member_of(
+pub(crate) async fn member_of(
     state: &AppState,
     context_id: &str,
     did: &str,
@@ -544,7 +544,7 @@ async fn member_of(
     }
 }
 
-fn owns(membership: crate::authz::Membership) -> bool {
+pub(crate) fn owns(membership: crate::authz::Membership) -> bool {
     membership.role == wiki_domain_types::Role::Owner
 }
 
@@ -603,7 +603,7 @@ pub async fn list_members(
 }
 
 /// An owner of a context, or the response to send instead.
-async fn owner_of(
+pub(crate) async fn owner_of(
     state: &AppState,
     context_id: &str,
     did: &str,
@@ -1314,7 +1314,7 @@ pub async fn remove_reaction(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::{AppState, Config, Db, router};
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
@@ -1328,7 +1328,7 @@ mod tests {
         router(seeded_state().await)
     }
 
-    async fn seeded_state() -> AppState {
+    pub(crate) async fn seeded_state() -> AppState {
         let db = Db::open(":memory:").await.expect("open");
         db.init_schema().await.expect("schema");
         let conn = db.acquire().await.expect("conn");
@@ -1386,7 +1386,7 @@ mod tests {
         AppState::new(db, Config::default())
     }
 
-    async fn get(app: axum::Router, uri: &str) -> (StatusCode, serde_json::Value) {
+    pub(crate) async fn get(app: axum::Router, uri: &str) -> (StatusCode, serde_json::Value) {
         let resp = app
             .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
             .await
@@ -1400,7 +1400,7 @@ mod tests {
     }
 
     /// Sign `did` in the way `/callback` does: a user row and a session.
-    async fn token_for(state: &AppState, did: &str) -> String {
+    pub(crate) async fn token_for(state: &AppState, did: &str) -> String {
         crate::Store::new(state.db.clone())
             .upsert_user_min(did)
             .await
@@ -1412,11 +1412,11 @@ mod tests {
     }
 
     /// Make `did` (who must have a user row) an active member of `context`.
-    async fn join(state: &AppState, did: &str, context: &str) {
+    pub(crate) async fn join(state: &AppState, did: &str, context: &str) {
         join_as(state, did, context, "member").await;
     }
 
-    async fn join_as(state: &AppState, did: &str, context: &str, role: &str) {
+    pub(crate) async fn join_as(state: &AppState, did: &str, context: &str, role: &str) {
         let conn = state.db.acquire().await.expect("conn");
         conn.execute(
             "INSERT INTO member (id, user_did, context_id, role, active) \
@@ -1427,7 +1427,7 @@ mod tests {
         .expect("join");
     }
 
-    async fn post(
+    pub(crate) async fn post(
         app: axum::Router,
         uri: &str,
         token: Option<&str>,
@@ -1653,7 +1653,11 @@ mod tests {
         );
     }
 
-    async fn get_as(app: axum::Router, uri: &str, token: &str) -> (StatusCode, serde_json::Value) {
+    pub(crate) async fn get_as(
+        app: axum::Router,
+        uri: &str,
+        token: &str,
+    ) -> (StatusCode, serde_json::Value) {
         let resp = app
             .oneshot(
                 Request::builder()

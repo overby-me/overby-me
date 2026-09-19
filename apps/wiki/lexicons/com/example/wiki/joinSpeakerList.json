@@ -1,0 +1,58 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.joinSpeakerList",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Ask for the floor. A member of the context may while the list is open; an owner may regardless, to enter someone who cannot. Asking twice for the same kind is asking once: the entry already there is returned, so a second tap takes no second place.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["list_id"],
+					"properties": {
+						"list_id": {
+							"type": "string"
+						},
+						"kind": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 4,
+							"default": 0
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": {
+						"id": {
+							"type": "string"
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such speaker list, or one in a context the caller is not a member of."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The list is closed, or the caller may read the context but is not a member of it."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "`kind` is not 0 to 4."
+				}
+			]
+		}
+	}
+}
