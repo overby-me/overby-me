@@ -131,7 +131,10 @@ is merged and its tests pass.
 - [x] Production client metadata (`/client-metadata.json`) when a public URL is
   configured; the loopback profile otherwise.
 - [x] Outbound requests confined to public https addresses.
-- [ ] Profile hydration on login (handle, display name, avatar into `user`).
+- [x] Profile hydration on login (`crates/appview/src/profile.rs`): the handle,
+  display name and avatar, read from the member's own PDS beside the login and
+  never in its way. PDS-agnostic: `getSession` and the profile record, not
+  Bluesky's AppView. Like posting, it has not met a real PDS yet.
 - [ ] A confidential client (`private_key_jwt` and a served JWKS). Not needed
   until the publish seam writes to members' repos and wants long-lived PDS
   tokens; the AppView's own sessions do not depend on them.
@@ -149,9 +152,13 @@ is merged and its tests pass.
   from its subject, a document's parent must be in its context.
 - [x] Invite binding by claim token (`claimMembership`), and the owner's claim
   link.
-- [ ] Invite binding by email. Needs the account's confirmed address from its
-  PDS (`transition:email` and an authenticated `getSession`), so it waits on
-  the first authenticated PDS call.
+- [x] Invite binding by email. A login asks for `transition:email`, and an
+  invitation sent to an address the account's PDS says is CONFIRMED is handed
+  to whoever signs in with it. Only a configured PDS is believed
+  (`APPVIEW_TRUSTED_EMAIL_PDS`, by default Bluesky's own hosts): anyone can run
+  a PDS, and one that lies about an address would walk its owner into that
+  address's invitations, voting rights included. Everyone else uses a claim
+  link.
 - [x] Authorship or ownership to change a node (`Standing`, with
   `updateDocument` in M3).
 
@@ -240,9 +247,10 @@ The steps:
   always keeping an owner who can sign in.
 - [x] The caller's invitations: list, accept, and decline or leave by removing
   oneself; claim links for every roster row.
-- [ ] Reaching an invited address. Nothing sends mail yet, so an owner hands out
-  claim links by hand; binding by the account's confirmed address (M2) would
-  make most of that unnecessary.
+- [ ] Reaching an invited address. Nothing sends mail, so an owner hands out
+  claim links by hand. Since M2 binds by the account's confirmed address, that
+  is only needed for members whose PDS is not one configured as trusted, or
+  whose account has another address than the roster's.
 - [x] Author chips (`setDocumentAuthors`): accounts, names with no account, or a
   group. The interim lets a group be named as an author, and the extractor read
   every chip that pointed at a node as a person, so a branch that put a motion

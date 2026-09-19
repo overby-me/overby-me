@@ -235,6 +235,9 @@ fn scopes() -> Vec<Scope> {
     vec![
         Scope::Known(KnownScope::Atproto),
         Scope::Known(KnownScope::TransitionGeneric),
+        // The account's address, which is how an invitation sent to it finds
+        // its person (`crate::profile`). atrium has no name for it yet.
+        Scope::Unknown("transition:email".to_string()),
     ]
 }
 
@@ -360,6 +363,47 @@ impl WikiOAuth {
         let (session, app_state) = self.client.callback(params).await?;
         let did = session.did().await.map(|d| d.as_str().to_string());
         Ok(CallbackOutcome { did, app_state })
+    }
+
+    /// What `did`'s own PDS says about them, asked with the session their login
+    /// left here: the account (`getSession`), its profile record if it has one,
+    /// and which PDS answered.
+    pub async fn account(
+        &self,
+        did: &str,
+    ) -> Result<crate::profile::PdsAccount, Box<dyn std::error::Error + Send + Sync>> {
+        use atrium_api::com::atproto::repo::get_record::ParametersData;
+        use atrium_api::xrpc::XrpcClient;
+        let did: atrium_api::types::string::Did = did.parse()?;
+        let session = self.client.restore(&did).await?;
+        // Where this session's requests go, which the login bound to the DID.
+        let pds = session.base_uri();
+        let agent = atrium_api::agent::Agent::new(session);
+        let account = agent.api.com.atproto.server.get_session().await?;
+        // An account need not have a profile: that is not a failure.
+        let profile = agent
+            .api
+            .com
+            .atproto
+            .repo
+            .get_record(
+                ParametersData {
+                    cid: None,
+                    collection: "app.bsky.actor.profile".parse()?,
+                    repo: did.clone().into(),
+                    rkey: "self".parse()?,
+                }
+                .into(),
+            )
+            .await
+            .ok()
+            .and_then(|found| serde_json::to_value(&found.value).ok());
+        Ok(crate::profile::account_from(
+            did.as_str(),
+            &pds,
+            &serde_json::to_value(&account.data)?,
+            profile.as_ref(),
+        ))
     }
 
     /// Write a record into `did`'s own repo, on their PDS, with the OAuth session
@@ -579,6 +623,9 @@ async fn finish_login(state: &crate::AppState, did: &str, return_to: Option<&str
             return (StatusCode::INTERNAL_SERVER_ERROR, "login failed").into_response();
         }
     };
+    // Beside the login, never in its way: a PDS that is slow to say who
+    // someone is must not keep them from signing in.
+    tokio::spawn(crate::profile::hydrate(state.clone(), did.to_string()));
     let clear = login_cookie("", 0, &state.config);
     // Re-checked, not trusted: the allowlist may have shrunk since /login.
     match return_to.filter(|url| state.config.allows_return(url)) {
@@ -824,7 +871,7 @@ mod tests {
         assert_eq!(doc["token_endpoint_auth_method"], "none");
         assert_eq!(doc["response_types"], serde_json::json!(["code"]));
         assert_eq!(doc["application_type"], "web");
-        assert_eq!(doc["scope"], "atproto transition:generic");
+        assert_eq!(doc["scope"], "atproto transition:generic transition:email");
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -100,6 +100,20 @@ in {
       '';
     };
 
+    trustedEmailPds = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      example = ["bsky.social" ".host.bsky.network" "pds.example.org"];
+      description = ''
+        PDS hosts whose word is taken that an account's email address is
+        confirmed, which is what hands a signed-in member the invitations sent
+        to that address. A leading dot matches every host under it. Empty keeps
+        the built-in default, Bluesky's own hosts. Add a PDS only if you trust
+        its operator with your roster: one that lies about an address lets its
+        owner take that address's seat.
+      '';
+    };
+
     firehoseUrl = lib.mkOption {
       type = lib.types.str;
       default = "wss://jetstream2.us-east.bsky.network/subscribe";
@@ -171,6 +185,7 @@ in {
         RUST_LOG = cfg.logFilter;
         APPVIEW_PUBLIC_URL = lib.optionalString (cfg.publicUrl != null) cfg.publicUrl;
         APPVIEW_FRONTEND_ORIGINS = lib.concatStringsSep "," cfg.frontendOrigins;
+        APPVIEW_TRUSTED_EMAIL_PDS = lib.concatStringsSep "," cfg.trustedEmailPds;
         VAPID_PUBLIC_KEY = cfg.vapidPublicKey;
         VAPID_SUBJECT = cfg.vapidSubject;
       };

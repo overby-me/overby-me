@@ -21,6 +21,7 @@ pub mod metafile;
 pub mod metafile_svg;
 pub mod oauth;
 pub mod poll;
+pub mod profile;
 pub mod projector;
 pub mod push;
 pub mod roster;

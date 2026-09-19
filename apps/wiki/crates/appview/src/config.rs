@@ -58,6 +58,11 @@ pub struct Config {
     /// redirect (`APPVIEW_FRONTEND_ORIGINS`, comma-separated). Empty keeps the
     /// API same-origin.
     pub frontend_origins: Vec<String>,
+    /// The PDS hosts whose word is taken that an account's email address is
+    /// confirmed (`APPVIEW_TRUSTED_EMAIL_PDS`, comma-separated; a leading dot
+    /// matches any host under it). Anyone can run a PDS, and one that lies about
+    /// an address would walk its owner into that address's invitations.
+    pub trusted_email_pds: Vec<String>,
     /// The VAPID (RFC 8292) application-server key for Web Push, as the interim
     /// has it: the 32-byte P-256 scalar and the uncompressed point, base64url
     /// (`VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`). No private key, no push.
@@ -151,6 +156,14 @@ impl Config {
             betterstack_token: Secret::new(env("BETTERSTACK_SOURCE_TOKEN")),
             ballot_replica_log: env("BALLOT_REPLICA_LOG"),
             public_url,
+            trusted_email_pds: match env("APPVIEW_TRUSTED_EMAIL_PDS") {
+                hosts if hosts.trim().is_empty() => default_trusted_email_pds(),
+                hosts => hosts
+                    .split(',')
+                    .map(|h| h.trim().to_ascii_lowercase())
+                    .filter(|h| !h.is_empty())
+                    .collect(),
+            },
             vapid_private: Secret::new(env("VAPID_PRIVATE_KEY")),
             vapid_public: env("VAPID_PUBLIC_KEY"),
             vapid_subject,
@@ -163,6 +176,12 @@ impl Config {
             frontend_origins,
         }
     }
+}
+
+/// Bluesky's own: the entryway, and the hosts its accounts live on. It confirms
+/// an address by mailing it, and is who nearly every member will sign in with.
+fn default_trusted_email_pds() -> Vec<String> {
+    vec!["bsky.social".to_string(), ".host.bsky.network".to_string()]
 }
 
 fn blobs_beside(db_path: &str) -> String {
@@ -223,6 +242,7 @@ impl Default for Config {
             ballot_replica_log: String::new(),
             public_url: String::new(),
             frontend_origins: Vec::new(),
+            trusted_email_pds: default_trusted_email_pds(),
             vapid_private: Secret::default(),
             vapid_public: String::new(),
             vapid_subject: String::new(),

@@ -338,7 +338,7 @@ pub struct Invitation {
     pub context_path: String,
 }
 
-fn normalized_email(email: Option<&str>) -> Option<String> {
+pub(crate) fn normalized_email(email: Option<&str>) -> Option<String> {
     email
         .map(|e| e.trim().to_lowercase())
         .filter(|e| !e.is_empty())
