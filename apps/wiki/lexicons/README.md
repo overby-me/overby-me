@@ -83,11 +83,12 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   `addReaction` returns `{ id }` (idempotent) and `removeReaction` returns `{ ok: true }` (idempotent
   toggle-off).
 - `setDocumentAuthors` replaces a document's author chips: accounts, or names with no account.
-- `moveDocument` takes a document and its subtree to another parent in the same context, rewriting
-  every path in it.
+- `moveDocument` takes a document and its subtree to another parent, rewriting every path in it; into
+  another context it takes an owner of both, and the comments, files and closed polls go along.
+  `copyDocument` makes the same content somewhere else, with files of its own.
 - `updateDocument` changes a document (never its slug); `deleteDocument` puts it and its subtree in
-  the bin, `restoreDocument` brings back exactly what went together, and `listDeleted` (a query) is
-  the bin of a context. Who may do which is the interim's rule: an author edits a draft, an owner of
+  the bin, `restoreDocument` brings back exactly what went together, `purgeDocument` deletes a bin
+  entry for good, and `listDeleted` (a query) is the bin of a context. Who may do which is the interim's rule: an author edits a draft, an owner of
   the context edits and arranges anything.
 - `inviteMembers` puts people on a roster (one invitation or a whole spreadsheet, skipping whoever is
   already there), `updateMember` and `removeMember` administer it, and a context always keeps an

@@ -344,6 +344,13 @@ fn normalized_email(email: Option<&str>) -> Option<String> {
         .filter(|e| !e.is_empty())
 }
 
+/// SQL that holds for a `column` strictly under the path bound as `?param`. By
+/// `substr` and not `LIKE`, in which the underscore every slug is full of is a
+/// wildcard.
+pub(crate) fn under(column: &str, param: usize) -> String {
+    format!("substr({column}, 1, length(?{param}) + 1) = ?{param} || '/'")
+}
+
 /// A document to create. The store picks its slug and path.
 pub struct NewDocument<'a> {
     pub context_id: &'a str,
@@ -412,6 +419,18 @@ pub enum WriteError {
     LastOwner,
     /// Another invitation to this context already has that address.
     EmailTaken,
+    /// A poll is running somewhere in what would be moved. Its voters are the
+    /// members of the context it was opened in, and would not be of the next.
+    OpenPollInside,
+    /// A poll is in what would be deleted for good, and a vote's record is not
+    /// anybody's to delete.
+    PollInside,
+    /// A group or an event is in what would be deleted for good.
+    ContextInside,
+    /// Deleting for good is for what is already in the bin.
+    NotBinned,
+    /// More nodes than one request may copy.
+    TooMany,
 }
 
 impl std::fmt::Display for WriteError {
@@ -424,6 +443,11 @@ impl std::fmt::Display for WriteError {
             WriteError::IntoItself => write!(f, "a node cannot be moved into itself"),
             WriteError::LastOwner => write!(f, "a context must keep an owner"),
             WriteError::EmailTaken => write!(f, "that address is already invited here"),
+            WriteError::OpenPollInside => write!(f, "a poll is running in there; close it first"),
+            WriteError::PollInside => write!(f, "a poll is in there, and a vote's record stays"),
+            WriteError::ContextInside => write!(f, "a group or an event is in there"),
+            WriteError::NotBinned => write!(f, "only what is in the bin is deleted for good"),
+            WriteError::TooMany => write!(f, "too much to copy at once"),
         }
     }
 }
@@ -489,7 +513,11 @@ impl Store {
 
     /// Whether a live node of either kind already has this path. The unique
     /// indexes each cover one table, so the other is asked here.
-    async fn path_taken(&self, conn: &turso::Connection, path: &str) -> Result<bool, DbError> {
+    pub(crate) async fn path_taken(
+        &self,
+        conn: &turso::Connection,
+        path: &str,
+    ) -> Result<bool, DbError> {
         for table in ["context", "document"] {
             let mut rows = conn
                 .query(
@@ -1722,16 +1750,22 @@ impl Store {
         Ok(())
     }
 
-    /// Move a live document, and everything under it, to a new parent in the
-    /// same context. Returns its new path.
+    /// Move a live document, and everything under it, to a new parent. Returns
+    /// its new path. `across` says the parent may be in another context, which
+    /// is the caller's to have checked: it takes an owner of both.
     ///
     /// It keeps its slug if that is free there and takes the next one if not.
     /// Every path in the subtree is rewritten, the binned ones too: a node that
     /// is restored later must come back under where its parent now is.
-    pub async fn move_document(&self, id: &str, new_parent_id: &str) -> Result<String, WriteError> {
+    pub async fn move_document(
+        &self,
+        id: &str,
+        new_parent_id: &str,
+        across: bool,
+    ) -> Result<String, WriteError> {
         let conn = self.db.acquire().await?;
         conn.execute("BEGIN IMMEDIATE", ()).await?;
-        let moved = self.move_in(&conn, id, new_parent_id).await;
+        let moved = self.move_in(&conn, id, new_parent_id, across).await;
         conn.execute(if moved.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())
             .await?;
         moved
@@ -1742,6 +1776,7 @@ impl Store {
         conn: &turso::Connection,
         id: &str,
         new_parent_id: &str,
+        across: bool,
     ) -> Result<String, WriteError> {
         let mut rows = conn
             .query(
@@ -1762,11 +1797,27 @@ impl Store {
             .parent(conn, new_parent_id)
             .await?
             .ok_or(WriteError::NoSuchParent)?;
-        if parent.context_id != context_id {
+        let rehomed = parent.context_id != context_id;
+        if rehomed && !across {
             return Err(WriteError::ParentElsewhere);
         }
         if parent.path == old_path || parent.path.starts_with(&format!("{old_path}/")) {
             return Err(WriteError::IntoItself);
+        }
+        if rehomed {
+            let mut rows = conn
+                .query(
+                    &format!(
+                        "SELECT 1 FROM poll p JOIN document d ON d.id = p.id \
+                         WHERE p.open = 1 AND (d.id = ?1 OR {})",
+                        under("d.path", 2)
+                    ),
+                    [id, old_path.as_str()],
+                )
+                .await?;
+            if rows.next().await?.is_some() {
+                return Err(WriteError::OpenPollInside);
+            }
         }
 
         let mut new_slug = slug.clone();
@@ -1800,7 +1851,65 @@ impl Store {
             [new_parent_id, new_slug.as_str(), new_path.as_str(), id],
         )
         .await?;
+        if rehomed {
+            self.rehome(conn, id, &new_path, &context_id, &parent.context_id)
+                .await?;
+        }
         Ok(new_path)
+    }
+
+    /// Hand the documents at and under `path` that belong to context `from` over
+    /// to context `to`, with what hangs on them. A group inside the subtree, and
+    /// what is its own, stays its own.
+    ///
+    /// The comments, the files and the polls go along because each is read
+    /// through its OWN context: left behind, a file would stay readable by the
+    /// old group and unreadable by the new.
+    async fn rehome(
+        &self,
+        conn: &turso::Connection,
+        id: &str,
+        path: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<(), WriteError> {
+        let moved = format!(
+            "SELECT d.id FROM document d WHERE d.context_id = ?2 AND (d.id = ?3 OR {})",
+            under("d.path", 4)
+        );
+        let args = [to, from, id, path];
+        conn.execute(
+            &format!("UPDATE comment SET context_id = ?1 WHERE on_id IN ({moved})"),
+            args,
+        )
+        .await?;
+        for field in ["$.fileId", "$.image"] {
+            conn.execute(
+                &format!(
+                    "UPDATE blob SET context_id = ?1 WHERE context_id = ?2 AND id IN \
+                       (SELECT json_extract(d.data, '{field}') FROM document d \
+                        WHERE d.context_id = ?2 AND (d.id = ?3 OR {}))",
+                    under("d.path", 4)
+                ),
+                args,
+            )
+            .await?;
+        }
+        conn.execute(
+            &format!("UPDATE poll SET context_id = ?1 WHERE id IN ({moved})"),
+            args,
+        )
+        .await?;
+        conn.execute(
+            &format!(
+                "UPDATE document SET context_id = ?1 \
+                 WHERE context_id = ?2 AND (id = ?3 OR {})",
+                under("path", 4)
+            ),
+            args,
+        )
+        .await?;
+        Ok(())
     }
 
     /// A document's authorization facts, whether or not it is in the bin.

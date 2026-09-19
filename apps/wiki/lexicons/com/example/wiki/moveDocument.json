@@ -4,14 +4,16 @@
 	"defs": {
 		"main": {
 			"type": "procedure",
-			"description": "Move a document, with everything under it, to another parent in the same context. An owner of the context may. It keeps its slug if that is free under the new parent and takes the next one (`name-2`) if not, and every path in the subtree is rewritten, so every node in it has a new URL.",
+			"description": "Move a document, and everything under it, to another parent, rewriting every path in it. It keeps its name if that is free there and takes the next one if not. Into ANOTHER context it takes an owner of both, and the comments on those documents, the files they hold and their closed polls change context with them, since each is read through its own. A running poll does not change groups: its voters are the members of where it was opened.",
 			"input": {
 				"encoding": "application/json",
 				"schema": {
 					"type": "object",
 					"required": ["id", "parent_id"],
 					"properties": {
-						"id": { "type": "string" },
+						"id": {
+							"type": "string"
+						},
 						"parent_id": {
 							"type": "string",
 							"description": "The new parent: a live context or document in the same context."
@@ -25,7 +27,10 @@
 					"type": "object",
 					"required": ["path"],
 					"properties": {
-						"path": { "type": "string", "description": "Its new path." }
+						"path": {
+							"type": "string",
+							"description": "Its new path."
+						}
 					}
 				}
 			},

@@ -1027,7 +1027,8 @@ pub struct MoveDocumentBody {
 }
 
 /// `com.example.wiki.moveDocument` (procedure): move a document, with
-/// everything under it, to another parent in the same context.
+/// everything under it, to another parent. Into another context it takes an
+/// owner of both, and the comments, files and closed polls go along.
 pub async fn move_document(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -1040,12 +1041,24 @@ pub async fn move_document(
     if !standing.may_arrange() {
         return forbidden("only an owner of the context may move things");
     }
-    match crate::Store::new(state.db.clone())
-        .move_document(&body.id, &body.parent_id)
-        .await
-    {
+    let store = crate::Store::new(state.db.clone());
+    // Into another context: taking it out of this one was checked above, and
+    // putting it into that one takes owning that one too.
+    let target = match store.parent_of(&body.parent_id).await {
+        Ok(Some(parent)) => parent.context_id,
+        Ok(None) => return invalid("no such parent"),
+        Err(e) => return write_failed("moveDocument", e),
+    };
+    let across = target != meta.context_id;
+    if across && let Err(refusal) = owner_of(&state, &target, &did, "moveDocument").await {
+        return refusal;
+    }
+    match store.move_document(&body.id, &body.parent_id, across).await {
         Ok(path) => {
             state.publish(Topic::Context(meta.context_id), "node", &body.id);
+            if across {
+                state.publish(Topic::Context(target), "node", &body.id);
+            }
             (StatusCode::OK, Json(serde_json::json!({ "path": path }))).into_response()
         }
         Err(crate::store::WriteError::Db(e)) => write_failed("moveDocument", e),
@@ -3038,7 +3051,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn a_move_is_the_chairs_stays_in_its_context_and_cannot_swallow_itself() {
+    async fn a_move_is_the_chairs_and_cannot_swallow_itself_or_land_in_anothers_group() {
         let m = meeting().await;
         let arkiv = second_folder(&m).await;
         assert_eq!(
@@ -3059,12 +3072,14 @@ pub(crate) mod tests {
         for (target, why) in [
             ("fold", "into itself"),
             (inner.as_str(), "into its own subtree"),
-            ("s1", "into another context"),
             ("nowhere", "into nothing"),
         ] {
             let (status, v) = mv(&m, &m.chair, "fold", target).await;
             assert_eq!(status, StatusCode::BAD_REQUEST, "{why}: {v}");
         }
+        // Into a group the chair does not own, which here they cannot even see.
+        let (status, v) = mv(&m, &m.chair, "fold", "s1").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "into another's group: {v}");
         assert_eq!(
             resolves(&m.state, "group-one/resolutioner")
                 .await

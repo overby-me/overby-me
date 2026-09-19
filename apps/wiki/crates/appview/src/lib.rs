@@ -33,6 +33,7 @@ pub mod speak;
 pub mod statecookie;
 pub mod store;
 pub mod symbolicate;
+pub mod tree;
 pub mod util;
 pub mod xrpc;
 
@@ -300,6 +301,14 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.moveDocument",
             post(xrpc::move_document),
+        )
+        .route(
+            "/xrpc/com.example.wiki.copyDocument",
+            post(tree::copy_document),
+        )
+        .route(
+            "/xrpc/com.example.wiki.purgeDocument",
+            post(tree::purge_document),
         )
         .route(
             "/xrpc/com.example.wiki.deleteDocument",

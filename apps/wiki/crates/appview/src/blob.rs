@@ -353,6 +353,30 @@ async fn forget(state: &AppState, blob: &BlobMeta) -> Result<(), DbError> {
     Ok(())
 }
 
+/// Forget the blob `id` if no node points at it any more: what a purge leaves
+/// of the files its nodes held.
+pub(crate) async fn forget_if_unreferenced(state: &AppState, id: &str) -> Result<(), DbError> {
+    let referenced = {
+        let conn = state.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM document \
+                 WHERE json_extract(data, '$.fileId') = ?1 OR json_extract(data, '$.image') = ?1 \
+                 UNION ALL SELECT 1 FROM feedback WHERE image = ?1 LIMIT 1",
+                [id],
+            )
+            .await?;
+        rows.next().await?.is_some()
+    };
+    if referenced {
+        return Ok(());
+    }
+    match meta(state, id).await? {
+        Some(blob) => forget(state, &blob).await,
+        None => Ok(()),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UploadParams {
     pub context: String,
@@ -601,7 +625,7 @@ pub async fn serve_blob(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::router;
     use crate::xrpc::tests::{join, seeded_state, token_for};
@@ -609,7 +633,7 @@ mod tests {
     use tower::ServiceExt;
 
     /// A state whose blobs land in a directory of their own.
-    async fn state() -> AppState {
+    pub(crate) async fn state() -> AppState {
         let mut state = seeded_state().await;
         state.config.blob_dir = std::env::temp_dir()
             .join(format!("appview-blobs-{}", crate::util::random_token(8)))
@@ -627,7 +651,7 @@ mod tests {
         (status, headers, bytes.to_vec())
     }
 
-    async fn upload_named(
+    pub(crate) async fn upload_named(
         state: &AppState,
         who: &str,
         context: &str,
@@ -648,7 +672,7 @@ mod tests {
         (status, serde_json::from_slice(&body).unwrap_or_default())
     }
 
-    async fn upload(
+    pub(crate) async fn upload(
         state: &AppState,
         who: &str,
         context: &str,
@@ -658,7 +682,7 @@ mod tests {
         upload_named(state, who, context, "file", mime, bytes).await
     }
 
-    async fn fetch(
+    pub(crate) async fn fetch(
         state: &AppState,
         uri: &str,
         who: Option<&str>,

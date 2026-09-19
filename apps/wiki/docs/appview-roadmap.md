@@ -209,10 +209,13 @@ The steps:
   the listing.
 - [x] Move: a subtree to a new parent, every stored path in it rewritten, the
   binned ones too so a later restore lands where its parent now is.
-- [ ] Copy and purge. Moving between contexts, which has to change the context
-  of a whole subtree, and of the files its nodes point at: a blob is read
-  through its own context, so one left behind would stay readable by the old
-  group and not by the new.
+- [x] Copy and purge (`crates/appview/src/tree.rs`), and moving between
+  contexts. All three mind what a node points at, because a comment, a file and
+  a poll are each read through their OWN context: a move takes them along, or a
+  file would stay readable by the old group and not by the new; a copy gets
+  file rows of its own over the same bytes; a purge takes the files nothing
+  else points at. A purge refuses a bin entry that holds a poll, and a running
+  poll does not change groups.
 - [x] Search, the recent feed, contributions, orphans
   (`crates/appview/src/search.rs`, `feed.rs`). Search runs over an index of each
   document's WORDS, lowercased by Unicode's rules: over the stored Slate JSON
