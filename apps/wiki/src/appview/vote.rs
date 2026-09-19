@@ -26,7 +26,9 @@ pub(crate) fn poll_data(poll: &defs::PollView) -> serde_json::Value {
 pub(crate) async fn read_poll(access_token: Option<&str>, id: &str) -> Option<defs::PollView> {
     let client = client(access_token);
     let params = get_poll::Params { id: id.to_string() };
-    ask_quiet(true, || client.get_poll(&params)).await.ok()
+    let poll = ask_quiet(true, || client.get_poll(&params)).await.ok()?;
+    super::seen::placed(&poll.id, &poll.context_id);
+    Some(poll)
 }
 
 /// The polls on a node, by id: what a page's poll rows are filled in from.

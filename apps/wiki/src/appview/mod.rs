@@ -13,6 +13,8 @@ pub mod api;
 mod ballot;
 mod bin;
 mod canvas;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod hub;
 pub mod map;
 mod nodes;
 mod people;
@@ -22,6 +24,8 @@ mod seen;
 mod speak;
 mod talk;
 mod vote;
+mod watch;
+mod wire;
 
 #[allow(unused_imports)]
 pub use bin::*;
@@ -41,6 +45,8 @@ pub use speak::*;
 pub use talk::*;
 #[allow(unused_imports)]
 pub use vote::*;
+#[allow(unused_imports)]
+pub use wire::*;
 
 use appview_client::{Client, Error};
 

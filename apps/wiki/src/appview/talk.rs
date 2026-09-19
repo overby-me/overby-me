@@ -1,7 +1,7 @@
 //! What people say: comments and reactions, the feed they show up in, what a
 //! person or a group has put forward, and finding things by their words.
 
-use super::seen::{saw, saw_node, Seen};
+use super::seen::{placed, saw, saw_node, Seen};
 use super::{ask, client, map};
 use crate::model::{ChildNodeFields, ContextNodeFields, Jsonb, NodeFields, Timestamptz, Uuid};
 use appview_client::{
@@ -92,6 +92,7 @@ pub async fn query_comments(
         .iter()
         .map(|comment| {
             saw(&comment.id, Seen::Comment);
+            placed(&comment.id, &comment.context_id);
             if let Some(root) = &comment.root_id {
                 hosted(&comment.id, root, None);
             }
@@ -315,15 +316,26 @@ pub async fn query_recent_nodes(
     }
 }
 
-/// The feed refetches a page when something new arrives, so nothing is fetched
-/// by id. Kept because the component asks.
+/// How much of the feed's head is read to find what just landed in it.
+const ARRIVALS_PAGE: i32 = 30;
+
+/// The feed rows for `ids`, which a live push named as having just landed. They
+/// are at the head of the feed, so that is where they are looked for: an id that
+/// is not there was an edit to something older, or is not the reader's to see.
 pub async fn query_nodes_by_ids(
-    _access_token: Option<&str>,
-    _ids: &[String],
-    _user_id: &str,
-    _context_id: Option<&str>,
+    access_token: Option<&str>,
+    ids: &[String],
+    user_id: &str,
+    context_id: Option<&str>,
 ) -> Vec<ChildNodeFields> {
-    Vec::new()
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    query_recent_nodes(access_token, ARRIVALS_PAGE, 0, user_id, context_id)
+        .await
+        .into_iter()
+        .filter(|row| ids.contains(&row.id.0))
+        .collect()
 }
 
 async fn contributions(

@@ -43,6 +43,24 @@ pub(crate) fn seen(id: &str) -> Option<Seen> {
     SEEN.with(|seen| seen.borrow().get(id).cloned())
 }
 
+thread_local! {
+    /// The context each thing read is in. A live watch listens per context, and
+    /// a view often knows only the node it shows.
+    static PLACES: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
+
+pub(crate) fn placed(id: &str, context: &str) {
+    PLACES.with(|places| {
+        places
+            .borrow_mut()
+            .insert(id.to_string(), context.to_string());
+    });
+}
+
+pub(crate) fn place_of(id: &str) -> Option<String> {
+    PLACES.with(|places| places.borrow().get(id).cloned())
+}
+
 /// A node of the tree, by the `node` and `kind` a view carries.
 pub(crate) fn saw_node(id: &str, node: &str, kind: &str) {
     saw(

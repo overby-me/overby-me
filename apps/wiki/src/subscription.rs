@@ -822,7 +822,7 @@ fn past_use(expires_at: Option<f64>, now: f64) -> bool {
 /// come back at the same instant too, and the server meets one synchronised
 /// stampede after another. `rand` is a 0..1 sample, passed in so this is pure and
 /// testable.
-fn backoff_delay_ms(attempts: u32, rand: f64) -> i32 {
+pub(crate) fn backoff_delay_ms(attempts: u32, rand: f64) -> i32 {
     let exp = attempts.min(5); // 2^5 * 1s = 32s pre-cap
     let base = ((1u32 << exp) * 1_000).min(30_000) as f64;
     let jitter = 0.75 + rand.clamp(0.0, 1.0) * 0.5;

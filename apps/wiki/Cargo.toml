@@ -144,6 +144,8 @@ zip = { version = "2", default-features = false, features = ["deflate-miniz"] }
 # from `cargo test`. Already in the tree through reqwest; the test macro is the
 # one crate it adds.
 tokio = { version = "1", features = ["macros", "net", "rt", "time"] }
+# And its `/ws`, which a browser speaks through `web_sys` and a test cannot.
+tokio-tungstenite = "0.24"
 
 [features]
 default = ["web"]

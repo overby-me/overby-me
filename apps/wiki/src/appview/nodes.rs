@@ -1,7 +1,7 @@
 //! Reading the tree: a node by its path or id with what a screen draws around
 //! it, its children, the way down to it.
 
-use super::seen::{saw_node, seen, Seen};
+use super::seen::{placed, saw_node, seen, Seen};
 use super::{ask, ask_quiet, client, is_absent, map, offline_copy, reported};
 use crate::model::{
     ChildNodeFields, Crumb, DrawerChildFields, InsertedNode, NodeWithChildren, NodesInsertInput,
@@ -29,13 +29,26 @@ async fn read_node(
     };
     let viewer = Some(user_id).filter(|id| !id.is_empty());
     let mut node = map::node_with_children(&read, viewer);
-    match &read.node {
-        get_node::OutputNode::Context(c) => saw_node(&c.id, "context", &c.kind),
-        get_node::OutputNode::Document(d) => saw_node(&d.id, "document", &d.kind),
-    }
+    let context = match &read.node {
+        get_node::OutputNode::Context(c) => {
+            saw_node(&c.id, "context", &c.kind);
+            &c.id
+        }
+        get_node::OutputNode::Document(d) => {
+            saw_node(&d.id, "document", &d.kind);
+            placed(&d.id, &d.context_id);
+            &d.context_id
+        }
+    };
     for child in &read.children {
         saw_node(&child.id, &child.node, &child.kind);
+        // A context is its own place: what changes in it is heard there.
+        match child.node.as_str() {
+            "context" => placed(&child.id, &child.id),
+            _ => placed(&child.id, context),
+        }
     }
+    placed(context, context);
     // A poll is a node to the components: what is asked in its `data`, open
     // while `mutable`. So are the polls among a page's children.
     if node.mime_id.as_deref() == Some("vote/poll") {

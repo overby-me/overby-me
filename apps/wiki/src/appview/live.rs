@@ -1064,3 +1064,227 @@ async fn a_secret_ballot_is_cast_blind_and_only_once_as_the_poll_screen_does_it(
         "one ballot each, whatever was retried"
     );
 }
+
+/// The `/ws` a browser holds, from a test: one frame out, the next one back.
+struct Socket(
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+);
+
+impl Socket {
+    async fn open() -> Socket {
+        let url = super::appview_url().replacen("http://", "ws://", 1);
+        let (socket, _) = tokio_tungstenite::connect_async(format!("{url}/ws"))
+            .await
+            .expect("the socket");
+        Socket(socket)
+    }
+
+    async fn say(&mut self, frame: serde_json::Value) -> serde_json::Value {
+        use futures_util::SinkExt;
+        let text = tokio_tungstenite::tungstenite::Message::Text(frame.to_string());
+        self.0.send(text).await.expect("send");
+        self.hear().await
+    }
+
+    async fn hear(&mut self) -> serde_json::Value {
+        use futures_util::StreamExt;
+        let wait = std::time::Duration::from_secs(5);
+        loop {
+            let frame = tokio::time::timeout(wait, self.0.next())
+                .await
+                .expect("a frame in time")
+                .expect("an open socket")
+                .expect("a frame");
+            if let tokio_tungstenite::tungstenite::Message::Text(text) = frame {
+                return serde_json::from_str(text.as_str()).expect("json");
+            }
+        }
+    }
+
+    /// The next change, as the hub reads it.
+    async fn change(&mut self) -> super::wire::Change {
+        serde_json::from_value(self.hear().await).expect("a change")
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_change_is_heard_over_the_socket_and_handed_to_the_views_watching_it() {
+    use super::watch::{payload, topics_of, Watches};
+    use super::wire::{
+        cell_stream, children_of_mime, feed_scope, id_stream, in_context_or_under, node_is,
+        parent_stream, state_stream,
+    };
+    use crate::model::BallotRules;
+    let server = Server::start();
+    let carol = server.session(CAROL);
+    let (group, page) = a_group_with_a_page(&carol).await;
+    let meeting =
+        super::create_context(Some(&carol), &group, &group, "wiki/event", "Årsmøde", None)
+            .await
+            .expect("an event")
+            .id
+            .0;
+    let board = super::create_canvas(Some(&carol), &group, "Tavle", 8, 8, 0)
+        .await
+        .expect("a board")
+        .id
+        .0;
+    super::load_canvas(Some(&carol), &board)
+        .await
+        .expect("the board as the screen first reads it");
+
+    // What four views on screen would hold. None was told its context but the
+    // feed, so each asks where its node is.
+    let mut watches = Watches::<&str>::default();
+    let mut held = std::collections::HashMap::new();
+    for (view, wire) in [
+        (
+            "thread",
+            parent_stream(in_context_or_under(None, &page, "vote/comment"), "", 100),
+        ),
+        ("feed", id_stream(feed_scope(Some(&group), CAROL), "", 100)),
+        (
+            "cells",
+            cell_stream(children_of_mime(&board, "canvas/pixel"), ""),
+        ),
+    ] {
+        let (_, new) = watches.register(wire.clone(), view);
+        let watch = new.expect("new");
+        let topics = topics_of(Some(&carol), &wire.scope).await;
+        watches.resolved(watch, topics);
+        held.insert(view, watch);
+    }
+    let mut topics = watches.topics();
+    topics.sort();
+    let mut both = [format!("context:{group}"), format!("context:{meeting}")];
+    both.sort();
+    assert_eq!(
+        topics, both,
+        "a group's feed listens to its events' too, and the rest share the group's"
+    );
+
+    let mut socket = Socket::open().await;
+    let authed = socket
+        .say(serde_json::json!({ "op": "auth", "session": carol }))
+        .await;
+    assert_eq!(authed["ok"], true);
+    for topic in &topics {
+        let granted = socket
+            .say(serde_json::json!({ "op": "sub", "topic": topic }))
+            .await;
+        assert_eq!(granted["ok"], true, "{granted}");
+    }
+    assert_eq!(
+        socket.say(serde_json::json!({ "op": "ping" })).await["op"],
+        "pong"
+    );
+
+    // A comment lands: the thread is told whose child it is, the feed which row
+    // to fetch, and the board nothing.
+    super::insert_comment(Some(&carol), &page, Some(&group), "", CAROL, "Enig", None)
+        .await
+        .expect("a comment");
+    let change = socket.change().await;
+    let heard: std::collections::HashMap<u64, serde_json::Value> =
+        watches.heard(&change).into_iter().collect();
+    assert_eq!(heard.len(), 2, "{heard:?}");
+    let to_thread = &heard[&held["thread"]];
+    assert_eq!(to_thread["parentId"], page.as_str());
+    let (wire, mut cursor, views) = watches.parts(held["feed"]).expect("the feed");
+    assert_eq!(views, ["feed"]);
+    let rows = vec![heard[&held["feed"]].clone()];
+    let pushed = payload(Some(&carol), &wire, rows, &mut cursor)
+        .await
+        .expect("a payload");
+    let landed = pushed["nodes_stream"][0]["id"]
+        .as_str()
+        .expect("an id")
+        .to_string();
+    let fetched =
+        super::query_nodes_by_ids(Some(&carol), &[landed.clone()], CAROL, Some(&group)).await;
+    assert_eq!(fetched.len(), 1, "the feed fetches exactly what landed");
+    assert_eq!(fetched[0].id.0, landed);
+    assert_eq!(fetched[0].mime_id.as_deref(), Some("vote/comment"));
+
+    // A cell is painted: the board is handed that cell, and the next push only
+    // what came after it.
+    super::paint_cell(Some(&carol), &board, &group, CAROL, 2, 3, 5)
+        .await
+        .expect("paint");
+    let change = socket.change().await;
+    let heard = watches.heard(&change);
+    assert_eq!(heard.len(), 1);
+    assert_eq!(heard[0].0, held["cells"]);
+    let (wire, mut cursor, _) = watches.parts(held["cells"]).expect("the board");
+    let pushed = payload(Some(&carol), &wire, vec![], &mut cursor)
+        .await
+        .expect("cells");
+    let cell = super::parse_cell_full(&pushed["nodes_stream"][0]).expect("a cell");
+    assert_eq!((cell.at, cell.colour), ((2, 3), 5));
+    assert_eq!(cell.owner.as_deref(), Some(CAROL));
+    watches.moved_on(held["cells"], cursor.clone());
+    assert_eq!(
+        payload(Some(&carol), &wire, vec![], &mut cursor).await,
+        None,
+        "nothing new since, so nothing to hand over"
+    );
+
+    // The chair closes a poll: its screen is told it is shut, without asking.
+    let folder = super::insert_node(
+        Some(&carol),
+        a_node("wiki/folder", "Forslag", &group, &group),
+    )
+    .await
+    .expect("a folder")
+    .expect("inserted");
+    let mut motion = a_node("vote/policy", "Forslag 1", &folder.id.0, &group);
+    motion.mutable = Some(false);
+    let motion = super::insert_node(Some(&carol), motion)
+        .await
+        .expect("a motion")
+        .expect("inserted");
+    let options = ["for", "imod"].map(str::to_string);
+    let poll = super::create_poll(
+        Some(&carol),
+        &motion.id.0,
+        &group,
+        "Forslag 1",
+        "",
+        &options,
+        1,
+        1,
+        BallotRules::default(),
+    )
+    .await
+    .expect("a poll")
+    .id
+    .0;
+    let open = state_stream(node_is(&poll), "");
+    let (_, new) = watches.register(open.clone(), "poll");
+    let watch = new.expect("new");
+    watches.resolved(watch, topics_of(Some(&carol), &open.scope).await);
+    let shut = NodesSetInput {
+        mutable: Some(false),
+        ..Default::default()
+    };
+    super::update_node(Some(&carol), &poll, shut)
+        .await
+        .expect("closePoll");
+    let closing = loop {
+        let change = socket.change().await;
+        if change.kind == "poll" && change.id == poll && !watches.heard(&change).is_empty() {
+            // Opening it said so too; the state asked for now is what counts.
+            let still_open = super::vote::read_poll(Some(&carol), &poll)
+                .await
+                .is_some_and(|p| p.open);
+            if !still_open {
+                break change;
+            }
+        }
+    };
+    assert!(watches.heard(&closing).iter().any(|(w, _)| *w == watch));
+    let pushed = payload(Some(&carol), &open, vec![], &mut None)
+        .await
+        .expect("its state");
+    assert_eq!(pushed["nodes_stream"][0]["mutable"], false);
+}

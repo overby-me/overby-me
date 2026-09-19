@@ -79,7 +79,46 @@ pub(crate) async fn read_canvas(
         id: canvas_id.to_string(),
         since: since.map(str::to_string),
     };
-    ask_quiet(true, || client.get_canvas(&params)).await
+    let board = ask_quiet(true, || client.get_canvas(&params)).await?;
+    super::seen::placed(&board.id, &board.context_id);
+    Ok(board)
+}
+
+thread_local! {
+    /// Where each board was last read up to, on the AppView's clock: what the
+    /// live watch of it asks from, so nothing painted in between is missed.
+    static READ_UP_TO: std::cell::RefCell<std::collections::HashMap<String, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// The cells painted since `cursor`, as the rows `parse_cell_full` reads, and
+/// the cursor moved on. With no cursor it starts from the board's last read.
+pub(crate) async fn cells_since(
+    access_token: Option<&str>,
+    canvas_id: &str,
+    cursor: &mut Option<String>,
+) -> Vec<serde_json::Value> {
+    let from = cursor
+        .clone()
+        .or_else(|| READ_UP_TO.with(|read| read.borrow().get(canvas_id).cloned()))
+        .unwrap_or_else(|| NO_CELLS.to_string());
+    let Ok(board) = read_canvas(access_token, canvas_id, Some(&from)).await else {
+        return Vec::new();
+    };
+    *cursor = Some(board.now.clone());
+    board
+        .cells
+        .iter()
+        .filter_map(|row| cell(row, &board.painters))
+        .map(|cell| {
+            serde_json::json!({
+                "key": format!("p_{}_{}", cell.at.0, cell.at.1),
+                "data": { "c": cell.colour },
+                "ownerId": cell.owner,
+                "updatedAt": cell.when,
+            })
+        })
+        .collect()
 }
 
 /// Every painted cell of a canvas.
@@ -87,6 +126,10 @@ pub async fn load_canvas(access_token: Option<&str>, canvas_id: &str) -> Result<
     let board = read_canvas(access_token, canvas_id, None)
         .await
         .map_err(|e| reported("getCanvas", &e))?;
+    READ_UP_TO.with(|read| {
+        read.borrow_mut()
+            .insert(canvas_id.to_string(), board.now.clone());
+    });
     Ok(board
         .cells
         .iter()
