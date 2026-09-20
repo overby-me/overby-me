@@ -1,0 +1,100 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.getCanvas",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "A canvas and its painted cells, or with `since` only the cells painted at or after it. A change on the live socket says only that the board moved; a listener then asks for what was painted since the `now` of its last answer, so a repaint costs everyone watching a few bytes and not the board again. A cell painted in the very millisecond of `since` may come twice, which repaints it the same colour.",
+			"parameters": {
+				"type": "params",
+				"required": ["id"],
+				"properties": {
+					"id": {
+						"type": "string"
+					},
+					"since": {
+						"type": "string",
+						"format": "datetime"
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": [
+						"id",
+						"context_id",
+						"width",
+						"height",
+						"cooldown",
+						"open",
+						"cells",
+						"painters",
+						"profiles",
+						"now",
+						"now_ms"
+					],
+					"properties": {
+						"id": {
+							"type": "string"
+						},
+						"context_id": {
+							"type": "string"
+						},
+						"width": {
+							"type": "integer"
+						},
+						"height": {
+							"type": "integer"
+						},
+						"cooldown": {
+							"type": "integer",
+							"description": "Seconds."
+						},
+						"open": {
+							"type": "boolean"
+						},
+						"cells": {
+							"type": "array",
+							"items": {
+								"type": "unknown"
+							},
+							"description": "Rows of `[x, y, colour, painter, painted_at]`, oldest first. `colour` indexes the client's palette; `painter` indexes `painters`, or is null."
+						},
+						"painters": {
+							"type": "array",
+							"items": {
+								"type": "string",
+								"format": "did"
+							}
+						},
+						"profiles": {
+							"type": "unknown",
+							"description": "A map from DID to profile, for `painters`."
+						},
+						"now": {
+							"type": "string",
+							"format": "datetime",
+							"description": "Pass as `since` next time."
+						},
+						"now_ms": {
+							"type": "integer",
+							"description": "The server's clock, which `next_paint_at` is on."
+						},
+						"next_paint_at": {
+							"type": "integer",
+							"description": "Unix milliseconds at which the caller may paint again. Absent if they never have."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "NotFound",
+					"description": "No such canvas, or none the caller may read."
+				}
+			]
+		}
+	}
+}

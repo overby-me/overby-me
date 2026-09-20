@@ -136,7 +136,7 @@ async fn create_in(
     Ok((id, path))
 }
 
-/// `com.example.wiki.createContext` (procedure): make a group or an event under
+/// `wiki.radikal.createContext` (procedure): make a group or an event under
 /// a context, or a folder in one, that the caller owns; or a site, a place that
 /// publishes, directly under the home. The caller is its first owner, with
 /// voting rights. It starts closed to everyone else.
@@ -222,7 +222,7 @@ pub struct UpdateContextBody {
     pub created_at: Option<String>,
 }
 
-/// `com.example.wiki.updateContext` (procedure): an owner renames a context,
+/// `wiki.radikal.updateContext` (procedure): an owner renames a context,
 /// opens or closes it to the public, locks it, or changes what it says about
 /// itself. A rename keeps the address: the slug is what links point at.
 pub async fn update_context(
@@ -382,7 +382,7 @@ pub struct ContextIdBody {
     pub id: String,
 }
 
-/// `com.example.wiki.deleteContext` (procedure): put a group or an event, and
+/// `wiki.radikal.deleteContext` (procedure): put a group or an event, and
 /// everything in it, in the bin. Its members keep their rows, so restoring it
 /// brings back who was in it too.
 pub async fn delete_context(
@@ -446,7 +446,7 @@ async fn member_or_parent_owner(
     }
 }
 
-/// `com.example.wiki.restoreContext` (procedure): bring a context back from the
+/// `wiki.radikal.restoreContext` (procedure): bring a context back from the
 /// bin, with everything that went with it.
 pub async fn restore_context(
     State(state): State<AppState>,
@@ -503,8 +503,8 @@ mod tests {
     use axum::http::StatusCode;
     use serde_json::json;
 
-    const CREATE: &str = "/xrpc/com.example.wiki.createContext";
-    const UPDATE: &str = "/xrpc/com.example.wiki.updateContext";
+    const CREATE: &str = "/xrpc/wiki.radikal.createContext";
+    const UPDATE: &str = "/xrpc/wiki.radikal.updateContext";
 
     /// The seeded wiki, given a home that carol runs.
     async fn with_home() -> (crate::AppState, String) {
@@ -530,7 +530,7 @@ mod tests {
 
         let (status, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getNode?path=",
+            "/xrpc/wiki.radikal.getNode?path=",
             &carol,
         )
         .await;
@@ -553,11 +553,7 @@ mod tests {
         );
         let offered = v["viewer"]["can_create"].as_array().expect("can_create");
         assert!(offered.contains(&json!("site")), "{v}");
-        let (status, _) = get(
-            router(state.clone()),
-            "/xrpc/com.example.wiki.getNode?path=",
-        )
-        .await;
+        let (status, _) = get(router(state.clone()), "/xrpc/wiki.radikal.getNode?path=").await;
         assert_eq!(
             status,
             StatusCode::NOT_FOUND,
@@ -610,7 +606,7 @@ mod tests {
 
         let (_, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listContexts?scope=roots",
+            "/xrpc/wiki.radikal.listContexts?scope=roots",
             &carol,
         )
         .await;
@@ -625,7 +621,7 @@ mod tests {
         let gone = json!({"id": "home"});
         let (status, v) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.deleteContext",
+            "/xrpc/wiki.radikal.deleteContext",
             Some(&carol),
             gone,
         )
@@ -652,7 +648,7 @@ mod tests {
 
         let (_, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getNode?path=closed",
+            "/xrpc/wiki.radikal.getNode?path=closed",
             &bob,
         )
         .await;
@@ -668,7 +664,7 @@ mod tests {
 
         let (_, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listContexts?scope=roots",
+            "/xrpc/wiki.radikal.listContexts?scope=roots",
             &bob,
         )
         .await;
@@ -685,7 +681,7 @@ mod tests {
 
         let (_, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.search?q=ÅRSMØDET",
+            "/xrpc/wiki.radikal.search?q=ÅRSMØDET",
             &bob,
         )
         .await;
@@ -696,7 +692,7 @@ mod tests {
         let zoe = token_for(&state, "did:plc:zoe").await;
         let (_, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.search?q=årsmødet",
+            "/xrpc/wiki.radikal.search?q=årsmødet",
             &zoe,
         )
         .await;
@@ -720,7 +716,7 @@ mod tests {
         );
         let id = v["id"].as_str().expect("id");
 
-        let node = format!("/xrpc/com.example.wiki.getNode?id={id}");
+        let node = format!("/xrpc/wiki.radikal.getNode?id={id}");
         let (_, seen) = get_as(router(state.clone()), &node, &alice).await;
         assert_eq!(seen["node"]["kind"], "event", "{seen}");
         assert_eq!(seen["viewer"]["is_context_owner"], true);
@@ -730,7 +726,7 @@ mod tests {
             StatusCode::NOT_FOUND,
             "an event is its own context: the group's members are not in it"
         );
-        let members = format!("/xrpc/com.example.wiki.listMembers?context={id}");
+        let members = format!("/xrpc/wiki.radikal.listMembers?context={id}");
         let (_, roster) = get_as(router(state.clone()), &members, &alice).await;
         assert_eq!(roster["members"][0]["display_name"], "Alice", "{roster}");
 
@@ -739,7 +735,7 @@ mod tests {
         assert_eq!(again["path"], "closed/årsmøde_2027-2");
         let (_, found) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.search?q=årsmøde",
+            "/xrpc/wiki.radikal.search?q=årsmøde",
             &alice,
         )
         .await;
@@ -786,7 +782,7 @@ mod tests {
         let state = seeded_state().await;
         let alice = token_for(&state, "did:plc:alice").await;
         let bob = token_for(&state, "did:plc:bob").await;
-        let page = "/xrpc/com.example.wiki.getNode?path=closed";
+        let page = "/xrpc/wiki.radikal.getNode?path=closed";
         assert_eq!(
             get(router(state.clone()), page).await.0,
             StatusCode::NOT_FOUND
@@ -822,9 +818,9 @@ mod tests {
         let state = seeded_state().await;
         let alice = token_for(&state, "did:plc:alice").await;
         let bob = token_for(&state, "did:plc:bob").await;
-        let delete = "/xrpc/com.example.wiki.deleteContext";
-        let restore = "/xrpc/com.example.wiki.restoreContext";
-        let page = "/xrpc/com.example.wiki.getNode?path=closed/secret_minutes";
+        let delete = "/xrpc/wiki.radikal.deleteContext";
+        let restore = "/xrpc/wiki.radikal.restoreContext";
+        let page = "/xrpc/wiki.radikal.getNode?path=closed/secret_minutes";
 
         let (status, _) = post(
             router(state.clone()),
@@ -852,7 +848,7 @@ mod tests {
         );
 
         // What went along is not an entry of its own in any bin.
-        let bin_of_group = "/xrpc/com.example.wiki.listDeleted?context=c9";
+        let bin_of_group = "/xrpc/wiki.radikal.listDeleted?context=c9";
         let (_, bin) = get_as(router(state.clone()), bin_of_group, &alice).await;
         assert_eq!(bin["deleted"], json!([]), "{bin}");
 

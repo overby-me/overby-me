@@ -1,0 +1,32 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.getPoll",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "A poll as the caller may see it. `counts` and `outcome` are absent where the tally is hidden from the caller; `ballots` and `eligible` never are.",
+			"parameters": {
+				"type": "params",
+				"required": ["id"],
+				"properties": {
+					"id": {
+						"type": "string"
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "ref",
+					"ref": "wiki.radikal.defs#pollView"
+				}
+			},
+			"errors": [
+				{
+					"name": "NotFound",
+					"description": "No such poll, or none the caller may read."
+				}
+			]
+		}
+	}
+}

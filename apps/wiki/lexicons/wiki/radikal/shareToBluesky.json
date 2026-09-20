@@ -1,0 +1,64 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.shareToBluesky",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Post to the caller's own Bluesky account: an `app.bsky.feed.post` written into their repo, on their PDS, with the grant their login left with this AppView. Where the text contains `url`, it becomes a link; `url` always rides along as a link card. Only a page of this app can be the card.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["text"],
+					"properties": {
+						"text": {
+							"type": "string",
+							"maxLength": 300
+						},
+						"url": {
+							"type": "string",
+							"format": "uri",
+							"description": "On a configured frontend origin."
+						},
+						"title": {
+							"type": "string",
+							"description": "The card's title."
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["uri"],
+					"properties": {
+						"uri": {
+							"type": "string",
+							"format": "at-uri",
+							"description": "The post, in the caller's repo."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "No text, more than 300 characters, or a card for somewhere else."
+				},
+				{
+					"name": "PdsRefused",
+					"description": "The caller's PDS did not take the post, usually because the grant has lapsed; signing in again renews it (HTTP 409)."
+				},
+				{
+					"name": "OAuthNotConfigured",
+					"description": "This AppView has no OAuth client (HTTP 503)."
+				}
+			]
+		}
+	}
+}

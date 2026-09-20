@@ -350,7 +350,7 @@ def start-dev-appview []: nothing -> int {
     if ($said | is-empty) { log-fail "the dev AppView did not start"; return 0 }
     let owner = ($said.sessions | get "did:plc:owner")
     let member = ($said.sessions | get "did:plc:member")
-    let xrpc = $"(api-url)/xrpc/com.example.wiki"
+    let xrpc = $"(api-url)/xrpc/wiki.radikal"
     let post = {|token: string, method: string, body: record|
         ^curl -s -X POST -H $"authorization: Bearer ($token)" -H "content-type: application/json" -d ($body | to json -r) $"($xrpc).($method)" | from json
     }

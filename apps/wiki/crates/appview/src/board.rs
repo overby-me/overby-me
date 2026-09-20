@@ -175,7 +175,7 @@ pub async fn close_out_of(
     }))
 }
 
-/// `com.example.wiki.getBoardKey`: the key this AppView signs receipts and
+/// `wiki.radikal.getBoardKey`: the key this AppView signs receipts and
 /// close-outs with. For anyone: a receipt names its key too, and this is what
 /// it is checked against.
 pub async fn get_board_key(State(state): State<AppState>) -> Response {
@@ -216,9 +216,9 @@ const MIN_BATCH: usize = 3;
 /// What one `applyWrites` is asked to take. A PDS refuses more than 200.
 const MAX_WRITES: usize = 100;
 
-const POLL_NSID: &str = "com.example.wiki.poll";
-const ENTRY_NSID: &str = "com.example.wiki.ballotEntry";
-const CLOSEOUT_NSID: &str = "com.example.wiki.pollCloseOut";
+const POLL_NSID: &str = "wiki.radikal.poll";
+const ENTRY_NSID: &str = "wiki.radikal.ballotEntry";
+const CLOSEOUT_NSID: &str = "wiki.radikal.pollCloseOut";
 
 /// A record key as a repo expects one to be made: 53 bits of microseconds and
 /// ten of a clock id, in the sortable base32 of the atproto spec.

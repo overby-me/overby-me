@@ -64,7 +64,7 @@ pub fn parse_member_roster(bytes: &[u8]) -> Option<Vec<RosterEntry>> {
     )
 }
 
-/// `com.example.wiki.parseRoster` (procedure): the raw .xlsx as the body, its
+/// `wiki.radikal.parseRoster` (procedure): the raw .xlsx as the body, its
 /// rows back as `{ entries: [{ name, email }] }`. Any signed-in caller may.
 pub async fn parse_roster(_caller: Caller, body: Body) -> Response {
     let Ok(bytes) = axum::body::to_bytes(body, MAX_BYTES).await else {
@@ -215,7 +215,7 @@ mod tests {
             async move {
                 let mut req = Request::builder()
                     .method("POST")
-                    .uri("/xrpc/com.example.wiki.parseRoster");
+                    .uri("/xrpc/wiki.radikal.parseRoster");
                 if let Some(token) = token {
                     req = req.header("authorization", format!("Bearer {token}"));
                 }

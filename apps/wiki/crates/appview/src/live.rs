@@ -428,7 +428,7 @@ mod tests {
         });
         let request = http::Request::builder()
             .method("POST")
-            .uri("/xrpc/com.example.wiki.createDocument")
+            .uri("/xrpc/wiki.radikal.createDocument")
             .header("content-type", "application/json")
             .header("authorization", format!("Bearer {token}"))
             .body(axum::body::Body::from(body.to_string()))

@@ -221,7 +221,7 @@ async fn copy_in(
     Ok((new_id, path, copies.len()))
 }
 
-/// `com.example.wiki.copyDocument` (procedure): copy a document, with what the
+/// `wiki.radikal.copyDocument` (procedure): copy a document, with what the
 /// caller may read under it, to under another parent, in this context or any
 /// other the caller owns. The copy is the caller's.
 pub async fn copy_document(
@@ -371,7 +371,7 @@ async fn purge_in(conn: &Connection, id: &str) -> Result<(u64, Vec<String>), Wri
     Ok((purged, blobs))
 }
 
-/// `com.example.wiki.purgeDocument` (procedure): the way out of the bin that
+/// `wiki.radikal.purgeDocument` (procedure): the way out of the bin that
 /// restoring is not. An owner of the context deletes for good what one bin entry
 /// holds: the documents, their author chips, the threads on them with their
 /// reactions and pictures, and the files nothing else points at. A vote's record, and a group, are nobody's to purge.
@@ -476,7 +476,7 @@ async fn purge_thread(conn: &Connection, id: &str) -> Result<(u64, Vec<String>),
     Ok((purged, images))
 }
 
-/// `com.example.wiki.purgeOrphan` (procedure): whoever runs the site deletes for
+/// `wiki.radikal.purgeOrphan` (procedure): whoever runs the site deletes for
 /// good a node `listOrphans` lists, and what is under it. A page goes as a purge
 /// from the bin takes it, a comment with the answers to it. A group does not go
 /// this way: it holds people's seats and a record of its own, and it still opens
@@ -574,10 +574,10 @@ mod tests {
     use axum::http::StatusCode;
     use serde_json::json;
 
-    const COPY: &str = "/xrpc/com.example.wiki.copyDocument";
-    const PURGE: &str = "/xrpc/com.example.wiki.purgeDocument";
-    const MOVE: &str = "/xrpc/com.example.wiki.moveDocument";
-    const BIN: &str = "/xrpc/com.example.wiki.deleteDocument";
+    const COPY: &str = "/xrpc/wiki.radikal.copyDocument";
+    const PURGE: &str = "/xrpc/wiki.radikal.purgeDocument";
+    const MOVE: &str = "/xrpc/wiki.radikal.moveDocument";
+    const BIN: &str = "/xrpc/wiki.radikal.deleteDocument";
 
     async fn count(state: &AppState, sql: &str) -> i64 {
         let conn = state.db.acquire().await.expect("conn");
@@ -630,7 +630,7 @@ mod tests {
     }
 
     async fn file_of(state: &AppState, path: &str, who: &str) -> String {
-        let uri = format!("/xrpc/com.example.wiki.getNode?path={path}");
+        let uri = format!("/xrpc/wiki.radikal.getNode?path={path}");
         let (status, v) = get_as(router(state.clone()), &uri, who).await;
         assert_eq!(status, StatusCode::OK, "{path}: {v}");
         v["node"]["data"]["fileId"]
@@ -659,7 +659,7 @@ mod tests {
 
         let (_, page) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getNode?path=closed/bilag-2/dagsorden",
+            "/xrpc/wiki.radikal.getNode?path=closed/bilag-2/dagsorden",
             &alice,
         )
         .await;
@@ -673,7 +673,7 @@ mod tests {
         );
         let (_, folder) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getNode?path=closed/bilag-2",
+            "/xrpc/wiki.radikal.getNode?path=closed/bilag-2",
             &alice,
         )
         .await;
@@ -702,7 +702,7 @@ mod tests {
 
         let (_, found) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.search?q=dirigent",
+            "/xrpc/wiki.radikal.search?q=dirigent",
             &alice,
         )
         .await;
@@ -885,7 +885,7 @@ mod tests {
         .expect("motion");
         let (status, poll) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.openPoll",
+            "/xrpc/wiki.radikal.openPoll",
             Some(&alice),
             json!({"parent_id": "mo", "title": "Forslag", "options": ["for", "against", "blank"]}),
         )
@@ -962,7 +962,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let (_, comments) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getComments?on=pg",
+            "/xrpc/wiki.radikal.getComments?on=pg",
             &carol,
         )
         .await;
@@ -974,7 +974,7 @@ mod tests {
         // An answer used to stay in the old group: read there, and not here.
         let (_, answers) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getComments?on=kp",
+            "/xrpc/wiki.radikal.getComments?on=kp",
             &carol,
         )
         .await;
@@ -1016,7 +1016,7 @@ mod tests {
         let purge = |who: &str, id: &'static str| {
             let (state, who) = (state.clone(), who.to_string());
             async move {
-                let uri = "/xrpc/com.example.wiki.purgeOrphan";
+                let uri = "/xrpc/wiki.radikal.purgeOrphan";
                 post(router(state), uri, Some(&who), json!({"id": id})).await
             }
         };
@@ -1085,7 +1085,7 @@ mod tests {
         .expect("motion");
         let (_, poll) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.openPoll",
+            "/xrpc/wiki.radikal.openPoll",
             Some(&alice),
             json!({"parent_id": "mo", "title": "Forslag", "options": ["for", "against", "blank"]}),
         )
@@ -1105,7 +1105,7 @@ mod tests {
 
         post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.closePoll",
+            "/xrpc/wiki.radikal.closePoll",
             Some(&alice),
             json!({"id": id}),
         )

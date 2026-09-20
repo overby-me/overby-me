@@ -69,7 +69,7 @@ fn render(bytes: &[u8]) -> Result<Option<Rendered>, String> {
         .map_err(|e| e.to_string())
 }
 
-/// `com.example.wiki.renderMetafile` (procedure): the metafile as the body, a
+/// `wiki.radikal.renderMetafile` (procedure): the metafile as the body, a
 /// picture back. Any signed-in caller: there is nothing to authorise against,
 /// since the bytes come from the request and the caller already holds whatever
 /// this could tell them.
@@ -138,7 +138,7 @@ mod tests {
         let state = seeded_state().await;
         let mut req = Request::builder()
             .method("POST")
-            .uri("/xrpc/com.example.wiki.renderMetafile");
+            .uri("/xrpc/wiki.radikal.renderMetafile");
         let bob;
         if token.is_some() {
             bob = token_for(&state, "did:plc:bob").await;

@@ -445,7 +445,7 @@ pub struct UploadParams {
     pub name: Option<String>,
 }
 
-/// `com.example.wiki.uploadBlob` (procedure): the raw bytes as the body, their
+/// `wiki.radikal.uploadBlob` (procedure): the raw bytes as the body, their
 /// type as `Content-Type`. A member of the context may. The body goes to disk
 /// as it arrives, so an upload costs no memory of its size.
 pub async fn upload_blob(
@@ -532,7 +532,7 @@ fn no_such_file() -> Response {
     err(StatusCode::NOT_FOUND, "NotFound", "no such file")
 }
 
-/// `com.example.wiki.getBlobLink`: a link to a blob that carries its own
+/// `wiki.radikal.getBlobLink`: a link to a blob that carries its own
 /// authority, for what cannot send a header.
 pub async fn get_blob_link(
     State(state): State<AppState>,
@@ -563,7 +563,7 @@ pub async fn get_blob_link(
         .into_response()
 }
 
-/// `com.example.wiki.deleteBlob` (procedure): a member deletes what they
+/// `wiki.radikal.deleteBlob` (procedure): a member deletes what they
 /// uploaded, an owner of the context anything in it. Membership is asked for
 /// even of the uploader: someone put out of a group must not be able to pull
 /// their files out of its documents on the way.
@@ -723,7 +723,7 @@ pub(crate) mod tests {
         let req = Request::builder()
             .method("POST")
             .uri(format!(
-                "/xrpc/com.example.wiki.uploadBlob?context={context}&name={name}"
+                "/xrpc/wiki.radikal.uploadBlob?context={context}&name={name}"
             ))
             .header("authorization", format!("Bearer {who}"))
             .header("content-type", mime)
@@ -762,7 +762,7 @@ pub(crate) mod tests {
     async fn delete(state: &AppState, who: &str, id: &serde_json::Value) -> StatusCode {
         let req = Request::builder()
             .method("POST")
-            .uri("/xrpc/com.example.wiki.deleteBlob")
+            .uri("/xrpc/wiki.radikal.deleteBlob")
             .header("authorization", format!("Bearer {who}"))
             .header("content-type", "application/json")
             .body(Body::from(serde_json::json!({ "id": id }).to_string()))
@@ -854,7 +854,7 @@ pub(crate) mod tests {
             futures_util::stream::iter([&b"nine"[..], &b" byte"[..]].map(Ok::<_, std::io::Error>));
         let req = Request::builder()
             .method("POST")
-            .uri("/xrpc/com.example.wiki.uploadBlob?context=c9")
+            .uri("/xrpc/wiki.radikal.uploadBlob?context=c9")
             .header("authorization", format!("Bearer {bob}"))
             .body(Body::from_stream(chunks))
             .expect("request");
@@ -914,7 +914,7 @@ pub(crate) mod tests {
         let id = up["id"].as_str().expect("id");
 
         let mallory = token_for(&state, "did:plc:mallory").await;
-        let link = format!("/xrpc/com.example.wiki.getBlobLink?id={id}");
+        let link = format!("/xrpc/wiki.radikal.getBlobLink?id={id}");
         assert_eq!(
             fetch(&state, &link, Some(&mallory), None).await.0,
             StatusCode::NOT_FOUND,
@@ -1110,9 +1110,7 @@ pub(crate) mod tests {
         let bytes: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
         let http = reqwest::Client::new();
         let up: serde_json::Value = http
-            .post(format!(
-                "{base}/xrpc/com.example.wiki.uploadBlob?context=c9"
-            ))
+            .post(format!("{base}/xrpc/wiki.radikal.uploadBlob?context=c9"))
             .bearer_auth(&bob)
             .header("content-type", "video/mp4")
             .body(bytes.clone())

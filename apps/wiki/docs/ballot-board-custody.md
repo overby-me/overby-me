@@ -5,7 +5,7 @@ follows is the memo the call was made from (pre-rewrite plan, round-2 item 9). T
 (RFC 9474 blind-signature UNIT tokens, per-poll issuer keys, a public bulletin board that IS atproto
 records; see `docs/atproto-open-decisions.md` and `crates/ballot-spec`) deliberately left one question
 open: in WHOSE repo do the board-entry records live? Companion drafts:
-`lexicons/com/example/wiki/poll.json` and `lexicons/com/example/wiki/ballotEntry.json`.
+`lexicons/wiki/radikal/poll.json` and `lexicons/wiki/radikal/ballotEntry.json`.
 
 ## Why custody is load-bearing (atproto mechanics)
 

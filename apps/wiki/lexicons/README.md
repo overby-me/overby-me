@@ -1,4 +1,4 @@
-# com.example.wiki.* lexicons (placeholder NSID)
+# wiki.radikal.* lexicons
 
 atproto Lexicon schemas for the app, drafted for the atproto rewrite (pre-rewrite plan #7). They come
 in two categories:
@@ -25,19 +25,19 @@ can stay the editor's own JSON.
 
 Only entities that are meaningfully and safely publishable get a lexicon:
 
-- `com.example.wiki.post`: a member's feed post (the social unit).
-- `com.example.wiki.statement`: a member's personal public statement.
-- `com.example.wiki.resolution`: the org's published outcome of a motion/election.
-- `com.example.wiki.comment`: a public comment on a public item.
-- `com.example.wiki.reaction`: a member's emoji reaction to a public item
+- `wiki.radikal.post`: a member's feed post (the social unit).
+- `wiki.radikal.statement`: a member's personal public statement.
+- `wiki.radikal.resolution`: the org's published outcome of a motion/election.
+- `wiki.radikal.comment`: a public comment on a public item.
+- `wiki.radikal.reaction`: a member's emoji reaction to a public item
   (comment/post/resolution), addressed by a strongRef. One record per (reactor,
   subject, emoji); deleting the record removes the reaction (toggle). Net-new (the
   old wiki had no reactions), so it maps no legacy mime.
-- `com.example.wiki.group` / `com.example.wiki.event`: the opt-in-public container contexts. The
+- `wiki.radikal.group` / `wiki.radikal.event`: the opt-in-public container contexts. The
   group/event kind split is carried by the two NSIDs; a record exists only while the context is public.
-- `com.example.wiki.poll` / `com.example.wiki.ballotEntry`: the public poll announcement and the
+- `wiki.radikal.poll` / `wiki.radikal.ballotEntry`: the public poll announcement and the
   anonymized bulletin-board entry (repo custody pending an owner call).
-- `com.example.wiki.document` is EXCLUDED for now: documents store Slate JSON internally, and the
+- `wiki.radikal.document` is EXCLUDED for now: documents store Slate JSON internally, and the
   public rich-text representation (what a document record's body looks like on the wire) is a
   rewrite-time decision that has not been made yet. No lexicon until it is.
 
@@ -45,13 +45,13 @@ Always-private entities (`voted`, roster/eligibility/delegation, membership-as-a
 projector/speaker) deliberately have NO lexicon. The ballot is SPLIT, not simply private: the
 org-side ballot row (eligibility, token issuance, resolved weights) is always-private and has no
 lexicon, while the public ANONYMIZED board entry (token + choices, no voter identity) is exactly
-what `com.example.wiki.ballotEntry` describes.
+what `wiki.radikal.ballotEntry` describes.
 
 ## Methods (the AppView's XRPC serving layer)
 
 These describe the AppView's own read/write API (`crates/appview/src/xrpc.rs`), served at
 `/xrpc/{nsid}`. They return the AppView's canonical DOMAIN entities (the reconciled internal shapes),
-NOT the published repo records above; `com.example.wiki.defs` holds the shared view objects
+NOT the published repo records above; `wiki.radikal.defs` holds the shared view objects
 (`documentView`, `contextView`, `commentView`, `reactionView`, `authorView`, `memberView`,
 `userView`, `blobView`, `pollView`, `boardEntryView`) they reference. This is
 why a `documentView` exists even though the `document` RECORD is excluded: the served entity shape is
@@ -164,24 +164,19 @@ What is not built yet: `docs/appview-roadmap.md` tracks it.
 
 ## NSID
 
-`com.example.wiki.*` is a DELIBERATE placeholder: `example.com` is IANA-reserved (RFC 2606), so it can
-never collide with a real authority and is universally read as "not yet decided". The owner has not picked
-the authority domain yet (tracked as an Open decision in `docs/atproto-open-decisions.md`). The real NSID
-authority must be a domain the org durably controls, registered via the Lexicon Resolution mechanism (a
-DNS TXT record on that domain pointing at the org DID). Nothing may be published or minted under the
-placeholder; a minted record's NSID is effectively permanent.
+`wiki.radikal.*`: the authority is `radikal.wiki`, the domain the wiki is served on. Taken on 2026-09-20,
+when the owner said to do what made most sense of the calls the spaces redesign had put to them; until
+then every lexicon sat under the RFC 2606 placeholder `com.example.wiki.*` (the two spikes that hash or
+sign over a collection name, `crates/spaces-spike` and `crates/dagcbor-spike`, still do). It rests on the
+organization durably holding that domain, registrar and DNS both. A minted record's NSID is effectively
+permanent, and so is a space's type in its URI; NOTHING HAS BEEN MINTED, so until the first real record
+or space the name is still a find-and-replace away.
 
-### Rebranding when the domain is decided
+Left to do, by whoever holds the DNS: the Lexicon Resolution TXT record on `radikal.wiki`, pointing at
+the organization's DID once that account exists (`docs/atproto-spaces-redesign.md`, decision 1).
 
-The swap is mechanical. For a decided domain `D` (say `radikal.wiki`, giving authority `wiki.radikal`):
-
-1. `grep -rl 'com\.example\.wiki\.' docs/ lexicons/ | xargs sed -i 's/com\.example\.wiki\./wiki.radikal./g'`
-2. `mv lexicons/com/example/wiki lexicons/<reversed-domain-path>` (mirror the NSID segments), then remove
-   the empty `com/example` directories.
-3. Register the DNS TXT record per Lexicon Resolution and record the decision as Decided in
-   `docs/atproto-open-decisions.md`.
-
-Do this BEFORE any codegen output, XRPC route, or Jetstream filter embeds the NSID in code.
+Names stay flat under the one authority (`wiki.radikal.getNode`, never `wiki.radikal.node.get`): every
+further segment is another domain to resolve a lexicon by.
 
 ## Codegen pipeline
 

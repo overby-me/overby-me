@@ -283,7 +283,7 @@ fn done() -> Response {
     (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
 }
 
-/// `com.example.wiki.subscribePush` (procedure): this device rings for the
+/// `wiki.radikal.subscribePush` (procedure): this device rings for the
 /// caller from now on.
 pub async fn subscribe_push(
     State(state): State<AppState>,
@@ -324,7 +324,7 @@ pub struct UnsubscribeBody {
     pub endpoint: String,
 }
 
-/// `com.example.wiki.unsubscribePush` (procedure): this device stops ringing.
+/// `wiki.radikal.unsubscribePush` (procedure): this device stops ringing.
 /// Any signed-in caller may drop an endpoint they know: knowing it is holding
 /// the device, which is how signing out on a shared phone has to work.
 pub async fn unsubscribe_push(
@@ -409,7 +409,7 @@ pub struct NotifyContextBody {
     pub message: Message,
 }
 
-/// `com.example.wiki.notifyContext` (procedure): an owner tells the members of
+/// `wiki.radikal.notifyContext` (procedure): an owner tells the members of
 /// a context something, a poll having opened for one. It reaches those who hold
 /// voting rights and have accepted, and not the sender.
 pub async fn notify_context(
@@ -457,7 +457,7 @@ pub struct NotifyReplyBody {
     pub message: Message,
 }
 
-/// `com.example.wiki.notifyReply` (procedure): tell whoever wrote a node that it
+/// `wiki.radikal.notifyReply` (procedure): tell whoever wrote a node that it
 /// has been answered. Only from inside its context, so that an author cannot be
 /// pinged by a stranger; and never about one's own reply.
 pub async fn notify_reply(
@@ -665,7 +665,7 @@ mod tests {
         let message = json!({
             "context_id": "c9", "title": "Afstemning", "body": "Motion One", "url": "/closed/motion-one"
         });
-        let uri = "/xrpc/com.example.wiki.notifyContext";
+        let uri = "/xrpc/wiki.radikal.notifyContext";
         let (status, _) = post(router(state.clone()), uri, Some(&bob), message.clone()).await;
         assert_eq!(
             status,
@@ -722,7 +722,7 @@ mod tests {
         .await
         .expect("owner");
         device(&state, "did:plc:alice", &format!("{service}/alice-phone")).await;
-        let uri = "/xrpc/com.example.wiki.notifyReply";
+        let uri = "/xrpc/wiki.radikal.notifyReply";
         let reply = json!({"parent": "s1", "body": "bob svarede", "url": "/closed/secret_minutes"});
 
         let mallory = token_for(&state, "did:plc:mallory").await;
@@ -747,7 +747,7 @@ mod tests {
         let state = configured().await;
         let bob = token_for(&state, "did:plc:bob").await;
         let alice = token_for(&state, "did:plc:alice").await;
-        let uri = "/xrpc/com.example.wiki.subscribePush";
+        let uri = "/xrpc/wiki.radikal.subscribePush";
         let endpoint = format!("https://{}/send/device-1", "push.example");
         let sub = json!({"endpoint": endpoint, "p256dh": UA_PUBLIC, "auth": AUTH});
 
@@ -803,7 +803,7 @@ mod tests {
             StatusCode::UNAUTHORIZED
         );
 
-        let gone = "/xrpc/com.example.wiki.unsubscribePush";
+        let gone = "/xrpc/wiki.radikal.unsubscribePush";
         let (status, _) = post(
             router(state.clone()),
             gone,
@@ -860,7 +860,7 @@ mod tests {
         let alice = token_for(&state, "did:plc:alice").await;
         let (status, v) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.notifyContext",
+            "/xrpc/wiki.radikal.notifyContext",
             Some(&alice),
             json!({"context_id": "c9", "body": "x"}),
         )

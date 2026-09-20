@@ -18,7 +18,7 @@
 //! 2. The PDS redirects back to `/callback?code=...&state=...&iss=...`.
 //!    [`callback_handler`] checks the cookie, drives the token exchange, and
 //!    returns to `<url>#code=<one-time code>`.
-//! 3. The frontend POSTs the code to `com.example.wiki.createSession` and holds
+//! 3. The frontend POSTs the code to `wiki.radikal.createSession` and holds
 //!    the bearer token it gets back (`crate::session`).
 //!
 //! Step 2 against a real PDS needs a human in a browser; everything around the

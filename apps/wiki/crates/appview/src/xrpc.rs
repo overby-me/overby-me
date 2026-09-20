@@ -8,7 +8,7 @@
 //! array in a named field (`{ documents: [...] }`, `{ contexts: [...] }`, ...) so
 //! the output has an atproto-expressible object schema (a bare top-level array is
 //! not a valid lexicon `output.schema`) and leaves room for a future cursor. The
-//! method lexicons in `lexicons/com/example/wiki/` are the contract for exactly
+//! method lexicons in `lexicons/wiki/radikal/` are the contract for exactly
 //! these shapes.
 //!
 //! Every read serves only what the caller may read (`crate::authz`): a row they
@@ -41,7 +41,7 @@ pub(crate) fn err(status: StatusCode, error: &str, message: &str) -> Response {
         .into_response()
 }
 
-/// `com.example.wiki.getDocument`: a content node (document/folder/file/
+/// `wiki.radikal.getDocument`: a content node (document/folder/file/
 /// proposal) by id, with its authors.
 pub async fn get_document(
     State(state): State<AppState>,
@@ -59,7 +59,7 @@ pub async fn get_document(
     }
 }
 
-/// `com.example.wiki.getContext`: a group/event context by id.
+/// `wiki.radikal.getContext`: a group/event context by id.
 pub async fn get_context(
     State(state): State<AppState>,
     caller: MaybeCaller,
@@ -82,7 +82,7 @@ pub struct PathParam {
     pub path: String,
 }
 
-/// `com.example.wiki.resolveNode`: the context or document a path names.
+/// `wiki.radikal.resolveNode`: the context or document a path names.
 pub async fn resolve_node(
     State(state): State<AppState>,
     caller: MaybeCaller,
@@ -115,7 +115,7 @@ pub struct NodeParam {
     pub id: Option<String>,
 }
 
-/// `com.example.wiki.getNode`: a node with what every screen draws around it:
+/// `wiki.radikal.getNode`: a node with what every screen draws around it:
 /// its children of either kind, the way down to it, and what the caller may do
 /// here. One call where the interim makes several.
 pub async fn get_node(
@@ -224,7 +224,7 @@ pub struct ParentParam {
     pub parent: String,
 }
 
-/// `com.example.wiki.listChildren`: what is under a node. `children` is every
+/// `wiki.radikal.listChildren`: what is under a node. `children` is every
 /// child of either kind as a light row, which is what a drawer expands by;
 /// `documents` is the child documents whole, for a page that shows what its
 /// children say (a resolution's amendments, a position's candidates).
@@ -276,7 +276,7 @@ pub struct ListContextsParams {
     pub kind: Option<String>,
 }
 
-/// `com.example.wiki.listContexts`: the contexts at the top of the tree that the
+/// `wiki.radikal.listContexts`: the contexts at the top of the tree that the
 /// caller may read; or with `scope=mine` the groups and events the caller has a
 /// seat in, wherever they sit; or with `scope=public` every place open to all.
 pub async fn list_contexts(
@@ -311,7 +311,7 @@ pub struct OnParam {
     pub on: String,
 }
 
-/// `com.example.wiki.getComments`: the comment thread on a node.
+/// `wiki.radikal.getComments`: the comment thread on a node.
 pub async fn get_comments(
     State(state): State<AppState>,
     caller: MaybeCaller,
@@ -383,7 +383,7 @@ async fn reactable(
     Ok(store.public_post_exists(subject).await?.then_some(None))
 }
 
-/// `com.example.wiki.getReactions`: the reactions on something the caller may
+/// `wiki.radikal.getReactions`: the reactions on something the caller may
 /// read. Who reacted to a closed group's comment is part of that group's
 /// business, so what the caller may not read has, to them, no reactions.
 pub async fn get_reactions(
@@ -417,7 +417,7 @@ pub struct CreateSessionBody {
     pub code: String,
 }
 
-/// `com.example.wiki.createSession` (procedure): redeem the one-time code
+/// `wiki.radikal.createSession` (procedure): redeem the one-time code
 /// `/callback` handed the browser for a session. The only unauthenticated
 /// procedure: the code is the credential.
 pub async fn create_session(
@@ -446,7 +446,7 @@ pub async fn create_session(
     }
 }
 
-/// `com.example.wiki.getSession`: who the presented session belongs to.
+/// `wiki.radikal.getSession`: who the presented session belongs to.
 pub async fn get_session(State(state): State<AppState>, caller: Caller) -> Response {
     let store = crate::Store::new(state.db.clone());
     match store.read_user(&caller.did).await {
@@ -460,7 +460,7 @@ pub async fn get_session(State(state): State<AppState>, caller: Caller) -> Respo
     }
 }
 
-/// `com.example.wiki.deleteSession` (procedure): sign out: ends the presented
+/// `wiki.radikal.deleteSession` (procedure): sign out: ends the presented
 /// session and no other, so a phone stays signed in when a laptop signs out.
 pub async fn delete_session(
     State(state): State<AppState>,
@@ -514,7 +514,7 @@ pub struct ClaimMembershipBody {
     pub token: String,
 }
 
-/// `com.example.wiki.claimMembership` (procedure): bind the invitation a
+/// `wiki.radikal.claimMembership` (procedure): bind the invitation a
 /// `?claim=<token>` link names to the caller. This is how a rostered member,
 /// known only by an email address, becomes a DID.
 ///
@@ -626,7 +626,7 @@ pub struct ListMembersParams {
     pub offset: Option<i64>,
 }
 
-/// `com.example.wiki.listMembers`: a page of a context's members, by name.
+/// `wiki.radikal.listMembers`: a page of a context's members, by name.
 /// For members only. An owner of the context is served the addresses and the
 /// hidden rows; nobody else is.
 pub async fn list_members(
@@ -683,7 +683,7 @@ pub struct InviteMembersBody {
     pub invites: Vec<crate::store::Invite>,
 }
 
-/// `com.example.wiki.inviteMembers` (procedure): put people on a context's
+/// `wiki.radikal.inviteMembers` (procedure): put people on a context's
 /// roster: one invitation, or a whole imported spreadsheet.
 pub async fn invite_members(
     State(state): State<AppState>,
@@ -775,7 +775,7 @@ fn refused_write(what: &str, refused: crate::store::WriteError) -> Response {
     }
 }
 
-/// `com.example.wiki.updateMember` (procedure): an owner changes a row of their
+/// `wiki.radikal.updateMember` (procedure): an owner changes a row of their
 /// roster: the name, the address, the role, voting rights, whether it is hidden.
 pub async fn update_member(
     State(state): State<AppState>,
@@ -811,7 +811,7 @@ pub struct MemberIdBody {
     pub id: String,
 }
 
-/// `com.example.wiki.removeMember` (procedure): take someone off a roster. An
+/// `wiki.radikal.removeMember` (procedure): take someone off a roster. An
 /// owner removes anyone; anyone removes themselves, which is also how an
 /// invitation is declined and how a member leaves.
 pub async fn remove_member(
@@ -839,7 +839,7 @@ pub async fn remove_member(
     }
 }
 
-/// `com.example.wiki.listInvitations`: the invitations the caller has not
+/// `wiki.radikal.listInvitations`: the invitations the caller has not
 /// answered. Only those made out to their account: one made out to an address
 /// reaches them as a claim link.
 pub async fn list_invitations(State(state): State<AppState>, Caller { did }: Caller) -> Response {
@@ -856,7 +856,7 @@ pub async fn list_invitations(State(state): State<AppState>, Caller { did }: Cal
     }
 }
 
-/// `com.example.wiki.acceptInvitation` (procedure): say yes. Declining is
+/// `wiki.radikal.acceptInvitation` (procedure): say yes. Declining is
 /// `removeMember` on the same row.
 pub async fn accept_invitation(
     State(state): State<AppState>,
@@ -876,7 +876,7 @@ pub async fn accept_invitation(
     }
 }
 
-/// `com.example.wiki.getVoterCount`: how many members of a context hold
+/// `wiki.radikal.getVoterCount`: how many members of a context hold
 /// voting rights, which a poll's turnout is out of. A number and no names, so it
 /// is served to whoever may read the context.
 pub async fn get_voter_count(
@@ -902,7 +902,7 @@ pub struct MemberParam {
     pub member: String,
 }
 
-/// `com.example.wiki.getMemberClaimLink`: a member's claim token, for an owner
+/// `wiki.radikal.getMemberClaimLink`: a member's claim token, for an owner
 /// of that member's context to hand out. An unknown member answers as a
 /// forbidden one does, so the method is no oracle for member ids.
 ///
@@ -962,7 +962,7 @@ pub struct CreateDocumentBody {
     pub data: Option<serde_json::Value>,
 }
 
-/// `com.example.wiki.createDocument` (procedure): the caller authors a document.
+/// `wiki.radikal.createDocument` (procedure): the caller authors a document.
 pub async fn create_document(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -1074,7 +1074,7 @@ async fn standing_towards(
     Ok((meta, standing))
 }
 
-/// `com.example.wiki.updateDocument` (procedure): change a document. The slug
+/// `wiki.radikal.updateDocument` (procedure): change a document. The slug
 /// stays: a rename keeps the URL people have linked to.
 pub async fn update_document(
     State(state): State<AppState>,
@@ -1142,7 +1142,7 @@ pub struct SetDocumentAuthorsBody {
     pub authors: Vec<wiki_domain_types::Author>,
 }
 
-/// `com.example.wiki.setDocumentAuthors` (procedure): replace the author chips
+/// `wiki.radikal.setDocumentAuthors` (procedure): replace the author chips
 /// on a document, in order. Whoever may edit it may. An author is an account, a
 /// name with no account behind it (42 percent of them), or a group.
 pub async fn set_document_authors(
@@ -1200,7 +1200,7 @@ pub struct MoveDocumentBody {
     pub parent_id: String,
 }
 
-/// `com.example.wiki.moveDocument` (procedure): move a document, with
+/// `wiki.radikal.moveDocument` (procedure): move a document, with
 /// everything under it, to another parent. Into another context it takes an
 /// owner of both, and the comments, files and closed polls go along.
 pub async fn move_document(
@@ -1245,7 +1245,7 @@ pub struct DocumentIdBody {
     pub id: String,
 }
 
-/// `com.example.wiki.deleteDocument` (procedure): put a document, and
+/// `wiki.radikal.deleteDocument` (procedure): put a document, and
 /// everything under it, in the bin.
 pub async fn delete_document(
     State(state): State<AppState>,
@@ -1275,7 +1275,7 @@ pub async fn delete_document(
     }
 }
 
-/// `com.example.wiki.restoreDocument` (procedure): bring a document back from
+/// `wiki.radikal.restoreDocument` (procedure): bring a document back from
 /// the bin, with everything that went there with it.
 pub async fn restore_document(
     State(state): State<AppState>,
@@ -1334,7 +1334,7 @@ pub struct ContextParam {
     pub context: String,
 }
 
-/// `com.example.wiki.listDeleted`: the bin of a context. An owner of the
+/// `wiki.radikal.listDeleted`: the bin of a context. An owner of the
 /// context sees all of it; anyone else sees what they created and deleted.
 pub async fn list_deleted(
     State(state): State<AppState>,
@@ -1378,7 +1378,7 @@ pub struct PostCommentBody {
 /// Far more than an argument runs to, and a cap on what one row can hold.
 const MAX_COMMENT_CHARS: usize = 10_000;
 
-/// `com.example.wiki.postComment` (procedure): the caller comments on a node.
+/// `wiki.radikal.postComment` (procedure): the caller comments on a node.
 pub async fn post_comment(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -1485,7 +1485,7 @@ async fn may_react(
     }
 }
 
-/// `com.example.wiki.addReaction` (procedure): the caller reacts to a document,
+/// `wiki.radikal.addReaction` (procedure): the caller reacts to a document,
 /// a comment or a mirrored post. Once per emoji: a second tap changes nothing.
 pub async fn add_reaction(
     State(state): State<AppState>,
@@ -1512,7 +1512,7 @@ pub async fn add_reaction(
     }
 }
 
-/// `com.example.wiki.removeReaction` (procedure): the caller takes their own
+/// `wiki.radikal.removeReaction` (procedure): the caller takes their own
 /// reaction back. Not gated on still being a member: leaving a group must not
 /// strand what one left in it.
 pub async fn remove_reaction(
@@ -1545,8 +1545,8 @@ pub(crate) mod tests {
     use tower::ServiceExt;
 
     // Split, or the repository's link checker tries to parse an at-uri as a URL.
-    const POST_URI: &str = concat!("at:", "//did:plc:alice/com.example.wiki.post/p1");
-    const REACTION_URI: &str = concat!("at:", "//did:plc:bob/com.example.wiki.reaction/r1");
+    const POST_URI: &str = concat!("at:", "//did:plc:alice/wiki.radikal.post/p1");
+    const REACTION_URI: &str = concat!("at:", "//did:plc:bob/wiki.radikal.reaction/r1");
 
     async fn seeded_router() -> axum::Router {
         router(seeded_state().await)
@@ -1689,7 +1689,7 @@ pub(crate) mod tests {
     async fn a_group_can_be_named_as_the_author_of_a_motion() {
         let state = seeded_state().await;
         let alice = token_for(&state, "did:plc:alice").await;
-        let set = "/xrpc/com.example.wiki.setDocumentAuthors";
+        let set = "/xrpc/wiki.radikal.setDocumentAuthors";
         let by = |group: &str| {
             serde_json::json!({"id": "s1", "authors": [
                 {"kind": "context", "context_id": group},
@@ -1702,7 +1702,7 @@ pub(crate) mod tests {
         let bob = token_for(&state, "did:plc:bob").await;
         let (_, doc) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getDocument?id=s1",
+            "/xrpc/wiki.radikal.getDocument?id=s1",
             &bob,
         )
         .await;
@@ -1727,7 +1727,7 @@ pub(crate) mod tests {
     async fn get_document_returns_the_document_with_authors() {
         let (status, v) = get(
             seeded_router().await,
-            "/xrpc/com.example.wiki.getDocument?id=d1",
+            "/xrpc/wiki.radikal.getDocument?id=d1",
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -1747,11 +1747,7 @@ pub(crate) mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn get_context_returns_the_context() {
-        let (status, v) = get(
-            seeded_router().await,
-            "/xrpc/com.example.wiki.getContext?id=c1",
-        )
-        .await;
+        let (status, v) = get(seeded_router().await, "/xrpc/wiki.radikal.getContext?id=c1").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(v["name"], "Group One");
         assert_eq!(v["kind"], "group");
@@ -1762,7 +1758,7 @@ pub(crate) mod tests {
     async fn missing_id_is_a_404_xrpc_error() {
         let (status, v) = get(
             seeded_router().await,
-            "/xrpc/com.example.wiki.getDocument?id=nope",
+            "/xrpc/wiki.radikal.getDocument?id=nope",
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
@@ -1772,14 +1768,14 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn resolve_node_walks_the_slug_path() {
         let app = seeded_router().await;
-        let (status, v) = get(app, "/xrpc/com.example.wiki.resolveNode?path=group-one/sub").await;
+        let (status, v) = get(app, "/xrpc/wiki.radikal.resolveNode?path=group-one/sub").await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(v["slug"], "sub");
         assert_eq!(v["name"], "Sub Event");
         // A broken path is a 404.
         let (status, _) = get(
             seeded_router().await,
-            "/xrpc/com.example.wiki.resolveNode?path=group-one/nope",
+            "/xrpc/wiki.radikal.resolveNode?path=group-one/nope",
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
@@ -1789,18 +1785,14 @@ pub(crate) mod tests {
     async fn list_children_search_recent_return_documents() {
         let (status, v) = get(
             seeded_router().await,
-            "/xrpc/com.example.wiki.listChildren?parent=c1",
+            "/xrpc/wiki.radikal.listChildren?parent=c1",
         )
         .await;
         assert_eq!(status, StatusCode::OK);
         let docs = v["documents"].as_array().expect("array");
         assert!(docs.iter().any(|d| d["id"] == "d2"));
 
-        let (status, v) = get(
-            seeded_router().await,
-            "/xrpc/com.example.wiki.search?q=Motion",
-        )
-        .await;
+        let (status, v) = get(seeded_router().await, "/xrpc/wiki.radikal.search?q=Motion").await;
         assert_eq!(status, StatusCode::OK);
         assert!(
             v["hits"]
@@ -1813,7 +1805,7 @@ pub(crate) mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn list_contexts_returns_only_roots() {
-        let (status, v) = get(seeded_router().await, "/xrpc/com.example.wiki.listContexts").await;
+        let (status, v) = get(seeded_router().await, "/xrpc/wiki.radikal.listContexts").await;
         assert_eq!(status, StatusCode::OK);
         let ctxs = v["contexts"].as_array().expect("array");
         // c1 is a root; c2 has a parent and is excluded.
@@ -1841,7 +1833,7 @@ pub(crate) mod tests {
         .expect("zoe said yes");
         let zoe = token_for(&state, "did:plc:zoe").await;
         let bob = token_for(&state, "did:plc:bob").await;
-        let list = "/xrpc/com.example.wiki.listContexts";
+        let list = "/xrpc/wiki.radikal.listContexts";
 
         // Zoe's one seat is in a meeting two levels down, which `roots` never shows.
         let (_, mine) = get_as(router(state.clone()), &format!("{list}?scope=mine"), &zoe).await;
@@ -1873,7 +1865,7 @@ pub(crate) mod tests {
     async fn get_comments_and_reactions() {
         let (status, v) = get(
             seeded_router().await,
-            "/xrpc/com.example.wiki.getComments?on=d1",
+            "/xrpc/wiki.radikal.getComments?on=d1",
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -1884,7 +1876,7 @@ pub(crate) mod tests {
 
         let (status, v) = get(
             seeded_router().await,
-            "/xrpc/com.example.wiki.getReactions?subject=at://did:plc:alice/com.example.wiki.post/p1",
+            "/xrpc/wiki.radikal.getReactions?subject=at://did:plc:alice/wiki.radikal.post/p1",
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -1901,7 +1893,7 @@ pub(crate) mod tests {
         join_as(&state, "did:plc:carol", "c1", "owner").await;
         let (status, v) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.createDocument",
+            "/xrpc/wiki.radikal.createDocument",
             Some(&carol),
             serde_json::json!({
                 "context_id": "c1",
@@ -1917,7 +1909,7 @@ pub(crate) mod tests {
         // Read it back through getDocument on the SAME db: title, author, content.
         let (status, doc) = get(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.getDocument?id={id}"),
+            &format!("/xrpc/wiki.radikal.getDocument?id={id}"),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
@@ -1930,7 +1922,7 @@ pub(crate) mod tests {
     async fn a_write_without_a_bearer_is_401() {
         let (status, v) = post(
             seeded_router().await,
-            "/xrpc/com.example.wiki.postComment",
+            "/xrpc/wiki.radikal.postComment",
             None,
             serde_json::json!({"on_id": "d1", "context_id": "c1", "text": "hi"}),
         )
@@ -1946,7 +1938,7 @@ pub(crate) mod tests {
         let state = seeded_state().await;
         let (status, v) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.postComment",
+            "/xrpc/wiki.radikal.postComment",
             Some("did:plc:alice"),
             serde_json::json!({"on_id": "d1", "context_id": "c1", "text": "forged"}),
         )
@@ -1955,7 +1947,7 @@ pub(crate) mod tests {
         assert_eq!(v["error"], "InvalidToken");
         let (_, v) = get(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getComments?on=d1",
+            "/xrpc/wiki.radikal.getComments?on=d1",
         )
         .await;
         assert!(
@@ -1997,7 +1989,7 @@ pub(crate) mod tests {
     async fn get_session_names_the_caller_and_sign_out_ends_it() {
         let state = seeded_state().await;
         let token = token_for(&state, "did:plc:alice").await;
-        let session = "/xrpc/com.example.wiki.getSession";
+        let session = "/xrpc/wiki.radikal.getSession";
 
         let (status, v) = get_as(router(state.clone()), session, &token).await;
         assert_eq!(status, StatusCode::OK);
@@ -2009,7 +2001,7 @@ pub(crate) mod tests {
 
         let (status, _) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.deleteSession",
+            "/xrpc/wiki.radikal.deleteSession",
             Some(&token),
             serde_json::json!({}),
         )
@@ -2031,7 +2023,7 @@ pub(crate) mod tests {
             .issue_code("did:plc:frank")
             .await
             .expect("code");
-        let create = "/xrpc/com.example.wiki.createSession";
+        let create = "/xrpc/wiki.radikal.createSession";
 
         let (status, v) = post(
             router(state.clone()),
@@ -2045,7 +2037,7 @@ pub(crate) mod tests {
         let session = v["session"].as_str().expect("session").to_string();
         let (status, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getSession",
+            "/xrpc/wiki.radikal.getSession",
             &session,
         )
         .await;
@@ -2074,7 +2066,7 @@ pub(crate) mod tests {
         let phone = token_for(&state, "did:plc:alice").await;
         let (status, _) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.deleteSession",
+            "/xrpc/wiki.radikal.deleteSession",
             Some(&laptop),
             serde_json::json!({}),
         )
@@ -2082,7 +2074,7 @@ pub(crate) mod tests {
         assert_eq!(status, StatusCode::OK);
         let (status, _) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getSession",
+            "/xrpc/wiki.radikal.getSession",
             &phone,
         )
         .await;
@@ -2096,7 +2088,7 @@ pub(crate) mod tests {
         join(&state, "did:plc:dave", "c1").await;
         let (status, _) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.postComment",
+            "/xrpc/wiki.radikal.postComment",
             Some(&dave),
             serde_json::json!({"on_id": "d1", "context_id": "c1", "text": "Seconded"}),
         )
@@ -2104,7 +2096,7 @@ pub(crate) mod tests {
         assert_eq!(status, StatusCode::OK);
         let (_, v) = get(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getComments?on=d1",
+            "/xrpc/wiki.radikal.getComments?on=d1",
         )
         .await;
         let comments = v["comments"].as_array().expect("array");
@@ -2129,7 +2121,7 @@ pub(crate) mod tests {
             async move {
                 post(
                     router(s),
-                    "/xrpc/com.example.wiki.addReaction",
+                    "/xrpc/wiki.radikal.addReaction",
                     Some(&eve),
                     serde_json::json!({"subject": subject, "emoji": emoji}),
                 )
@@ -2141,14 +2133,14 @@ pub(crate) mod tests {
         assert_eq!(add("🎉").await.0, StatusCode::OK);
         let (_, v) = get_as(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.getReactions?subject={subject}"),
+            &format!("/xrpc/wiki.radikal.getReactions?subject={subject}"),
             &eve,
         )
         .await;
         assert_eq!(v["reactions"].as_array().unwrap().len(), 1);
         let (_, outside) = get(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.getReactions?subject={subject}"),
+            &format!("/xrpc/wiki.radikal.getReactions?subject={subject}"),
         )
         .await;
         assert_eq!(
@@ -2160,7 +2152,7 @@ pub(crate) mod tests {
         // Remove it.
         let (status, _) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.removeReaction",
+            "/xrpc/wiki.radikal.removeReaction",
             Some(&eve),
             serde_json::json!({"subject": subject, "emoji": "🎉"}),
         )
@@ -2168,7 +2160,7 @@ pub(crate) mod tests {
         assert_eq!(status, StatusCode::OK);
         let (_, v) = get_as(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.getReactions?subject={subject}"),
+            &format!("/xrpc/wiki.radikal.getReactions?subject={subject}"),
             &eve,
         )
         .await;
@@ -2183,7 +2175,7 @@ pub(crate) mod tests {
             async move {
                 post(
                     router(state),
-                    "/xrpc/com.example.wiki.addReaction",
+                    "/xrpc/wiki.radikal.addReaction",
                     Some(&who),
                     serde_json::json!({"subject": subject, "emoji": emoji}),
                 )
@@ -2223,12 +2215,12 @@ pub(crate) mod tests {
     //    bob is a member); `did:plc:zoe` belongs only to the meeting inside it. --
 
     const SECRET_READS: [&str; 6] = [
-        "/xrpc/com.example.wiki.getDocument?id=s1",
-        "/xrpc/com.example.wiki.getContext?id=c9",
-        "/xrpc/com.example.wiki.resolveNode?path=closed",
-        "/xrpc/com.example.wiki.listChildren?parent=c9",
-        "/xrpc/com.example.wiki.search?q=Secret",
-        "/xrpc/com.example.wiki.getComments?on=s1",
+        "/xrpc/wiki.radikal.getDocument?id=s1",
+        "/xrpc/wiki.radikal.getContext?id=c9",
+        "/xrpc/wiki.radikal.resolveNode?path=closed",
+        "/xrpc/wiki.radikal.listChildren?parent=c9",
+        "/xrpc/wiki.radikal.search?q=Secret",
+        "/xrpc/wiki.radikal.getComments?on=s1",
     ];
 
     /// Whether a response gave away anything from the private group.
@@ -2247,9 +2239,9 @@ pub(crate) mod tests {
                 "{uri} leaked to an anonymous reader: {v}"
             );
         }
-        let (_, v) = get(router(state.clone()), "/xrpc/com.example.wiki.listRecent").await;
+        let (_, v) = get(router(state.clone()), "/xrpc/wiki.radikal.listRecent").await;
         assert!(!v.to_string().contains("Secret"), "listRecent leaked: {v}");
-        let (_, v) = get(router(state.clone()), "/xrpc/com.example.wiki.listContexts").await;
+        let (_, v) = get(router(state.clone()), "/xrpc/wiki.radikal.listContexts").await;
         assert!(
             !v.to_string().contains("Closed"),
             "listContexts leaked: {v}"
@@ -2273,12 +2265,12 @@ pub(crate) mod tests {
         let state = seeded_state().await;
         let forbidden = get(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getDocument?id=s1",
+            "/xrpc/wiki.radikal.getDocument?id=s1",
         )
         .await;
         let missing = get(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getDocument?id=nope",
+            "/xrpc/wiki.radikal.getDocument?id=nope",
         )
         .await;
         assert_eq!(forbidden, missing);
@@ -2295,16 +2287,11 @@ pub(crate) mod tests {
                 "{uri} hid the group from its own member: {v}"
             );
         }
-        let (_, v) = get_as(
-            router(state.clone()),
-            "/xrpc/com.example.wiki.listRecent",
-            &bob,
-        )
-        .await;
+        let (_, v) = get_as(router(state.clone()), "/xrpc/wiki.radikal.listRecent", &bob).await;
         assert!(v.to_string().contains("Secret Minutes"), "{v}");
         let (_, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listContexts",
+            "/xrpc/wiki.radikal.listContexts",
             &bob,
         )
         .await;
@@ -2331,7 +2318,7 @@ pub(crate) mod tests {
         let zoe = token_for(&state, "did:plc:zoe").await;
         let (status, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.resolveNode?path=closed/meeting",
+            "/xrpc/wiki.radikal.resolveNode?path=closed/meeting",
             &zoe,
         )
         .await;
@@ -2339,7 +2326,7 @@ pub(crate) mod tests {
         assert_eq!(v["id"], "c10");
         let (status, _) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.resolveNode?path=closed",
+            "/xrpc/wiki.radikal.resolveNode?path=closed",
             &zoe,
         )
         .await;
@@ -2360,14 +2347,14 @@ pub(crate) mod tests {
         let erin = token_for(&state, "did:plc:erin").await;
         let (status, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getDocument?id=s1",
+            "/xrpc/wiki.radikal.getDocument?id=s1",
             &erin,
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{v}");
         let (status, _) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getContext?id=c9",
+            "/xrpc/wiki.radikal.getContext?id=c9",
             &erin,
         )
         .await;
@@ -2386,7 +2373,7 @@ pub(crate) mod tests {
         let mallory = token_for(&state, "did:plc:mallory").await;
         let (status, v) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.createDocument",
+            "/xrpc/wiki.radikal.createDocument",
             Some(&mallory),
             serde_json::json!({"context_id": "c9", "kind": "document", "title": "Planted"}),
         )
@@ -2396,7 +2383,7 @@ pub(crate) mod tests {
         let bob = token_for(&state, "did:plc:bob").await;
         let (_, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listChildren?parent=c9",
+            "/xrpc/wiki.radikal.listChildren?parent=c9",
             &bob,
         )
         .await;
@@ -2410,7 +2397,7 @@ pub(crate) mod tests {
         join(&state, "did:plc:carol", "c1").await;
         let (status, v) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.createDocument",
+            "/xrpc/wiki.radikal.createDocument",
             Some(&carol),
             serde_json::json!({
                 "context_id": "c1", "parent_id": "s1", "kind": "document", "title": "Graft"
@@ -2429,7 +2416,7 @@ pub(crate) mod tests {
         let bob = token_for(&state, "did:plc:bob").await;
         let (status, v) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.postComment",
+            "/xrpc/wiki.radikal.postComment",
             Some(&bob),
             serde_json::json!({"on_id": "d1", "context_id": "c9", "text": "smuggled"}),
         )
@@ -2446,7 +2433,7 @@ pub(crate) mod tests {
             async move {
                 post(
                     router(state),
-                    "/xrpc/com.example.wiki.postComment",
+                    "/xrpc/wiki.radikal.postComment",
                     Some(&mallory),
                     serde_json::json!({"on_id": on, "text": "hello"}),
                 )
@@ -2488,7 +2475,7 @@ pub(crate) mod tests {
     async fn claim(state: &AppState, who: &str, token: &str) -> (StatusCode, serde_json::Value) {
         post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.claimMembership",
+            "/xrpc/wiki.radikal.claimMembership",
             Some(who),
             serde_json::json!({ "token": token }),
         )
@@ -2500,7 +2487,7 @@ pub(crate) mod tests {
         let state = seeded_state().await;
         invite(&state, "inv", "tok-inv", 1).await;
         let nina = token_for(&state, "did:plc:nina").await;
-        let secret = "/xrpc/com.example.wiki.getDocument?id=s1";
+        let secret = "/xrpc/wiki.radikal.getDocument?id=s1";
         let (before, _) = get_as(router(state.clone()), secret, &nina).await;
         assert_eq!(before, StatusCode::NOT_FOUND);
 
@@ -2560,7 +2547,7 @@ pub(crate) mod tests {
     async fn only_an_active_owner_is_given_a_claim_link() {
         let state = seeded_state().await;
         invite(&state, "inv", "tok-inv", 1).await;
-        let link = "/xrpc/com.example.wiki.getMemberClaimLink?member=inv";
+        let link = "/xrpc/wiki.radikal.getMemberClaimLink?member=inv";
         let alice = token_for(&state, "did:plc:alice").await;
         let (status, v) = get_as(router(state.clone()), link, &alice).await;
         assert_eq!(status, StatusCode::OK, "{v}");
@@ -2571,7 +2558,7 @@ pub(crate) mod tests {
         assert_eq!(refused.0, StatusCode::FORBIDDEN);
         let unknown = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getMemberClaimLink?member=nobody",
+            "/xrpc/wiki.radikal.getMemberClaimLink?member=nobody",
             &bob,
         )
         .await;
@@ -2586,7 +2573,7 @@ pub(crate) mod tests {
     async fn create(state: &AppState, token: &str, body: serde_json::Value) -> serde_json::Value {
         let (status, v) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.createDocument",
+            "/xrpc/wiki.radikal.createDocument",
             Some(token),
             body,
         )
@@ -2595,7 +2582,7 @@ pub(crate) mod tests {
         let id = v["id"].as_str().expect("id");
         let (status, doc) = get_as(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.getDocument?id={id}"),
+            &format!("/xrpc/wiki.radikal.getDocument?id={id}"),
             token,
         )
         .await;
@@ -2606,7 +2593,7 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn a_path_names_a_document_as_well_as_a_context() {
         let state = seeded_state().await;
-        let resolve = "/xrpc/com.example.wiki.resolveNode?path=";
+        let resolve = "/xrpc/wiki.radikal.resolveNode?path=";
         let (status, v) = get(router(state.clone()), &format!("{resolve}group-one/motion")).await;
         assert_eq!(status, StatusCode::OK, "{v}");
         assert_eq!(v["node"], "document");
@@ -2651,7 +2638,7 @@ pub(crate) mod tests {
         assert_eq!(nested["path"], "group-one/landsmøde_2026/dagsorden");
         let (status, v) = get(
             router(state.clone()),
-            "/xrpc/com.example.wiki.resolveNode?path=group-one/landsmøde_2026/dagsorden",
+            "/xrpc/wiki.radikal.resolveNode?path=group-one/landsmøde_2026/dagsorden",
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{v}");
@@ -2691,7 +2678,7 @@ pub(crate) mod tests {
         join(&state, "did:plc:carol", "c1").await;
         let (status, v) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.createDocument",
+            "/xrpc/wiki.radikal.createDocument",
             Some(&carol),
             serde_json::json!({
                 "context_id": "c1", "parent_id": "nowhere", "kind": "document", "title": "Lost"
@@ -2713,16 +2700,16 @@ pub(crate) mod tests {
         .await
         .expect("bin");
         for uri in [
-            "/xrpc/com.example.wiki.getDocument?id=d1",
-            "/xrpc/com.example.wiki.resolveNode?path=group-one/motion",
+            "/xrpc/wiki.radikal.getDocument?id=d1",
+            "/xrpc/wiki.radikal.resolveNode?path=group-one/motion",
         ] {
             let (status, _) = get(router(state.clone()), uri).await;
             assert_eq!(status, StatusCode::NOT_FOUND, "{uri}");
         }
         for uri in [
-            "/xrpc/com.example.wiki.listChildren?parent=c1",
-            "/xrpc/com.example.wiki.search?q=Motion",
-            "/xrpc/com.example.wiki.listRecent",
+            "/xrpc/wiki.radikal.listChildren?parent=c1",
+            "/xrpc/wiki.radikal.search?q=Motion",
+            "/xrpc/wiki.radikal.listRecent",
         ] {
             let (_, v) = get(router(state.clone()), uri).await;
             assert!(
@@ -2761,7 +2748,7 @@ pub(crate) mod tests {
             .expect("reorder");
         let (_, v) = get(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listChildren?parent=c1",
+            "/xrpc/wiki.radikal.listChildren?parent=c1",
         )
         .await;
         let ids: Vec<&str> = v["documents"]
@@ -2797,7 +2784,7 @@ pub(crate) mod tests {
     ) -> (StatusCode, serde_json::Value) {
         post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.createDocument",
+            "/xrpc/wiki.radikal.createDocument",
             Some(token),
             serde_json::json!({
                 "context_id": "c1", "parent_id": parent, "kind": kind, "title": "Forslag"
@@ -2850,7 +2837,7 @@ pub(crate) mod tests {
             async move {
                 post(
                     router(state),
-                    "/xrpc/com.example.wiki.postComment",
+                    "/xrpc/wiki.radikal.postComment",
                     Some(&dave),
                     serde_json::json!({"on_id": on, "text": "hej"}),
                 )
@@ -2897,7 +2884,7 @@ pub(crate) mod tests {
         async fn call(&self, method: &str, who: &str, body: serde_json::Value) -> StatusCode {
             post(
                 router(self.state.clone()),
-                &format!("/xrpc/com.example.wiki.{method}"),
+                &format!("/xrpc/wiki.radikal.{method}"),
                 Some(who),
                 body,
             )
@@ -2908,7 +2895,7 @@ pub(crate) mod tests {
         async fn read(&self, who: &str) -> (StatusCode, serde_json::Value) {
             get_as(
                 router(self.state.clone()),
-                &format!("/xrpc/com.example.wiki.getDocument?id={}", self.motion),
+                &format!("/xrpc/wiki.radikal.getDocument?id={}", self.motion),
                 who,
             )
             .await
@@ -2927,13 +2914,13 @@ pub(crate) mod tests {
         let listed = |who: String| {
             let state = m.state.clone();
             async move {
-                let uri = "/xrpc/com.example.wiki.getNode?path=group-one/resolutioner";
+                let uri = "/xrpc/wiki.radikal.getNode?path=group-one/resolutioner";
                 let (_, v) = get_as(router(state.clone()), uri, &who).await;
                 let on_the_page = v["children"].as_array().expect("children").len();
-                let uri = "/xrpc/com.example.wiki.listChildren?parent=fold";
+                let uri = "/xrpc/wiki.radikal.listChildren?parent=fold";
                 let (_, v) = get_as(router(state.clone()), uri, &who).await;
                 let whole = v["documents"].as_array().expect("documents").len();
-                let uri = "/xrpc/com.example.wiki.getNode?path=group-one";
+                let uri = "/xrpc/wiki.radikal.getNode?path=group-one";
                 let (_, v) = get_as(router(state), uri, &who).await;
                 let folder = v["children"].as_array().expect("children");
                 let folder = folder.iter().find(|c| c["id"] == "fold").expect("fold");
@@ -3125,7 +3112,7 @@ pub(crate) mod tests {
     async fn deleting_a_folder_bins_what_is_in_it_and_restore_brings_it_all_back() {
         let m = meeting().await;
         let fold = serde_json::json!({"id": "fold"});
-        let motion_path = "/xrpc/com.example.wiki.resolveNode?path=group-one/resolutioner/forslag";
+        let motion_path = "/xrpc/wiki.radikal.resolveNode?path=group-one/resolutioner/forslag";
 
         // An older deletion inside the folder, which must stay deleted.
         let (_, v) = try_create(&m.state, &m.dave, "policy", "fold").await;
@@ -3155,7 +3142,7 @@ pub(crate) mod tests {
         // The bin lists the folder, not the motion that went along with it.
         let (_, bin) = get_as(
             router(m.state.clone()),
-            "/xrpc/com.example.wiki.listDeleted?context=c1",
+            "/xrpc/wiki.radikal.listDeleted?context=c1",
             &m.chair,
         )
         .await;
@@ -3178,7 +3165,7 @@ pub(crate) mod tests {
         assert_eq!(status, StatusCode::OK);
         let (status, _) = get_as(
             router(m.state.clone()),
-            &format!("/xrpc/com.example.wiki.getDocument?id={earlier}"),
+            &format!("/xrpc/wiki.radikal.getDocument?id={earlier}"),
             &m.dave,
         )
         .await;
@@ -3202,7 +3189,7 @@ pub(crate) mod tests {
         assert_eq!(status, StatusCode::OK, "{v}");
         let (status, v) = post(
             router(m.state.clone()),
-            "/xrpc/com.example.wiki.restoreDocument",
+            "/xrpc/wiki.radikal.restoreDocument",
             Some(&m.dave),
             motion,
         )
@@ -3228,7 +3215,7 @@ pub(crate) mod tests {
             async move {
                 get_as(
                     router(state),
-                    "/xrpc/com.example.wiki.listDeleted?context=c1",
+                    "/xrpc/wiki.radikal.listDeleted?context=c1",
                     &who,
                 )
                 .await
@@ -3272,7 +3259,7 @@ pub(crate) mod tests {
 
         let (status, v) = get(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getNode?path=group-one",
+            "/xrpc/wiki.radikal.getNode?path=group-one",
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{v}");
@@ -3313,7 +3300,7 @@ pub(crate) mod tests {
             async move {
                 get(
                     router(state),
-                    &format!("/xrpc/com.example.wiki.getNode?{query}"),
+                    &format!("/xrpc/wiki.radikal.getNode?{query}"),
                 )
                 .await
             }
@@ -3334,7 +3321,7 @@ pub(crate) mod tests {
         let zoe = token_for(&state, "did:plc:zoe").await;
         let (status, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getNode?path=closed/meeting",
+            "/xrpc/wiki.radikal.getNode?path=closed/meeting",
             &zoe,
         )
         .await;
@@ -3356,7 +3343,7 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn the_viewer_is_told_what_they_may_do_here() {
         let state = seeded_state().await;
-        let node = "/xrpc/com.example.wiki.getNode?path=closed/secret_minutes";
+        let node = "/xrpc/wiki.radikal.getNode?path=closed/secret_minutes";
         let conn = state.db.acquire().await.expect("conn");
         conn.execute(
             "UPDATE document SET owner_did = 'did:plc:bob' WHERE id = 's1'",
@@ -3385,7 +3372,7 @@ pub(crate) mod tests {
 
         let (_, open) = get(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getNode?path=group-one",
+            "/xrpc/wiki.radikal.getNode?path=group-one",
         )
         .await;
         assert_eq!(
@@ -3420,7 +3407,7 @@ pub(crate) mod tests {
                 .map(|c| c["id"].as_str().unwrap().to_string())
                 .collect()
         };
-        let node = "/xrpc/com.example.wiki.getNode?path=group-one";
+        let node = "/xrpc/wiki.radikal.getNode?path=group-one";
         let (_, anonymous) = get(router(state.clone()), node).await;
         assert!(!ids(&anonymous).contains(&"c9".to_string()), "{anonymous}");
         let bob = token_for(&state, "did:plc:bob").await;
@@ -3433,7 +3420,7 @@ pub(crate) mod tests {
     async fn resolves(state: &AppState, path: &str) -> Option<String> {
         let (status, v) = get(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.resolveNode?path={path}"),
+            &format!("/xrpc/wiki.radikal.resolveNode?path={path}"),
         )
         .await;
         (status == StatusCode::OK).then(|| v["id"].as_str().expect("id").to_string())
@@ -3442,7 +3429,7 @@ pub(crate) mod tests {
     async fn mv(m: &Meeting, who: &str, id: &str, parent: &str) -> (StatusCode, serde_json::Value) {
         post(
             router(m.state.clone()),
-            "/xrpc/com.example.wiki.moveDocument",
+            "/xrpc/wiki.radikal.moveDocument",
             Some(who),
             serde_json::json!({"id": id, "parent_id": parent}),
         )
@@ -3453,7 +3440,7 @@ pub(crate) mod tests {
     async fn second_folder(m: &Meeting) -> String {
         let (_, v) = post(
             router(m.state.clone()),
-            "/xrpc/com.example.wiki.createDocument",
+            "/xrpc/wiki.radikal.createDocument",
             Some(&m.chair),
             serde_json::json!({"context_id": "c1", "kind": "folder", "title": "Arkiv"}),
         )
@@ -3540,7 +3527,7 @@ pub(crate) mod tests {
         );
         let (_, v) = post(
             router(m.state.clone()),
-            "/xrpc/com.example.wiki.createDocument",
+            "/xrpc/wiki.radikal.createDocument",
             Some(&m.chair),
             serde_json::json!({
                 "context_id": "c1", "parent_id": "fold", "kind": "folder", "title": "Inderst"
@@ -3594,7 +3581,7 @@ pub(crate) mod tests {
     async fn members(state: &AppState, who: &str, query: &str) -> (StatusCode, serde_json::Value) {
         get_as(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.listMembers?context=c9{query}"),
+            &format!("/xrpc/wiki.radikal.listMembers?context=c9{query}"),
             who,
         )
         .await
@@ -3697,14 +3684,14 @@ pub(crate) mod tests {
         // c1 is public, so she may read it. Its roster is still not hers to see.
         let (status, _) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listMembers?context=c1",
+            "/xrpc/wiki.radikal.listMembers?context=c1",
             &mallory,
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         let (status, _) = get(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listMembers?context=c1",
+            "/xrpc/wiki.radikal.listMembers?context=c1",
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -3716,7 +3703,7 @@ pub(crate) mod tests {
         let bob = token_for(&state, "did:plc:bob").await;
         let (status, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getVoterCount?context=c9",
+            "/xrpc/wiki.radikal.getVoterCount?context=c9",
             &bob,
         )
         .await;
@@ -3725,7 +3712,7 @@ pub(crate) mod tests {
         assert_eq!(v, serde_json::json!({ "count": 5 }));
         let (status, _) = get(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getVoterCount?context=c9",
+            "/xrpc/wiki.radikal.getVoterCount?context=c9",
         )
         .await;
         assert_eq!(
@@ -3745,7 +3732,7 @@ pub(crate) mod tests {
     ) -> (StatusCode, serde_json::Value) {
         post(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.{method}"),
+            &format!("/xrpc/wiki.radikal.{method}"),
             Some(who),
             body,
         )
@@ -3785,7 +3772,7 @@ pub(crate) mod tests {
             .to_string();
         let (status, link) = get_as(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.getMemberClaimLink?member={finn}"),
+            &format!("/xrpc/wiki.radikal.getMemberClaimLink?member={finn}"),
             &alice,
         )
         .await;
@@ -3811,7 +3798,7 @@ pub(crate) mod tests {
 
         let (_, mine) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listInvitations",
+            "/xrpc/wiki.radikal.listInvitations",
             &nina,
         )
         .await;
@@ -3832,7 +3819,7 @@ pub(crate) mod tests {
         );
         let (_, after) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listInvitations",
+            "/xrpc/wiki.radikal.listInvitations",
             &nina,
         )
         .await;
@@ -3868,7 +3855,7 @@ pub(crate) mod tests {
             StatusCode::OK,
             "anyone may leave"
         );
-        let secret = "/xrpc/com.example.wiki.getDocument?id=s1";
+        let secret = "/xrpc/wiki.radikal.getDocument?id=s1";
         assert_eq!(
             get_as(router(state.clone()), secret, &bob).await.0,
             StatusCode::NOT_FOUND,
@@ -4046,7 +4033,7 @@ pub(crate) mod tests {
         .expect("profile");
         let (_, v) = get_as(
             router(m.state.clone()),
-            &format!("/xrpc/com.example.wiki.getNode?id={}", m.motion),
+            &format!("/xrpc/wiki.radikal.getNode?id={}", m.motion),
             &m.dave,
         )
         .await;
@@ -4056,7 +4043,7 @@ pub(crate) mod tests {
         // In a listing, the creator of each child.
         let (_, folder) = get_as(
             router(m.state.clone()),
-            "/xrpc/com.example.wiki.getNode?id=fold",
+            "/xrpc/wiki.radikal.getNode?id=fold",
             &m.dave,
         )
         .await;
@@ -4090,7 +4077,7 @@ pub(crate) mod tests {
 
         let (_, folder) = get_as(
             router(m.state.clone()),
-            "/xrpc/com.example.wiki.getNode?id=fold",
+            "/xrpc/wiki.radikal.getNode?id=fold",
             &m.dave,
         )
         .await;
@@ -4113,7 +4100,7 @@ pub(crate) mod tests {
         ] {
             let (_, page) = get_as(
                 router(m.state.clone()),
-                &format!("/xrpc/com.example.wiki.getNode?id={id}"),
+                &format!("/xrpc/wiki.radikal.getNode?id={id}"),
                 &m.dave,
             )
             .await;
@@ -4124,7 +4111,7 @@ pub(crate) mod tests {
         }
         let (_, draft) = get_as(
             router(m.state.clone()),
-            &format!("/xrpc/com.example.wiki.getNode?id={}", ids[1]),
+            &format!("/xrpc/wiki.radikal.getNode?id={}", ids[1]),
             &m.dave,
         )
         .await;

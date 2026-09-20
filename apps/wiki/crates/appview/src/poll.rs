@@ -622,7 +622,7 @@ impl<E: Into<WriteError>> From<E> for OpenError {
     }
 }
 
-/// `com.example.wiki.openPoll` (procedure): an owner of the context puts
+/// `wiki.radikal.openPoll` (procedure): an owner of the context puts
 /// something to the vote. The roster is frozen here, and for a secret poll the
 /// issuer key is made here and published with the poll, before any ballot.
 pub async fn open_poll(
@@ -778,7 +778,7 @@ pub struct PollIdBody {
     pub id: String,
 }
 
-/// `com.example.wiki.closePoll` (procedure): an owner ends the vote. The result
+/// `wiki.radikal.closePoll` (procedure): an owner ends the vote. The result
 /// is counted once, here, and stored, and a secret poll's issuer key is
 /// destroyed. Closing a closed poll answers with the same result.
 pub async fn close_poll(
@@ -911,7 +911,7 @@ pub struct IdParam {
     pub id: String,
 }
 
-/// `com.example.wiki.getPoll`: a poll as the caller may see it.
+/// `wiki.radikal.getPoll`: a poll as the caller may see it.
 pub async fn get_poll(
     State(state): State<AppState>,
     caller: MaybeCaller,
@@ -934,7 +934,7 @@ pub struct ParentParam {
     pub context: Option<String>,
 }
 
-/// `com.example.wiki.listPolls`: the polls opened on a node, or all of a
+/// `wiki.radikal.listPolls`: the polls opened on a node, or all of a
 /// context's, newest first.
 pub async fn list_polls(
     State(state): State<AppState>,
@@ -991,7 +991,7 @@ pub struct BoardParam {
     pub poll: String,
 }
 
-/// `com.example.wiki.getBoard`: every ballot of a secret poll, for whoever may
+/// `wiki.radikal.getBoard`: every ballot of a secret poll, for whoever may
 /// see its counts, so that they can count for themselves. In token order, which
 /// says nothing, and not in the order the room voted in.
 pub async fn get_board(
@@ -1039,7 +1039,7 @@ pub struct BoardEntryParams {
     pub token: String,
 }
 
-/// `com.example.wiki.getBoardEntry`: the ballot a token was spent on. How a
+/// `wiki.radikal.getBoardEntry`: the ballot a token was spent on. How a
 /// voter checks that theirs is on the board and says what they said, which
 /// works where the counts are hidden too: knowing a token is having cast it.
 ///
@@ -1093,7 +1093,7 @@ pub struct IssueBody {
     pub blinded: Vec<String>,
 }
 
-/// `com.example.wiki.issueBallotTokens` (procedure): blind-sign the caller's
+/// `wiki.radikal.issueBallotTokens` (procedure): blind-sign the caller's
 /// tokens, once. The server signs what it cannot read, and records only that
 /// this voter was served.
 ///
@@ -1223,7 +1223,7 @@ pub struct CastBody {
     pub entry: ProvisionalEntry,
 }
 
-/// `com.example.wiki.castBallot` (procedure): spend one token on one ballot.
+/// `wiki.radikal.castBallot` (procedure): spend one token on one ballot.
 ///
 /// Takes NO session, on purpose, and reads none if one is sent: the token is
 /// the right to vote, and a ballot that arrived with its voter's name on the
@@ -1316,7 +1316,7 @@ enum OpenBallot {
     Closed,
 }
 
-/// `com.example.wiki.castOpenBallot` (procedure): vote in a poll that is not
+/// `wiki.radikal.castOpenBallot` (procedure): vote in a poll that is not
 /// secret. One ballot per voter, counted at their frozen weight; the first
 /// stands.
 pub async fn cast_open_ballot(
@@ -1419,11 +1419,11 @@ pub(crate) mod tests {
     use ballot_spec::{BlindSignature, TokenRequest, finalize_token, request_token};
     use serde_json::json;
 
-    pub(crate) const OPEN: &str = "/xrpc/com.example.wiki.openPoll";
-    pub(crate) const CLOSE: &str = "/xrpc/com.example.wiki.closePoll";
-    const ISSUE: &str = "/xrpc/com.example.wiki.issueBallotTokens";
-    pub(crate) const CAST: &str = "/xrpc/com.example.wiki.castBallot";
-    const CAST_OPEN: &str = "/xrpc/com.example.wiki.castOpenBallot";
+    pub(crate) const OPEN: &str = "/xrpc/wiki.radikal.openPoll";
+    pub(crate) const CLOSE: &str = "/xrpc/wiki.radikal.closePoll";
+    const ISSUE: &str = "/xrpc/wiki.radikal.issueBallotTokens";
+    pub(crate) const CAST: &str = "/xrpc/wiki.radikal.castBallot";
+    const CAST_OPEN: &str = "/xrpc/wiki.radikal.castOpenBallot";
 
     /// The seeded closed group (alice owns it, bob votes in it, ivan is a member
     /// without voting rights) with a motion to vote on.
@@ -1458,7 +1458,7 @@ pub(crate) mod tests {
     }
 
     async fn poll_as(state: &AppState, id: &str, who: &str) -> serde_json::Value {
-        let uri = format!("/xrpc/com.example.wiki.getPoll?id={id}");
+        let uri = format!("/xrpc/wiki.radikal.getPoll?id={id}");
         let (status, v) = get_as(router(state.clone()), &uri, who).await;
         assert_eq!(status, StatusCode::OK, "{v}");
         v
@@ -1575,7 +1575,7 @@ pub(crate) mod tests {
         let (status, cast) = post(router(state.clone()), CAST, None, ballot.clone()).await;
         assert_eq!(status, StatusCode::OK, "{cast}");
 
-        let (_, published) = get(router(state.clone()), "/xrpc/com.example.wiki.getBoardKey").await;
+        let (_, published) = get(router(state.clone()), "/xrpc/wiki.radikal.getBoardKey").await;
         let (receipt, key, sig) = receipt_of(&cast["receipt"]);
         assert_eq!(
             published["key"],
@@ -1603,7 +1603,7 @@ pub(crate) mod tests {
         // The answer to a cast can be lost, and the receipt with it: whoever
         // knows the token is given another, asking as nobody.
         let mine = format!(
-            "/xrpc/com.example.wiki.getBoardEntry?poll={id}&token={}",
+            "/xrpc/wiki.radikal.getBoardEntry?poll={id}&token={}",
             receipt.token
         );
         let (_, found) = get(router(state.clone()), &mine).await;
@@ -1625,7 +1625,7 @@ pub(crate) mod tests {
             (&signed_for["entries"], &signed_for["issued"]),
             (&json!(2), &json!(2))
         );
-        let board = format!("/xrpc/com.example.wiki.getBoard?poll={id}");
+        let board = format!("/xrpc/wiki.radikal.getBoard?poll={id}");
         let (_, board) = get_as(router(state.clone()), &board, &bob).await;
         let entries: Vec<ProvisionalEntry> =
             serde_json::from_value(board["entries"].clone()).expect("entries");
@@ -1935,7 +1935,7 @@ pub(crate) mod tests {
             json!([0, 1, 0])
         );
 
-        let board = format!("/xrpc/com.example.wiki.getBoard?poll={id}");
+        let board = format!("/xrpc/wiki.radikal.getBoard?poll={id}");
         assert_eq!(
             get_as(router(state.clone()), &board, &bob).await.0,
             StatusCode::FORBIDDEN,
@@ -1947,14 +1947,14 @@ pub(crate) mod tests {
         assert_eq!(v["entries"][0]["token"], ballot["token"]);
 
         let mine = format!(
-            "/xrpc/com.example.wiki.getBoardEntry?poll={id}&token={}",
+            "/xrpc/wiki.radikal.getBoardEntry?poll={id}&token={}",
             ballot["token"].as_str().expect("token")
         );
         let (status, v) = get_as(router(state.clone()), &mine, &bob).await;
         assert_eq!(status, StatusCode::OK, "{v}");
         assert_eq!(v["entry"]["choices"], json!([1]));
         assert_eq!(v["position"], 0);
-        let nobodys = format!("/xrpc/com.example.wiki.getBoardEntry?poll={id}&token=AAAA");
+        let nobodys = format!("/xrpc/wiki.radikal.getBoardEntry?poll={id}&token=AAAA");
         assert_eq!(
             get_as(router(state.clone()), &nobodys, &bob).await.0,
             StatusCode::NOT_FOUND
@@ -2123,7 +2123,7 @@ pub(crate) mod tests {
 
         let (_, node) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getNode?path=closed/motion-one/motion_one",
+            "/xrpc/wiki.radikal.getNode?path=closed/motion-one/motion_one",
             &bob,
         )
         .await;
@@ -2135,11 +2135,11 @@ pub(crate) mod tests {
             "the chair did not write the motion"
         );
 
-        let list = "/xrpc/com.example.wiki.listPolls?parent=mo1";
+        let list = "/xrpc/wiki.radikal.listPolls?parent=mo1";
         let (_, v) = get_as(router(state.clone()), list, &bob).await;
         assert_eq!(v["polls"].as_array().expect("polls").len(), 1);
         assert_eq!(v["polls"][0]["id"], id);
-        let of_context = "/xrpc/com.example.wiki.listPolls?context=c9";
+        let of_context = "/xrpc/wiki.radikal.listPolls?context=c9";
         let (_, v) = get_as(router(state.clone()), of_context, &alice).await;
         assert_eq!(v["polls"][0]["id"], id, "the chair's overview: {v}");
         let mallory = token_for(&state, "did:plc:mallory").await;
@@ -2151,7 +2151,7 @@ pub(crate) mod tests {
                 "a stranger was shown a closed group's poll"
             );
         }
-        let neither = "/xrpc/com.example.wiki.listPolls";
+        let neither = "/xrpc/wiki.radikal.listPolls";
         assert_eq!(
             get_as(router(state.clone()), neither, &alice).await.0,
             StatusCode::BAD_REQUEST
@@ -2160,13 +2160,13 @@ pub(crate) mod tests {
         // The motion goes to the bin, and the poll with it.
         let (status, _) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.deleteDocument",
+            "/xrpc/wiki.radikal.deleteDocument",
             Some(&alice),
             json!({"id": "mo1"}),
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        let uri = format!("/xrpc/com.example.wiki.getPoll?id={id}");
+        let uri = format!("/xrpc/wiki.radikal.getPoll?id={id}");
         assert_eq!(
             get_as(router(state.clone()), &uri, &bob).await.0,
             StatusCode::NOT_FOUND

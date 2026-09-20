@@ -128,7 +128,7 @@ pub struct ContextParam {
     pub context: String,
 }
 
-/// `com.example.wiki.getProjector`: what a context's projector shows, for
+/// `wiki.radikal.getProjector`: what a context's projector shows, for
 /// whoever may read the context. A context nobody has set one for shows nothing.
 pub async fn get_projector(
     State(state): State<AppState>,
@@ -150,7 +150,7 @@ pub async fn get_projector(
     }
 }
 
-/// `com.example.wiki.setProjector` (procedure): an owner changes what the room
+/// `wiki.radikal.setProjector` (procedure): an owner changes what the room
 /// sees. Absent fields stay as they are; `null` clears one.
 pub async fn set_projector(
     State(state): State<AppState>,
@@ -204,7 +204,7 @@ mod tests {
     use crate::xrpc::tests::{get, get_as, post, seeded_state, token_for};
     use axum::http::StatusCode;
 
-    const SCREEN: &str = "/xrpc/com.example.wiki.getProjector?context=c9";
+    const SCREEN: &str = "/xrpc/wiki.radikal.getProjector?context=c9";
 
     async fn set(
         state: &crate::AppState,
@@ -213,7 +213,7 @@ mod tests {
     ) -> (StatusCode, serde_json::Value) {
         post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.setProjector",
+            "/xrpc/wiki.radikal.setProjector",
             Some(who),
             body,
         )

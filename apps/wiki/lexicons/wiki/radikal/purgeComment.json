@@ -1,0 +1,46 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.purgeComment",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Delete for good a comment that is in the bin, with the reactions to it and the picture it showed. Its author may, as well as an owner of its context: what someone wrote is theirs to have gone.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": {
+						"id": {
+							"type": "string",
+							"description": "The comment."
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["purged"],
+					"properties": {
+						"purged": {
+							"type": "integer",
+							"description": "How many comments went."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "Nothing in the bin by that id that the caller may purge. A live comment is deleted first."
+				}
+			]
+		}
+	}
+}

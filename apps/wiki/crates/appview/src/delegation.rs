@@ -63,7 +63,7 @@ pub struct SetBody {
     pub to_did: Option<String>,
 }
 
-/// `com.example.wiki.setDelegation` (procedure): the caller gives their vote in
+/// `wiki.radikal.setDelegation` (procedure): the caller gives their vote in
 /// a context to another member with voting rights, or takes it back.
 pub async fn set_delegation(
     State(state): State<AppState>,
@@ -148,7 +148,7 @@ pub struct ContextParam {
     pub context: String,
 }
 
-/// `com.example.wiki.listDelegations`: the delegations standing in a context
+/// `wiki.radikal.listDelegations`: the delegations standing in a context
 /// that are the caller's to see. Their own, given and received; all of them for
 /// an owner of the context, who chairs its votes.
 pub async fn list_delegations(
@@ -212,8 +212,8 @@ mod tests {
     use axum::http::StatusCode;
     use serde_json::json;
 
-    const SET: &str = "/xrpc/com.example.wiki.setDelegation";
-    const LIST: &str = "/xrpc/com.example.wiki.listDelegations?context=c9";
+    const SET: &str = "/xrpc/wiki.radikal.setDelegation";
+    const LIST: &str = "/xrpc/wiki.radikal.listDelegations?context=c9";
 
     /// c9 with a motion to vote on: alice chairs, bob and carol hold a vote
     /// each, and ivan is a member without one.
@@ -244,14 +244,14 @@ mod tests {
     async fn open(state: &crate::AppState, chair: &str) -> String {
         let body =
             json!({"parent_id": "mo1", "title": "Motion One", "options": ["for", "against"]});
-        let uri = "/xrpc/com.example.wiki.openPoll";
+        let uri = "/xrpc/wiki.radikal.openPoll";
         let (status, v) = post(router(state.clone()), uri, Some(chair), body).await;
         assert_eq!(status, StatusCode::OK, "{v}");
         v["id"].as_str().expect("id").to_string()
     }
 
     async fn weight(state: &crate::AppState, poll: &str, who: &str) -> i64 {
-        let uri = format!("/xrpc/com.example.wiki.getPoll?id={poll}");
+        let uri = format!("/xrpc/wiki.radikal.getPoll?id={poll}");
         let (_, v) = get_as(router(state.clone()), &uri, who).await;
         v["viewer"]["weight"].as_i64().expect("a weight")
     }
@@ -275,7 +275,7 @@ mod tests {
         let poll = open(&state, &alice).await;
         assert_eq!(weight(&state, &poll, &alice).await, 3);
         assert_eq!(weight(&state, &poll, &bob).await, 0);
-        let cast = "/xrpc/com.example.wiki.castOpenBallot";
+        let cast = "/xrpc/wiki.radikal.castOpenBallot";
         let ballot = json!({ "poll": poll, "choices": [0] });
         let (status, v) = post(router(state.clone()), cast, Some(&bob), ballot.clone()).await;
         assert_eq!(
@@ -285,7 +285,7 @@ mod tests {
         );
         let (status, v) = post(router(state.clone()), cast, Some(&alice), ballot).await;
         assert_eq!(status, StatusCode::OK, "{v}");
-        let uri = format!("/xrpc/com.example.wiki.getPoll?id={poll}");
+        let uri = format!("/xrpc/wiki.radikal.getPoll?id={poll}");
         let (_, tally) = get_as(router(state.clone()), &uri, &alice).await;
         assert_eq!(
             (&tally["ballots"], &tally["eligible"]),
@@ -297,7 +297,7 @@ mod tests {
         // next poll is hers to vote in again.
         assert_eq!(give(&state, &carol, None).await.0, StatusCode::OK);
         assert_eq!(weight(&state, &poll, &carol).await, 0);
-        let close = "/xrpc/com.example.wiki.closePoll";
+        let close = "/xrpc/wiki.radikal.closePoll";
         post(
             router(state.clone()),
             close,
@@ -376,7 +376,7 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
 
         // Put out of the group, carol takes what she gave with her.
-        let remove = "/xrpc/com.example.wiki.removeMember";
+        let remove = "/xrpc/wiki.radikal.removeMember";
         let seat = json!({ "id": "m-did:plc:carol-c9" });
         let (status, v) = post(router(state.clone()), remove, Some(&alice), seat).await;
         assert_eq!(status, StatusCode::OK, "{v}");

@@ -376,7 +376,7 @@ pub struct ContextParam {
     pub context: String,
 }
 
-/// `com.example.wiki.listSpeakerLists`: a context's lists with their queues, for
+/// `wiki.radikal.listSpeakerLists`: a context's lists with their queues, for
 /// whoever may read the context: the room follows it on the projector. `now` is
 /// the server's clock, so a countdown does not depend on the viewer's.
 pub async fn list_speaker_lists(
@@ -424,7 +424,7 @@ pub struct CreateListBody {
     pub name: String,
 }
 
-/// `com.example.wiki.createSpeakerList` (procedure): an owner's.
+/// `wiki.radikal.createSpeakerList` (procedure): an owner's.
 pub async fn create_speaker_list(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -463,7 +463,7 @@ pub struct UpdateListBody {
     pub turn_secs: Option<i64>,
 }
 
-/// `com.example.wiki.updateSpeakerList` (procedure): rename a list, open or
+/// `wiki.radikal.updateSpeakerList` (procedure): rename a list, open or
 /// close it to new speakers, or set the limit on a turn, which starts the clock
 /// afresh.
 pub async fn update_speaker_list(
@@ -507,7 +507,7 @@ pub struct ListIdBody {
     pub list_id: String,
 }
 
-/// `com.example.wiki.deleteSpeakerList` (procedure): the list and its queue.
+/// `wiki.radikal.deleteSpeakerList` (procedure): the list and its queue.
 pub async fn delete_speaker_list(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -530,7 +530,7 @@ pub async fn delete_speaker_list(
     }
 }
 
-/// `com.example.wiki.clearSpeakerList` (procedure): empty the queue.
+/// `wiki.radikal.clearSpeakerList` (procedure): empty the queue.
 pub async fn clear_speaker_list(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -557,7 +557,7 @@ pub async fn clear_speaker_list(
     }
 }
 
-/// `com.example.wiki.nextSpeaker` (procedure): the floor passes on.
+/// `wiki.radikal.nextSpeaker` (procedure): the floor passes on.
 pub async fn next_speaker(
     State(state): State<AppState>,
     Caller { did }: Caller,
@@ -591,7 +591,7 @@ pub struct JoinBody {
     pub kind: i64,
 }
 
-/// `com.example.wiki.joinSpeakerList` (procedure): ask for the floor. A member
+/// `wiki.radikal.joinSpeakerList` (procedure): ask for the floor. A member
 /// of the context may while the list is open; an owner may regardless, to enter
 /// someone who cannot.
 pub async fn join_speaker_list(
@@ -662,7 +662,7 @@ async fn entry_for(
     }
 }
 
-/// `com.example.wiki.leaveSpeakerList` (procedure): withdraw, or be removed by
+/// `wiki.radikal.leaveSpeakerList` (procedure): withdraw, or be removed by
 /// an owner.
 pub async fn leave_speaker_list(
     State(state): State<AppState>,
@@ -695,7 +695,7 @@ pub struct MoveBody {
     pub to: String,
 }
 
-/// `com.example.wiki.moveSpeaker` (procedure): the chair puts someone ahead of
+/// `wiki.radikal.moveSpeaker` (procedure): the chair puts someone ahead of
 /// the queue or behind it.
 pub async fn move_speaker(
     State(state): State<AppState>,
@@ -749,7 +749,7 @@ mod tests {
     ) -> (StatusCode, serde_json::Value) {
         post(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.{method}"),
+            &format!("/xrpc/wiki.radikal.{method}"),
             Some(who),
             body,
         )
@@ -795,7 +795,7 @@ mod tests {
         async fn queue(&self) -> Vec<String> {
             let (_, v) = get_as(
                 router(self.state.clone()),
-                "/xrpc/com.example.wiki.listSpeakerLists?context=c9",
+                "/xrpc/wiki.radikal.listSpeakerLists?context=c9",
                 &self.bob,
             )
             .await;
@@ -848,7 +848,7 @@ mod tests {
 
         let (_, lists) = get_as(
             router(r.state.clone()),
-            "/xrpc/com.example.wiki.listSpeakerLists?context=c9",
+            "/xrpc/wiki.radikal.listSpeakerLists?context=c9",
             &r.bob,
         )
         .await;
@@ -942,7 +942,7 @@ mod tests {
     async fn a_closed_groups_queue_is_its_members_business() {
         let r = room().await;
         r.join(&r.bob, 0).await;
-        let lists = "/xrpc/com.example.wiki.listSpeakerLists?context=c9";
+        let lists = "/xrpc/wiki.radikal.listSpeakerLists?context=c9";
         assert_eq!(
             get(router(r.state.clone()), lists).await.0,
             StatusCode::NOT_FOUND
@@ -989,7 +989,7 @@ mod tests {
         );
         let (_, v) = get_as(
             router(r.state.clone()),
-            "/xrpc/com.example.wiki.listSpeakerLists?context=c9",
+            "/xrpc/wiki.radikal.listSpeakerLists?context=c9",
             &r.bob,
         )
         .await;

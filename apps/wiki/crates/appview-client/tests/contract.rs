@@ -1081,7 +1081,7 @@ fn every_method_is_called_here() {
 #[test]
 fn the_client_is_what_the_lexicons_generate() {
     let lexicons =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lexicons/com/example/wiki");
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../lexicons/wiki/radikal");
     let fresh = lexgen::generate(&lexgen::read_lexicons(&lexicons).expect("lexicons"));
     let bare = |text: &str| -> String {
         text.chars()

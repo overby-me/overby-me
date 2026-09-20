@@ -1,0 +1,56 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.listOrphans",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "The nodes whose parent no longer exists, for an owner of the home, who runs the site, to put right. A parent is a plain reference, since it may be a document or a context, so nothing else notices one going missing.",
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["orphans"],
+					"properties": {
+						"orphans": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"required": ["node", "id", "kind", "text", "parent_id"],
+								"properties": {
+									"node": {
+										"type": "string",
+										"knownValues": ["document", "context", "comment"]
+									},
+									"id": {
+										"type": "string"
+									},
+									"kind": {
+										"type": "string"
+									},
+									"text": {
+										"type": "string",
+										"description": "A title, a name, or a comment's text."
+									},
+									"parent_id": {
+										"type": "string",
+										"description": "The parent that is not there."
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller does not own the site."
+				}
+			]
+		}
+	}
+}

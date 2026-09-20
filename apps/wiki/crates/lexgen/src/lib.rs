@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-const NSID: &str = "com.example.wiki.";
+const NSID: &str = "wiki.radikal.";
 
 /// `fooBar` as `foo_bar`.
 fn snake(name: &str) -> String {

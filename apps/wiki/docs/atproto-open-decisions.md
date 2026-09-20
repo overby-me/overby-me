@@ -57,51 +57,47 @@ choices that need a human call.
   types), and would publish schema contracts for records that never federate, taxing private-side iteration
   with versioning ceremony. `atproto-domain-model.md` is reconciled to this stance.
 
-## Open (need a call)
-
-- **atproto spaces** (raised 2026-09-20, when the owner asked that the wiki use them; the redesign is
-  `docs/atproto-spaces-redesign.md`, what the alpha PDS was asked is `crates/spaces-spike/FINDINGS.md`).
-  Spaces give atproto non-public records, which the domain model was built on not having. Five calls, none
-  of which holds up the cutover from the interim: (1) the organization's own account, the DID every space
-  is anchored on, and the spaces-capable PDS it lives on; (2) the NSID, which now also names the space
-  type and is in every space URI for good; (3) how far records move from the organization's repos to
-  their authors' (everything with the organization first, which asks nothing of any member; members'
-  contributions in members' repos later, if at all); (4) which applications may read a space (an allow
-  list, recommended, or any a member consents to); (5) when (recommended: cut over on the AppView as
-  built, move to spaces once they are released; they are an alpha not to run production against).
-  Revisits four entries under Decided: **Identity / PDS** (members stay free to choose a host, the
-  organization's own account needs a spaces-capable one), **Visibility** ("optionally public" was
+- **atproto spaces** (2026-09-20; the redesign is `docs/atproto-spaces-redesign.md`, what the alpha PDS
+  was asked is `crates/spaces-spike/FINDINGS.md`). atproto gained non-public records, which the domain
+  model was built on not having, and the owner asked that the wiki use them. Five calls were put to the
+  owner with a recommendation each; the owner's answer was to do what made most sense, so they are taken
+  as recommended: (1) every space is anchored on ONE account that is the organization's and nobody's
+  personally, on a PDS the organization runs beside the AppView, with its file limit raised and its data
+  in the backups; the account, its keys and the DNS record are the owner's to make, when spaces are
+  released and not before; (2) the NSID is `wiki.radikal.*` (next entry); (3) every record is held by the
+  organization first, which asks nothing of any member, and whether members' contributions move to their
+  own repos is decided again with the release in hand; (4) a space admits applications by an allow list:
+  the wiki, and tools named to it such as the board mirror; (5) the cutover from the interim goes ahead
+  on the AppView as built, and the move to spaces follows their release, since they are an alpha not to
+  run production against. Revisits four entries above: **Identity / PDS** (members stay free to choose a
+  host; the organization's own account is on one it runs), **Visibility** ("optionally public" was
   "optionally becomes a record"; on spaces every context is a space and being public is who the managing
   app lets read), **Lexicon scope** (still the boundary only, but the boundary now includes what members
-  see, so content gets lexicons; the private half still has none), and the files default below (a
-  space's blobs on the holder's PDS, the AppView's store as a cache; a PDS as it comes refuses over 5 MB).
-- **ballot-spec pinned semantics (D1 to D8)**: the executable ballot spec
-  (`crates/ballot-spec/DECISIONS.md`) pins eight semantics no design doc had decided, notably: delegation
-  chains are transitive; cycles and hops to ineligible DIDs void the delegation (weight stays with the
-  voter); on a token double spend the FIRST board entry stands; an invalid ballot does not burn its token;
-  RSABSSA-SHA384-PSS-Randomized with a 32-byte random nullifier as the token message. Each is enforced by
-  property tests and cheap to change now; they await owner sign-off (or objection) as a batch.
-- **NSID authority domain**: NOT decided (owner, 2026-07-16: no domain picked yet). All lexicons and docs
-  use the reserved placeholder `com.example.wiki.*` (RFC 2606 `example.com`, cannot collide, obviously a
-  placeholder) so nothing is accidentally minted under a name the org may not keep. Requirements for the
-  eventual call: a domain the org durably controls (registrar + DNS access for the Lexicon Resolution TXT
-  record), reversed into the NSID authority (e.g. `radikal.wiki` gives `wiki.radikal.*`). The rebrand is a
-  mechanical find-replace plus a lexicons/ directory rename, documented in `lexicons/README.md` (NSID
-  section); it must happen before any codegen, XRPC route, Jetstream filter, or published record embeds the
-  NSID. Until then the placeholder is safe everywhere, including the spec crate and lexicon drafts.
+  see, so content gets lexicons; the private half still has none), and the files default below (a space's
+  blobs on the holder's PDS, the AppView's store as a cache; a PDS as it comes refuses over 5 MB).
+- **NSID authority domain** (2026-09-20, with the above): `radikal.wiki`, giving `wiki.radikal.*`, the
+  domain the wiki is served on. It rests on the organization durably holding the domain, registrar and
+  DNS both. Everything under the RFC 2606 placeholder `com.example.wiki.*` was renamed the same day
+  (`lexicons/README.md` has what is left: the Lexicon Resolution TXT record, which is the owner's).
+  Nothing has been minted under either name, so until the first real record or space it is still a
+  find-and-replace away.
+
+- **ballot-spec pinned semantics (D1 to D8)** (2026-09-20): taken as stated in
+  `crates/ballot-spec/DECISIONS.md` and `docs/ballot-decisions-signoff.md`, when the owner asked for the
+  open items to be finished: delegation chains are transitive; a cycle or a hop to someone with no vote
+  voids the delegation; on a double spend the FIRST board entry stands; an invalid ballot does not burn
+  its token; RSABSSA-SHA384-PSS-Randomized over a 32-byte random nullifier.
+- **Board custody** (2026-09-20): taken as `docs/ballot-custody-signoff.md` recommended: published by the
+  organization, a custody key kept for nothing else, receipts over the token AND the choices, a close-out
+  that makes a tally official, entries in shuffled batches of at least three or all at the close, a board
+  account of its own, and an independent mirror (`crates/board-mirror`). One call the memo had not
+  weighed: a board is public only for a poll opened as public. The spaces redesign above removes that
+  limit by publishing a closed group's board INTO its space.
+
+## Open (need a call)
+
 - **README P-256 atproto-exception row**: expanded into the concrete before/after rows below (owner asked to
   see the edits before deciding). Awaiting go-ahead to apply to the monorepo-root README.
-- **Board custody (who publishes the board-entry records)**: options memo in `docs/ballot-board-custody.md`.
-  (a) Voter-published is fatal for a secret ballot: records live in DID-owned repos, so repo ownership
-  deanonymizes, and throwaway repos are unrealistic for this membership. (b) Org-published preserves
-  anonymity (the org already learns nothing from a blind-signed token) but could silently censor, so it
-  needs signed inclusion receipts (receipt plus missing entry = public censorship evidence), a signed
-  close-out digest, and an independent mirror. (c) A dedicated board DID only moves the trust.
-  RECOMMENDED: org-published plus receipts. Sub-calls the owner must make: receipt signing key, publication
-  latency (per-cast vs batched vs at-close), receipt scope (token only vs plus choices), digest mandatory or
-  not, mirror commitment, board account. Draft lexicons landed: `poll.json`, `ballotEntry.json` (crypto
-  encodings PROVISIONAL pending the spec crate's serialization).
-
 ## Proposed README edits (for the "expand on this" ask)
 
 Concrete edits to the monorepo-root `README.md`, pending approval:

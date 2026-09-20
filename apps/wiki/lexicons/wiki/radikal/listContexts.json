@@ -1,0 +1,47 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.listContexts",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "Contexts, by name. `roots` (the default): those at the top of the tree, which is directly under the home, that the caller may read. `mine`: the groups and events the caller has a seat in and has said yes to, wherever they sit, which is what a home screen lists. `public`: every place open to everyone, at any depth, less the home itself. The home is in none of the three: it is `getNode` of the empty path.",
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["contexts"],
+					"properties": {
+						"contexts": {
+							"type": "array",
+							"items": {
+								"type": "ref",
+								"ref": "wiki.radikal.defs#contextView"
+							}
+						}
+					}
+				}
+			},
+			"parameters": {
+				"type": "params",
+				"properties": {
+					"scope": {
+						"type": "string",
+						"enum": ["roots", "mine", "public"],
+						"default": "roots"
+					},
+					"kind": {
+						"type": "string",
+						"enum": ["group", "event"],
+						"description": "With `mine`: one of the two."
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "InvalidRequest",
+					"description": "No such scope."
+				}
+			]
+		}
+	}
+}

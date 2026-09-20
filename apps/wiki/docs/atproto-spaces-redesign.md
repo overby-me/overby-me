@@ -226,28 +226,37 @@ from the interim does not wait for any of this.
 - **Backups of two things**: the organization's PDS, and the AppView's private
   tables. Only the index is rebuildable.
 
-## Decisions that are the owner's
+## Decisions, as taken
 
-1. **The organization's account**: which DID anchors every space, and on which
-   spaces-capable PDS it lives (run by the organization, or a host it trusts).
-   The decision log has the AppView "not run or mandate a PDS"; members stay
-   free, the organization's own account does not.
-2. **The NSID**, still the placeholder `com.example.wiki`. It now names the
-   space TYPE, which is in every space's URI for good. It has to be settled
-   before the first real space is made, as before the first real record.
+Five calls were the owner's. Put to them with a recommendation each, the answer
+on 2026-09-20 was to do what made most sense, so each stands as recommended
+(`atproto-open-decisions.md` has them as decided). What is still an ACT of the
+owner's is marked.
+
+1. **The organization's account.** One new account that is the organization's
+   and nobody's personally anchors every space, on a PDS the organization runs
+   beside the AppView: that server holds everything the wiki has and is in the
+   path of every write, so its location, backups, uptime and file limit should
+   be the organization's. The decision log had the AppView "not run or mandate a
+   PDS"; members stay free, the organization's own account does not. THE
+   OWNER'S, once spaces are released: make the account (a handle on a domain
+   the organization holds, keys with two people and not on the server alone).
+2. **The NSID** is `wiki.radikal.*`, after the domain the wiki is served on. It
+   names the space TYPE too, which is in every space's URI for good. The
+   placeholder was renamed the same day; nothing has been minted, so it stays
+   cheap to change until the first real record or space. THE OWNER'S: the DNS
+   record for lexicon resolution, and being sure the domain stays theirs.
 3. **How far records move to their authors.** Everything with the organization
-   (the first stage, and a place one may stop: the data is in atproto, other
-   applications a member authorizes can read it, the AppView is rebuildable);
-   or members' contributions in members' repos where their PDS can hold them
-   (what the protocol is for, at the costs above). Recommended: build the first,
-   then decide the second with the release in hand.
-4. **Which applications may read a space**: the wiki's own and named tools (an
-   allow list, recommended for a political organization's internal debate), or
-   any application a member consents to.
-5. **When**: cut over from the interim on the AppView as built and move to
-   spaces at their release (recommended: the interim is the fragile part, and
-   the second move is internal to the backend, with the same rehearsal tooling),
-   or hold the cutover for spaces.
+   first, and a place one may stop: the data is in atproto, other applications
+   can be let in to read it, the AppView is rebuildable. Whether members'
+   contributions move to members' repos is decided again with the release in
+   hand, and with the PDS hosts members actually use.
+4. **Which applications may read a space**: the wiki, and tools named to it
+   such as the board mirror. An allow list, because this is a political
+   organization's internal debate.
+5. **When**: the cutover from the interim goes ahead on the AppView as built,
+   because the interim is the fragile part. Spaces follow their release; that
+   second move stays inside the backend and is rehearsed with the same tooling.
 
 Revisited in the decision log by this: "atproto has no private records"
 (domain model), PDS-agnostic hosting (true of members, not of the

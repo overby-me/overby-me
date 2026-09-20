@@ -45,7 +45,7 @@ async fn deletable_comment(
     }
 }
 
-/// `com.example.wiki.deleteComment` (procedure): its author, or an owner of its
+/// `wiki.radikal.deleteComment` (procedure): its author, or an owner of its
 /// context, takes a comment away. One that has been answered is emptied and
 /// stays, because the answers hang on it: deleting it outright would take
 /// everyone who replied along. Any other goes to the context's bin.
@@ -86,7 +86,7 @@ pub async fn delete_comment(
         .into_response()
 }
 
-/// `com.example.wiki.restoreComment` (procedure): bring a comment back from the
+/// `wiki.radikal.restoreComment` (procedure): bring a comment back from the
 /// bin, with whatever went there with it.
 pub async fn restore_comment(
     State(state): State<AppState>,
@@ -124,7 +124,7 @@ pub async fn restore_comment(
     }
 }
 
-/// `com.example.wiki.purgeComment` (procedure): delete for good a comment that
+/// `wiki.radikal.purgeComment` (procedure): delete for good a comment that
 /// is in the bin, with the reactions to it and the picture it held. Its author
 /// may, as well as an owner: what someone wrote is theirs to have gone.
 pub async fn purge_comment(
@@ -175,10 +175,10 @@ mod tests {
     use axum::http::StatusCode;
     use serde_json::{Value, json};
 
-    const POST: &str = "/xrpc/com.example.wiki.postComment";
-    const DELETE: &str = "/xrpc/com.example.wiki.deleteComment";
-    const RESTORE: &str = "/xrpc/com.example.wiki.restoreComment";
-    const PURGE: &str = "/xrpc/com.example.wiki.purgeComment";
+    const POST: &str = "/xrpc/wiki.radikal.postComment";
+    const DELETE: &str = "/xrpc/wiki.radikal.deleteComment";
+    const RESTORE: &str = "/xrpc/wiki.radikal.restoreComment";
+    const PURGE: &str = "/xrpc/wiki.radikal.purgeComment";
 
     /// Post a comment on `on` and return its id.
     async fn say(state: &AppState, who: &str, on: &str, text: &str) -> String {
@@ -198,14 +198,14 @@ mod tests {
     }
 
     async fn thread(state: &AppState, who: &str, on: &str) -> Vec<Value> {
-        let uri = format!("/xrpc/com.example.wiki.getComments?on={on}");
+        let uri = format!("/xrpc/wiki.radikal.getComments?on={on}");
         let (status, v) = get_as(router(state.clone()), &uri, who).await;
         assert_eq!(status, StatusCode::OK, "{v}");
         v["comments"].as_array().expect("comments").clone()
     }
 
     async fn bin(state: &AppState, who: &str) -> Vec<Value> {
-        let uri = "/xrpc/com.example.wiki.listDeleted?context=c9";
+        let uri = "/xrpc/wiki.radikal.listDeleted?context=c9";
         let (status, v) = get_as(router(state.clone()), uri, who).await;
         assert_eq!(status, StatusCode::OK, "{v}");
         let listed = v["deleted"].as_array().expect("deleted").clone();
@@ -292,7 +292,7 @@ mod tests {
         .await;
         let id = v["id"].as_str().expect("id").to_string();
         let react = json!({"subject": id, "emoji": "👍"});
-        let reacted = "/xrpc/com.example.wiki.addReaction";
+        let reacted = "/xrpc/wiki.radikal.addReaction";
         assert_eq!(
             post(router(state.clone()), reacted, Some(&alice), react)
                 .await
@@ -318,7 +318,7 @@ mod tests {
                 .iter()
                 .all(|k| k["id"] != id.as_str())
         );
-        let reactions = format!("/xrpc/com.example.wiki.getReactions?subject={id}");
+        let reactions = format!("/xrpc/wiki.radikal.getReactions?subject={id}");
         let (_, v) = get_as(router(state.clone()), &reactions, &alice).await;
         assert_eq!(
             v["reactions"],
@@ -398,7 +398,7 @@ mod tests {
         let react = json!({"subject": first, "emoji": "👎"});
         post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.addReaction",
+            "/xrpc/wiki.radikal.addReaction",
             Some(&alice),
             react,
         )
@@ -428,7 +428,7 @@ mod tests {
             answers[0]["root_id"], "s1",
             "an answer hangs on the document too"
         );
-        let reactions = format!("/xrpc/com.example.wiki.getReactions?subject={first}");
+        let reactions = format!("/xrpc/wiki.radikal.getReactions?subject={first}");
         let (_, v) = get_as(router(state.clone()), &reactions, &alice).await;
         assert_eq!(v["reactions"], json!([]));
         assert!(

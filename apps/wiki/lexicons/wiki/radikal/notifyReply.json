@@ -1,0 +1,76 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.notifyReply",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Tell whoever wrote a node that it has been answered. Only a member of the node's context may, so that an author cannot be pinged by a stranger, and nobody is told about their own reply.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["parent"],
+					"properties": {
+						"parent": {
+							"type": "string",
+							"description": "The node that was replied to."
+						},
+						"title": {
+							"type": "string",
+							"description": "`RadikalWiki` if absent."
+						},
+						"body": {
+							"type": "string"
+						},
+						"url": {
+							"type": "string",
+							"description": "What a tap opens: a path in the app, or a URL on a configured frontend origin. Anything else is refused."
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["ok", "recipients", "sent"],
+					"properties": {
+						"ok": {
+							"type": "boolean"
+						},
+						"recipients": {
+							"type": "integer",
+							"description": "Devices the message was sent towards."
+						},
+						"sent": {
+							"type": "integer",
+							"description": "Devices whose push service took it."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such node, or a context the caller may not read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is not a member of the node's context."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "A link that leads out of the app, or a message too long for a push."
+				},
+				{
+					"name": "PushNotConfigured",
+					"description": "This AppView has no VAPID key (HTTP 503)."
+				}
+			]
+		}
+	}
+}

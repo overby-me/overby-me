@@ -21,9 +21,9 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-pub const POLL: &str = "com.example.wiki.poll";
-pub const ENTRY: &str = "com.example.wiki.ballotEntry";
-pub const CLOSEOUT: &str = "com.example.wiki.pollCloseOut";
+pub const POLL: &str = "wiki.radikal.poll";
+pub const ENTRY: &str = "wiki.radikal.ballotEntry";
+pub const CLOSEOUT: &str = "wiki.radikal.pollCloseOut";
 
 type Failure = Box<dyn std::error::Error + Send + Sync>;
 

@@ -196,311 +196,242 @@ fn build_router(state: AppState) -> Router {
             get(oauth::client_metadata_handler),
         )
         // The native XRPC read surface (identity-free content lookups).
+        .route("/xrpc/wiki.radikal.getDocument", get(xrpc::get_document))
+        .route("/xrpc/wiki.radikal.getContext", get(xrpc::get_context))
+        .route("/xrpc/wiki.radikal.getNode", get(xrpc::get_node))
+        .route("/xrpc/wiki.radikal.resolveNode", get(xrpc::resolve_node))
+        .route("/xrpc/wiki.radikal.listChildren", get(xrpc::list_children))
+        .route("/xrpc/wiki.radikal.listContexts", get(xrpc::list_contexts))
+        .route("/xrpc/wiki.radikal.listRecent", get(feed::list_recent))
         .route(
-            "/xrpc/com.example.wiki.getDocument",
-            get(xrpc::get_document),
-        )
-        .route("/xrpc/com.example.wiki.getContext", get(xrpc::get_context))
-        .route("/xrpc/com.example.wiki.getNode", get(xrpc::get_node))
-        .route(
-            "/xrpc/com.example.wiki.resolveNode",
-            get(xrpc::resolve_node),
-        )
-        .route(
-            "/xrpc/com.example.wiki.listChildren",
-            get(xrpc::list_children),
-        )
-        .route(
-            "/xrpc/com.example.wiki.listContexts",
-            get(xrpc::list_contexts),
-        )
-        .route("/xrpc/com.example.wiki.listRecent", get(feed::list_recent))
-        .route(
-            "/xrpc/com.example.wiki.listContributions",
+            "/xrpc/wiki.radikal.listContributions",
             get(feed::list_contributions),
         )
+        .route("/xrpc/wiki.radikal.listOrphans", get(feed::list_orphans))
+        .route("/xrpc/wiki.radikal.purgeOrphan", post(tree::purge_orphan))
+        .route("/xrpc/wiki.radikal.getProfile", get(people::get_profile))
         .route(
-            "/xrpc/com.example.wiki.listOrphans",
-            get(feed::list_orphans),
-        )
-        .route(
-            "/xrpc/com.example.wiki.purgeOrphan",
-            post(tree::purge_orphan),
-        )
-        .route(
-            "/xrpc/com.example.wiki.getProfile",
-            get(people::get_profile),
-        )
-        .route(
-            "/xrpc/com.example.wiki.searchPeople",
+            "/xrpc/wiki.radikal.searchPeople",
             get(people::search_people),
         )
-        .route("/xrpc/com.example.wiki.search", get(search::search))
+        .route("/xrpc/wiki.radikal.search", get(search::search))
+        .route("/xrpc/wiki.radikal.getComments", get(xrpc::get_comments))
+        .route("/xrpc/wiki.radikal.getReactions", get(xrpc::get_reactions))
         .route(
-            "/xrpc/com.example.wiki.getComments",
-            get(xrpc::get_comments),
-        )
-        .route(
-            "/xrpc/com.example.wiki.getReactions",
-            get(xrpc::get_reactions),
-        )
-        .route(
-            "/xrpc/com.example.wiki.createSession",
+            "/xrpc/wiki.radikal.createSession",
             post(xrpc::create_session),
         )
-        .route("/xrpc/com.example.wiki.getSession", get(xrpc::get_session))
+        .route("/xrpc/wiki.radikal.getSession", get(xrpc::get_session))
         .route(
-            "/xrpc/com.example.wiki.deleteSession",
+            "/xrpc/wiki.radikal.deleteSession",
             post(xrpc::delete_session),
         )
+        .route("/xrpc/wiki.radikal.listMembers", get(xrpc::list_members))
         .route(
-            "/xrpc/com.example.wiki.listMembers",
-            get(xrpc::list_members),
-        )
-        .route(
-            "/xrpc/com.example.wiki.getVoterCount",
+            "/xrpc/wiki.radikal.getVoterCount",
             get(xrpc::get_voter_count),
         )
         .route(
-            "/xrpc/com.example.wiki.inviteMembers",
+            "/xrpc/wiki.radikal.inviteMembers",
             post(xrpc::invite_members),
         )
         .route(
-            "/xrpc/com.example.wiki.sendInvitation",
+            "/xrpc/wiki.radikal.sendInvitation",
             post(mail::send_invitation),
         )
+        .route("/xrpc/wiki.radikal.getBoardKey", get(board::get_board_key))
         .route(
-            "/xrpc/com.example.wiki.getBoardKey",
-            get(board::get_board_key),
-        )
-        .route(
-            "/xrpc/com.example.wiki.setDelegation",
+            "/xrpc/wiki.radikal.setDelegation",
             post(delegation::set_delegation),
         )
         .route(
-            "/xrpc/com.example.wiki.listDelegations",
+            "/xrpc/wiki.radikal.listDelegations",
             get(delegation::list_delegations),
         )
+        .route("/xrpc/wiki.radikal.updateMember", post(xrpc::update_member))
+        .route("/xrpc/wiki.radikal.removeMember", post(xrpc::remove_member))
         .route(
-            "/xrpc/com.example.wiki.updateMember",
-            post(xrpc::update_member),
-        )
-        .route(
-            "/xrpc/com.example.wiki.removeMember",
-            post(xrpc::remove_member),
-        )
-        .route(
-            "/xrpc/com.example.wiki.listInvitations",
+            "/xrpc/wiki.radikal.listInvitations",
             get(xrpc::list_invitations),
         )
         .route(
-            "/xrpc/com.example.wiki.acceptInvitation",
+            "/xrpc/wiki.radikal.acceptInvitation",
             post(xrpc::accept_invitation),
         )
         .route(
-            "/xrpc/com.example.wiki.getProjector",
+            "/xrpc/wiki.radikal.getProjector",
             get(projector::get_projector),
         )
         .route(
-            "/xrpc/com.example.wiki.setProjector",
+            "/xrpc/wiki.radikal.setProjector",
             post(projector::set_projector),
         )
         .route(
-            "/xrpc/com.example.wiki.listSpeakerLists",
+            "/xrpc/wiki.radikal.listSpeakerLists",
             get(speak::list_speaker_lists),
         )
         .route(
-            "/xrpc/com.example.wiki.createSpeakerList",
+            "/xrpc/wiki.radikal.createSpeakerList",
             post(speak::create_speaker_list),
         )
         .route(
-            "/xrpc/com.example.wiki.updateSpeakerList",
+            "/xrpc/wiki.radikal.updateSpeakerList",
             post(speak::update_speaker_list),
         )
         .route(
-            "/xrpc/com.example.wiki.deleteSpeakerList",
+            "/xrpc/wiki.radikal.deleteSpeakerList",
             post(speak::delete_speaker_list),
         )
         .route(
-            "/xrpc/com.example.wiki.clearSpeakerList",
+            "/xrpc/wiki.radikal.clearSpeakerList",
             post(speak::clear_speaker_list),
         )
+        .route("/xrpc/wiki.radikal.nextSpeaker", post(speak::next_speaker))
         .route(
-            "/xrpc/com.example.wiki.nextSpeaker",
-            post(speak::next_speaker),
-        )
-        .route(
-            "/xrpc/com.example.wiki.joinSpeakerList",
+            "/xrpc/wiki.radikal.joinSpeakerList",
             post(speak::join_speaker_list),
         )
         .route(
-            "/xrpc/com.example.wiki.leaveSpeakerList",
+            "/xrpc/wiki.radikal.leaveSpeakerList",
             post(speak::leave_speaker_list),
         )
+        .route("/xrpc/wiki.radikal.moveSpeaker", post(speak::move_speaker))
         .route(
-            "/xrpc/com.example.wiki.moveSpeaker",
-            post(speak::move_speaker),
-        )
-        .route(
-            "/xrpc/com.example.wiki.claimMembership",
+            "/xrpc/wiki.radikal.claimMembership",
             post(xrpc::claim_membership),
         )
         .route(
-            "/xrpc/com.example.wiki.getMemberClaimLink",
+            "/xrpc/wiki.radikal.getMemberClaimLink",
             get(xrpc::get_member_claim_link),
         )
         // The write procedures (the session's DID authors content).
         .route(
-            "/xrpc/com.example.wiki.createDocument",
+            "/xrpc/wiki.radikal.createDocument",
             post(xrpc::create_document),
         )
         .route(
-            "/xrpc/com.example.wiki.updateDocument",
+            "/xrpc/wiki.radikal.updateDocument",
             post(xrpc::update_document),
         )
         .route(
-            "/xrpc/com.example.wiki.setDocumentAuthors",
+            "/xrpc/wiki.radikal.setDocumentAuthors",
             post(xrpc::set_document_authors),
         )
+        .route("/xrpc/wiki.radikal.moveDocument", post(xrpc::move_document))
         .route(
-            "/xrpc/com.example.wiki.moveDocument",
-            post(xrpc::move_document),
-        )
-        .route(
-            "/xrpc/com.example.wiki.createCanvas",
+            "/xrpc/wiki.radikal.createCanvas",
             post(canvas::create_canvas),
         )
-        .route("/xrpc/com.example.wiki.getCanvas", get(canvas::get_canvas))
-        .route("/xrpc/com.example.wiki.paintCell", post(canvas::paint_cell))
+        .route("/xrpc/wiki.radikal.getCanvas", get(canvas::get_canvas))
+        .route("/xrpc/wiki.radikal.paintCell", post(canvas::paint_cell))
         .route(
-            "/xrpc/com.example.wiki.setCanvasOpen",
+            "/xrpc/wiki.radikal.setCanvasOpen",
             post(canvas::set_canvas_open),
         )
         .route(
-            "/xrpc/com.example.wiki.createContext",
+            "/xrpc/wiki.radikal.createContext",
             post(context::create_context),
         )
         .route(
-            "/xrpc/com.example.wiki.updateContext",
+            "/xrpc/wiki.radikal.updateContext",
             post(context::update_context),
         )
         .route(
-            "/xrpc/com.example.wiki.deleteContext",
+            "/xrpc/wiki.radikal.deleteContext",
             post(context::delete_context),
         )
         .route(
-            "/xrpc/com.example.wiki.restoreContext",
+            "/xrpc/wiki.radikal.restoreContext",
             post(context::restore_context),
         )
+        .route("/xrpc/wiki.radikal.copyDocument", post(tree::copy_document))
         .route(
-            "/xrpc/com.example.wiki.copyDocument",
-            post(tree::copy_document),
-        )
-        .route(
-            "/xrpc/com.example.wiki.purgeDocument",
+            "/xrpc/wiki.radikal.purgeDocument",
             post(tree::purge_document),
         )
         .route(
-            "/xrpc/com.example.wiki.deleteDocument",
+            "/xrpc/wiki.radikal.deleteDocument",
             post(xrpc::delete_document),
         )
         .route(
-            "/xrpc/com.example.wiki.restoreDocument",
+            "/xrpc/wiki.radikal.restoreDocument",
             post(xrpc::restore_document),
         )
+        .route("/xrpc/wiki.radikal.listDeleted", get(xrpc::list_deleted))
+        .route("/xrpc/wiki.radikal.postComment", post(xrpc::post_comment))
         .route(
-            "/xrpc/com.example.wiki.listDeleted",
-            get(xrpc::list_deleted),
-        )
-        .route(
-            "/xrpc/com.example.wiki.postComment",
-            post(xrpc::post_comment),
-        )
-        .route(
-            "/xrpc/com.example.wiki.deleteComment",
+            "/xrpc/wiki.radikal.deleteComment",
             post(comment::delete_comment),
         )
         .route(
-            "/xrpc/com.example.wiki.restoreComment",
+            "/xrpc/wiki.radikal.restoreComment",
             post(comment::restore_comment),
         )
         .route(
-            "/xrpc/com.example.wiki.purgeComment",
+            "/xrpc/wiki.radikal.purgeComment",
             post(comment::purge_comment),
         )
+        .route("/xrpc/wiki.radikal.addReaction", post(xrpc::add_reaction))
         .route(
-            "/xrpc/com.example.wiki.addReaction",
-            post(xrpc::add_reaction),
-        )
-        .route(
-            "/xrpc/com.example.wiki.removeReaction",
+            "/xrpc/wiki.radikal.removeReaction",
             post(xrpc::remove_reaction),
         )
-        .route("/xrpc/com.example.wiki.openPoll", post(poll::open_poll))
-        .route("/xrpc/com.example.wiki.closePoll", post(poll::close_poll))
-        .route("/xrpc/com.example.wiki.getPoll", get(poll::get_poll))
-        .route("/xrpc/com.example.wiki.listPolls", get(poll::list_polls))
-        .route("/xrpc/com.example.wiki.getBoard", get(poll::get_board))
+        .route("/xrpc/wiki.radikal.openPoll", post(poll::open_poll))
+        .route("/xrpc/wiki.radikal.closePoll", post(poll::close_poll))
+        .route("/xrpc/wiki.radikal.getPoll", get(poll::get_poll))
+        .route("/xrpc/wiki.radikal.listPolls", get(poll::list_polls))
+        .route("/xrpc/wiki.radikal.getBoard", get(poll::get_board))
         .route(
-            "/xrpc/com.example.wiki.getBoardEntry",
+            "/xrpc/wiki.radikal.getBoardEntry",
             get(poll::get_board_entry),
         )
         .route(
-            "/xrpc/com.example.wiki.issueBallotTokens",
+            "/xrpc/wiki.radikal.issueBallotTokens",
             post(poll::issue_ballot_tokens),
         )
-        .route("/xrpc/com.example.wiki.castBallot", post(poll::cast_ballot))
+        .route("/xrpc/wiki.radikal.castBallot", post(poll::cast_ballot))
         .route(
-            "/xrpc/com.example.wiki.castOpenBallot",
+            "/xrpc/wiki.radikal.castOpenBallot",
             post(poll::cast_open_ballot),
         )
         .route(
-            "/xrpc/com.example.wiki.submitFeedback",
+            "/xrpc/wiki.radikal.submitFeedback",
             post(feedback::submit_feedback),
         )
         .route(
-            "/xrpc/com.example.wiki.listFeedback",
+            "/xrpc/wiki.radikal.listFeedback",
             get(feedback::list_feedback),
         )
         .route(
-            "/xrpc/com.example.wiki.deleteFeedback",
+            "/xrpc/wiki.radikal.deleteFeedback",
             post(feedback::delete_feedback),
         )
         .route(
-            "/xrpc/com.example.wiki.subscribePush",
+            "/xrpc/wiki.radikal.subscribePush",
             post(push::subscribe_push),
         )
         .route(
-            "/xrpc/com.example.wiki.unsubscribePush",
+            "/xrpc/wiki.radikal.unsubscribePush",
             post(push::unsubscribe_push),
         )
         .route(
-            "/xrpc/com.example.wiki.notifyContext",
+            "/xrpc/wiki.radikal.notifyContext",
             post(push::notify_context),
         )
+        .route("/xrpc/wiki.radikal.notifyReply", post(push::notify_reply))
         .route(
-            "/xrpc/com.example.wiki.notifyReply",
-            post(push::notify_reply),
-        )
-        .route(
-            "/xrpc/com.example.wiki.shareToBluesky",
+            "/xrpc/wiki.radikal.shareToBluesky",
             post(share::share_to_bluesky),
         )
         .route(
-            "/xrpc/com.example.wiki.renderMetafile",
+            "/xrpc/wiki.radikal.renderMetafile",
             post(metafile::render_metafile),
         )
-        .route(
-            "/xrpc/com.example.wiki.parseRoster",
-            post(roster::parse_roster),
-        )
+        .route("/xrpc/wiki.radikal.parseRoster", post(roster::parse_roster))
         .route("/blob/{id}", get(blob::serve_blob))
-        .route("/xrpc/com.example.wiki.uploadBlob", post(blob::upload_blob))
-        .route(
-            "/xrpc/com.example.wiki.getBlobLink",
-            get(blob::get_blob_link),
-        )
-        .route("/xrpc/com.example.wiki.deleteBlob", post(blob::delete_blob))
+        .route("/xrpc/wiki.radikal.uploadBlob", post(blob::upload_blob))
+        .route("/xrpc/wiki.radikal.getBlobLink", get(blob::get_blob_link))
+        .route("/xrpc/wiki.radikal.deleteBlob", post(blob::delete_blob))
         .with_state(state)
 }
 
@@ -562,7 +493,7 @@ mod tests {
         app.oneshot(
             Request::builder()
                 .method("OPTIONS")
-                .uri("/xrpc/com.example.wiki.createSession")
+                .uri("/xrpc/wiki.radikal.createSession")
                 .header("origin", origin)
                 .header("access-control-request-method", "POST")
                 .header(

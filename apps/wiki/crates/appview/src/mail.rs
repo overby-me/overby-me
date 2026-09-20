@@ -191,7 +191,7 @@ pub struct SendInvitationBody {
     pub member: String,
 }
 
-/// `com.example.wiki.sendInvitation` (procedure): an owner has a seat's claim
+/// `wiki.radikal.sendInvitation` (procedure): an owner has a seat's claim
 /// link mailed to the address on it, again or for the first time.
 pub async fn send_invitation(
     State(state): State<AppState>,
@@ -406,8 +406,8 @@ mod tests {
         inbox.lock().expect("inbox").clone()
     }
 
-    const INVITE: &str = "/xrpc/com.example.wiki.inviteMembers";
-    const SEND: &str = "/xrpc/com.example.wiki.sendInvitation";
+    const INVITE: &str = "/xrpc/wiki.radikal.inviteMembers";
+    const SEND: &str = "/xrpc/wiki.radikal.sendInvitation";
 
     #[test]
     fn an_invitation_says_where_to_and_how_in_both_languages() {
@@ -483,7 +483,7 @@ mod tests {
 
         // The roster says when, to an owner and to nobody else.
         let bob = token_for(&state, "did:plc:bob").await;
-        let list = "/xrpc/com.example.wiki.listMembers?context=c9&q=Bo";
+        let list = "/xrpc/wiki.radikal.listMembers?context=c9&q=Bo";
         let (_, owners) = get_as(router(state.clone()), list, &alice).await;
         assert!(owners["members"][0]["mailed_at"].is_string(), "{owners}");
         let (_, members) = get_as(router(state.clone()), list, &bob).await;

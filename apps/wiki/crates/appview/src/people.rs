@@ -40,7 +40,7 @@ pub struct DidParam {
     pub did: String,
 }
 
-/// `com.example.wiki.getProfile`: who a DID is, for a profile page.
+/// `wiki.radikal.getProfile`: who a DID is, for a profile page.
 pub async fn get_profile(
     State(state): State<AppState>,
     _caller: Caller,
@@ -70,7 +70,7 @@ pub struct SearchParams {
     pub contexts: bool,
 }
 
-/// `com.example.wiki.searchPeople`: the people whose name or handle contains
+/// `wiki.radikal.searchPeople`: the people whose name or handle contains
 /// the query, and with `contexts` the groups the caller may read that do. For a
 /// picker: ten at most, and nothing for fewer than two letters.
 pub async fn search_people(
@@ -179,7 +179,7 @@ mod tests {
         let find = |q: &'static str| {
             let (state, bob) = (state.clone(), bob.clone());
             async move {
-                let uri = format!("/xrpc/com.example.wiki.searchPeople?q={q}&contexts=true");
+                let uri = format!("/xrpc/wiki.radikal.searchPeople?q={q}&contexts=true");
                 get_as(router(state), &uri, &bob).await.1
             }
         };
@@ -208,7 +208,7 @@ mod tests {
         let mallory = token_for(&state, "did:plc:mallory").await;
         let (_, outside) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.searchPeople?q=group&contexts=true",
+            "/xrpc/wiki.radikal.searchPeople?q=group&contexts=true",
             &mallory,
         )
         .await;
@@ -223,7 +223,7 @@ mod tests {
     async fn who_is_known_here_is_told_to_the_signed_in_only() {
         let state = seeded_state().await;
         let bob = token_for(&state, "did:plc:bob").await;
-        let profile = "/xrpc/com.example.wiki.getProfile?did=did:plc:alice";
+        let profile = "/xrpc/wiki.radikal.getProfile?did=did:plc:alice";
         let (status, v) = get_as(router(state.clone()), profile, &bob).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(v["display_name"], "Alice");
@@ -231,12 +231,12 @@ mod tests {
             get(router(state.clone()), profile).await.0,
             StatusCode::UNAUTHORIZED
         );
-        let search = "/xrpc/com.example.wiki.searchPeople?q=alice";
+        let search = "/xrpc/wiki.radikal.searchPeople?q=alice";
         assert_eq!(
             get(router(state.clone()), search).await.0,
             StatusCode::UNAUTHORIZED
         );
-        let nobody = "/xrpc/com.example.wiki.getProfile?did=did:plc:nobody";
+        let nobody = "/xrpc/wiki.radikal.getProfile?did=did:plc:nobody";
         assert_eq!(
             get_as(router(state.clone()), nobody, &bob).await.0,
             StatusCode::NOT_FOUND

@@ -636,21 +636,21 @@ pub(crate) mod tests {
         assert_eq!(apply(&state, ALICE, &account).await.expect("apply"), 2);
 
         let read = |uri: &'static str| get_as(router(state.clone()), uri, &alice);
-        let (status, v) = read("/xrpc/com.example.wiki.getNode?path=hb/forslag_1").await;
+        let (status, v) = read("/xrpc/wiki.radikal.getNode?path=hb/forslag_1").await;
         assert_eq!(status, StatusCode::OK, "{v}");
         assert_eq!(v["viewer"]["is_context_owner"], true, "{v}");
 
         // She runs the site, as she did: its welcome is hers to read and change,
         // and the reports are hers to see.
-        let (status, v) = read("/xrpc/com.example.wiki.getNode?path=").await;
+        let (status, v) = read("/xrpc/wiki.radikal.getNode?path=").await;
         assert_eq!(status, StatusCode::OK, "{v}");
         assert_eq!(v["node"]["name"], "Radikal Ungdom");
         assert_eq!(v["node"]["content"][0]["children"][0]["text"], "Velkommen");
         assert_eq!(v["children"][0]["path"], "hb", "{v}");
-        let (status, v) = read("/xrpc/com.example.wiki.listFeedback").await;
+        let (status, v) = read("/xrpc/wiki.radikal.listFeedback").await;
         assert_eq!(status, StatusCode::OK, "{v}");
 
-        let (status, v) = read("/xrpc/com.example.wiki.getPoll?id=p1").await;
+        let (status, v) = read("/xrpc/wiki.radikal.getPoll?id=p1").await;
         assert_eq!(status, StatusCode::OK, "{v}");
         assert_eq!(
             (&v["open"], &v["question"]),
@@ -663,7 +663,7 @@ pub(crate) mod tests {
             "{v}"
         );
 
-        let (status, v) = read("/xrpc/com.example.wiki.getCanvas?id=cv").await;
+        let (status, v) = read("/xrpc/wiki.radikal.getCanvas?id=cv").await;
         assert_eq!(status, StatusCode::OK, "{v}");
         assert_eq!(v["cells"].as_array().expect("cells").len(), 2, "{v}");
         assert_eq!(
@@ -672,7 +672,7 @@ pub(crate) mod tests {
             "who is gone painted as nobody: {v}"
         );
 
-        let (status, v) = read("/xrpc/com.example.wiki.getComments?on=mo").await;
+        let (status, v) = read("/xrpc/wiki.radikal.getComments?on=mo").await;
         assert_eq!(status, StatusCode::OK, "{v}");
         assert_eq!(v["comments"][0]["text"], "Godt forslag", "{v}");
         assert_eq!(
@@ -680,12 +680,12 @@ pub(crate) mod tests {
             1,
             "what she had deleted came back: {v}"
         );
-        let (_, v) = read("/xrpc/com.example.wiki.listDeleted?context=hb").await;
+        let (_, v) = read("/xrpc/wiki.radikal.listDeleted?context=hb").await;
         assert_eq!(
             v["deleted"][0]["title"], "Fortrudt",
             "it is in the bin, as it was: {v}"
         );
-        let (_, v) = read("/xrpc/com.example.wiki.getReactions?subject=k1").await;
+        let (_, v) = read("/xrpc/wiki.radikal.getReactions?subject=k1").await;
         assert_eq!(v["reactions"][0]["emoji"], "🎉", "{v}");
 
         let conn = state.db.acquire().await.expect("conn");

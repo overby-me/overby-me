@@ -1,0 +1,54 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.subscribePush",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "This device rings for the caller from now on. A subscription belongs to the device, so whoever signs in on it next takes it over. The fields are what `PushManager.subscribe` hands back, its keys base64url without padding.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["endpoint", "p256dh", "auth"],
+					"properties": {
+						"endpoint": {
+							"type": "string",
+							"format": "uri",
+							"description": "https, on a push service's DNS name."
+						},
+						"p256dh": {
+							"type": "string",
+							"description": "The device's public key: a 65-byte uncompressed P-256 point."
+						},
+						"auth": {
+							"type": "string",
+							"description": "The device's 16-byte auth secret."
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["ok"],
+					"properties": {
+						"ok": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "Not a push service's endpoint, or keys of the wrong size."
+				}
+			]
+		}
+	}
+}

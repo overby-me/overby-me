@@ -85,7 +85,7 @@ def main [dir: path, --each: int = 6] {
     if $said == null { log-fail "the dev AppView did not start"; cleanup "" [$api_pid]; exit 2 }
 
     # The returned account with the most seats has the most to show.
-    let api = $"($said.url)/xrpc/com.example.wiki"
+    let api = $"($said.url)/xrpc/wiki.radikal"
     let seated = ($said.sessions | transpose did token | each { |p|
         let mine = (http get --headers {authorization: $"Bearer ($p.token)"} $"($api).listContexts?scope=mine")
         {did: $p.did, token: $p.token, contexts: ($mine.contexts | get id)}

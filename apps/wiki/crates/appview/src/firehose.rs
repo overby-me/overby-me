@@ -21,20 +21,20 @@ use tokio_tungstenite::tungstenite::Message;
 
 /// The wiki record collections the consumer subscribes to and acts on.
 pub const WIKI_COLLECTIONS: &[&str] = &[
-    "com.example.wiki.group",
-    "com.example.wiki.event",
-    "com.example.wiki.post",
-    "com.example.wiki.comment",
-    "com.example.wiki.resolution",
-    "com.example.wiki.reaction",
+    "wiki.radikal.group",
+    "wiki.radikal.event",
+    "wiki.radikal.post",
+    "wiki.radikal.comment",
+    "wiki.radikal.resolution",
+    "wiki.radikal.reaction",
 ];
 
-const GROUP_COLLECTION: &str = "com.example.wiki.group";
-const EVENT_COLLECTION: &str = "com.example.wiki.event";
-const POST_COLLECTION: &str = "com.example.wiki.post";
-const COMMENT_COLLECTION: &str = "com.example.wiki.comment";
-const RESOLUTION_COLLECTION: &str = "com.example.wiki.resolution";
-const REACTION_COLLECTION: &str = "com.example.wiki.reaction";
+const GROUP_COLLECTION: &str = "wiki.radikal.group";
+const EVENT_COLLECTION: &str = "wiki.radikal.event";
+const POST_COLLECTION: &str = "wiki.radikal.post";
+const COMMENT_COLLECTION: &str = "wiki.radikal.comment";
+const RESOLUTION_COLLECTION: &str = "wiki.radikal.resolution";
+const REACTION_COLLECTION: &str = "wiki.radikal.reaction";
 
 /// Live firehose status for `/healthz`: whether the socket is connected and how
 /// many events have been seen (a stalled firehose is connected-but-not-advancing,
@@ -330,7 +330,7 @@ mod tests {
 
     fn post_event(op: &str, rkey: &str, text: &str) -> String {
         format!(
-            r#"{{"did":"did:plc:alice","kind":"commit","commit":{{"operation":"{op}","collection":"com.example.wiki.post","rkey":"{rkey}","record":{{"$type":"com.example.wiki.post","text":"{text}","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
+            r#"{{"did":"did:plc:alice","kind":"commit","commit":{{"operation":"{op}","collection":"wiki.radikal.post","rkey":"{rkey}","record":{{"$type":"wiki.radikal.post","text":"{text}","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
         )
     }
 
@@ -349,7 +349,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn post_create_materializes_and_returns_a_delta() {
         let (store, db) = store_with_db().await;
-        let uri = "at://did:plc:alice/com.example.wiki.post/abc";
+        let uri = "at://did:plc:alice/wiki.radikal.post/abc";
 
         let delta = ingest(&store, &post_event("create", "abc", "Hej verden"))
             .await
@@ -380,7 +380,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn post_update_then_delete_are_idempotent() {
         let (store, db) = store_with_db().await;
-        let uri = "at://did:plc:alice/com.example.wiki.post/abc";
+        let uri = "at://did:plc:alice/wiki.radikal.post/abc";
 
         ingest(&store, &post_event("create", "abc", "first"))
             .await
@@ -418,10 +418,10 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn comment_is_broadcast_but_not_yet_materialized() {
         let (store, db) = store_with_db().await;
-        let raw = r#"{"did":"did:plc:alice","kind":"commit","commit":{"operation":"create","collection":"com.example.wiki.comment","rkey":"c1","record":{"text":"agreed","createdAt":"2026-07-16T12:00:00.000Z","subject":{"uri":"at://did:plc:org/com.example.wiki.resolution/r1","cid":"bafy"}}}}"#;
+        let raw = r#"{"did":"did:plc:alice","kind":"commit","commit":{"operation":"create","collection":"wiki.radikal.comment","rkey":"c1","record":{"text":"agreed","createdAt":"2026-07-16T12:00:00.000Z","subject":{"uri":"at://did:plc:org/wiki.radikal.resolution/r1","cid":"bafy"}}}}"#;
         // A delta fires (clients refetch)...
         let delta = ingest(&store, raw).await.unwrap().expect("comment delta");
-        assert_eq!(delta.collection, "com.example.wiki.comment");
+        assert_eq!(delta.collection, "wiki.radikal.comment");
         // ...but the comment table stays empty (depth-3: needs subject->context).
         let conn = db.acquire().await.unwrap();
         let mut c = conn
@@ -434,7 +434,7 @@ mod tests {
 
     fn reaction_event(op: &str, rkey: &str, emoji: &str, subject: &str) -> String {
         format!(
-            r#"{{"did":"did:plc:alice","kind":"commit","commit":{{"operation":"{op}","collection":"com.example.wiki.reaction","rkey":"{rkey}","record":{{"$type":"com.example.wiki.reaction","subject":{{"uri":"{subject}","cid":"bafy"}},"emoji":"{emoji}","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
+            r#"{{"did":"did:plc:alice","kind":"commit","commit":{{"operation":"{op}","collection":"wiki.radikal.reaction","rkey":"{rkey}","record":{{"$type":"wiki.radikal.reaction","subject":{{"uri":"{subject}","cid":"bafy"}},"emoji":"{emoji}","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
         )
     }
 
@@ -447,15 +447,15 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn reaction_materializes_dedups_and_deletes() {
         let (store, db) = store_with_db().await;
-        let subject = "at://did:plc:org/com.example.wiki.comment/k1";
-        let uri = "at://did:plc:alice/com.example.wiki.reaction/r1";
+        let subject = "at://did:plc:org/wiki.radikal.comment/k1";
+        let uri = "at://did:plc:alice/wiki.radikal.reaction/r1";
 
         // A create materializes the reaction and returns a delta.
         let delta = ingest(&store, &reaction_event("create", "r1", "👍", subject))
             .await
             .unwrap()
             .expect("reaction delta");
-        assert_eq!(delta.collection, "com.example.wiki.reaction");
+        assert_eq!(delta.collection, "wiki.radikal.reaction");
         assert_eq!(delta.uri, uri);
         assert_eq!(
             count_reactions(&db, "SELECT count(*) FROM reaction WHERE id = ?1", uri).await,
@@ -509,12 +509,12 @@ mod tests {
                 r#"{{"did":"did:plc:org","kind":"commit","commit":{{"operation":"create","collection":"{coll}","rkey":"{rkey}","record":{{"name":"{name}","slug":"{slug}","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
             )
         };
-        ingest(&store, &rec("com.example.wiki.group", "g1", "Reds", "reds"))
+        ingest(&store, &rec("wiki.radikal.group", "g1", "Reds", "reds"))
             .await
             .unwrap();
         ingest(
             &store,
-            &rec("com.example.wiki.event", "e1", "Congress", "congress"),
+            &rec("wiki.radikal.event", "e1", "Congress", "congress"),
         )
         .await
         .unwrap();
@@ -522,7 +522,7 @@ mod tests {
         let mut rows = conn
             .query(
                 "SELECT kind, name FROM context WHERE id = ?1",
-                ["at://did:plc:org/com.example.wiki.group/g1"],
+                ["at://did:plc:org/wiki.radikal.group/g1"],
             )
             .await
             .unwrap();
@@ -532,7 +532,7 @@ mod tests {
         let mut e = conn
             .query(
                 "SELECT kind FROM context WHERE id = ?1",
-                ["at://did:plc:org/com.example.wiki.event/e1"],
+                ["at://did:plc:org/wiki.radikal.event/e1"],
             )
             .await
             .unwrap();
@@ -555,7 +555,7 @@ mod tests {
         .unwrap();
         let comment = |rkey: &str, subject: &str| {
             format!(
-                r#"{{"did":"did:plc:alice","kind":"commit","commit":{{"operation":"create","collection":"com.example.wiki.comment","rkey":"{rkey}","record":{{"subject":{{"uri":"{subject}","cid":"bafy"}},"text":"Agreed","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
+                r#"{{"did":"did:plc:alice","kind":"commit","commit":{{"operation":"create","collection":"wiki.radikal.comment","rkey":"{rkey}","record":{{"subject":{{"uri":"{subject}","cid":"bafy"}},"text":"Agreed","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
             )
         };
         // Subject is the materialized document -> the comment lands with its context.
@@ -563,7 +563,7 @@ mod tests {
         let mut rows = conn
             .query(
                 "SELECT on_id, context_id FROM comment WHERE id = ?1",
-                ["at://did:plc:alice/com.example.wiki.comment/k1"],
+                ["at://did:plc:alice/wiki.radikal.comment/k1"],
             )
             .await
             .unwrap();
@@ -586,8 +586,8 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn resolution_materializes_as_a_document() {
         let (store, db) = store_with_db().await;
-        let raw = r#"{"did":"did:plc:org","kind":"commit","commit":{"operation":"create","collection":"com.example.wiki.resolution","rkey":"r1","record":{"title":"Vedtaegt","status":"carried","context":"at://did:plc:org/com.example.wiki.group/g1","body":"the text","createdAt":"2026-07-16T12:00:00.000Z"}}}"#;
-        let uri = "at://did:plc:org/com.example.wiki.resolution/r1";
+        let raw = r#"{"did":"did:plc:org","kind":"commit","commit":{"operation":"create","collection":"wiki.radikal.resolution","rkey":"r1","record":{"title":"Vedtaegt","status":"carried","context":"at://did:plc:org/wiki.radikal.group/g1","body":"the text","createdAt":"2026-07-16T12:00:00.000Z"}}}"#;
+        let uri = "at://did:plc:org/wiki.radikal.resolution/r1";
         let conn = db.acquire().await.unwrap();
 
         // Its group is not in the view yet: broadcast, not materialized.
@@ -606,7 +606,7 @@ mod tests {
         );
         drop(orphan);
 
-        let group = r#"{"did":"did:plc:org","kind":"commit","commit":{"operation":"create","collection":"com.example.wiki.group","rkey":"g1","record":{"name":"Org","slug":"org","createdAt":"2026-07-16T11:00:00.000Z"}}}"#;
+        let group = r#"{"did":"did:plc:org","kind":"commit","commit":{"operation":"create","collection":"wiki.radikal.group","rkey":"g1","record":{"name":"Org","slug":"org","createdAt":"2026-07-16T11:00:00.000Z"}}}"#;
         ingest(&store, group).await.unwrap();
         ingest(&store, raw).await.unwrap();
         let mut rows = conn
@@ -621,7 +621,7 @@ mod tests {
         assert_eq!(row.get::<String>(1).unwrap(), "Vedtaegt");
         assert_eq!(
             row.get::<String>(2).unwrap(),
-            "at://did:plc:org/com.example.wiki.group/g1"
+            "at://did:plc:org/wiki.radikal.group/g1"
         );
         let mut a = conn
             .query(
@@ -641,10 +641,10 @@ mod tests {
                 .map(|uri| format!(r#","parent":{{"uri":"{uri}"}}"#))
                 .unwrap_or_default();
             format!(
-                r#"{{"did":"did:plc:org","kind":"commit","commit":{{"operation":"create","collection":"com.example.wiki.{collection}","rkey":"{rkey}","record":{{"name":"N","slug":"{slug}","createdAt":"2026-07-16T11:00:00.000Z"{parent}}}}}}}"#
+                r#"{{"did":"did:plc:org","kind":"commit","commit":{{"operation":"create","collection":"wiki.radikal.{collection}","rkey":"{rkey}","record":{{"name":"N","slug":"{slug}","createdAt":"2026-07-16T11:00:00.000Z"{parent}}}}}}}"#
             )
         };
-        let group_uri = concat!("at:", "//did:plc:org/com.example.wiki.group/g1");
+        let group_uri = concat!("at:", "//did:plc:org/wiki.radikal.group/g1");
         ingest(&store, &context("group", "g1", "org", None))
             .await
             .expect("group");
@@ -652,7 +652,7 @@ mod tests {
             .await
             .expect("event");
         let resolution = format!(
-            r#"{{"did":"did:plc:org","kind":"commit","commit":{{"operation":"create","collection":"com.example.wiki.resolution","rkey":"r1","record":{{"title":"Vedtaegt","status":"carried","context":"{group_uri}","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
+            r#"{{"did":"did:plc:org","kind":"commit","commit":{{"operation":"create","collection":"wiki.radikal.resolution","rkey":"r1","record":{{"title":"Vedtaegt","status":"carried","context":"{group_uri}","createdAt":"2026-07-16T12:00:00.000Z"}}}}}}"#
         );
         ingest(&store, &resolution).await.expect("resolution");
 
@@ -678,8 +678,8 @@ mod tests {
     fn subscribe_url_appends_wanted_collections() {
         let u = subscribe_url("wss://jetstream.example/subscribe");
         assert!(u.starts_with("wss://jetstream.example/subscribe?wantedCollections="));
-        assert!(u.contains("com.example.wiki.post"));
-        assert!(u.contains("com.example.wiki.comment"));
+        assert!(u.contains("wiki.radikal.post"));
+        assert!(u.contains("wiki.radikal.comment"));
         // A base that already has a query string uses '&'.
         assert!(subscribe_url("wss://x/y?foo=1").contains("?foo=1&wantedCollections="));
     }

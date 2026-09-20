@@ -52,7 +52,7 @@ fn post_record(text: &str, url: Option<&str>, title: &str, created_at: &str) -> 
     record
 }
 
-/// `com.example.wiki.shareToBluesky` (procedure): post to the caller's own
+/// `wiki.radikal.shareToBluesky` (procedure): post to the caller's own
 /// account. Only a page of this app can be the card: what is posted carries the
 /// member's name, and must not be pointed elsewhere by whoever crafted the call.
 pub async fn share_to_bluesky(
@@ -140,7 +140,7 @@ mod tests {
         let mut state = seeded_state().await;
         state.config.frontend_origins = vec!["https://wiki.example".to_string()];
         let bob = token_for(&state, "did:plc:bob").await;
-        let uri = "/xrpc/com.example.wiki.shareToBluesky";
+        let uri = "/xrpc/wiki.radikal.shareToBluesky";
         for (why, body) in [
             ("no text", json!({"text": "  "})),
             ("too long", json!({"text": "x".repeat(301)})),

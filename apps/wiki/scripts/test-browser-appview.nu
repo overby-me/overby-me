@@ -23,7 +23,7 @@ const API_PORT = 8136
 
 def wd [] { $"http://127.0.0.1:($WD_PORT)" }
 def app [] { $"http://127.0.0.1:($SERVE_PORT)" }
-def api [] { $"http://127.0.0.1:($API_PORT)/xrpc/com.example.wiki" }
+def api [] { $"http://127.0.0.1:($API_PORT)/xrpc/wiki.radikal" }
 
 def log-info [...msg: string] { print -e $"(ansi blue_bold)[info](ansi reset)  ($msg | str join ' ')" }
 def log-ok [...msg: string] { print -e $"(ansi green_bold)[pass](ansi reset)  ($msg | str join ' ')" }

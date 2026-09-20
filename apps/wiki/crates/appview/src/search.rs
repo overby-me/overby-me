@@ -260,7 +260,7 @@ fn pattern(term: &str) -> String {
     escaped
 }
 
-/// `com.example.wiki.search`: documents and contexts the caller may read, by
+/// `wiki.radikal.search`: documents and contexts the caller may read, by
 /// what they are called and what they say. Every word of the query has to be
 /// found, in any order. What is CALLED the query comes before what mentions it,
 /// and that is decided before the cut, so a title match is never crowded out.
@@ -410,7 +410,7 @@ mod tests {
     }
 
     async fn hits(state: &AppState, query: &str, who: Option<&str>) -> Vec<serde_json::Value> {
-        let uri = format!("/xrpc/com.example.wiki.search?{query}");
+        let uri = format!("/xrpc/wiki.radikal.search?{query}");
         let (status, v) = match who {
             Some(who) => get_as(router(state.clone()), &uri, who).await,
             None => get(router(state.clone()), &uri).await,
@@ -433,7 +433,7 @@ mod tests {
             async move {
                 post(
                     router(state),
-                    "/xrpc/com.example.wiki.createDocument",
+                    "/xrpc/wiki.radikal.createDocument",
                     Some(&alice),
                     body,
                 )
@@ -517,7 +517,7 @@ mod tests {
         });
         let (status, v) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.updateDocument",
+            "/xrpc/wiki.radikal.updateDocument",
             Some(&alice),
             edit,
         )

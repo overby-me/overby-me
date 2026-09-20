@@ -310,7 +310,7 @@ mod tests {
     async fn signing_in_with_the_address_takes_the_old_account_over() {
         let state = carried().await;
         let carol = token_for(&state, CAROL).await;
-        let closed = "/xrpc/com.example.wiki.getNode?path=closed/secret_minutes";
+        let closed = "/xrpc/wiki.radikal.getNode?path=closed/secret_minutes";
         let (status, _) = get_as(router(state.clone()), closed, &carol).await;
         assert_eq!(status, StatusCode::NOT_FOUND, "she is nobody here yet");
 
@@ -486,7 +486,7 @@ mod tests {
         let alice = token_for(&state, "did:plc:alice").await;
         let bob = token_for(&state, "did:plc:bob").await;
         let carol = token_for(&state, CAROL).await;
-        let link = "/xrpc/com.example.wiki.getMemberClaimLink?member=seat-9";
+        let link = "/xrpc/wiki.radikal.getMemberClaimLink?member=seat-9";
 
         let (status, _) = get_as(router(state.clone()), link, &bob).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "a member is no owner");
@@ -505,7 +505,7 @@ mod tests {
             "one link, however often asked for"
         );
 
-        let claim = "/xrpc/com.example.wiki.claimMembership";
+        let claim = "/xrpc/wiki.radikal.claimMembership";
         let (status, v) = post(
             router(state.clone()),
             claim,

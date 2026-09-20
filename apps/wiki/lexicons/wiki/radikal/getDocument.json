@@ -1,0 +1,24 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.getDocument",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "Fetch a content node (document / folder / file / proposal) by id, with its authors. Serves only what the caller may read; a document they may not read answers NotFound, exactly as a missing one does.",
+			"parameters": {
+				"type": "params",
+				"required": ["id"],
+				"properties": {
+					"id": { "type": "string", "description": "The document id." }
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": { "type": "ref", "ref": "wiki.radikal.defs#documentView" }
+			},
+			"errors": [
+				{ "name": "NotFound", "description": "No document has that id." }
+			]
+		}
+	}
+}

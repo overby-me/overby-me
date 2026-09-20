@@ -100,7 +100,7 @@ pkgs.testers.nixosTest {
     machine.fail("systemctl is-active wiki-appview.service")
     machine.succeed("systemctl start wiki-appview.service")
     machine.wait_for_open_port(8080)
-    xrpc = "http://localhost:8080/xrpc/com.example.wiki"
+    xrpc = "http://localhost:8080/xrpc/wiki.radikal"
     page = machine.succeed(f"curl -sf '{xrpc}.getNode?path=open/minutes'")
     assert "The meeting was opened" in page, page
     agenda = machine.succeed("curl -sf http://localhost:8080/blob/0f000000-0000-4000-8000-0000000000f1")

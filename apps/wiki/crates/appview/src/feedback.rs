@@ -166,7 +166,7 @@ pub struct SubmitBody {
     pub image: Option<String>,
 }
 
-/// `com.example.wiki.submitFeedback` (procedure): file a report. A session is
+/// `wiki.radikal.submitFeedback` (procedure): file a report. A session is
 /// taken if there is one and not asked for: someone who cannot sign in has the
 /// most to report.
 pub async fn submit_feedback(
@@ -296,7 +296,7 @@ pub struct FeedbackView {
     pub updated_at: String,
 }
 
-/// `com.example.wiki.listFeedback`: every report, for an owner of the site; for
+/// `wiki.radikal.listFeedback`: every report, for an owner of the site; for
 /// anyone else, the ones they sent. Newest sighting first, with the profile
 /// behind every DID named.
 pub async fn list_feedback(State(state): State<AppState>, Caller { did }: Caller) -> Response {
@@ -377,7 +377,7 @@ pub struct DeleteBody {
     pub id: String,
 }
 
-/// `com.example.wiki.deleteFeedback` (procedure): an owner of the site clears a
+/// `wiki.radikal.deleteFeedback` (procedure): an owner of the site clears a
 /// report away.
 pub async fn delete_feedback(
     State(state): State<AppState>,
@@ -419,8 +419,8 @@ mod tests {
     use crate::xrpc::tests::{get_as, join_as, post, seeded_state, token_for};
     use serde_json::json;
 
-    const SUBMIT: &str = "/xrpc/com.example.wiki.submitFeedback";
-    const LIST: &str = "/xrpc/com.example.wiki.listFeedback";
+    const SUBMIT: &str = "/xrpc/wiki.radikal.submitFeedback";
+    const LIST: &str = "/xrpc/wiki.radikal.listFeedback";
 
     /// The seeded state with a site that carol owns.
     async fn state() -> AppState {
@@ -534,7 +534,7 @@ mod tests {
             "{everything}"
         );
 
-        let delete = "/xrpc/com.example.wiki.deleteFeedback";
+        let delete = "/xrpc/wiki.radikal.deleteFeedback";
         let id = mine[0]["id"].clone();
         let (status, _) = post(router(state.clone()), delete, Some(&bob), json!({"id": id})).await;
         assert_eq!(

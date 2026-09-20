@@ -156,7 +156,7 @@ before spaces are released.
   for every ballot and a signed close-out.
 - **Two record names, one a prefix of the other.** The mirror told a poll's
   announcement from its close-out by whether the address contained
-  `com.example.wiki.poll`, which `com.example.wiki.pollCloseOut` does too, so
+  `wiki.radikal.poll`, which `wiki.radikal.pollCloseOut` does too, so
   every close-out was counted as a second poll. Found by the first end-to-end
   test of publisher and mirror together; a record's collection is now read as
   the whole path segment.

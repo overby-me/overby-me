@@ -100,7 +100,7 @@ def main [dir: path, --port: int = 8190] {
         log-fail $"($back.failed | length) accounts could not return, ($back.seats_still_held_by_a_carried_account) seats are still held by one that did: ($back.failed | to json -r)"
     }
 
-    let api = $"($said.url)/xrpc/com.example.wiki"
+    let api = $"($said.url)/xrpc/wiki.radikal"
     let stranger = ($said.sessions | get "did:plc:stranger")
     let ex = (open extraction.json)
     mut checks = []

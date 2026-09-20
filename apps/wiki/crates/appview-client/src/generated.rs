@@ -2030,7 +2030,7 @@ pub mod list_speaker_lists {
     pub struct Output {
         pub lists: Vec<SpeakerListView>,
         pub now: String,
-        /// An object from DID to com.example.wiki.getNode#profileView, for every speaker in a queue.
+        /// An object from DID to wiki.radikal.getNode#profileView, for every speaker in a queue.
         pub profiles: serde_json::Value,
     }
 
@@ -3006,523 +3006,523 @@ impl upload_blob::Params {
 impl Client {
     /// Say yes to an invitation made out to the caller's account. Declining is removeMember on the same row.
     pub async fn accept_invitation(&self, input: &accept_invitation::Input) -> Result<accept_invitation::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.acceptInvitation", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.acceptInvitation", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// React to a document, a comment, or a post mirrored from the public network. A member of the subject's context may (the interim's rule for a reaction); anyone signed in may react to a public post. Once per emoji: a second tap changes nothing.
     pub async fn add_reaction(&self, input: &add_reaction::Input) -> Result<add_reaction::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.addReaction", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.addReaction", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// A secret poll, step two: spend one token on one ballot. Send NO session with this call. The token is the right to vote, and the server reads no credential here even if one arrives, so that a ballot cannot be tied to the account that asked for its token. A client should also let some time pass between being issued tokens and casting them. A ballot that breaks the poll's rules does not use its token up; a token is spent by the first ballot it lands, whatever a second one says.
     pub async fn cast_ballot(&self, input: &cast_ballot::Input) -> Result<cast_ballot::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.castBallot", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.castBallot", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Vote in a poll that is not secret. One ballot per voter, counted at the weight frozen when the poll opened; the first stands.
     pub async fn cast_open_ballot(&self, input: &cast_open_ballot::Input) -> Result<cast_open_ballot::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.castOpenBallot", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.castOpenBallot", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Bind the invitation a `?claim=<token>` link names to the caller. This is how a rostered member, known only by an email address, becomes a DID. It binds and nothing more: voting rights stay as an owner set them. Repeating a claim the caller already made succeeds. A seat held by an account carried over from the interim counts as unclaimed: the link hands over that seat, and nothing else that account holds.
     pub async fn claim_membership(&self, input: &claim_membership::Input) -> Result<claim_membership::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.claimMembership", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.claimMembership", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner empties a list's queue.
     pub async fn clear_speaker_list(&self, input: &clear_speaker_list::Input) -> Result<clear_speaker_list::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.clearSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.clearSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner ends the vote. The result is counted once, here, and stored; a secret poll's board is sealed and its issuer key destroyed, so no token can be signed or spent afterwards. Closing a closed poll answers with the same result.
     pub async fn close_poll(&self, input: &close_poll::Input) -> Result<close_poll::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.closePoll", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.closePoll", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Copy a document, with what the caller may read under it, to under another parent: in this context or in any other the caller owns. The copy is the caller's, keeps the original's date and author chips, and takes the next free name where it lands beside its source. A file it holds gets a file row of its own in the context it lands in, over the same bytes, so that it is readable there and deleting one copy leaves the other. Comments are not copied, and neither is a poll.
     pub async fn copy_document(&self, input: &copy_document::Input) -> Result<copy_document::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.copyDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.copyDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner puts a canvas in a context, or a folder in one: a board of cells a room paints together, one placement per person per cooldown. It has a place in the tree like any node, and starts open.
     pub async fn create_canvas(&self, input: &create_canvas::Input) -> Result<create_canvas::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.createCanvas", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.createCanvas", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Make a group or an event under a context, or under a folder in one, that the caller owns; or a site, a place that publishes, directly under the home. What sits at the top of the tree is made under the home, by those who own it. It is its own context from the start: the caller is its first owner, with voting rights, and nobody else is in it. It starts closed. One step, where the interim needed four writes from the browser.
     pub async fn create_context(&self, input: &create_context::Input) -> Result<create_context::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.createContext", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.createContext", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Author a content node in a context (Phase 1: the authenticated caller becomes the sole author). Requires authentication; the caller's DID is taken from the request's authorization, not the body.
     pub async fn create_document(&self, input: &create_document::Input) -> Result<create_document::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.createDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.createDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Redeem the one-time login code that /callback appended to the frontend's return URL (`#code=...`) for a session. Unauthenticated: the code is the credential. A code works once and for one minute.
     pub async fn create_session(&self, input: &create_session::Input) -> Result<create_session::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.createSession", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.createSession", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner of a context makes a speaker list in it. A context may hold several.
     pub async fn create_speaker_list(&self, input: &create_speaker_list::Input) -> Result<create_speaker_list::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.createSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.createSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Delete a file. A member deletes what they uploaded; an owner of the context deletes anything in it. Nodes that still refer to the file are left as they are.
     pub async fn delete_blob(&self, input: &delete_blob::Input) -> Result<delete_blob::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.deleteBlob", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.deleteBlob", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Take a comment away. Its author may, and an owner of its context. A comment that has been answered is emptied and stays, since the answers hang on it: its text, its author, its picture and the reactions to it go, and it reads as deleted. Any other goes to the context's bin, from which `restoreComment` brings it back.
     pub async fn delete_comment(&self, input: &delete_comment::Input) -> Result<delete_comment::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.deleteComment", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.deleteComment", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Put a group or an event, and everything in it, in the bin. An owner of it may, and so may an owner of the context it sits in. Its members keep their rows, so restoring it brings back who was in it. The home is not deleted.
     pub async fn delete_context(&self, input: &delete_context::Input) -> Result<delete_context::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.deleteContext", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.deleteContext", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Put a document, and everything under it, in the bin. Its creator or an owner of its context may. Nothing is destroyed: restoreDocument brings back exactly what went together, and the path is free for another node meanwhile.
     pub async fn delete_document(&self, input: &delete_document::Input) -> Result<delete_document::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.deleteDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.deleteDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner of the home, who runs the site, clears a report away.
     pub async fn delete_feedback(&self, input: &delete_feedback::Input) -> Result<delete_feedback::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.deleteFeedback", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.deleteFeedback", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Sign out: end the presented session and no other, so signing out on one device leaves the rest signed in. Requires authentication.
     pub async fn delete_session(&self) -> Result<delete_session::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.deleteSession", Vec::new(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.deleteSession", Vec::new(), crate::Body::None).await?;
         answer.json()
     }
 
     /// An owner deletes a list, and its queue with it.
     pub async fn delete_speaker_list(&self, input: &delete_speaker_list::Input) -> Result<delete_speaker_list::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.deleteSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.deleteSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// A link to a file that carries its own authority, for what cannot send an `Authorization` header: an `<iframe>`, a `<video>`, a document viewer on another server. Whoever holds the link reads that one file until it expires, so it is made only for a caller who may read the file. Pictures do not need one: fetch `/blob/<id>` with the session instead.
     pub async fn get_blob_link(&self, params: &get_blob_link::Params) -> Result<get_blob_link::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getBlobLink", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getBlobLink", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Every ballot of a secret poll, for whoever may see its counts, so that they can verify each signature under `issuer_pubkey` and count for themselves. In token order, which says nothing, and not in the order the room voted in.
     pub async fn get_board(&self, params: &get_board::Params) -> Result<get_board::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getBoard", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getBoard", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// The ballot a token was spent on: how a voter checks that theirs is on the board and says what they said. It works where the counts are hidden too, since knowing a token is having cast it. Like `castBallot` it takes no session and reads none: asked as nobody, it does not pair a voter with their token.
     pub async fn get_board_entry(&self, params: &get_board_entry::Params) -> Result<get_board_entry::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getBoardEntry", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getBoardEntry", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// The key this AppView signs ballot receipts and close-outs with, as a `did:key` (P-256). For anyone, signed in or not: a receipt names its key too, and this is what that is checked against. It is kept for nothing else, and is not a poll's issuer key.
     pub async fn get_board_key(&self) -> Result<get_board_key::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getBoardKey", Vec::new(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getBoardKey", Vec::new(), crate::Body::None).await?;
         answer.json()
     }
 
     /// A canvas and its painted cells, or with `since` only the cells painted at or after it. A change on the live socket says only that the board moved; a listener then asks for what was painted since the `now` of its last answer, so a repaint costs everyone watching a few bytes and not the board again. A cell painted in the very millisecond of `since` may come twice, which repaints it the same colour.
     pub async fn get_canvas(&self, params: &get_canvas::Params) -> Result<get_canvas::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getCanvas", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getCanvas", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Fetch the comment thread on a node (document or comment). Serves only what the caller may read.
     pub async fn get_comments(&self, params: &get_comments::Params) -> Result<get_comments::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getComments", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getComments", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Fetch a group/event context by id. Serves only what the caller may read.
     pub async fn get_context(&self, params: &get_context::Params) -> Result<get_context::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getContext", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getContext", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Fetch a content node (document / folder / file / proposal) by id, with its authors. Serves only what the caller may read; a document they may not read answers NotFound, exactly as a missing one does.
     pub async fn get_document(&self, params: &get_document::Params) -> Result<get_document::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getDocument", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getDocument", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// A member's claim token, for an owner of that member's context to hand out as a `?claim=<token>` link. A seat that an account carried over from the interim holds has no token, its old one being spent, and is given one the first time an owner asks. An unknown member answers Forbidden too, so the method is no oracle for member ids.
     pub async fn get_member_claim_link(&self, params: &get_member_claim_link::Params) -> Result<get_member_claim_link::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getMemberClaimLink", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getMemberClaimLink", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// A node with what every screen draws around it: its children of either kind, the way down to it, and what the caller may do here. One call where the interim makes several. Give `path` or `id`, not both. Serves only what the caller may read.
     pub async fn get_node(&self, params: &get_node::Params) -> Result<get_node::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getNode", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getNode", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// A poll as the caller may see it. `counts` and `outcome` are absent where the tally is hidden from the caller; `ballots` and `eligible` never are.
     pub async fn get_poll(&self, params: &get_poll::Params) -> Result<get_poll::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getPoll", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getPoll", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Who a DID is, for a profile page. For the signed in only: a DID known here is someone who has signed in here or been named here, which a stranger is not told.
     pub async fn get_profile(&self, params: &get_profile::Params) -> Result<get_profile::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getProfile", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getProfile", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// What a context's projector shows, for whoever may read the context. A context nobody has set one for shows nothing.
     pub async fn get_projector(&self, params: &get_projector::Params) -> Result<get_projector::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getProjector", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getProjector", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// The reactions on something the caller may read. Who reacted to a closed group's comment is that group's business, so what the caller may not read has, to them, no reactions: an empty list, not an error, since a thread asks this once per comment.
     pub async fn get_reactions(&self, params: &get_reactions::Params) -> Result<get_reactions::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getReactions", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getReactions", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Who the presented session belongs to. Requires authentication.
     pub async fn get_session(&self) -> Result<get_session::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getSession", Vec::new(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getSession", Vec::new(), crate::Body::None).await?;
         answer.json()
     }
 
     /// How many members of a context hold voting rights, which a poll's turnout is out of. A number and no names, so it is served to whoever may read the context.
     pub async fn get_voter_count(&self, params: &get_voter_count::Params) -> Result<get_voter_count::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.getVoterCount", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.getVoterCount", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Put people on a context's roster: one invitation, or a whole imported spreadsheet. An owner of the context may. An invite with a `did` invites an account, which is bound from the start and answers with acceptInvitation; any other is a roster row, which whoever holds its claim link binds with claimMembership. Anyone the context already has, by address or by account, is skipped rather than failing the import, and so is an address the batch repeats. Addresses are stored trimmed and lowercased.
     pub async fn invite_members(&self, input: &invite_members::Input) -> Result<invite_members::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.inviteMembers", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.inviteMembers", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// A secret poll, step one. The caller blinds one random 32-byte token per unit of their weight (RFC 9474, RSABSSA-SHA384-PSS-Randomized, under the poll's `issuer_pubkey`) and the server signs each without being able to read it. Served once per voter. Asking again with the SAME blinded tokens answers with the same signatures, so a reply lost on the way does not cost a vote; different tokens are refused. The server records that the voter was served, and neither what they were given nor when.
     pub async fn issue_ballot_tokens(&self, input: &issue_ballot_tokens::Input) -> Result<issue_ballot_tokens::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.issueBallotTokens", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.issueBallotTokens", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Ask for the floor. A member of the context may while the list is open; an owner may regardless, to enter someone who cannot. Asking twice for the same kind is asking once: the entry already there is returned, so a second tap takes no second place.
     pub async fn join_speaker_list(&self, input: &join_speaker_list::Input) -> Result<join_speaker_list::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.joinSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.joinSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Withdraw from a queue, or be removed from it by an owner.
     pub async fn leave_speaker_list(&self, input: &leave_speaker_list::Input) -> Result<leave_speaker_list::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.leaveSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.leaveSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// What is directly under a node. `children` is every child of either kind as a light row, which is what a drawer expands by; `documents` is the child documents whole, for a page that shows what its children say (a resolution's amendments, a position's candidates). Serves only what the caller may read.
     pub async fn list_children(&self, params: &list_children::Params) -> Result<list_children::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listChildren", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listChildren", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Contexts, by name. `roots` (the default): those at the top of the tree, which is directly under the home, that the caller may read. `mine`: the groups and events the caller has a seat in and has said yes to, wherever they sit, which is what a home screen lists. `public`: every place open to everyone, at any depth, less the home itself. The home is in none of the three: it is `getNode` of the empty path.
     pub async fn list_contexts(&self, params: &list_contexts::Params) -> Result<list_contexts::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listContexts", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listContexts", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// What a person, or a group, has put forward, as far as the caller may read it: motions, amendments, candidacies and questions they own or are named as an author of, and for a person their comments. Drafts included, since they are theirs too. Give `did` or `context`.
     pub async fn list_contributions(&self, params: &list_contributions::Params) -> Result<list_contributions::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listContributions", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listContributions", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// The delegations standing in a context that are the caller's to see: the one they gave and those they were given, or all of them for an owner of the context, who chairs its votes. For members only.
     pub async fn list_delegations(&self, params: &list_delegations::Params) -> Result<list_delegations::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listDelegations", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listDelegations", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// The bin of a context, newest first: each document that was deleted, but not the ones that only went along with a parent, which come back with it. An owner of the context sees all of it; anyone else sees what they created.
     pub async fn list_deleted(&self, params: &list_deleted::Params) -> Result<list_deleted::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listDeleted", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listDeleted", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Every report, for an owner of the home, who runs the site; for anyone else, the ones they sent. Latest sighting first, with the profile behind every DID named.
     pub async fn list_feedback(&self) -> Result<list_feedback::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listFeedback", Vec::new(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listFeedback", Vec::new(), crate::Body::None).await?;
         answer.json()
     }
 
     /// The invitations the caller has not answered, newest first. Only those made out to their account: one made out to an address reaches them as a claim link.
     pub async fn list_invitations(&self) -> Result<list_invitations::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listInvitations", Vec::new(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listInvitations", Vec::new(), crate::Body::None).await?;
         answer.json()
     }
 
     /// A page of a context's members, by name with the nameless last. For members of the context only: who belongs is not told to anyone else, even where the context itself is public. An owner of the context is also served each row's email and the rows that are hidden from everyone else; nobody else is served either, and a search matches an address for an owner only, so it is no way to ask whether someone is on the roster.
     pub async fn list_members(&self, params: &list_members::Params) -> Result<list_members::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listMembers", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listMembers", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// The nodes whose parent no longer exists, for an owner of the home, who runs the site, to put right. A parent is a plain reference, since it may be a document or a context, so nothing else notices one going missing.
     pub async fn list_orphans(&self) -> Result<list_orphans::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listOrphans", Vec::new(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listOrphans", Vec::new(), crate::Body::None).await?;
         answer.json()
     }
 
     /// The polls opened on a node (`parent`), or every poll of a context (`context`, the chair's overview of a meeting), newest first, leaving out any the caller may not read. Give one of the two.
     pub async fn list_polls(&self, params: &list_polls::Params) -> Result<list_polls::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listPolls", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listPolls", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// The feed: submitted content and comments, newest first, each with what it is about. A draft is nobody's news, and neither is what has lost its parent. With `context`, that context's own content (a group's feed is not its events': each is its own context). Without, everything in the contexts the caller belongs to, or whatever is public for someone not signed in.
     pub async fn list_recent(&self, params: &list_recent::Params) -> Result<list_recent::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listRecent", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listRecent", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// A context's speaker lists with their queues, for whoever may read the context: the room follows them on the projector. A queue is in the order it is served: the chair's override first, then the kind of contribution with a point of order ahead of a speech, then arrival. `now` is the server's clock, so a countdown does not depend on the viewer's.
     pub async fn list_speaker_lists(&self, params: &list_speaker_lists::Params) -> Result<list_speaker_lists::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.listSpeakerLists", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.listSpeakerLists", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Move a document, and everything under it, to another parent, rewriting every path in it. It keeps its name if that is free there and takes the next one if not. Into ANOTHER context it takes an owner of both, and the comments on those documents, the files they hold and their closed polls change context with them, since each is read through its own. A running poll does not change groups: its voters are the members of where it was opened.
     pub async fn move_document(&self, input: &move_document::Input) -> Result<move_document::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.moveDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.moveDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// The chair puts a speaker ahead of the whole queue or behind it. The override outranks the kind of contribution.
     pub async fn move_speaker(&self, input: &move_speaker::Input) -> Result<move_speaker::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.moveSpeaker", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.moveSpeaker", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// The floor passes on: whoever had it leaves the queue, and the next turn's clock starts. An owner's. An empty queue is not an error.
     pub async fn next_speaker(&self, input: &next_speaker::Input) -> Result<next_speaker::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.nextSpeaker", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.nextSpeaker", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner tells the members of a context something, a poll having opened for one. It reaches the devices of members who hold voting rights and have accepted, and not the sender's. The words are the sender's client's. A device its push service reports gone is forgotten.
     pub async fn notify_context(&self, input: &notify_context::Input) -> Result<notify_context::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.notifyContext", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.notifyContext", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Tell whoever wrote a node that it has been answered. Only a member of the node's context may, so that an author cannot be pinged by a stranger, and nobody is told about their own reply.
     pub async fn notify_reply(&self, input: &notify_reply::Input) -> Result<notify_reply::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.notifyReply", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.notifyReply", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner of the context puts something to the vote. The poll gets a place in the tree under `parent_id`. Who may vote is frozen here: every member of the context who holds voting rights at this moment. A secret poll's issuer key is made here and published with the poll, before any ballot.
     pub async fn open_poll(&self, input: &open_poll::Input) -> Result<open_poll::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.openPoll", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.openPoll", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// A member of the canvas's context paints one cell, and then waits out the cooldown. The cell becomes theirs: a repaint takes over the colour, the painter and the time. The cooldown is the server's, so it holds whatever a client does.
     pub async fn paint_cell(&self, input: &paint_cell::Input) -> Result<paint_cell::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.paintCell", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.paintCell", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Read a bulk member-import roster: the raw .xlsx as the body, the rows of its first sheet back. The header row names the columns `Fornavn`, `Efternavn` and `Email`, in any case and order. A row with a name or an address is kept; an empty `email` means the office has none. It reads and nothing more: `inviteMembers` is what puts people on a roster.
     pub async fn parse_roster(&self, body: Vec<u8>, content_type: &str) -> Result<parse_roster::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.parseRoster", Vec::new(), crate::Body::Bytes(body, content_type.to_string())).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.parseRoster", Vec::new(), crate::Body::Bytes(body, content_type.to_string())).await?;
         answer.json()
     }
 
     /// Post a comment on a node (document or comment). Requires a session, and membership of the node's context; the caller's DID is the comment's author. It says something, shows a picture, or both.
     pub async fn post_comment(&self, input: &post_comment::Input) -> Result<post_comment::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.postComment", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.postComment", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Delete for good a comment that is in the bin, with the reactions to it and the picture it showed. Its author may, as well as an owner of its context: what someone wrote is theirs to have gone.
     pub async fn purge_comment(&self, input: &purge_comment::Input) -> Result<purge_comment::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.purgeComment", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.purgeComment", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// The way out of the bin that restoring is not. An owner of the context deletes for good everything one bin entry holds: the documents, their author chips, the comments on them, and the files nothing else points at. A bin entry that holds a poll is refused, since a vote's record is nobody's to delete, and so is one that holds a group or an event.
     pub async fn purge_document(&self, input: &purge_document::Input) -> Result<purge_document::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.purgeDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.purgeDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner of the home, who runs the site, deletes for good a node that `listOrphans` lists, and what is under it: a page as `purgeDocument` takes one, a comment with the answers and the reactions to it. A group or an event does not go this way: it holds people's seats, and it still opens by its path.
     pub async fn purge_orphan(&self, input: &purge_orphan::Input) -> Result<purge_orphan::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.purgeOrphan", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.purgeOrphan", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Take someone off a roster. An owner removes anyone; anyone removes themselves, which is also how an invitation is declined and how a member leaves.
     pub async fn remove_member(&self, input: &remove_member::Input) -> Result<remove_member::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.removeMember", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.removeMember", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Take one's own reaction back. Not asked about membership: leaving a group must not strand what one left in it. Removing what is not there changes nothing.
     pub async fn remove_reaction(&self, input: &remove_reaction::Input) -> Result<remove_reaction::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.removeReaction", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.removeReaction", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Turn a Windows metafile (EMF, EMF+ or WMF), which Word and PowerPoint keep pasted figures as and no browser can draw, into a picture: SVG where the figure can be drawn as shapes and real text, PNG otherwise. The metafile is the body; the caller already holds it, having opened the document to find it, so this reads no storage. A session is asked for only so that this is not a conversion service for whoever finds the URL.
     pub async fn render_metafile(&self, body: Vec<u8>, content_type: &str) -> Result<Binary, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.renderMetafile", Vec::new(), crate::Body::Bytes(body, content_type.to_string())).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.renderMetafile", Vec::new(), crate::Body::Bytes(body, content_type.to_string())).await?;
         Ok(answer.binary())
     }
 
     /// The context or document a path names (e.g. `group-one/sub/dagsorden`). The path is stored with each node, so this is one lookup at any depth, and nothing above the node has to be readable by the caller: only the node itself. Serves only what the caller may read.
     pub async fn resolve_node(&self, params: &resolve_node::Params) -> Result<resolve_node::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.resolveNode", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.resolveNode", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Bring a comment back from the bin, as it was, with the reactions to it. Whoever could delete it may.
     pub async fn restore_comment(&self, input: &restore_comment::Input) -> Result<restore_comment::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.restoreComment", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.restoreComment", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Bring a context back from the bin, with everything that went with it. Whoever could have deleted it may. One that went along with something else is restored by restoring that.
     pub async fn restore_context(&self, input: &restore_context::Input) -> Result<restore_context::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.restoreContext", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.restoreContext", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Bring a document back from the bin with everything that went there with it, and nothing that was deleted from inside it earlier. Its creator or an owner of its context may; to anyone else it is not there.
     pub async fn restore_document(&self, input: &restore_document::Input) -> Result<restore_document::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.restoreDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.restoreDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Documents and contexts the caller may read, by what they are called and what they say. Every word of the query has to be found, in any order, whatever its case. What is CALLED the query comes before what only mentions it, and that is decided before the cut at 30, so a title match is never crowded out by mentions. The text searched is a document's words, not the JSON they are stored in.
     pub async fn search(&self, params: &search::Params) -> Result<search::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.search", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.search", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// The people whose name or handle contains the query, whatever its case, for the pickers that invite someone or credit an author. Ten at most, and nothing for fewer than two letters. With `contexts`, also the groups and events by that name that the caller may read, since a group can be an author.
     pub async fn search_people(&self, params: &search_people::Params) -> Result<search_people::Output, Error> {
-        let answer = self.call(crate::Verb::Get, "com.example.wiki.searchPeople", params.pairs(), crate::Body::None).await?;
+        let answer = self.call(crate::Verb::Get, "wiki.radikal.searchPeople", params.pairs(), crate::Body::None).await?;
         answer.json()
     }
 
     /// Mail a seat's claim link to the address on it, for an owner of that seat's context: again after a mail that was lost, or for the first time to a seat carried over from the interim. `inviteMembers` mails a new seat by itself. An unknown member answers Forbidden too, so the method is no oracle for member ids.
     pub async fn send_invitation(&self, input: &send_invitation::Input) -> Result<send_invitation::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.sendInvitation", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.sendInvitation", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner opens a canvas to the room, or locks it so that it takes no more paint.
     pub async fn set_canvas_open(&self, input: &set_canvas_open::Input) -> Result<set_canvas_open::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.setCanvasOpen", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.setCanvasOpen", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Give the caller's vote in a context to another member who holds voting rights there, or take it back. It stands until it is taken back or either of them leaves. A poll copies the delegations standing as it opens and freezes them: a chain follows through, a cycle or a delegate without voting rights is void, and one made or taken back while the poll is open moves nothing in it. What stands behind an assignment is the delegator's own session.
     pub async fn set_delegation(&self, input: &set_delegation::Input) -> Result<set_delegation::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.setDelegation", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.setDelegation", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Replace the author chips on a document, in the order given. Whoever may edit the document may. An author is an account (a DID) or a name with no account behind it, which is what 42 percent of them are.
     pub async fn set_document_authors(&self, input: &set_document_authors::Input) -> Result<set_document_authors::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.setDocumentAuthors", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.setDocumentAuthors", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner changes what the room sees. An absent field stays as it is; an explicit `null` clears `active_id` or `focus`. Putting another node on screen clears the focus, since an anchor points into the node that was there. Answers with the projector as it now is.
     pub async fn set_projector(&self, input: &set_projector::Input) -> Result<set_projector::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.setProjector", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.setProjector", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Post to the caller's own Bluesky account: an `app.bsky.feed.post` written into their repo, on their PDS, with the grant their login left with this AppView. Where the text contains `url`, it becomes a link; `url` always rides along as a link card. Only a page of this app can be the card.
     pub async fn share_to_bluesky(&self, input: &share_to_bluesky::Input) -> Result<share_to_bluesky::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.shareToBluesky", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.shareToBluesky", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// File a report: a person's account of a bug or a wish, or the app's own account of a crash or an error. A session is taken if there is one and not asked for, since someone who cannot sign in has the most to report. A stack in the message has its wasm frames resolved on the way in. A `crash` or an `error` seen before becomes one more sighting on the row already there, known by where it happened and not by the bytes of the report, so it survives a new build.
     pub async fn submit_feedback(&self, input: &submit_feedback::Input) -> Result<submit_feedback::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.submitFeedback", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.submitFeedback", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// This device rings for the caller from now on. A subscription belongs to the device, so whoever signs in on it next takes it over. The fields are what `PushManager.subscribe` hands back, its keys base64url without padding.
     pub async fn subscribe_push(&self, input: &subscribe_push::Input) -> Result<subscribe_push::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.subscribePush", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.subscribePush", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// This device stops ringing. Any signed-in caller may drop an endpoint they know, since knowing it is holding the device: that is how signing out on a shared phone has to work.
     pub async fn unsubscribe_push(&self, input: &unsubscribe_push::Input) -> Result<unsubscribe_push::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.unsubscribePush", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.unsubscribePush", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner renames a context, opens it to the public or closes it, locks it against direct additions, or changes what it says about itself. An absent field stays as it is. A rename keeps the address: the slug is what links point at. `public` opens the context and what is in it to everyone, signed in or not.
     pub async fn update_context(&self, input: &update_context::Input) -> Result<update_context::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.updateContext", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.updateContext", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Change a document. Absent fields are left as they are. The slug is not among them: a rename keeps the URL people have linked to. Its creator may edit it while it is mutable; clearing `mutable` submits it, after which only an owner of the context may edit it. The order (`idx`), the lock (`attachable`) and reopening a submitted document are an owner's alone.
     pub async fn update_document(&self, input: &update_document::Input) -> Result<update_document::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.updateDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.updateDocument", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner changes a row of their roster. Absent fields are left as they are. `active` is voting rights; `owner` is the role. A context must keep an owner who can sign in, so the last one cannot be demoted.
     pub async fn update_member(&self, input: &update_member::Input) -> Result<update_member::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.updateMember", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.updateMember", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// An owner renames a list, opens or closes it to new speakers, or sets the limit on a turn, which starts the clock afresh. Absent fields stay as they are.
     pub async fn update_speaker_list(&self, input: &update_speaker_list::Input) -> Result<update_speaker_list::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.updateSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.updateSpeakerList", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 
     /// Store a file in a context: the raw bytes as the body, their type as `Content-Type`. A member of the context may. The file is then at `GET /blob/<id>`, for whoever may read the context. A node refers to it by `id`; the same bytes uploaded twice are stored once and get two ids.
     pub async fn upload_blob(&self, params: &upload_blob::Params, body: Vec<u8>, content_type: &str) -> Result<upload_blob::Output, Error> {
-        let answer = self.call(crate::Verb::Post, "com.example.wiki.uploadBlob", params.pairs(), crate::Body::Bytes(body, content_type.to_string())).await?;
+        let answer = self.call(crate::Verb::Post, "wiki.radikal.uploadBlob", params.pairs(), crate::Body::Bytes(body, content_type.to_string())).await?;
         answer.json()
     }
 

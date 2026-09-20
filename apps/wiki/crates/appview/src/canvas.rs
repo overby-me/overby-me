@@ -160,7 +160,7 @@ pub struct CreateCanvasBody {
     pub cooldown: Option<i64>,
 }
 
-/// `com.example.wiki.createCanvas` (procedure): an owner puts a canvas in a
+/// `wiki.radikal.createCanvas` (procedure): an owner puts a canvas in a
 /// context, or a folder in one. It starts open.
 pub async fn create_canvas(
     State(state): State<AppState>,
@@ -257,7 +257,7 @@ pub struct GetCanvasParams {
     pub since: Option<String>,
 }
 
-/// `com.example.wiki.getCanvas`: a canvas and its painted cells, or with `since`
+/// `wiki.radikal.getCanvas`: a canvas and its painted cells, or with `since`
 /// only those painted after it. Cells are rows of
 /// `[x, y, colour, painter, painted_at]`, where `painter` indexes `painters`: a
 /// thousand cells are a handful of people.
@@ -359,7 +359,7 @@ enum Painted {
     Closed,
 }
 
-/// `com.example.wiki.paintCell` (procedure): a member of the canvas's context
+/// `wiki.radikal.paintCell` (procedure): a member of the canvas's context
 /// paints one cell, and then waits out the cooldown. The cell becomes theirs.
 pub async fn paint_cell(
     State(state): State<AppState>,
@@ -483,7 +483,7 @@ pub struct SetOpenBody {
     pub open: bool,
 }
 
-/// `com.example.wiki.setCanvasOpen` (procedure): an owner opens a canvas to the
+/// `wiki.radikal.setCanvasOpen` (procedure): an owner opens a canvas to the
 /// room, or locks it so that it takes no more paint.
 pub async fn set_canvas_open(
     State(state): State<AppState>,
@@ -531,13 +531,13 @@ mod tests {
     use crate::xrpc::tests::{get, get_as, post, seeded_state, token_for};
     use serde_json::json;
 
-    const PAINT: &str = "/xrpc/com.example.wiki.paintCell";
+    const PAINT: &str = "/xrpc/wiki.radikal.paintCell";
 
     async fn canvas(state: &AppState, owner: &str, cooldown: i64) -> String {
         let body = json!({"parent_id": "c9", "name": "Tavlen", "width": 4, "height": 3, "cooldown": cooldown});
         let (status, v) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.createCanvas",
+            "/xrpc/wiki.radikal.createCanvas",
             Some(owner),
             body,
         )
@@ -563,7 +563,7 @@ mod tests {
         let alice = token_for(&state, "did:plc:alice").await;
         let bob = token_for(&state, "did:plc:bob").await;
         let id = canvas(&state, &alice, 0).await;
-        let board = format!("/xrpc/com.example.wiki.getCanvas?id={id}");
+        let board = format!("/xrpc/wiki.radikal.getCanvas?id={id}");
 
         assert_eq!(paint(&state, &bob, &id, (1, 2), 5).await.0, StatusCode::OK);
         assert_eq!(
@@ -645,7 +645,7 @@ mod tests {
 
         let (_, seen) = get_as(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.getCanvas?id={id}"),
+            &format!("/xrpc/wiki.radikal.getCanvas?id={id}"),
             &bob,
         )
         .await;
@@ -667,7 +667,7 @@ mod tests {
         let bob = token_for(&state, "did:plc:bob").await;
         let mallory = token_for(&state, "did:plc:mallory").await;
         let id = canvas(&state, &alice, 0).await;
-        let board = format!("/xrpc/com.example.wiki.getCanvas?id={id}");
+        let board = format!("/xrpc/wiki.radikal.getCanvas?id={id}");
 
         assert_eq!(
             get(router(state.clone()), &board).await.0,
@@ -680,14 +680,14 @@ mod tests {
         let make = json!({"parent_id": "c9", "name": "Bobs"});
         let (status, _) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.createCanvas",
+            "/xrpc/wiki.radikal.createCanvas",
             Some(&bob),
             make,
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN, "a member made a canvas");
 
-        let shut = "/xrpc/com.example.wiki.setCanvasOpen";
+        let shut = "/xrpc/wiki.radikal.setCanvasOpen";
         let (status, _) = post(
             router(state.clone()),
             shut,
@@ -711,7 +711,7 @@ mod tests {
         // It has a place in the tree, like anything else.
         let (_, node) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.getNode?path=closed/tavlen",
+            "/xrpc/wiki.radikal.getNode?path=closed/tavlen",
             &bob,
         )
         .await;
@@ -752,7 +752,7 @@ mod tests {
         );
         let (_, v) = get_as(
             router(state.clone()),
-            &format!("/xrpc/com.example.wiki.getCanvas?id={id}"),
+            &format!("/xrpc/wiki.radikal.getCanvas?id={id}"),
             &alice,
         )
         .await;

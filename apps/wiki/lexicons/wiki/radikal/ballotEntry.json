@@ -1,0 +1,51 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.ballotEntry",
+	"defs": {
+		"main": {
+			"type": "record",
+			"description": "One spent unit token on a public board: an anonymous ballot. Written by the board account and never by the voter, since a record lives in a repo owned by a DID and a voter's own would name them. It has no field for who cast it, and weighs exactly 1, so the tally is a count of entries per choice. A token seen twice counts once, the first standing (D4). Ballots are not published as they are cast: they go out at least three together and shuffled, or all at the close, and `createdAt` is when the batch left, so that a record's arrival says nothing of when its ballot was cast. Encodings are base64url without padding (`crates/ballot-spec/src/provisional.rs`, pinned by a known-answer vector).",
+			"key": "tid",
+			"record": {
+				"type": "object",
+				"required": ["pollRef", "token", "signature", "choices", "createdAt"],
+				"properties": {
+					"pollRef": {
+						"type": "ref",
+						"ref": "com.atproto.repo.strongRef",
+						"description": "The poll this ballot belongs to. The strongRef's CID pins the exact poll version (question, options, rules, issuerPubkey) the entry was validated against."
+					},
+					"token": {
+						"type": "string",
+						"maxLength": 64,
+						"description": "The unblinded unit token's message, a 32-byte voter-generated random nullifier, as base64url (unpadded). Carries no structure and no identity; its uniqueness on the board is the dedup."
+					},
+					"msgRandomizer": {
+						"type": "string",
+						"maxLength": 64,
+						"description": "The RFC 9474 message randomizer from blinding (the RSABSSA Randomized variant), base64url (unpadded). Optional per the spec crate's shape; required by verification when present at signing."
+					},
+					"signature": {
+						"type": "string",
+						"maxLength": 2048,
+						"description": "The unblinded RSA-PSS signature over token, base64url (unpadded). Verifies under the referenced poll's published issuerPubkey; per-poll keys make cross-poll spends unverifiable."
+					},
+					"choices": {
+						"type": "array",
+						"maxLength": 20,
+						"items": {
+							"type": "integer",
+							"minimum": 0
+						},
+						"description": "Selected option indices into the poll's options array, subject to the poll's minVote, maxVote, and blank rules."
+					},
+					"createdAt": {
+						"type": "string",
+						"format": "datetime",
+						"description": "When the batch this ballot went out in left, the same for all of it. Not when it was cast."
+					}
+				}
+			}
+		}
+	}
+}

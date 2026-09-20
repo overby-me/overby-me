@@ -377,7 +377,7 @@ pub struct RecentParams {
     pub offset: Option<i64>,
 }
 
-/// `com.example.wiki.listRecent`: the feed. Submitted content and comments,
+/// `wiki.radikal.listRecent`: the feed. Submitted content and comments,
 /// newest first, each with what it is about.
 pub async fn list_recent(
     State(state): State<AppState>,
@@ -405,7 +405,7 @@ pub struct ContributionParams {
     pub offset: Option<i64>,
 }
 
-/// `com.example.wiki.listContributions`: what a person, or a group, has put
+/// `wiki.radikal.listContributions`: what a person, or a group, has put
 /// forward, as far as the caller may read it.
 pub async fn list_contributions(
     State(state): State<AppState>,
@@ -448,7 +448,7 @@ pub(crate) fn nowhere(id: &str) -> String {
     )
 }
 
-/// `com.example.wiki.listOrphans`: the nodes whose parent no longer exists, for
+/// `wiki.radikal.listOrphans`: the nodes whose parent no longer exists, for
 /// an owner of the site to put right. A parent is a plain column, since it may
 /// be of either kind, so nothing but this notices one going missing.
 pub async fn list_orphans(State(state): State<AppState>, Caller { did }: Caller) -> Response {
@@ -550,7 +550,7 @@ mod tests {
     async fn the_feed_is_what_was_submitted_where_the_caller_belongs() {
         let state = state().await;
         let bob = token_for(&state, "did:plc:bob").await;
-        let recent = "/xrpc/com.example.wiki.listRecent";
+        let recent = "/xrpc/wiki.radikal.listRecent";
 
         let (_, v) = get_as(router(state.clone()), recent, &bob).await;
         assert_eq!(
@@ -592,7 +592,7 @@ mod tests {
         // An answer is news of the document its thread is on, as the comment it
         // answers is. It used to be news of nothing, and was left out.
         let answer = json!({"on_id": "ks", "text": "Enig"});
-        let said = "/xrpc/com.example.wiki.postComment";
+        let said = "/xrpc/wiki.radikal.postComment";
         let (status, said) = post(router(state.clone()), said, Some(&bob), answer).await;
         assert_eq!(status, StatusCode::OK, "{said}");
         let (_, v) = get_as(router(state.clone()), &of_closed, &bob).await;
@@ -619,7 +619,7 @@ mod tests {
         let say = |body: serde_json::Value, method: &'static str| {
             let (state, bob) = (state.clone(), bob.clone());
             async move {
-                let uri = format!("/xrpc/com.example.wiki.{method}");
+                let uri = format!("/xrpc/wiki.radikal.{method}");
                 let (status, v) = post(router(state), &uri, Some(&bob), body).await;
                 assert_eq!(status, StatusCode::OK, "{v}");
             }
@@ -630,7 +630,7 @@ mod tests {
 
         let (_, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listRecent?context=c9",
+            "/xrpc/wiki.radikal.listRecent?context=c9",
             &bob,
         )
         .await;
@@ -667,7 +667,7 @@ mod tests {
 
         let (_, v) = get(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listRecent?context=c9",
+            "/xrpc/wiki.radikal.listRecent?context=c9",
         )
         .await;
         assert_eq!(
@@ -683,7 +683,7 @@ mod tests {
         let alice = token_for(&state, "did:plc:alice").await;
         let (status, _) = post(
             router(state.clone()),
-            "/xrpc/com.example.wiki.deleteDocument",
+            "/xrpc/wiki.radikal.deleteDocument",
             Some(&alice),
             json!({"id": "s1"}),
         )
@@ -691,7 +691,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         let (_, v) = get_as(
             router(state.clone()),
-            "/xrpc/com.example.wiki.listRecent",
+            "/xrpc/wiki.radikal.listRecent",
             &alice,
         )
         .await;
@@ -715,7 +715,7 @@ mod tests {
         )
         .await
         .expect("motion");
-        let by = "/xrpc/com.example.wiki.listContributions";
+        let by = "/xrpc/wiki.radikal.listContributions";
 
         let (_, v) = get_as(
             router(state.clone()),
@@ -768,7 +768,7 @@ mod tests {
         .expect("seed");
         let carol = token_for(&state, "did:plc:carol").await;
         join_as(&state, "did:plc:carol", "home", "owner").await;
-        let uri = "/xrpc/com.example.wiki.listOrphans";
+        let uri = "/xrpc/wiki.radikal.listOrphans";
 
         let (status, v) = get_as(router(state.clone()), uri, &carol).await;
         assert_eq!(status, StatusCode::OK, "{v}");
@@ -786,7 +786,7 @@ mod tests {
             StatusCode::FORBIDDEN
         );
         // And an orphan is not news: it would open nowhere.
-        let (_, v) = get(router(state.clone()), "/xrpc/com.example.wiki.listRecent").await;
+        let (_, v) = get(router(state.clone()), "/xrpc/wiki.radikal.listRecent").await;
         assert!(!ids(&v).contains(&"kl"), "{v}");
     }
 }

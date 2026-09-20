@@ -1160,7 +1160,7 @@ impl Store {
         Ok(())
     }
 
-    /// Materialize a public `com.example.wiki.post` record into the `post` view,
+    /// Materialize a public `wiki.radikal.post` record into the `post` view,
     /// keyed by its at-uri (also its `published_uri` and `legacy_id`). `group` and
     /// `reply` are at-uris and foreign keys, so the caller must have checked that
     /// both are in the view.
@@ -1202,7 +1202,7 @@ impl Store {
         Ok(())
     }
 
-    /// Materialize a public `com.example.wiki.reaction` record into the `reaction`
+    /// Materialize a public `wiki.radikal.reaction` record into the `reaction`
     /// view, keyed by its at-uri. Idempotent: updates the row if the at-uri is
     /// already present, and skips if the same `(subject, reactor, emoji)` triple
     /// already exists under a different record (a redundant double-react).

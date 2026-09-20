@@ -153,7 +153,7 @@ fn report_fetch_js(message: &str) -> String {
     #[cfg(feature = "appview")]
     {
         let url = format!(
-            "{}/xrpc/com.example.wiki.submitFeedback",
+            "{}/xrpc/wiki.radikal.submitFeedback",
             crate::backend_api::BACKEND_URL
         );
         let report = serde_json::json!({

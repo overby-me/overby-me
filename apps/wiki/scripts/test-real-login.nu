@@ -26,7 +26,7 @@ const PDS_PORT = 2583
 
 def wd [] { $"http://127.0.0.1:($WD_PORT)" }
 def app [] { $"http://127.0.0.1:($SERVE_PORT)" }
-def api [] { $"http://127.0.0.1:($API_PORT)/xrpc/com.example.wiki" }
+def api [] { $"http://127.0.0.1:($API_PORT)/xrpc/wiki.radikal" }
 def provider [] { $"http://localhost:($PDS_PORT)" }
 
 def log-info [...msg: string] { print -e $"(ansi blue_bold)[info](ansi reset)  ($msg | str join ' ')" }

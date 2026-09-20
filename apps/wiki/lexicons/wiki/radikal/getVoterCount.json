@@ -1,0 +1,29 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.getVoterCount",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "How many members of a context hold voting rights, which a poll's turnout is out of. A number and no names, so it is served to whoever may read the context.",
+			"parameters": {
+				"type": "params",
+				"required": ["context"],
+				"properties": { "context": { "type": "string" } }
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["count"],
+					"properties": { "count": { "type": "integer" } }
+				}
+			},
+			"errors": [
+				{
+					"name": "NotFound",
+					"description": "No such context, or none the caller may read."
+				}
+			]
+		}
+	}
+}

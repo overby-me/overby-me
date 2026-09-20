@@ -13,7 +13,7 @@ function xrpc(method, params, body) {
     ? "?" + Object.keys(params).map(function (k) { return k + "=" + encodeURIComponent(params[k]); }).join("&")
     : "";
   var x = new XMLHttpRequest();
-  x.open(body === undefined ? "GET" : "POST", "__API__/xrpc/com.example.wiki." + method + qs, false);
+  x.open(body === undefined ? "GET" : "POST", "__API__/xrpc/wiki.radikal." + method + qs, false);
   x.setRequestHeader("authorization", "Bearer " + __T);
   if (body !== undefined) x.setRequestHeader("content-type", "application/json");
   try { x.send(body === undefined ? null : JSON.stringify(body)); } catch (e) { return null; }

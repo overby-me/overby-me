@@ -1,0 +1,737 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.defs",
+	"description": "Shared view objects the AppView's XRPC methods return. These describe the AppView's canonical DOMAIN entities as served over the wire (the reconciled internal shapes), NOT the public atproto repo records (wiki.radikal.post / .comment / .reaction / .resolution), which are a separate, publish-time shape. Field names are snake_case to match the served JSON. The NSID is a placeholder pending a minted namespace.",
+	"defs": {
+		"authorView": {
+			"type": "object",
+			"description": "An author: a resolved account (a DID), a free-text name with no account (the census found ~42% of author chips are free-text), or a group or event, which is how a branch puts a motion forward. Exactly one of `did`, `display` and `context_id` is present, discriminated by `kind`.",
+			"required": ["kind"],
+			"properties": {
+				"kind": {
+					"type": "string",
+					"enum": ["user", "free_text", "context"],
+					"description": "`user` when the author is a resolved account, `context` when it is a group or event, `free_text` otherwise."
+				},
+				"did": {
+					"type": "string",
+					"format": "did",
+					"description": "The author's DID (present only when `kind` is `user`; during migration this may hold the interim user id until DID binding)."
+				},
+				"display": {
+					"type": "string",
+					"description": "The free-text author name (present only when `kind` is `free_text`)."
+				},
+				"context_id": {
+					"type": "string",
+					"description": "The group or event (present only when `kind` is `context`). Written with this alone; it has to be one the caller may read."
+				},
+				"name": {
+					"type": "string",
+					"description": "That group's name, when read. Ignored when written."
+				},
+				"path": {
+					"type": "string",
+					"description": "That group's path, when read. Ignored when written."
+				}
+			}
+		},
+		"documentView": {
+			"type": "object",
+			"description": "A content node: document / folder / file / proposal, with its authors and its place in the tree.",
+			"required": [
+				"id",
+				"context_id",
+				"kind",
+				"title",
+				"slug",
+				"path",
+				"authors",
+				"visibility"
+			],
+			"properties": {
+				"id": { "type": "string" },
+				"context_id": {
+					"type": "string",
+					"description": "The owning context (group/event)."
+				},
+				"kind": {
+					"type": "string",
+					"knownValues": [
+						"document",
+						"folder",
+						"file",
+						"policy",
+						"position",
+						"candidate",
+						"change",
+						"question"
+					],
+					"description": "The content sub-kind (open set: unknown values are tolerated for forward compatibility)."
+				},
+				"title": { "type": "string" },
+				"slug": {
+					"type": "string",
+					"description": "The URL segment, unique among live siblings. The server picks it from the name."
+				},
+				"path": {
+					"type": "string",
+					"description": "The slugs from the root, slash-joined: what the URL carries, and what resolveNode takes."
+				},
+				"parent_id": {
+					"type": "string",
+					"description": "The parent node, a context or a document. Absent for a root."
+				},
+				"idx": {
+					"type": "integer",
+					"description": "Manual order among siblings."
+				},
+				"attachable": {
+					"type": "boolean",
+					"description": "Whether children may be added (the folder lock)."
+				},
+				"owner_did": {
+					"type": "string",
+					"format": "did",
+					"description": "Who created it. Distinct from authorship."
+				},
+				"created_at": { "type": "string", "format": "datetime" },
+				"updated_at": { "type": "string", "format": "datetime" },
+				"deleted_at": {
+					"type": "string",
+					"format": "datetime",
+					"description": "Set while the node is in the bin. No read but the bin's own serves such a node."
+				},
+				"deleted_root": {
+					"type": "string",
+					"description": "The node whose deletion took this one to the bin: itself, or an ancestor."
+				},
+				"mutable": {
+					"type": "boolean",
+					"description": "Whether it may still be edited. Submitting a motion clears it."
+				},
+				"data": {
+					"type": "unknown",
+					"description": "What the node holds beside its text: a file's id and type, a cover image. An object, or absent."
+				},
+				"content": {
+					"type": "unknown",
+					"description": "The Slate document JSON, carried verbatim (parsed only at the publish seam). Absent for content-free nodes (folders)."
+				},
+				"authors": {
+					"type": "array",
+					"items": { "type": "ref", "ref": "#authorView" },
+					"description": "Zero or more authors (the census found up to 8 per node), each a DID or a free-text fallback."
+				},
+				"visibility": {
+					"type": "string",
+					"enum": ["private", "public"],
+					"description": "`public` content is mirrored to a repo; `private` stays AppView-only."
+				},
+				"published_uri": {
+					"type": "string",
+					"format": "at-uri",
+					"description": "The at-uri of the mirrored public record, when published."
+				},
+				"legacy_id": {
+					"type": "string",
+					"description": "The interim node id this row was migrated from (import provenance)."
+				}
+			}
+		},
+		"contextView": {
+			"type": "object",
+			"description": "A context: a group, an event or a site, the org's organizing structure, with its place in the tree; or the home they are all under, whose path is the empty one and whose owners run the site.",
+			"required": ["id", "kind", "name", "slug", "path", "visibility"],
+			"properties": {
+				"id": { "type": "string" },
+				"kind": {
+					"type": "string",
+					"enum": ["home", "group", "event", "site"]
+				},
+				"name": { "type": "string" },
+				"content": {
+					"type": "unknown",
+					"description": "What the place says about itself (Slate JSON). Served with the place itself, and left out of listings."
+				},
+				"data": {
+					"type": "unknown",
+					"description": "What it holds beside that: `image` (a cover's blob id), `url` (where it redirects)."
+				},
+				"slug": {
+					"type": "string",
+					"description": "The URL segment, unique among live siblings. The server picks it from the name."
+				},
+				"path": {
+					"type": "string",
+					"description": "The slugs from the root, slash-joined: what the URL carries, and what resolveNode takes."
+				},
+				"parent_id": {
+					"type": "string",
+					"description": "The parent node, a context or a document. Absent for the home."
+				},
+				"idx": {
+					"type": "integer",
+					"description": "Manual order among siblings."
+				},
+				"attachable": {
+					"type": "boolean",
+					"description": "Whether children may be added (the folder lock)."
+				},
+				"owner_did": {
+					"type": "string",
+					"format": "did",
+					"description": "Who created it. Distinct from authorship."
+				},
+				"created_at": { "type": "string", "format": "datetime" },
+				"updated_at": { "type": "string", "format": "datetime" },
+				"deleted_at": {
+					"type": "string",
+					"format": "datetime",
+					"description": "Set while the node is in the bin. No read but the bin's own serves such a node."
+				},
+				"deleted_root": {
+					"type": "string",
+					"description": "The node whose deletion took this one to the bin: itself, or an ancestor."
+				},
+				"visibility": {
+					"type": "string",
+					"enum": ["private", "public"]
+				},
+				"published_uri": { "type": "string", "format": "at-uri" },
+				"legacy_id": { "type": "string" }
+			}
+		},
+		"commentView": {
+			"type": "object",
+			"description": "An internal threaded comment on a document or another comment.",
+			"required": ["id", "on_id", "context_id", "author", "text"],
+			"properties": {
+				"id": { "type": "string" },
+				"on_id": {
+					"type": "string",
+					"description": "The document or comment this replies to."
+				},
+				"root_id": {
+					"type": "string",
+					"description": "The document its whole thread is on: `on_id`, or for an answer what the comment it answers is on."
+				},
+				"context_id": { "type": "string" },
+				"author": { "type": "ref", "ref": "#authorView" },
+				"text": { "type": "string" },
+				"image": {
+					"type": "string",
+					"description": "A picture shown with it: a blob id, read as any file is."
+				},
+				"tombstone": {
+					"type": "boolean",
+					"description": "Deleted after it was answered: emptied of its text, author and picture, and kept because the answers hang on it. Show it as deleted."
+				},
+				"created_at": { "type": "string", "format": "datetime" },
+				"legacy_id": { "type": "string" }
+			}
+		},
+		"reactionView": {
+			"type": "object",
+			"description": "An emoji reaction to a subject: a comment or a document, or a post mirrored from the public network.",
+			"required": ["id", "subject_uri", "emoji"],
+			"properties": {
+				"id": { "type": "string" },
+				"subject_uri": {
+					"type": "string",
+					"description": "What is reacted to: the id of a comment or a document, or the at-uri of a mirrored post."
+				},
+				"reactor_did": {
+					"type": "string",
+					"description": "Who reacted: a DID, or the interim id of an account nobody has taken over yet. Absent for a reactor whose account did not come across."
+				},
+				"emoji": {
+					"type": "string",
+					"maxGraphemes": 1,
+					"maxLength": 64,
+					"description": "A single emoji grapheme cluster."
+				},
+				"created_at": { "type": "string", "format": "datetime" },
+				"legacy_id": { "type": "string" }
+			}
+		},
+		"memberView": {
+			"type": "object",
+			"description": "A row of a context's member list: a member, or an invitation nobody has claimed yet.",
+			"required": ["id", "role", "active", "accepted", "hidden"],
+			"properties": {
+				"id": { "type": "string" },
+				"user_did": {
+					"type": "string",
+					"format": "did",
+					"description": "Absent while the row is an invitation nobody has claimed."
+				},
+				"role": { "type": "string", "enum": ["member", "owner"] },
+				"active": {
+					"type": "boolean",
+					"description": "Voting rights, which an owner grants. Not membership."
+				},
+				"accepted": {
+					"type": "boolean",
+					"description": "Whether they have said yes to the invitation."
+				},
+				"hidden": {
+					"type": "boolean",
+					"description": "Kept off the list everyone sees. Only an owner is served such a row."
+				},
+				"name": {
+					"type": "string",
+					"description": "The roster's name for them: the only label an unclaimed invitation has."
+				},
+				"display_name": { "type": "string" },
+				"handle": { "type": "string", "format": "handle" },
+				"avatar_url": { "type": "string", "format": "uri" },
+				"email": {
+					"type": "string",
+					"description": "Present only when the caller owns the context."
+				},
+				"mailed_at": {
+					"type": "string",
+					"format": "datetime",
+					"description": "When the claim link was last mailed to `email`. Present only when the caller owns the context."
+				}
+			}
+		},
+		"userView": {
+			"type": "object",
+			"description": "A person. The DID is the identity; the rest is profile, absent until it has been read from their PDS.",
+			"required": ["did"],
+			"properties": {
+				"did": { "type": "string", "format": "did" },
+				"handle": { "type": "string", "format": "handle" },
+				"display_name": { "type": "string" },
+				"avatar_url": { "type": "string", "format": "uri" },
+				"legacy_id": { "type": "string" }
+			}
+		},
+		"blobView": {
+			"type": "object",
+			"description": "A stored file. `id` is what a node refers to; the bytes are at `GET /blob/<id>`.",
+			"required": ["id", "context_id", "sha256", "size", "mime"],
+			"properties": {
+				"id": { "type": "string" },
+				"context_id": {
+					"type": "string",
+					"description": "The context whose readers may read the file."
+				},
+				"owner_did": {
+					"type": "string",
+					"format": "did",
+					"description": "Whoever uploaded it. Absent on a file migrated from an account that was never claimed."
+				},
+				"sha256": { "type": "string", "description": "Lowercase hex." },
+				"size": { "type": "integer" },
+				"mime": {
+					"type": "string",
+					"description": "As the uploader declared it, reduced to `type/subtype`."
+				},
+				"name": { "type": "string", "maxLength": 255 }
+			}
+		},
+		"pollView": {
+			"type": "object",
+			"description": "A poll as one caller may see it. It is also a node of kind `poll`, at `path`.",
+			"required": [
+				"id",
+				"context_id",
+				"path",
+				"question",
+				"options",
+				"min",
+				"max",
+				"blank",
+				"secret",
+				"hide_tally",
+				"public_board",
+				"open",
+				"created_at",
+				"ballots",
+				"eligible"
+			],
+			"properties": {
+				"id": { "type": "string" },
+				"context_id": { "type": "string" },
+				"parent_id": { "type": "string" },
+				"path": { "type": "string" },
+				"question": {
+					"type": "string",
+					"description": "The wording voted on. Fixed when the poll opened; renaming the node does not change it."
+				},
+				"options": { "type": "array", "items": { "type": "string" } },
+				"min": { "type": "integer" },
+				"max": { "type": "integer" },
+				"blank": {
+					"type": "boolean",
+					"description": "The last option is the abstention."
+				},
+				"secret": { "type": "boolean" },
+				"hide_tally": { "type": "boolean" },
+				"public_board": {
+					"type": "boolean",
+					"description": "A secret poll's board is published for anyone to read and mirror."
+				},
+				"open": { "type": "boolean" },
+				"created_at": { "type": "string", "format": "datetime" },
+				"closed_at": { "type": "string", "format": "datetime" },
+				"issuer_pubkey": {
+					"type": "string",
+					"description": "A secret poll's RSA key as SubjectPublicKeyInfo DER, base64url without padding. PROVISIONAL with the other ballot encodings (`crates/ballot-spec` DECISIONS.md D7)."
+				},
+				"ballots": {
+					"type": "integer",
+					"description": "Ballots cast so far, by weight. Shown to everyone: a room reads its turnout off this."
+				},
+				"eligible": {
+					"type": "integer",
+					"description": "The sum of the weights frozen at opening: what `ballots` is out of. 0 for a poll carried over from the interim, which froze no roster, so there a turnout cannot be shown."
+				},
+				"counts": {
+					"type": "array",
+					"items": { "type": "integer" },
+					"description": "One count per option. Absent where the tally is hidden from the caller."
+				},
+				"outcome": {
+					"type": "object",
+					"description": "Absent with `counts`. The abstention never wins; options sharing the top count are a tie.",
+					"required": ["kind"],
+					"properties": {
+						"kind": {
+							"type": "string",
+							"knownValues": ["winner", "tie", "none"]
+						},
+						"option": { "type": "integer" }
+					}
+				},
+				"viewer": {
+					"type": "object",
+					"description": "The caller's standing in the poll. Absent for someone who held no voting rights when it opened.",
+					"required": ["weight", "issued"],
+					"properties": {
+						"weight": {
+							"type": "integer",
+							"description": "Ballots the caller has. 0 when their weight went to a delegate."
+						},
+						"issued": {
+							"type": "boolean",
+							"description": "A secret poll: the caller has collected their tokens. Whether they then cast them the server cannot know."
+						},
+						"choices": {
+							"type": "array",
+							"items": { "type": "integer" },
+							"description": "An open poll: the caller's own ballot, once cast."
+						}
+					}
+				},
+				"closeout": {
+					"type": "ref",
+					"ref": "#closeOutView",
+					"description": "A closed secret poll's signed close-out. Absent with `counts`, which it states, and for a poll carried over from the interim, which has none."
+				}
+			}
+		},
+		"receiptView": {
+			"type": "object",
+			"description": "The custodian's signed word that one ballot is on a poll's board, saying what it said. A board without that entry, or with other choices under that token, contradicts it. The signature is ECDSA P-256 over SHA-256 of these fields as lines of text, in this order, after the line `wiki-ballot-receipt-v1`: poll, position, token, choices joined by commas, entry_digest, at (`crates/ballot-spec/src/custody.rs`).",
+			"required": [
+				"poll",
+				"position",
+				"token",
+				"choices",
+				"entry_digest",
+				"at",
+				"key",
+				"sig"
+			],
+			"properties": {
+				"poll": { "type": "string" },
+				"position": { "type": "integer" },
+				"token": { "type": "string" },
+				"choices": { "type": "array", "items": { "type": "integer" } },
+				"entry_digest": {
+					"type": "string",
+					"description": "SHA-256, in hex, of the entry's token, message randomizer, signature and choices as lines of text."
+				},
+				"at": {
+					"type": "string",
+					"description": "When it was signed, to the minute: enough for a dispute, too coarse to pair with a log."
+				},
+				"key": {
+					"type": "string",
+					"description": "The custody key, as a `did:key`. What `getBoardKey` answers."
+				},
+				"sig": {
+					"type": "string",
+					"description": "`r || s`, base64url without padding."
+				}
+			}
+		},
+		"closeOutView": {
+			"type": "object",
+			"description": "The custodian's signed word on what a board was when it closed and what it came to. A tally is official once this is signed, and a recount is checked against it. Signed as `receiptView` is, over the lines after `wiki-poll-closeout-v1`: poll id, entries, issued, counts joined by commas, board_digest, closed_at.",
+			"required": [
+				"entries",
+				"issued",
+				"counts",
+				"board_digest",
+				"closed_at",
+				"key",
+				"sig"
+			],
+			"properties": {
+				"entries": { "type": "integer" },
+				"issued": {
+					"type": "integer",
+					"description": "Unit tokens handed out: the bound on `entries` that anyone can check."
+				},
+				"counts": { "type": "array", "items": { "type": "integer" } },
+				"board_digest": {
+					"type": "string",
+					"description": "SHA-256, in hex, over the entries' digests in token order: the same board in whatever order it was cast, published or read."
+				},
+				"closed_at": { "type": "string", "format": "datetime" },
+				"key": { "type": "string" },
+				"sig": { "type": "string" }
+			}
+		},
+		"nodeRef": {
+			"type": "object",
+			"description": "Enough of a node to name it and link to it.",
+			"required": ["node", "id", "kind", "title", "path"],
+			"properties": {
+				"node": { "type": "string", "knownValues": ["document", "context"] },
+				"id": { "type": "string" },
+				"kind": { "type": "string" },
+				"title": {
+					"type": "string",
+					"description": "A document's title, or a context's name."
+				},
+				"path": { "type": "string" }
+			}
+		},
+		"hitView": {
+			"type": "object",
+			"description": "A search hit: a `nodeRef`, with where it was found and where it sits.",
+			"required": [
+				"node",
+				"id",
+				"kind",
+				"title",
+				"path",
+				"context_id",
+				"created_at",
+				"matched"
+			],
+			"properties": {
+				"node": { "type": "string", "knownValues": ["document", "context"] },
+				"id": { "type": "string" },
+				"kind": { "type": "string" },
+				"title": { "type": "string" },
+				"path": { "type": "string" },
+				"context_id": { "type": "string" },
+				"created_at": { "type": "string", "format": "datetime" },
+				"matched": {
+					"type": "string",
+					"knownValues": ["title", "text"],
+					"description": "`title` when every word is in what it is called."
+				},
+				"parent": {
+					"type": "ref",
+					"ref": "#nodeRef",
+					"description": "Where it sits, if the caller may read that too."
+				}
+			}
+		},
+		"feedItemView": {
+			"type": "object",
+			"description": "One thing that happened: a page submitted, a comment, a reaction. Light on purpose: it never carries a document's content, only how it begins.",
+			"required": ["node", "id", "kind", "text", "context_id", "created_at"],
+			"properties": {
+				"node": {
+					"type": "string",
+					"knownValues": ["document", "comment", "reaction"]
+				},
+				"id": { "type": "string" },
+				"kind": {
+					"type": "string",
+					"description": "A document's kind; `comment` or `reaction` for those."
+				},
+				"text": {
+					"type": "string",
+					"description": "A document's title, a comment's text, or a reaction's emoji."
+				},
+				"excerpt": {
+					"type": "string",
+					"description": "How a page begins, on one line."
+				},
+				"image": {
+					"type": "string",
+					"description": "The picture that goes with the row, as a blob id: a page's cover, a picture that was uploaded, a comment's picture, or for a reaction that of what it is to."
+				},
+				"quote": {
+					"type": "object",
+					"description": "The comment an answer or a reaction is to, so that the row stands on its own.",
+					"required": ["text"],
+					"properties": {
+						"by_did": { "type": "string" },
+						"by_text": { "type": "string" },
+						"text": { "type": "string" }
+					}
+				},
+				"path": {
+					"type": "string",
+					"description": "A document's own path. A comment is reached through `about`."
+				},
+				"context_id": { "type": "string" },
+				"by_did": { "type": "string", "format": "did" },
+				"by_text": {
+					"type": "string",
+					"description": "A comment by someone with no account."
+				},
+				"created_at": { "type": "string", "format": "datetime" },
+				"about": {
+					"type": "ref",
+					"ref": "#nodeRef",
+					"description": "Where a document sits, or the page a comment's or a reaction's thread is on, if the caller may read it."
+				}
+			}
+		},
+		"feedbackView": {
+			"type": "object",
+			"description": "A report: a person's account, or a crash folded from every time it was seen.",
+			"required": [
+				"id",
+				"kind",
+				"message",
+				"path",
+				"app_version",
+				"commit",
+				"user_agent",
+				"seen",
+				"reporters",
+				"created_at",
+				"updated_at"
+			],
+			"properties": {
+				"id": { "type": "string" },
+				"kind": {
+					"type": "string",
+					"knownValues": ["bug", "feature", "other", "crash", "error"]
+				},
+				"message": {
+					"type": "string",
+					"description": "With its stack resolved. Of a folded crash, the first sighting's."
+				},
+				"path": { "type": "string" },
+				"app_version": { "type": "string" },
+				"commit": { "type": "string" },
+				"user_agent": { "type": "string" },
+				"image": { "type": "string", "description": "A screenshot's blob id." },
+				"seen": {
+					"type": "integer",
+					"description": "How often a folded crash has been reported. 1 for anything else."
+				},
+				"reporters": {
+					"type": "array",
+					"items": { "type": "string" },
+					"description": "Everyone who has hit a folded crash: DIDs, and `anonymous` at most once for all of those with no account."
+				},
+				"owner_did": {
+					"type": "string",
+					"format": "did",
+					"description": "Whoever sent it first. Absent when they were not signed in."
+				},
+				"created_at": { "type": "string", "format": "datetime" },
+				"updated_at": {
+					"type": "string",
+					"format": "datetime",
+					"description": "When it was last seen."
+				}
+			}
+		},
+		"boardEntryView": {
+			"type": "object",
+			"description": "One spent token on a secret poll's board. It carries no voter, by construction. PROVISIONAL encoding (`crates/ballot-spec/src/provisional.rs`).",
+			"required": ["token", "signature", "choices"],
+			"properties": {
+				"token": { "type": "string" },
+				"msg_randomizer": { "type": "string" },
+				"signature": { "type": "string" },
+				"choices": { "type": "array", "items": { "type": "integer" } }
+			}
+		},
+		"childView": {
+			"type": "object",
+			"description": "A child as a folder view and the drawer need it: the same fields whichever table it lives in, and no content.",
+			"required": [
+				"node",
+				"id",
+				"kind",
+				"name",
+				"slug",
+				"path",
+				"idx",
+				"mutable",
+				"attachable",
+				"child_count"
+			],
+			"properties": {
+				"node": {
+					"type": "string",
+					"enum": ["context", "document"]
+				},
+				"id": {
+					"type": "string"
+				},
+				"kind": {
+					"type": "string"
+				},
+				"name": {
+					"type": "string"
+				},
+				"slug": {
+					"type": "string"
+				},
+				"path": {
+					"type": "string"
+				},
+				"idx": {
+					"type": "integer"
+				},
+				"mutable": {
+					"type": "boolean",
+					"description": "Always false for a context, which is locked from the day it is made."
+				},
+				"attachable": {
+					"type": "boolean"
+				},
+				"owner_did": {
+					"type": "string",
+					"format": "did"
+				},
+				"created_at": {
+					"type": "string"
+				},
+				"data": {
+					"type": "unknown",
+					"description": "A file's id and type, a cover image: what a row needs to draw itself."
+				},
+				"child_count": {
+					"type": "integer",
+					"description": "Live children, so the drawer offers to expand only what has some."
+				},
+				"updated_at": {
+					"type": "string"
+				},
+				"ordinal": {
+					"type": "integer",
+					"description": "As the node's own `ordinal`: present on a submitted document only."
+				}
+			}
+		}
+	}
+}
