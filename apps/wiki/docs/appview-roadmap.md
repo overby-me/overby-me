@@ -697,9 +697,10 @@ asks Bluesky's public API itself. The steps:
   AppView, walks in through `#code=`, and swaps the suite's in-page `gql()` for
   an adapter that answers its 26 GraphQL documents from XRPC in Hasura's shape
   (`test-browser-appview-adapter.js`), so that one suite holds both backends to
-  the same thing. 143 of 144 checks pass. The one that does not is the
-  stylesheet's and fails whatever the backend: the nav rail's active pill is a
-  colour-distance of 35 from the rail, under the suite's 40. Three checks do
+  the same thing. 143 of 144 checks pass. The one that does not measures the
+  stylesheet, which both builds share: the nav rail's active pill is a
+  colour-distance of 35 from the rail, under the suite's 40 (not confirmed on
+  the interim's build, which takes an account to sign in to). Three checks do
   not apply and say so (a token refresh, which a month-long bearer has not got;
   permission rows, which are code here, so the check is that whoever made a
   group runs it; a secret ballot's choices, which no server can read back, so
