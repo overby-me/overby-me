@@ -309,7 +309,11 @@ impl WikiOAuth {
                     token_endpoint_auth_method: AuthMethod::None,
                     grant_types: vec![GrantType::AuthorizationCode, GrantType::RefreshToken],
                     scopes: scopes(),
-                    jwks_uri: None,
+                    // Not to sign in with: this stays a public client. A space
+                    // that admits applications by a list has them attest with a
+                    // key their client metadata publishes (`crate::spaces`).
+                    jwks_uri: (!config.spaces_pds.is_empty())
+                        .then(|| format!("{base}{}", crate::spaces::JWKS_PATH)),
                     token_endpoint_auth_signing_alg: None,
                 },
                 keys: None,
@@ -875,6 +879,26 @@ mod tests {
         assert_eq!(doc["response_types"], serde_json::json!(["code"]));
         assert_eq!(doc["application_type"], "web");
         assert_eq!(doc["scope"], "atproto transition:generic transition:email");
+        assert!(doc.get("jwks_uri").is_none(), "no keys to publish: {doc}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_wiki_in_spaces_publishes_the_key_it_attests_with_and_signs_in_as_before() {
+        let db = Db::open(":memory:").await.expect("open");
+        db.init_schema().await.expect("schema");
+        let config = Config {
+            public_url: "https://api.wiki.example".to_string(),
+            spaces_pds: "https://pds.wiki.example".to_string(),
+            ..Config::default()
+        };
+        let oauth = WikiOAuth::new(db, &config).expect("oauth client");
+        let doc = oauth.client_metadata();
+        assert_eq!(doc["jwks_uri"], "https://api.wiki.example/jwks.json");
+        assert_eq!(doc["token_endpoint_auth_method"], "none");
+        assert!(
+            doc.get("token_endpoint_auth_signing_alg").is_none(),
+            "{doc}"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

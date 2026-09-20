@@ -10,7 +10,8 @@
 //! pass. That is what makes it safe to run beside everything else.
 
 use crate::{AppState, Config, Store};
-use atproto_spaces::client::{Host, Record, is_managed_by};
+use atproto_spaces::attestation::ClientKey;
+use atproto_spaces::client::{Host, Record, is_set_up};
 use atproto_spaces::credential::Credential;
 use atproto_spaces::directory::Directory;
 use atproto_spaces::sync::{self, Pulled};
@@ -49,6 +50,9 @@ CREATE TABLE IF NOT EXISTS space_record (
   PRIMARY KEY (context_id, collection, rkey)
 );
 "#;
+
+/// Where the key this application attests with is published.
+pub const JWKS_PATH: &str = "/jwks.json";
 
 const CHECK_USER_ACCESS: &str = "com.atproto.simplespace.checkUserAccess";
 const NOTIFY_WRITE: &str = "com.atproto.space.notifyWrite";
@@ -102,6 +106,13 @@ pub struct Spaces {
     /// How long a context is left to go quiet before it is mirrored.
     pub quiet: Duration,
     blob_limit: u64,
+    /// The key this application attests with, published at `/jwks.json`.
+    key: ClientKey,
+    /// What this application attests as: its OAuth `client_id`. `None` for one
+    /// that is not deployed and has none a PDS could look up.
+    pub client_id: Option<String>,
+    /// The applications the wiki's spaces admit, this one first. Empty for any.
+    allowed: Vec<String>,
     session: tokio::sync::Mutex<Option<(String, String, u64)>>,
 }
 
@@ -133,7 +144,22 @@ impl Spaces {
             "" => "https://plc.directory",
             own => own,
         };
+        let client_id = (!config.public_url.is_empty()).then(|| {
+            format!(
+                "{}{}",
+                config.public_url,
+                crate::oauth::CLIENT_METADATA_PATH
+            )
+        });
+        let allowed = client_id
+            .iter()
+            .chain(&config.spaces_allowed_clients)
+            .cloned()
+            .collect();
         Ok(Some(Spaces {
+            key: client_key(config),
+            client_id,
+            allowed,
             host: Host::new(http.clone(), &config.spaces_pds),
             directory: Directory::new(http, plc),
             identifier: config.spaces_identifier.clone(),
@@ -143,6 +169,16 @@ impl Spaces {
             blob_limit: config.spaces_blob_limit,
             session: Default::default(),
         }))
+    }
+
+    /// Attest as `client_id`, which the spaces then admit first of all. What a
+    /// deployment gets from its public URL; a rehearsal against a PDS on the
+    /// same machine has to say, since that PDS looks the `client_id` up.
+    pub fn attest_as(&mut self, client_id: String) {
+        self.allowed
+            .retain(|known| Some(known) != self.client_id.as_ref());
+        self.allowed.insert(0, client_id.clone());
+        self.client_id = Some(client_id);
     }
 
     /// The organization's DID and a session of its own at its PDS.
@@ -203,7 +239,13 @@ impl Spaces {
         }
         match self
             .host
-            .create_managed_space(&session, CONTEXT_SPACE, context_id, &self.service)
+            .create_managed_space(
+                &session,
+                CONTEXT_SPACE,
+                context_id,
+                &self.service,
+                &self.allowed,
+            )
             .await
         {
             Ok(_) => {}
@@ -338,9 +380,14 @@ impl Spaces {
                 tracing::warn!("spaces: {uri} is gone from the PDS, and is made again");
                 forget_rows(state, context_id).await?;
             }
-            Some(setup) if !is_managed_by(&setup, &self.service) => {
-                tracing::warn!("spaces: {uri} was not under this AppView, and is again");
-                self.host.manage_space(&session, uri, &self.service).await?;
+            Some(setup) if !is_set_up(&setup, &self.service, &self.allowed) => {
+                tracing::warn!(
+                    "spaces: {uri} was not set up as this AppView makes it, and is again"
+                );
+                let (service, allowed) = (&self.service, &self.allowed);
+                self.host
+                    .manage_space(&session, uri, service, allowed)
+                    .await?;
             }
             Some(_) => {}
         }
@@ -445,7 +492,13 @@ impl Spaces {
         let space = Self::space_of(organization, context_id).to_string();
         let key = self.directory.resolve(organization).await?.signing_key;
         let (_, session) = self.session().await?;
-        let credential = Credential::obtain(&self.host, &session, &self.host, &space, None).await?;
+        // A space that admits by list asks its own authority's application too.
+        let attestation = self
+            .client_id
+            .as_deref()
+            .map(|client_id| self.key.attest(client_id, organization));
+        let (host, attestation) = (&self.host, attestation.as_deref());
+        let credential = Credential::obtain(host, &session, host, &space, attestation).await?;
         // From nothing, so the whole repo is listed and held to its commit.
         let mut copy = sync::Copy::default();
         let pull = sync::pull(
@@ -639,6 +692,21 @@ fn fields_that_differ(rebuilt: &Value, there: &Value) -> Vec<String> {
         }
     }
     differ
+}
+
+/// The key this application attests with. Derived, as the custody key is, so
+/// that it survives a restart and a restore and is in no copy of the database.
+/// One in 2^128 derivations is no valid scalar, so a counter is bound in.
+fn client_key(config: &Config) -> ClientKey {
+    (0u8..=255)
+        .find_map(|attempt| {
+            let mut seed = [0u8; 32];
+            hkdf::Hkdf::<Sha256>::new(Some(&[attempt]), config.secret.as_bytes())
+                .expand(b"wiki-appview spaces client key v1", &mut seed)
+                .ok()?;
+            ClientKey::from_seed(&seed)
+        })
+        .expect("one of 256 derivations is a valid P-256 scalar")
 }
 
 /// The first column of what a query finds.
@@ -1121,6 +1189,15 @@ pub async fn did_document(State(state): State<AppState>) -> Response {
         }))
         .into_response(),
         _ => refused(StatusCode::NOT_FOUND, "NotFound"),
+    }
+}
+
+/// `/jwks.json`: the key this application attests with, where its client
+/// metadata says its keys are (`jwks_uri`).
+pub async fn jwks(State(state): State<AppState>) -> Response {
+    match &state.spaces {
+        Some(spaces) => Json(spaces.key.jwks()).into_response(),
+        None => refused(StatusCode::NOT_FOUND, "NotFound"),
     }
 }
 
@@ -1702,7 +1779,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_space_someone_opened_to_everyone_is_taken_back() {
+    async fn a_space_someone_opened_is_taken_back() {
         let (state, pds, spaces) = mirroring().await;
         spaces.mirror_everything(&state).await.expect("a pass");
         let setup = |pds: &FakePds| {
@@ -1710,14 +1787,24 @@ pub(crate) mod tests {
             pds.tamper_spaces(|all| found = all.get(&space("c9")).map(|s| s.setup.clone()));
             found.expect("the space")
         };
-        assert!(is_managed_by(&setup(&pds), SERVICE));
-        pds.tamper_spaces(|all| {
-            let c9 = all.get_mut(&space("c9")).expect("the space");
-            c9.setup["readPolicy"] = json!({"$type": "com.atproto.simplespace.defs#publicPolicy"});
-        });
-        assert!(!is_managed_by(&setup(&pds), SERVICE));
-        spaces.mirror_everything(&state).await.expect("a pass");
-        assert!(is_managed_by(&setup(&pds), SERVICE));
+        // Made for this application and nobody else's, since it is deployed and
+        // so has a name to attest as.
+        let only_us = ["https://wiki.test/client-metadata.json".to_string()];
+        assert!(is_set_up(&setup(&pds), SERVICE, &only_us));
+
+        // To every reader, and then to every application.
+        for (policy, opened) in [
+            ("readPolicy", "com.atproto.simplespace.defs#publicPolicy"),
+            ("appAccess", "com.atproto.simplespace.defs#open"),
+        ] {
+            pds.tamper_spaces(|all| {
+                let c9 = all.get_mut(&space("c9")).expect("the space");
+                c9.setup[policy] = json!({"$type": opened});
+            });
+            assert!(!is_set_up(&setup(&pds), SERVICE, &only_us));
+            spaces.mirror_everything(&state).await.expect("a pass");
+            assert!(is_set_up(&setup(&pds), SERVICE, &only_us), "{policy}");
+        }
     }
 
     #[tokio::test]
@@ -1900,7 +1987,15 @@ pub(crate) mod tests {
             "https://wiki.test"
         );
 
+        // The key it attests with, by the name an attestation gives it.
+        let (status, keys) = ask(&state, JWKS_PATH, None).await;
+        assert_eq!(status, StatusCode::OK);
+        let spaces = state.spaces.clone().expect("spaces");
+        assert_eq!(keys["keys"][0]["kid"], spaces.key.kid().as_str());
+        assert!(keys["keys"][0].get("d").is_none());
+
         let plain = seeded_state().await;
+        assert_eq!(ask(&plain, JWKS_PATH, None).await.0, StatusCode::NOT_FOUND);
         assert_eq!(
             ask(&plain, "/.well-known/did.json", None).await.0,
             StatusCode::NOT_FOUND
@@ -1931,6 +2026,11 @@ pub(crate) mod tests {
             said["did"].as_str().expect("a did").to_string(),
             said["accessJwt"].as_str().expect("a session").to_string(),
         )
+    }
+
+    /// The key of the board mirror the alpha tests let into their spaces.
+    pub(crate) fn mirror_key() -> ClientKey {
+        ClientKey::from_seed(&[9u8; 32]).expect("a scalar")
     }
 
     /// The alpha's PDS and the directory beside it, as `scripts/test-spaces.nu`
@@ -1985,17 +2085,49 @@ pub(crate) mod tests {
             let registered = registered.send().await.expect("the directory");
             assert!(registered.status().is_success());
 
+            // Client metadata a PDS on this machine will fetch and take: by
+            // name and not by address, with a redirect by address and not by
+            // name. This application's, and a board mirror's (`mirror_key`).
+            let at = endpoint.replace("127.0.0.1", "localhost");
+            let metadata = |name: &str, keys: Value| {
+                let mut doc = json!({
+                    "client_id": format!("{at}/{name}"),
+                    "redirect_uris": [format!("{endpoint}/callback")],
+                    "grant_types": ["authorization_code"], "response_types": ["code"],
+                    "scope": "atproto", "token_endpoint_auth_method": "none",
+                    "application_type": "web", "dpop_bound_access_tokens": true,
+                });
+                let named = if keys.is_string() { "jwks_uri" } else { "jwks" };
+                doc[named] = keys;
+                doc
+            };
+            let ours = metadata("test-client.json", json!(format!("{at}{JWKS_PATH}")));
+            let mirrors = metadata("mirror-client.json", mirror_key().jwks());
+            let client_ids = [ours["client_id"].clone(), mirrors["client_id"].clone()];
+            let documents = axum::Router::new()
+                .route(
+                    "/test-client.json",
+                    axum::routing::get(|| async { Json(ours) }),
+                )
+                .route(
+                    "/mirror-client.json",
+                    axum::routing::get(|| async { Json(mirrors) }),
+                );
+
             state.config.spaces_pds = self.pds_url.clone();
             state.config.spaces_identifier = format!("wiki{}.test", self.run);
             state.config.spaces_password = crate::config::Secret::new(ALPHA_PASSWORD);
             state.config.spaces_service = format!("{app_did}#wiki_appview");
             state.config.plc_url = self.plc_url.clone();
-            let spaces = Spaces::from_config(&state.config)
+            let [ours, mirrors] = client_ids.map(|id| id.as_str().expect("an id").to_string());
+            state.config.spaces_allowed_clients = vec![mirrors];
+            let mut spaces = Spaces::from_config(&state.config)
                 .expect("whole")
                 .expect("spaces");
+            spaces.attest_as(ours);
             let spaces = Arc::new(spaces);
             state.spaces = Some(spaces.clone());
-            let router = crate::router(state.clone());
+            let router = crate::router(state.clone()).merge(documents);
             tokio::spawn(async move { axum::serve(listener, router).await });
             (state, spaces)
         }
@@ -2063,7 +2195,23 @@ pub(crate) mod tests {
         // it was written. Who the roster does not name does not.
         let pds = &alpha.pds;
         let c9 = Spaces::space_of(&org, "c9").to_string();
-        let hers = Credential::obtain(pds, &alice_session, pds, &c9, None)
+        // Through an application the space names, which a member's own choice
+        // of tool is not: the mirror's key stands in for one that is.
+        let mirror = format!(
+            "{}/mirror-client.json",
+            spaces
+                .client_id
+                .as_deref()
+                .expect("a client")
+                .trim_end_matches("/test-client.json")
+        );
+        let attest = || mirror_key().attest(&mirror, &org);
+        let unnamed = Credential::obtain(pds, &alice_session, pds, &c9, None).await;
+        assert_eq!(
+            unnamed.err().as_ref().and_then(|e| e.xrpc_name()),
+            Some("AppNotAuthorized")
+        );
+        let hers = Credential::obtain(pds, &alice_session, pds, &c9, Some(&attest()))
             .await
             .expect("a credential for a member");
         let read = pds.records(hers.auth(), &c9, &org).await.expect("records");
@@ -2078,14 +2226,14 @@ pub(crate) mod tests {
             .await
             .expect("the bytes");
         assert_eq!(bytes, b"%PDF a made-up agenda");
-        let his = Credential::obtain(pds, &bob_session, pds, &c9, None).await;
+        let his = Credential::obtain(pds, &bob_session, pds, &c9, Some(&attest())).await;
         assert_eq!(
             his.err().as_ref().and_then(|e| e.xrpc_name()),
             Some("UserNotAuthorized")
         );
         // What is open is anyone's to read, with its fraction back in place.
         let c1 = Spaces::space_of(&org, "c1").to_string();
-        let anyones = Credential::obtain(pds, &bob_session, pds, &c1, None)
+        let anyones = Credential::obtain(pds, &bob_session, pds, &c1, Some(&attest()))
             .await
             .expect("a credential for anyone");
         let read = pds

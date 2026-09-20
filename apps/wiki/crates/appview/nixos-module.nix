@@ -55,6 +55,7 @@
     APPVIEW_SPACES_IDENTIFIER = cfg.spaces.identifier;
     APPVIEW_SPACES_SERVICE = cfg.spaces.service;
     APPVIEW_SPACES_BLOB_LIMIT = toString cfg.spaces.blobLimit;
+    APPVIEW_SPACES_ALLOWED_CLIENTS = lib.concatStringsSep "," cfg.spaces.allowedClients;
   };
   # What the service and the cutover's load share: the same state, the same
   # secrets, the same confinement.
@@ -273,6 +274,19 @@ in {
           asks whether a user may read or write a space. For a `did:web` of the
           AppView's own domain, the AppView serves the DID document itself
           (`/.well-known/did.json`, pointing at `publicUrl`).
+        '';
+      };
+      allowedClients = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        example = ["https://tools.example.org/board-mirror/client-metadata.json"];
+        description = ''
+          The `client_id`s of other applications let into the wiki's spaces:
+          a board mirror a member runs, say. Every space admits this AppView
+          (as `<publicUrl>/client-metadata.json`) and these, and no other
+          application, whoever's session it comes with. Each is a client
+          metadata document the PDS can fetch, with the application's public
+          key in it.
         '';
       };
       blobLimit = lib.mkOption {

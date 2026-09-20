@@ -50,7 +50,9 @@ Read from the proposal, and where marked ✓ asked of the real alpha PDS by
   leaked commit proves nothing to a third party. ✓
 - A credential is bound to the application's key (DPoP) and lasts two hours. An
   application gets one through any one user's session, and may be required to
-  attest which application it is (`appAccess: #allowList`). ✓ for the first half.
+  attest which application it is (`appAccess: #allowList`): a token signed by a
+  key its client metadata publishes, which the space's host fetches to check.
+  Every application is asked, the authority's own included. ✓
 - Users grant access by **space type** through OAuth (`space:<type>?…`), and the
   consent screen shows the type's name.
 - Files are blobs on the author's PDS, served through the space. ✓ A PDS as it
@@ -198,12 +200,18 @@ credential.
 
 ### Signing in
 
-As now, with two additions when the first record moves to a member's repo: the
+As now. A space that admits applications by a list has each attest which it is,
+and what that takes is a key published where the `client_id` points, not a
+confidential client: the AppView stays the public client it signs members in
+as, adds a `jwks_uri` to its client metadata once spaces are configured, and
+attests with a key derived from the secret it already keeps. The confidential
+client stays the roadmap's one open box, wanted for long-lived tokens to
+members' repos and for nothing here.
+
+One addition comes with the first record that moves to a member's repo: the
 OAuth request asks for the wiki's spaces by type (a permission set, shown to the
-member under the type's name), and the AppView becomes a confidential client,
-which an allow list of applications on a space requires and which is the one box
-the roadmap still has open. In the first stage only the organization's account
-grants anything.
+member under the type's name). In the first stage only the organization's
+account grants anything.
 
 ### Public contexts
 
@@ -281,7 +289,11 @@ owner's is marked.
    hand, and with the PDS hosts members actually use.
 4. **Which applications may read a space**: the wiki, and tools named to it
    such as the board mirror. An allow list, because this is a political
-   organization's internal debate.
+   organization's internal debate. Built: a deployed AppView makes every space
+   with a list of itself and whatever `APPVIEW_SPACES_ALLOWED_CLIENTS` names,
+   and the sweep takes back a space someone opened. THE OWNER'S: a `client_id`
+   for each tool they let in, which is a client metadata document on a domain
+   of theirs with the tool's public key in it.
 5. **When**: the cutover from the interim goes ahead on the AppView as built,
    because the interim is the fragile part. Spaces follow their release; that
    second move stays inside the backend and is rehearsed with the same tooling.
@@ -317,6 +329,11 @@ configured (`APPVIEW_SPACES_*`, `services.wiki-appview.spaces`). Done so far
   (a bin, a move or a purge announces one id and changes a subtree), again on a
   sweep every fifteen minutes, and at start. The mirror compares and does not
   remember, so what failed is done by the next pass.
+- Decision 4, the allow list: a deployed AppView's spaces admit it and the
+  tools named to it and no other application. It attests with a key derived
+  from its secret and published at `/jwks.json`, which the alpha PDS fetched
+  and held it to; a member's session through an application the space does not
+  name was refused, and through one it names was let in.
 - S5: the board of every secret poll whose tally its members may see goes
   into its context's space, as it goes to the board account for a poll held in
   public (`crates/appview/src/board.rs`), and `board-mirror follow --space`
@@ -336,10 +353,7 @@ configured (`APPVIEW_SPACES_*`, `services.wiki-appview.spaces`). Done so far
 Not yet: registering for notifications and indexing members' own repos, which
 is nothing to do until a member holds a record (S7); the record FIRST, which is
 the second half of S4; a page past what a PDS takes as one record, which has
-to go as a blob, and the rehearsal on a copy of production (the rest of S6);
-and spaces are made open to any
-application until there is a confidential client to attest as (decision 4 needs
-it).
+to go as a blob, and the rehearsal on a copy of production (the rest of S6).
 
 - **S1 Foundations.** The NSID. A space type and record lexicons for content,
   overlays and the board (`content` as the editor's own JSON, tagged with its

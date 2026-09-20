@@ -203,6 +203,7 @@ fn build_router(state: AppState) -> Router {
         // What the organization's PDS asks and tells, where the wiki is
         // mirrored into atproto spaces (`crate::spaces`).
         .route("/.well-known/did.json", get(spaces::did_document))
+        .route(spaces::JWKS_PATH, get(spaces::jwks))
         .route(
             "/xrpc/com.atproto.simplespace.checkUserAccess",
             get(spaces::check_user_access),

@@ -4,6 +4,7 @@
 //! the host's (`sethash`, `commit`, `sync`), and how it knows a PDS is who
 //! calls it back (`service_auth`).
 
+pub mod attestation;
 pub mod client;
 pub mod commit;
 pub mod credential;

@@ -1099,7 +1099,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs a spaces PDS: run scripts/test-spaces.nu"]
     async fn a_member_mirrors_a_board_out_of_a_real_space() {
-        use crate::spaces::tests::{ALPHA_PASSWORD, Alpha, account};
+        use crate::spaces::tests::{ALPHA_PASSWORD, Alpha, account, mirror_key};
         let alpha = Alpha::with_an_organization().await;
         let (http, pds_url, run) = (&alpha.http, &alpha.pds_url, &alpha.run);
         let (member, _) = account(http, pds_url, &format!("mirror{run}")).await;
@@ -1135,10 +1135,14 @@ mod tests {
         assert_eq!(out.closed, 1);
 
         let c9 = format!("at://{}/space/wiki.radikal.context/c9", alpha.org);
+        // The mirror is an application the organization has named, and says so.
+        let client = spaces.client_id.clone().expect("a client");
+        let client = client.replace("/test-client.json", "/mirror-client.json");
         let as_member = |name: &str| board_mirror::Member {
             pds: pds_url.clone(),
             identifier: format!("{name}{run}.test"),
             password: ALPHA_PASSWORD.to_string(),
+            client: Some((client.clone(), mirror_key())),
         };
         let dir = mirror_dir();
         let seen = board_mirror::follow_space_once(&as_member("mirror"), &c9, &alpha.plc_url, &dir)
@@ -1154,6 +1158,18 @@ mod tests {
         assert_eq!(counted.len(), 1);
         assert_eq!(counted[0].problems, Vec::<String>::new());
         assert_eq!(counted[0].counts, Some(vec![3, 1, 0]));
+
+        // Nor is a member with a tool the organization has not named.
+        let mut unnamed = as_member("mirror");
+        unnamed.client = None;
+        let refused =
+            board_mirror::follow_space_once(&unnamed, &c9, &alpha.plc_url, &mirror_dir()).await;
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("AppNotAuthorized")),
+            "{refused:?}"
+        );
 
         // Who the roster does not name is not let in to look.
         let other = mirror_dir();

@@ -91,6 +91,23 @@ and by hand against the same build:
   sweep, and `updateSpace` takes back one whose policy was changed.
 - **The owner is not asked about.** The organization got a credential for its
   own space while the managing app it named could not be resolved at all.
+- **Admitting applications by name works, and needs no confidential client.**
+  A space made with `appAccess: #allowList` refuses a credential to a session
+  that comes with no attestation (`AppNotAuthorized`), the authority's own
+  included: the application is checked before the user, from the space's setup
+  alone. An attestation is a JWT of type `atproto-client-attestation+jwt`, with
+  `iss` and `sub` the `client_id`, `aud` `{authority}#atproto_space_host`, a
+  `jti`, good for a minute and once, signed by a key named by `kid`. The host
+  fetches the `client_id`, reads it as OAuth client metadata and takes the key
+  from its `jwks` or `jwks_uri`. It does not ask that the client be
+  confidential: `token_endpoint_auth_method: none` with a `jwks_uri` passes here
+  and in the OAuth provider's own validation. It fetches by NAME only (a
+  `client_id` on an IP address is refused even in dev mode), and over plain
+  HTTP only with SSRF protection off, which is how the tests here reach an
+  AppView on `localhost`.
+- **A deleted space says so to whoever renews.** `getSpaceCredential` answers
+  `SpaceDeleted` for one, which is what a syncer that missed
+  `notifySpaceDeleted` learns from. (Read in the PDS's source, not yet seen.)
 - **The managing app, for real.** With the AppView itself as the managing app,
   a member got a credential through her own session and read the organization's
   repo; who the roster did not name was `UserNotAuthorized`; anyone got in to a
@@ -98,8 +115,7 @@ and by hand against the same build:
 
 ## What was not asked
 
-OAuth `space:` scopes and the consent screen; a client attestation and
-`appAccess: #allowList`; `notifySpaceDeleted` as the PDS sends it (the AppView
+OAuth `space:` scopes and the consent screen; `notifySpaceDeleted` as the PDS sends it (the AppView
 answers it, and nothing registered to be told); a member on
 another PDS than the authority's (every account here shared one); account
 migration; how long a PDS keeps its operation log. The alpha promises breaking

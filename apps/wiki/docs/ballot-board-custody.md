@@ -138,7 +138,10 @@ same signed close-out. A space is read by the group's members and nobody else, s
 copy no longer depends on the poll having been public: any member can keep one, with
 `board-mirror follow --space <at-uri> --pds <their PDS> --as <their handle>` and an app password of
 their own account. The mirror lists the organization's repo whole and holds it to the commit the
-organization signed, so a host cannot serve one member a board of its own making.
+organization signed, so a host cannot serve one member a board of its own making. The
+organization's spaces admit applications by a list, so the mirror says which one it is
+(`--client-id`, with its key in `BOARD_MIRROR_CLIENT_KEY`): the organization names that `client_id`
+to the AppView, and what it points at is a small public document with the mirror's public key.
 
 One kind of poll has no board in a space: one that hides its tally. Its counts and its board are
 for the group's owners alone, open or closed, and nothing narrower than "every member" can live in

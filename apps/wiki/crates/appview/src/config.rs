@@ -120,6 +120,11 @@ pub struct Config {
     /// AppView, as `did#fragment` (`APPVIEW_SPACES_SERVICE`). The DID's document
     /// has to carry that service, pointing here.
     pub spaces_service: String,
+    /// The `client_id`s of other applications let into the wiki's spaces beside
+    /// this one (`APPVIEW_SPACES_ALLOWED_CLIENTS`, comma-separated): a board
+    /// mirror a member runs, say. Only a deployed AppView has a `client_id` to
+    /// attest as, so only its spaces admit by list; a loopback one's are open.
+    pub spaces_allowed_clients: Vec<String>,
     /// The largest file the organization's PDS takes as a blob, in bytes. A
     /// larger one stays with the AppView alone. A PDS as it comes takes 5 MiB.
     pub spaces_blob_limit: u64,
@@ -232,6 +237,12 @@ impl Config {
             spaces_identifier: env("APPVIEW_SPACES_IDENTIFIER").trim().to_string(),
             spaces_password: Secret::new(env("APPVIEW_SPACES_PASSWORD").trim()),
             spaces_service: env("APPVIEW_SPACES_SERVICE").trim().to_string(),
+            spaces_allowed_clients: env("APPVIEW_SPACES_ALLOWED_CLIENTS")
+                .split(',')
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .collect(),
             spaces_blob_limit: env("APPVIEW_SPACES_BLOB_LIMIT")
                 .trim()
                 .parse()
@@ -335,6 +346,7 @@ impl Default for Config {
             spaces_identifier: String::new(),
             spaces_password: Secret::default(),
             spaces_service: String::new(),
+            spaces_allowed_clients: Vec::new(),
             spaces_blob_limit: PDS_BLOB_LIMIT,
             smtp_url: Secret::default(),
             mail_from: String::new(),

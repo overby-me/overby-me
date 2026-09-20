@@ -141,7 +141,13 @@ async fn the_appviews_part_of_a_space_against_a_real_pds() {
 
     // A context's space, under the organization, with the stand-in deciding.
     let space = pds
-        .create_managed_space(&org_session, SPACE_TYPE, &format!("c-{run}"), &app.service)
+        .create_managed_space(
+            &org_session,
+            SPACE_TYPE,
+            &format!("c-{run}"),
+            &app.service,
+            &[],
+        )
         .await
         .expect("a space");
     assert_eq!(space, format!("at://{org}/space/{SPACE_TYPE}/c-{run}"));

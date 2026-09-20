@@ -278,8 +278,9 @@ is merged and its tests pass.
 - [ ] A confidential client (`private_key_jwt` and a served JWKS). Not needed
   until the publish seam writes to members' repos and wants long-lived PDS
   tokens; the AppView's own sessions do not depend on them. The spaces redesign
-  needs it (S1): a space that admits applications by an allow list has them
-  attest with this key.
+  turned out not to need it: a space that admits applications by an allow list
+  has them attest with a key their client metadata publishes, which a public
+  client may do, and the AppView does once spaces are configured.
 - [x] One full login in a real browser against a real PDS
   (`scripts/test-real-login.nu`). It was thought to need a human; it needed a
   PDS whose password is known. The real `appview` runs against nixpkgs'

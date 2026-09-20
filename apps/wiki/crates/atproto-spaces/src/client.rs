@@ -60,12 +60,26 @@ fn managed_by(app: &str) -> Value {
     json!({"$type": "com.atproto.simplespace.defs#managingAppPolicy", "managingApp": app})
 }
 
+/// Which applications a space lets in: the ones named, each of which then has
+/// to attest which it is ([`crate::attestation`]), or with nobody named, any.
+fn app_access(allowed: &[String]) -> Value {
+    match allowed {
+        [] => json!({"$type": "com.atproto.simplespace.defs#open"}),
+        named => json!({"$type": "com.atproto.simplespace.defs#allowList", "allowed": named}),
+    }
+}
+
 /// Whether `setup` (of [`Host::space_setup`]) leaves both who reads and who
-/// writes to `app` and to nobody else.
-pub fn is_managed_by(setup: &Value, app: &str) -> bool {
-    [&setup["readPolicy"], &setup["writePolicy"]]
+/// writes to `app` and to nobody else, and lets in the applications `allowed`
+/// names and no others.
+pub fn is_set_up(setup: &Value, app: &str, allowed: &[String]) -> bool {
+    let policies = [&setup["readPolicy"], &setup["writePolicy"]];
+    let managed = policies
         .iter()
-        .all(|policy| policy["$type"] == managed_by(app)["$type"] && policy["managingApp"] == app)
+        .all(|policy| policy["$type"] == managed_by(app)["$type"] && policy["managingApp"] == app);
+    let wanted = app_access(allowed);
+    let access = &setup["appAccess"];
+    managed && access["$type"] == wanted["$type"] && access.get("allowed") == wanted.get("allowed")
 }
 
 fn text(value: &Value, name: &str) -> Result<String, Error> {
@@ -306,19 +320,21 @@ impl Host {
 
     // -- Spaces of the simplest kind, on the account's PDS. --
 
-    /// Make a space whose readers and writers a managing app decides.
+    /// Make a space whose readers and writers a managing app decides, open to
+    /// the applications `allowed` names, or to any where it names none.
     pub async fn create_managed_space(
         &self,
         session: &str,
         space_type: &str,
         skey: &str,
         managing_app: &str,
+        allowed: &[String],
     ) -> Result<String, Error> {
         let policy = managed_by(managing_app);
         let body = json!({
             "type": space_type, "skey": skey,
             "readPolicy": policy, "writePolicy": policy,
-            "appAccess": {"$type": "com.atproto.simplespace.defs#open"},
+            "appAccess": app_access(allowed),
         });
         let said = self
             .procedure(
@@ -347,15 +363,20 @@ impl Host {
         }
     }
 
-    /// Put a space under a managing app, whoever decided its access before.
+    /// Set a space up as [`Self::create_managed_space`] would have made it,
+    /// whoever decided its access before.
     pub async fn manage_space(
         &self,
         session: &str,
         space: &str,
         managing_app: &str,
+        allowed: &[String],
     ) -> Result<(), Error> {
         let policy = managed_by(managing_app);
-        let body = json!({"space": space, "readPolicy": policy, "writePolicy": policy});
+        let body = json!({
+            "space": space, "readPolicy": policy, "writePolicy": policy,
+            "appAccess": app_access(allowed),
+        });
         self.procedure(
             "com.atproto.simplespace.updateSpace",
             &body,

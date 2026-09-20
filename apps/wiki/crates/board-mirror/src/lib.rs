@@ -160,6 +160,10 @@ pub struct Member {
     pub identifier: String,
     /// An app password: all it is used for is to be let into the space.
     pub password: String,
+    /// Which application this mirror is, where the organization's spaces admit
+    /// applications by a list: a `client_id` the organization has named, and
+    /// the key its client metadata publishes.
+    pub client: Option<(String, atproto_spaces::attestation::ClientKey)>,
 }
 
 /// [`follow_once`], of the board in a group's space
@@ -190,8 +194,18 @@ pub async fn follow_space_once(
         .await?;
     let host = authority.space_host().or(authority.pds());
     let host = Host::new(http, host.ok_or("the organization names no host")?);
-    let credential =
-        atproto_spaces::credential::Credential::obtain(&own, &session, &host, space, None).await?;
+    let attestation = member
+        .client
+        .as_ref()
+        .map(|(client_id, key)| key.attest(client_id, organization));
+    let credential = atproto_spaces::credential::Credential::obtain(
+        &own,
+        &session,
+        &host,
+        space,
+        attestation.as_deref(),
+    )
+    .await?;
     let pulled = atproto_spaces::sync::pull(
         &host,
         credential.auth(),

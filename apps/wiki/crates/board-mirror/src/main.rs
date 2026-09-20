@@ -2,7 +2,8 @@
 //! keeps an independent copy of a published ballot board;
 //! `board-mirror follow --space <at-uri> --pds <url> --as <handle> --dir <dir>`
 //! keeps one of the board in a group's space, as a member whose app password is
-//! in `BOARD_MIRROR_PASSWORD`;
+//! in `BOARD_MIRROR_PASSWORD` (and, where the organization admits applications
+//! by name, as `--client-id`, whose key is in `BOARD_MIRROR_CLIENT_KEY`);
 //! `board-mirror check --dir <dir> [--key <did:key>]` counts it. All exit
 //! non-zero when the custodian's word does not hold up.
 
@@ -33,6 +34,7 @@ async fn main() {
                         pds: pds.clone(),
                         identifier,
                         password,
+                        client: flag(&args, "--client-id").map(|id| (id, client_key())),
                     };
                     let directory = flag(&args, "--plc");
                     let directory = directory.unwrap_or("https://plc.directory".into());
@@ -100,11 +102,28 @@ async fn main() {
     }
 }
 
+/// The key of `--client-id`, as 64 hex digits in `BOARD_MIRROR_CLIENT_KEY`.
+fn client_key() -> atproto_spaces::attestation::ClientKey {
+    let hex = std::env::var("BOARD_MIRROR_CLIENT_KEY").unwrap_or_default();
+    let bytes: Vec<u8> = (0..hex.len() / 2)
+        .filter_map(|i| u8::from_str_radix(hex.get(2 * i..2 * i + 2)?, 16).ok())
+        .collect();
+    let key = <[u8; 32]>::try_from(bytes)
+        .ok()
+        .and_then(|seed| atproto_spaces::attestation::ClientKey::from_seed(&seed));
+    key.unwrap_or_else(|| {
+        eprintln!("BOARD_MIRROR_CLIENT_KEY is not 64 hex digits of a P-256 key");
+        std::process::exit(2);
+    })
+}
+
 fn usage() {
     eprintln!(
         "usage: board-mirror follow --pds <url> --repo <did> --dir <dir> [--every <secs>]\n       \
          board-mirror follow --space <at-uri> --pds <your pds> --as <your handle> --dir <dir> \
-         [--plc <url>] [--every <secs>]   (BOARD_MIRROR_PASSWORD: an app password)\n       \
+         [--plc <url>] [--every <secs>] [--client-id <url>]\n         \
+         (BOARD_MIRROR_PASSWORD: an app password; BOARD_MIRROR_CLIENT_KEY: the key of \
+         --client-id, where the organization admits applications by name)\n       \
          board-mirror check --dir <dir> [--key <did:key>]"
     );
     std::process::exit(2);

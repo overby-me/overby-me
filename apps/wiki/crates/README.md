@@ -71,7 +71,9 @@ workspace when the rewrite starts.
   repo, raises an alarm when a record it has seen is gone or rewritten, and
   recounts every closed poll against its signed close-out. With `--space` it
   does the same of a board in a group's atproto space, as a member, by an app
-  password of their own account. Packaged as `wiki-board-mirror`.
+  password of their own account, and as an application the organization has
+  named (`--client-id`), since its spaces admit applications by a list. Packaged
+  as `wiki-board-mirror`.
 - `atproto-spaces`: atproto spaces (proposal 0016, non-public records) as far as
   the AppView needs them: tokens and DPoP, the credential flow, the record and
   sync calls, a repo's set hash and signed commit, keeping a copy of a repo
