@@ -7,7 +7,8 @@ scratch directory, and was removed afterwards. Nothing of it is in the
 repository.
 
 Run it again, from a fresh dump in `<dir>`, with
-`nu scripts/rehearse-cutover.nu <dir>`.
+`nu scripts/rehearse-cutover.nu <dir>`, and then
+`nu scripts/rehearse-cutover-browser.nu <dir>` for the last step.
 
 ## What was run
 
@@ -38,6 +39,12 @@ Run it again, from a fresh dump in `<dir>`, with
    URL, and not to a stranger; a comment lands and is read back; search finds
    the page by a word of its title, and finds a stranger nothing; a file is
    served whole to a member, and refused to a stranger and to nobody.
+
+8. **The frontend, in a browser** (`scripts/rehearse-cutover-browser.nu`): the
+   build on the AppView in headless Firefox, as the returned member with the
+   most seats, walking real pages: ten of every kind, the longest bodies first,
+   since those are the likeliest to hold a shape no made-up page has. All 91
+   drew their title, and the app logged no error.
 
 ## What it found
 
@@ -81,7 +88,9 @@ are fixed and tested there.
   they are closed first, or come across closed with what they had taken.
 - 22 accounts have no verified address and will need a claim link for each
   seat, from an owner.
-- A real sign-in through a real PDS, which the rehearsal stands in for with a
-  dev tool that is never deployed.
+- A real sign-in. The rehearsal stands in for it with a dev tool that is never
+  deployed; one is made apart from it, on a made-up account against a real PDS
+  (`scripts/test-real-login.nu`), which cannot cover taking an old account over
+  by address, since a PDS on plain http is never believed about one.
 - The NixOS host: the unit that runs the load and the gates is covered by the
   VM test, on a made-up wiki.

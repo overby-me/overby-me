@@ -56,7 +56,8 @@ again: `nu scripts/rehearse-cutover.nu <dir>`.
   in `<dir>`: extract, load, file the files, the gates, then every carried
   account returns at once (`appview-dev --db ... --everyone-returns`, a dev
   tool that is never deployed) and a smoke test over HTTP as nobody, as a
-  returned member and as a stranger.
+  returned member and as a stranger. `scripts/rehearse-cutover-browser.nu
+  <dir>` then walks real pages of every kind in a real browser.
 
 ## Ordered checklist
 
