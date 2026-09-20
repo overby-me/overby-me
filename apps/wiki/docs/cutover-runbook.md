@@ -133,6 +133,29 @@ All must be green before the flip:
   about 42 percent, survived rather than being dropped by the old scalar
   `author_did`).
 
+## Mail, and the ballot board
+
+Neither is needed for the flip, and both are settings of the service
+(`crates/appview/nixos-module.nix`), with their secrets in `secretsFile`:
+
+- **Mail.** `mailFrom` and `APPVIEW_SMTP_URL`: an address put on a roster is
+  mailed the link to its seat. The account at a mail provider is to be made
+  first. Without them an owner hands claim links out, as before. After the
+  flip, `sendInvitation` mails a carried seat its link for the first time.
+- **The board account.** `board.pds`, `board.identifier` and
+  `APPVIEW_BOARD_PASSWORD` (an app password): an atproto account kept for
+  nothing but ballot boards, whose keys the organization holds. With it, a
+  secret poll opened as public has its board published for anyone to read.
+  Without it nothing is published; receipts and close-outs are signed all the
+  same.
+- **The mirror, before the first binding public vote.** Someone who is not the
+  organization runs `board-mirror follow --pds <the board's PDS> --repo <the
+  board account's DID> --dir <dir> --every 60`, and after a vote
+  `board-mirror check --dir <dir> --key <the custody key>`, the key being what
+  `getBoardKey` answers and what was read out to the assembly. Until someone
+  does, a ballot unpublished after the fact is nobody's to notice, and the
+  claim that censorship is provable is a claim about software nobody ran.
+
 ## Who runs the site afterwards
 
 The interim's root comes across as the home, with its owners as the owners of

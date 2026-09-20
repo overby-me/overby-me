@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "record",
-			"description": "One spent unit token on the public bulletin board: the anonymized ballot. Published by the BOARD CUSTODIAN (the org DID, per the custody decision in docs/ballot-board-custody.md), never by the voter: an atproto record lives in a DID-owned repo, so voter publication would deanonymize the ballot by repo ownership. This record deliberately has NO voter identity field, and every entry weighs exactly 1 (unit tokens), so the tally is a plain count of entries per choice. Token uniqueness on the board is the double-vote rejection; on a reused token the FIRST entry stands. Crypto field encodings are PROVISIONAL pending the ballot-spec crate's pinned serialization.",
+			"description": "One spent unit token on a public board: an anonymous ballot. Written by the board account and never by the voter, since a record lives in a repo owned by a DID and a voter's own would name them. It has no field for who cast it, and weighs exactly 1, so the tally is a count of entries per choice. A token seen twice counts once, the first standing (D4). Ballots are not published as they are cast: they go out at least three together and shuffled, or all at the close, and `createdAt` is when the batch left, so that a record's arrival says nothing of when its ballot was cast. Encodings are base64url without padding (`crates/ballot-spec/src/provisional.rs`, pinned by a known-answer vector).",
 			"key": "tid",
 			"record": {
 				"type": "object",
@@ -18,17 +18,17 @@
 					"token": {
 						"type": "string",
 						"maxLength": 64,
-						"description": "PROVISIONAL encoding: the unblinded unit token's message, a 32-byte voter-generated random nullifier, as base64url (unpadded). Carries no structure and no identity; its uniqueness on the board is the dedup."
+						"description": "The unblinded unit token's message, a 32-byte voter-generated random nullifier, as base64url (unpadded). Carries no structure and no identity; its uniqueness on the board is the dedup."
 					},
 					"msgRandomizer": {
 						"type": "string",
 						"maxLength": 64,
-						"description": "PROVISIONAL encoding: the RFC 9474 message randomizer from blinding (the RSABSSA Randomized variant), base64url (unpadded). Optional per the spec crate's shape; required by verification when present at signing."
+						"description": "The RFC 9474 message randomizer from blinding (the RSABSSA Randomized variant), base64url (unpadded). Optional per the spec crate's shape; required by verification when present at signing."
 					},
 					"signature": {
 						"type": "string",
 						"maxLength": 2048,
-						"description": "PROVISIONAL encoding: the unblinded RSA-PSS signature over token, base64url (unpadded). Verifies under the referenced poll's published issuerPubkey; per-poll keys make cross-poll spends unverifiable."
+						"description": "The unblinded RSA-PSS signature over token, base64url (unpadded). Verifies under the referenced poll's published issuerPubkey; per-poll keys make cross-poll spends unverifiable."
 					},
 					"choices": {
 						"type": "array",
@@ -41,7 +41,8 @@
 					},
 					"createdAt": {
 						"type": "string",
-						"format": "datetime"
+						"format": "datetime",
+						"description": "When the batch this ballot went out in left, the same for all of it. Not when it was cast."
 					}
 				}
 			}

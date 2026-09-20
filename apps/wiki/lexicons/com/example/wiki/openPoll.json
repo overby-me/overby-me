@@ -57,6 +57,10 @@
 							"type": "boolean",
 							"default": false,
 							"description": "The counts, and a secret poll's board, are for the owners of the context. The turnout is still everyone's."
+						},
+						"public_board": {
+							"type": "boolean",
+							"description": "Whether a secret poll's board is published, on a site that has a board account, for anyone to read and mirror. Absent, it is where the context is open to everyone: a board tells the world what a vote came to, which a closed group's members have to themselves. Refused with `hide_tally`, and for a poll that is not secret, which has no board."
 						}
 					}
 				}

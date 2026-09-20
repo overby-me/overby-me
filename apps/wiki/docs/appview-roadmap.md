@@ -130,6 +130,20 @@ it, and has not been ported; the AppView's is the smaller one named above.
   a page made a minute ago read "19 hours ago" after its first save. The interim
   does the same. Here the day a node already has leaves its time of day alone.
   Seen in the browser run, where a page is made and saved as a person would.
+- **A public board would have told the world what a closed group's votes came
+  to.** The custody memo chose atproto records because everyone can see them,
+  which is the point for a congress and a leak for a board meeting: the counts
+  of a poll are its members' to know, and a hidden tally is its owners'. So a
+  board is published only for a poll opened as public (`openPoll.public_board`,
+  by default where the context is open to everyone), a hidden tally cannot have
+  one, and every other secret poll keeps what needs no publication: a receipt
+  for every ballot and a signed close-out.
+- **Two record names, one a prefix of the other.** The mirror told a poll's
+  announcement from its close-out by whether the address contained
+  `com.example.wiki.poll`, which `com.example.wiki.pollCloseOut` does too, so
+  every close-out was counted as a second poll. Found by the first end-to-end
+  test of publisher and mirror together; a record's collection is now read as
+  the whole path segment.
 - **Looking a ballot up named the voter.** `getBoardEntry` asked that the
   caller be able to read the poll, so in a closed group a voter could only check
   their ballot with their session on the request: their name and their token in
@@ -442,11 +456,23 @@ motion and goes to the bin with it) and a `poll` row of the same id
   again, with the same blinded tokens, and mints nothing new.
 - [x] Open (non-secret) polls: one named ballot per voter, at their frozen weight.
 - [x] A board for every poll in one store. `ballot-store` held a single poll.
-- [ ] Publishing the board as atproto records, signed inclusion receipts, and a
-  signed close-out digest. All three wait on the owner's custody call
-  (`docs/ballot-board-custody.md`). Until then the board is served from here:
-  to whoever may see the counts, in token order (board order is the order the
-  room voted in), and one entry at a time to a voter who knows their token.
+- [x] Signed inclusion receipts, a signed close-out digest, and the board
+  published as atproto records (`crates/appview/src/board.rs`,
+  `crates/ballot-spec/src/custody.rs`). The custody call was the owner's, and
+  was taken as the sign-off sheet recommended it when the owner asked for the
+  open items to be finished (2026-09-20): org-published, a key kept for nothing
+  else, receipts over the token AND the choices, a close-out that makes a tally
+  official, ballots published in shuffled batches of at least three or all at
+  the close, a board account of its own, and an independent mirror
+  (`crates/board-mirror`, packaged as `wiki-board-mirror`) that keeps its own
+  copy of the public repo, raises an alarm for a record that is gone or
+  rewritten, and recounts every closed poll against its close-out. One thing
+  the memo had not weighed is decided here: a board is public only for a poll
+  opened as public, which a poll is by default only where its context is open
+  to everyone (see the finding below). Every secret poll gets receipts and a
+  close-out all the same, served with the board to whoever may see the counts.
+  Naming who runs the mirror is the one part that is not software, and the
+  runbook makes one running a precondition for the first binding public vote.
 - [x] Delegation (`crates/appview/src/delegation.rs`). A member with voting
   rights gives their vote in a context to another who holds one
   (`setDelegation`), until they take it back or either leaves; a poll copies

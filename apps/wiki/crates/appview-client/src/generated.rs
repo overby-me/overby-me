@@ -717,6 +717,8 @@ pub mod defs {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub parent_id: Option<String>,
         pub path: String,
+        /// A secret poll's board is published for anyone to read and mirror.
+        pub public_board: bool,
         /// The wording voted on. Fixed when the poll opened; renaming the node does not change it.
         pub question: String,
         pub secret: bool,
@@ -2232,6 +2234,9 @@ pub mod open_poll {
         pub options: Vec<String>,
         /// The motion, amendment, question or position put to the vote.
         pub parent_id: String,
+        /// Whether a secret poll's board is published, on a site that has a board account, for anyone to read and mirror. Absent, it is where the context is open to everyone: a board tells the world what a vote came to, which a closed group's members have to themselves. Refused with `hide_tally`, and for a poll that is not secret, which has no board.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub public_board: Option<bool>,
         /// The wording voted on, fixed for the life of the poll. The title if absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub question: Option<String>,

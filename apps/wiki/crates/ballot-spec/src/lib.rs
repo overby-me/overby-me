@@ -335,6 +335,32 @@ pub struct BoardEntry {
     pub choices: Vec<usize>,
 }
 
+/// What a board comes to when anyone counts it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recount {
+    pub counts: Vec<u64>,
+    /// The entries left out, by their place in what was given, and why: a
+    /// forged signature, a token seen before, choices the rules do not allow.
+    pub dropped: Vec<(usize, CastError)>,
+}
+
+/// Count `entries` as the board that took them did: each through the checks a
+/// cast goes through, in the order given, the first of a repeated token
+/// standing (D4). This is the count anyone can make, of any copy of a board.
+pub fn recount(pk: &IssuerPublicKey, rules: &BallotRules, entries: Vec<BoardEntry>) -> Recount {
+    let mut board = Board::default();
+    let mut dropped = Vec::new();
+    for (at, entry) in entries.into_iter().enumerate() {
+        if let Err(why) = board.cast(pk, rules, entry) {
+            dropped.push((at, why));
+        }
+    }
+    Recount {
+        counts: tally(board.entries(), rules),
+        dropped,
+    }
+}
+
 /// Why a cast was rejected by the board.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CastError {

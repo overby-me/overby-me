@@ -86,6 +86,19 @@ pub struct Config {
     /// Keys the signed blob links (`APPVIEW_SECRET`). Unset, one is made on
     /// first start and kept beside the database file.
     pub secret: Secret,
+    /// The board account's PDS (`APPVIEW_BOARD_PDS`), such as
+    /// `https://bsky.social`. With `board_identifier` and `board_password`, the
+    /// board of a poll that is public is published there as records, for
+    /// anyone to read and mirror. Without all three nothing is published, and
+    /// the AppView serves each board itself, to whoever may see its counts.
+    pub board_pds: String,
+    /// The board account's handle or DID (`APPVIEW_BOARD_IDENTIFIER`): an
+    /// account kept for nothing but boards, whose keys the organization holds.
+    pub board_identifier: String,
+    /// An app password of that account (`APPVIEW_BOARD_PASSWORD`).
+    pub board_password: Secret,
+    /// How often what is waiting is published (`APPVIEW_BOARD_BATCH_SECS`).
+    pub board_batch_secs: u64,
     /// Where mail is handed over (`APPVIEW_SMTP_URL`), such as
     /// `smtps://user:password@mail.example:465` or
     /// `smtp://mail.example:587?tls=required`. With `mail_from`, an invited
@@ -186,6 +199,10 @@ impl Config {
                     .filter(|h| !h.is_empty())
                     .collect(),
             },
+            board_pds: env("APPVIEW_BOARD_PDS").trim_end_matches('/').to_string(),
+            board_identifier: env("APPVIEW_BOARD_IDENTIFIER").trim().to_string(),
+            board_password: Secret::new(env("APPVIEW_BOARD_PASSWORD").trim()),
+            board_batch_secs: env("APPVIEW_BOARD_BATCH_SECS").parse().unwrap_or(30),
             smtp_url: Secret::new(env("APPVIEW_SMTP_URL").trim()),
             mail_from: env("APPVIEW_MAIL_FROM"),
             vapid_private: Secret::new(env("VAPID_PRIVATE_KEY")),
@@ -276,6 +293,10 @@ impl Default for Config {
             max_member_blob_bytes: DEFAULT_MAX_MEMBER_BLOB_BYTES,
             max_context_blob_bytes: DEFAULT_MAX_CONTEXT_BLOB_BYTES,
             secret: Secret::new(crate::util::random_token(32)),
+            board_pds: String::new(),
+            board_identifier: String::new(),
+            board_password: Secret::default(),
+            board_batch_secs: 30,
             smtp_url: Secret::default(),
             mail_from: String::new(),
             site_name: DEFAULT_SITE_NAME.to_string(),

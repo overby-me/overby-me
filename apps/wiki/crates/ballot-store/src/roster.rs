@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS poll (
   open          INTEGER NOT NULL DEFAULT 1,
   secret        INTEGER NOT NULL DEFAULT 0,
   hide_tally    INTEGER NOT NULL DEFAULT 0,              -- counts are for the context's owners
+  public_board  INTEGER NOT NULL DEFAULT 0,              -- its board is published for anyone to read
   issuer_pubkey TEXT,                                    -- published before open; kept after close
   issuer_secret TEXT,                                    -- sealed by the custodian; dropped at close
   -- The result, written once at close. A poll migrated from the interim has

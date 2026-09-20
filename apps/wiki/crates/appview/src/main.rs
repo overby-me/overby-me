@@ -102,6 +102,9 @@ async fn main() {
     // public records into the view and broadcasting deltas to /ws clients. It
     // reconnects on its own, so a failed connection never blocks serving.
     tokio::spawn(appview::firehose::run(state.clone()));
+    // And the board's publisher, which does nothing where no board account is
+    // configured.
+    tokio::spawn(appview::board::run_publisher(state.clone()));
 
     let app = router(state);
 

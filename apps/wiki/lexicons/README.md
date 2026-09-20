@@ -119,7 +119,10 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   caller may see them, `getBoard` is every ballot for whoever may see the counts, and
   `getBoardEntry` is how a voter finds their own, asked as nobody like the cast. `setDelegation`
   gives the caller's vote in a context to another member or takes it back, and `listDelegations`
-  (a query) is what stands: a poll freezes it as it opens.
+  (a query) is what stands: a poll freezes it as it opens. Every cast is answered with a receipt and
+  every close with a close-out, both signed by the key `getBoardKey` names. `poll`, `ballotEntry` and
+  `pollCloseOut` are RECORDS, not methods: what the board account publishes for a poll opened as
+  public, and what `wiki-board-mirror` reads.
 - `shareToBluesky` posts a page to the caller's own account, on their own PDS.
 - `renderMetafile` draws the EMF and WMF figures inside Word and PowerPoint files, which no browser
   can, so that the renderer stays out of the bundle.

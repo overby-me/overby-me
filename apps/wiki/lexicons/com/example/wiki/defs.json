@@ -347,6 +347,7 @@
 				"blank",
 				"secret",
 				"hide_tally",
+				"public_board",
 				"open",
 				"created_at",
 				"ballots",
@@ -370,6 +371,10 @@
 				},
 				"secret": { "type": "boolean" },
 				"hide_tally": { "type": "boolean" },
+				"public_board": {
+					"type": "boolean",
+					"description": "A secret poll's board is published for anyone to read and mirror."
+				},
 				"open": { "type": "boolean" },
 				"created_at": { "type": "string", "format": "datetime" },
 				"closed_at": { "type": "string", "format": "datetime" },

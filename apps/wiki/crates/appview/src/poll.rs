@@ -90,6 +90,7 @@ struct PollRow {
     open: bool,
     secret: bool,
     hide_tally: bool,
+    public_board: bool,
     issuer_pubkey: Option<String>,
     issuer_secret: Option<String>,
     result: Option<Tally>,
@@ -118,7 +119,7 @@ struct Tally {
 
 const POLL_COLS: &str = "p.id, p.context_id, p.question, p.options, p.min_choices, \
     p.max_choices, p.blank, p.open, p.secret, p.hide_tally, p.issuer_pubkey, p.issuer_secret, \
-    p.counts, p.ballots, p.created_at, p.closed_at, d.path, d.parent_id";
+    p.counts, p.ballots, p.created_at, p.closed_at, d.path, d.parent_id, p.public_board";
 
 fn text(row: &turso::Row, i: usize) -> Option<String> {
     match row.get_value(i) {
@@ -157,6 +158,7 @@ fn poll_row(row: &turso::Row) -> Result<PollRow, DbError> {
         closed_at: text(row, 15),
         path: row.get::<String>(16)?,
         parent_id: text(row, 17),
+        public_board: flag(18),
     })
 }
 
@@ -412,6 +414,8 @@ pub struct PollView {
     pub blank: bool,
     pub secret: bool,
     pub hide_tally: bool,
+    /// A secret poll's board is published for anyone to read and mirror.
+    pub public_board: bool,
     pub open: bool,
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -529,6 +533,7 @@ async fn view(state: &AppState, poll: PollRow, did: Option<&str>) -> Result<Poll
         blank: poll.blank,
         secret: poll.secret,
         hide_tally: poll.hide_tally,
+        public_board: poll.public_board,
         open: poll.open,
         created_at: poll.created_at,
         closed_at: poll.closed_at,
@@ -572,6 +577,12 @@ pub struct OpenPollBody {
     pub secret: bool,
     #[serde(default)]
     pub hide_tally: bool,
+    /// Whether a secret poll's board is published for anyone to read and
+    /// mirror. Absent, it is where the context is open to everyone and the
+    /// tally is not hidden: a board says what a vote came to, which a closed
+    /// group's members, or a hidden tally's owners, have to themselves.
+    #[serde(default)]
+    pub public_board: Option<bool>,
 }
 
 /// The ballot rules a request describes, or what is wrong with them.
@@ -636,6 +647,9 @@ pub async fn open_poll(
         Ok(rules) => rules,
         Err(why) => return invalid(why),
     };
+    if body.public_board == Some(true) && (!body.secret || body.hide_tally) {
+        return invalid("a public board is a secret poll's, and tells everyone the tally");
+    }
 
     let id = format!("d-{}", crate::util::random_token(16));
     let keys = if body.secret {
@@ -676,10 +690,21 @@ pub async fn open_poll(
                 keys.as_ref()
                     .map_or(Value::Null, |keys| Value::Text(part(keys).clone()))
             };
+            // Unsaid, a board is as public as the place its poll is held in.
+            let mut rows = conn
+                .query(
+                    "SELECT visibility = 'public' FROM context WHERE id = ?1",
+                    [parent.context_id.as_str()],
+                )
+                .await?;
+            let in_the_open = rows.next().await?.and_then(|row| natural(&row, 0)) == Some(1);
+            drop(rows);
+            let public_board =
+                body.secret && !body.hide_tally && body.public_board.unwrap_or(in_the_open);
             conn.execute(
                 "INSERT INTO poll (id, context_id, question, options, min_choices, max_choices, \
-                   blank, secret, hide_tally, issuer_pubkey, issuer_secret) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                   blank, secret, hide_tally, issuer_pubkey, issuer_secret, public_board) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 vec![
                     Value::Text(id.clone()),
                     Value::Text(parent.context_id.clone()),
@@ -692,6 +717,7 @@ pub async fn open_poll(
                     Value::Integer(i64::from(body.hide_tally)),
                     key(|keys| &keys.0),
                     key(|keys| &keys.1),
+                    Value::Integer(i64::from(public_board)),
                 ],
             )
             .await?;
@@ -1386,22 +1412,22 @@ pub async fn cast_open_ballot(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::router;
     use crate::xrpc::tests::{get, get_as, join, post, seeded_state, token_for};
     use ballot_spec::{BlindSignature, TokenRequest, finalize_token, request_token};
     use serde_json::json;
 
-    const OPEN: &str = "/xrpc/com.example.wiki.openPoll";
-    const CLOSE: &str = "/xrpc/com.example.wiki.closePoll";
+    pub(crate) const OPEN: &str = "/xrpc/com.example.wiki.openPoll";
+    pub(crate) const CLOSE: &str = "/xrpc/com.example.wiki.closePoll";
     const ISSUE: &str = "/xrpc/com.example.wiki.issueBallotTokens";
-    const CAST: &str = "/xrpc/com.example.wiki.castBallot";
+    pub(crate) const CAST: &str = "/xrpc/com.example.wiki.castBallot";
     const CAST_OPEN: &str = "/xrpc/com.example.wiki.castOpenBallot";
 
     /// The seeded closed group (alice owns it, bob votes in it, ivan is a member
     /// without voting rights) with a motion to vote on.
-    async fn state() -> AppState {
+    pub(crate) async fn state() -> AppState {
         let state = seeded_state().await;
         let conn = state.db.acquire().await.expect("conn");
         conn.execute(
@@ -1414,14 +1440,18 @@ mod tests {
         state
     }
 
-    fn for_against(secret: bool) -> serde_json::Value {
+    pub(crate) fn for_against(secret: bool) -> serde_json::Value {
         json!({
             "parent_id": "mo1", "title": "Motion One",
             "options": ["for", "against", "blank"], "secret": secret,
         })
     }
 
-    async fn open(state: &AppState, who: &str, body: serde_json::Value) -> serde_json::Value {
+    pub(crate) async fn open(
+        state: &AppState,
+        who: &str,
+        body: serde_json::Value,
+    ) -> serde_json::Value {
         let (status, v) = post(router(state.clone()), OPEN, Some(who), body).await;
         assert_eq!(status, StatusCode::OK, "{v}");
         v
@@ -1491,7 +1521,7 @@ mod tests {
     }
 
     /// Issue and cast one ballot for `who`. The cast carries no session.
-    async fn vote(
+    pub(crate) async fn vote(
         state: &AppState,
         poll: &serde_json::Value,
         who: &str,

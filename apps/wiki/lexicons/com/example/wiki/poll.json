@@ -4,16 +4,18 @@
 	"defs": {
 		"main": {
 			"type": "record",
-			"description": "The public announcement of a poll, authored by the org's DID. Publishes the question, options, ballot rules, and the per-poll issuer pubkey BEFORE the poll opens (the pre-open publication rule of the E2E-V scheme). The eligibility roster, delegation, resolved weights, and token issuance stay private in the org store and are never records. Lifecycle is a monotonic state field on this one record (announced, open, closed) rather than a separate close record: a close record would split one poll across two records every verifier must join and would need its own authority rule, while a single record makes each state transition a firehose-visible update event. Only state may change after creation; any other mutation is tamper-evident via the record's update history and voids the poll. Only closingAuthority may move state to closed.",
+			"description": "The public announcement of a secret poll whose board is public, written by the board account (`docs/ballot-board-custody.md`): the question, the options, the ballot rules, the per-poll issuer key and the custody key, out before any ballot is, since every ballot names this record. Only a poll opened as public has one: a closed group's votes, and a hidden tally, are not the world's. The roster, delegations, weights and issuance stay private and are never records. Its lifecycle is the one field `state`, open then closed, on this one record; any other change after creation is tamper-evident in the record's history, and a mirror raises an alarm for it.",
 			"key": "tid",
 			"record": {
 				"type": "object",
 				"required": [
+					"pollId",
 					"question",
 					"options",
 					"state",
 					"closingAuthority",
 					"issuerPubkey",
+					"custodyKey",
 					"minVote",
 					"maxVote",
 					"blank",
@@ -39,18 +41,18 @@
 					},
 					"state": {
 						"type": "string",
-						"knownValues": ["announced", "open", "closed"],
-						"description": "Lifecycle state, monotonic: announced, then open, then closed. Ballots verify only against entries cast while open."
+						"knownValues": ["open", "closed"],
+						"description": "Open, then closed. A ballot counts only if it was cast while open."
 					},
 					"closingAuthority": {
 						"type": "string",
 						"format": "did",
-						"description": "The org DID that may close the poll (move state to closed)."
+						"description": "The board account's DID, which is what moves `state` to closed."
 					},
 					"issuerPubkey": {
 						"type": "string",
 						"maxLength": 4096,
-						"description": "PROVISIONAL encoding pending the ballot-spec crate's pinned serialization: the poll's RSA issuer public key as base64url (unpadded) DER SPKI. Per-poll keys are the cryptographic poll binding (RFC 9474 blinding hides the message from the issuer); required at creation so publication strictly precedes open."
+						"description": "The poll's RSA issuer public key, DER SubjectPublicKeyInfo as base64url without padding (`crates/ballot-spec`, D6 and D7). Per-poll keys are what binds a token to its poll: blinding hides the message from the issuer."
 					},
 					"minVote": {
 						"type": "integer",
@@ -79,6 +81,14 @@
 					"createdAt": {
 						"type": "string",
 						"format": "datetime"
+					},
+					"pollId": {
+						"type": "string",
+						"description": "The poll's id at the AppView, which is what its receipts and its close-out are signed over."
+					},
+					"custodyKey": {
+						"type": "string",
+						"description": "The `did:key` (P-256) that signs this poll's receipts and its close-out. Kept for nothing else, and not the issuer key."
 					}
 				}
 			}

@@ -1,5 +1,9 @@
 # Ballot semantics D1–D8 — owner ratification sheet
 
+> **Taken as stated, 2026-09-20.** The owner asked for the open items to be
+> finished; D1 to D8 stand as written, and delegation (D1 to D3, D5) and the
+> board (D4, D7, D8) are built on them. Each is still a localized change.
+
 Eight semantics the `ballot-spec` crate PINS that no design doc had decided
 (`crates/ballot-spec/DECISIONS.md`). Each is already enforced by code + property
 tests (`crates/ballot-spec/tests/properties.rs`, 22 tests). They are currently my

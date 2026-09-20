@@ -91,6 +91,8 @@ impl Db {
         crate::ballot::init_ballot_schema(self).await?;
         // After it: a close-out names a poll.
         conn.execute_batch(crate::board::BOARD_CUSTODY_DDL).await?;
+        conn.execute_batch(crate::board::BOARD_PUBLICATION_DDL)
+            .await?;
         Ok(())
     }
 }
@@ -104,7 +106,7 @@ impl Db {
 /// so a file made by an older binary keeps its old columns. Without this the
 /// process would start and then fail one query at a time; with it, it refuses
 /// to start and says why.
-pub const SCHEMA_VERSION: i64 = 11;
+pub const SCHEMA_VERSION: i64 = 12;
 
 async fn schema_version(conn: &Connection) -> Result<i64, DbError> {
     let mut rows = conn.query("PRAGMA user_version", ()).await?;

@@ -59,6 +59,13 @@ workspace when the rewrite starts.
   laptop can talk to:
   `APPVIEW_FRONTEND_ORIGINS=http://127.0.0.1:8080 appview-dev --port 8136 did:plc:me`,
   then `WIKI_APPVIEW_URL=http://127.0.0.1:8136 dx serve --features appview`.
+- `board-mirror`: for someone who is NOT the organization. It keeps its own
+  append-only copy of a published ballot board from the board account's public
+  repo, raises an alarm when a record it has seen is gone or rewritten, and
+  recounts every closed poll against its signed close-out. Packaged as
+  `wiki-board-mirror`.
+- `fake-pds`: a PDS for tests, in no package: one account, its records in
+  memory, the calls the board's publisher and the mirror make of a real one.
 - `appview`: the backend itself. `docs/appview-roadmap.md` says what it does
   today and what is left.
 

@@ -135,9 +135,11 @@ dependencies = [
  "ballot-spec",
  "ballot-store",
  "base64 0.22.1",
+ "board-mirror",
  "calamine",
  "chacha20poly1305",
  "emfsdk",
+ "fake-pds",
  "futures-util",
  "hkdf",
  "hmac",
@@ -625,6 +627,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f6c7dbe95a6ed67ad9f18e57daf93a2f034c524b99fd2b76d18fdfeb6660aa"
 dependencies = [
  "hybrid-array",
+]
+
+[[package]]
+name = "board-mirror"
+version = "0.1.0"
+dependencies = [
+ "ballot-spec",
+ "base64 0.22.1",
+ "fake-pds",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1497,6 +1512,17 @@ checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener",
  "pin-project-lite",
+]
+
+[[package]]
+name = "fake-pds"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
 ]
 
 [[package]]

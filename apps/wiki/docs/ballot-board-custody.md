@@ -1,6 +1,7 @@
 # Ballot board custody: who publishes the board-entry records
 
-Status: OPTIONS MEMO, pending owner call (pre-rewrite plan, round-2 item 9). The decided scheme
+Status: DECIDED as recommended below, 2026-09-20, and built (`crates/appview/src/board.rs`, roadmap M6); what
+follows is the memo the call was made from (pre-rewrite plan, round-2 item 9). The decided scheme
 (RFC 9474 blind-signature UNIT tokens, per-poll issuer keys, a public bulletin board that IS atproto
 records; see `docs/atproto-open-decisions.md` and `crates/ballot-spec`) deliberately left one question
 open: in WHOSE repo do the board-entry records live? Companion drafts:

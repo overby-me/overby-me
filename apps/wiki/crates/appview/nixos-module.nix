@@ -48,6 +48,9 @@
     VAPID_PUBLIC_KEY = cfg.vapidPublicKey;
     VAPID_SUBJECT = cfg.vapidSubject;
     APPVIEW_MAIL_FROM = cfg.mailFrom;
+    APPVIEW_BOARD_PDS = cfg.board.pds;
+    APPVIEW_BOARD_IDENTIFIER = cfg.board.identifier;
+    APPVIEW_BOARD_BATCH_SECS = toString cfg.board.batchSeconds;
   };
   # What the service and the cutover's load share: the same state, the same
   # secrets, the same confinement.
@@ -195,9 +198,43 @@ in {
         EnvironmentFile so none of it enters the store: `APPVIEW_SECRET` (signs
         file links and seals a running poll's issuer key; without it one is
         made and kept in the state directory), `VAPID_PRIVATE_KEY` (Web Push;
-        without it no notification is sent), `APPVIEW_SMTP_URL` (see `mailFrom`)
-        and `BETTERSTACK_SOURCE_TOKEN`.
+        without it no notification is sent), `APPVIEW_SMTP_URL` (see `mailFrom`),
+        `APPVIEW_BOARD_PASSWORD` (see `board`) and `BETTERSTACK_SOURCE_TOKEN`.
       '';
+    };
+
+    board = {
+      pds = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        example = "https://bsky.social";
+        description = ''
+          The PDS of the account the ballot boards are published from. With
+          `identifier` and `APPVIEW_BOARD_PASSWORD` in `secretsFile` (an app
+          password of that account), the board of a poll opened as public is
+          published there as records, for anyone to read and to mirror with
+          `wiki-board-mirror`. Unset, nothing is published, and each board is
+          served by the AppView to whoever may see its counts.
+        '';
+      };
+      identifier = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        example = "afstemninger.example.org";
+        description = ''
+          The handle or DID of the board account: one kept for nothing but
+          boards, whose keys the organization holds.
+        '';
+      };
+      batchSeconds = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 30;
+        description = ''
+          How often waiting ballots are published. They go out at least three
+          together and shuffled, or all at the close, so that no ballot's
+          publication says when it was cast.
+        '';
+      };
     };
 
     mailFrom = lib.mkOption {

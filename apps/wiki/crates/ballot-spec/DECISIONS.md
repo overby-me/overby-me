@@ -1,9 +1,11 @@
 # ballot-spec decision log
 
 Semantics this crate PINS that no design doc had decided. Each is enforced by
-the code and its property tests; none is silently frozen. Status: PENDING
-OWNER SIGN-OFF unless marked decided. Overturning one is a code + test change,
-cheap now, expensive after the AppView ships.
+the code and its property tests; none is silently frozen. Status: taken as
+stated on 2026-09-20, when the owner asked for the open items to be finished
+(`docs/ballot-decisions-signoff.md`); delegation and the published board are
+built on them. Overturning one is a code + test change, cheap before a binding
+vote has been held under it and expensive after.
 
 - **D1 (delegation chains are transitive).** A delegation chain follows to its
   terminal non-delegating voter: A delegates to B, B delegates to C, then A's

@@ -1,5 +1,12 @@
 # Board custody — owner sign-off sheet
 
+> **Taken as recommended, 2026-09-20.** The owner asked for the open items to be
+> finished, and the six defaults below are what was built
+> (`crates/appview/src/board.rs`, roadmap M6). One thing the sheet did not ask
+> is decided there too: a board is public only for a poll opened as public.
+> Each of the six is still a localized change. Naming the mirror's operator
+> (row 5) is the part that remains a person's to do.
+
 Six sub-calls on how the public bulletin board is published and mirrored
 (`docs/ballot-board-custody.md`). The doc's analysis lands on **Org-published (B)
 with signed inclusion receipts, a signed close-out digest, and ≥1 independent

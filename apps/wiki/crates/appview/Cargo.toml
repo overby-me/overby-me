@@ -114,5 +114,9 @@ wiki-domain-types = { path = "../domain-types" }
 wiki-schema = { path = "../schema" }
 
 [dev-dependencies]
+# The mirror that holds a published board to its close-out, and the PDS the
+# two of them are tested against.
+board-mirror = { path = "../board-mirror" }
+fake-pds = { path = "../fake-pds" }
 # Builds the .xlsx a roster test parses. calamine's own zip, so nothing new.
 zip = { version = "8", default-features = false }
