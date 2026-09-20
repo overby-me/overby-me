@@ -1,0 +1,30 @@
+[package]
+name = "atproto-spaces"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# atproto spaces (proposal 0016, non-public records) as far as the wiki's AppView
+# needs them: the tokens, the credential flow, the record and sync calls, the
+# commit check, and the service tokens a PDS calls back with. Written against
+# the alpha of 2026-09: the proposal promises breaking changes, and
+# `tests/alpha.rs` is how to find them.
+[dependencies]
+base64 = "0.22"
+blake3 = "1"
+hmac = "0.12"
+k256 = { version = "0.13", default-features = false, features = ["ecdsa", "sha256"] }
+multibase = "0.9"
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "sha256"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls"
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }

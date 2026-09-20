@@ -18,6 +18,7 @@ let
         ./../appview
         ./../appview-client
         ./../appview-dev
+        ./../atproto-spaces
         ./../ballot-spec
         ./../ballot-store
         ./../board-mirror

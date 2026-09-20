@@ -154,6 +154,11 @@ test-browser-on-appview *ARGS:
 test-real-login *ARGS:
     nu scripts/test-real-login.nu {{ARGS}}
 
+# `crates/atproto-spaces` against the real spaces PDS, in a container (needs
+# docker): atproto spaces are an alpha, and this is what says when it moved.
+test-spaces *ARGS:
+    nu scripts/test-spaces.nu {{ARGS}}
+
 # The cutover, rehearsed from a dump already in DIR (docs/cutover-runbook.md):
 # extract, load, files, the gates, every carried account returns, a smoke test.
 rehearse-cutover DIR *ARGS:

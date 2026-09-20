@@ -269,7 +269,11 @@ has none), and files (a space's blobs, with the AppView's store as a cache).
 None of it in production before spaces are released. Done so far (2026-09-20):
 of S1, the NSID, the space type and the record lexicons, and
 `crates/wiki-records`, which maps the AppView's rows to records and back and is
-tested to lose nothing either way.
+tested to lose nothing either way; and S2 but for the CAR reader, in
+`crates/atproto-spaces`, whose test runs against the alpha PDS in a container
+(`just test-spaces`): a space the test's own stand-in for the AppView decides
+access to, the credential flow, a copy of a repo held to its signed commit
+through an edit, a removal and a corruption, write notifications, and a file.
 
 - **S1 Foundations.** The NSID. A space type and record lexicons for content,
   overlays and the board (`content` as the editor's own JSON, tagged with its

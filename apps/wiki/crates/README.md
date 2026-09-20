@@ -71,6 +71,13 @@ workspace when the rewrite starts.
   repo, raises an alarm when a record it has seen is gone or rewritten, and
   recounts every closed poll against its signed close-out. Packaged as
   `wiki-board-mirror`.
+- `atproto-spaces`: atproto spaces (proposal 0016, non-public records) as far as
+  the AppView needs them: tokens and DPoP, the credential flow, the record and
+  sync calls, a repo's set hash and signed commit, keeping a copy of a repo
+  honest, and checking the service tokens a PDS calls back with. Its ignored
+  test runs against the real alpha PDS in a container
+  (`apps/wiki/scripts/test-spaces.nu`), which is how a breaking change of the
+  alpha's shows.
 - `wiki-records`: a context's atproto space as Rust types (the lexicons
   `contextProfile`, `node`, `comment` and `reaction` under
   `lexicons/wiki/radikal/`), and the mapping between those records and the rows

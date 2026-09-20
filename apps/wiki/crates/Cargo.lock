@@ -286,6 +286,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
+name = "atproto-spaces"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "blake3",
+ "hmac",
+ "k256",
+ "multibase",
+ "p256",
+ "rand_core 0.6.4",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+]
+
+[[package]]
 name = "atrium-api"
 version = "0.25.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4198,15 +4217,10 @@ checksum = "45e14297decde697ddf377c25752aead0927d5cfc89c2684d2af96901a4ceeea"
 name = "spaces-spike"
 version = "0.1.0"
 dependencies = [
+ "atproto-spaces",
  "base64 0.22.1",
- "blake3",
- "hmac",
- "k256",
- "multibase",
- "p256",
  "serde",
  "serde_json",
- "sha2 0.10.9",
 ]
 
 [[package]]
