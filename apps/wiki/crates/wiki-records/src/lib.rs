@@ -1,5 +1,5 @@
 //! A context's space, as records (`lexicons/wiki/radikal/{contextProfile,node,
-//! comment,reaction}.json`), and the way between them and the rows the AppView
+//! comment,reaction,file}.json`), and the way between them and the rows the AppView
 //! keeps (`wiki-domain-types`).
 //!
 //! The mapping loses nothing in either direction (`tests/roundtrip.rs`): the
@@ -21,6 +21,7 @@ pub const PROFILE: &str = "wiki.radikal.contextProfile";
 pub const NODE: &str = "wiki.radikal.node";
 pub const COMMENT: &str = "wiki.radikal.comment";
 pub const REACTION: &str = "wiki.radikal.reaction";
+pub const FILE: &str = "wiki.radikal.file";
 
 /// The one format a body is kept in today: the editor's own document.
 pub const SLATE: &str = "slate/1";
@@ -73,8 +74,6 @@ pub struct ContextProfile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_format: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub made_by: Option<String>,
@@ -107,10 +106,6 @@ pub struct Node {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_format: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub file: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub authors: Vec<Author>,
@@ -133,8 +128,10 @@ pub struct Comment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<StrongRef>,
     pub text: String,
+    /// A picture said with it, by the key of its [`File`], as a page names its
+    /// files inside `data`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image: Option<serde_json::Value>,
+    pub image_file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<Author>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -157,6 +154,63 @@ pub struct Reaction {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub legacy_id: Option<String>,
     pub created_at: String,
+}
+
+/// `wiki.radikal.file`: a file of a context, its bytes a blob on the PDS of
+/// whoever holds the record.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct File {
+    /// As the PDS answered the upload: its CID, type and size.
+    pub blob: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub made_by: Option<String>,
+    pub created_at: String,
+}
+
+/// What the AppView keeps of a file beside its bytes: the row a [`File`] is
+/// made from and rebuilt as. Not one of the domain's types, which know no files.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct FileRow {
+    pub id: String,
+    pub context_id: String,
+    pub owner_did: Option<String>,
+    pub sha256: String,
+    pub size: i64,
+    pub mime: String,
+    pub name: Option<String>,
+    pub created_at: String,
+}
+
+impl File {
+    /// The record for a file's row, once its bytes are on the PDS as `blob`.
+    pub fn of(row: &FileRow, blob: serde_json::Value) -> File {
+        File {
+            blob,
+            name: row.name.clone(),
+            sha256: row.sha256.clone(),
+            made_by: row.owner_did.clone(),
+            created_at: row.created_at.clone(),
+        }
+    }
+
+    /// The row for a record found at `uri`. Its type and size are the blob's
+    /// to say: a PDS that kept the bytes and changed either has changed the file.
+    pub fn row(&self, uri: &RecordUri) -> Option<FileRow> {
+        Some(FileRow {
+            id: uri.rkey.clone(),
+            context_id: uri.space.skey.clone(),
+            owner_did: self.made_by.clone(),
+            sha256: self.sha256.clone(),
+            size: self.blob["size"].as_i64()?,
+            mime: self.blob["mimeType"].as_str()?.to_string(),
+            name: self.name.clone(),
+            created_at: self.created_at.clone(),
+        })
+    }
 }
 
 /// What a row has that no record carries, because it is the AppView's word and
@@ -318,8 +372,6 @@ impl Node {
             locked: Some(!place.attachable),
             content_format: doc.content.as_ref().map(|_| SLATE.to_string()),
             content: doc.content.as_ref().map(storable),
-            image: None,
-            file: None,
             data: doc.data.as_ref().map(storable),
             authors: doc.authors.iter().map(|a| author_of(a, at)).collect(),
             made_by: place.owner_did.clone(),
@@ -403,7 +455,6 @@ impl ContextProfile {
             locked: Some(!place.attachable),
             content_format: ctx.content.as_ref().map(|_| SLATE.to_string()),
             content: ctx.content.as_ref().map(storable),
-            image: None,
             data: ctx.data.as_ref().map(storable),
             made_by: place.owner_did.clone(),
             created_at: place.created_at.clone().unwrap_or_else(|| NO_DATE.into()),
@@ -481,7 +532,7 @@ impl Comment {
                 false => Some(pin(COMMENT, &row.on_id)?),
             },
             text: row.text.clone(),
-            image: None,
+            image_file: row.image.clone(),
             author: Some(author_of(&row.author, at)),
             tombstone: Some(row.tombstone).filter(|t| *t),
             binned: binned_of(
@@ -495,9 +546,8 @@ impl Comment {
         })
     }
 
-    /// The row for a record found at `uri`. `image` is the row's own file id,
-    /// which the caller knows from the blob and the record does not.
-    pub fn row(&self, uri: &RecordUri, image: Option<String>) -> Option<rows::Comment> {
+    /// The row for a record found at `uri`.
+    pub fn row(&self, uri: &RecordUri) -> Option<rows::Comment> {
         let root = self.subject.uri.parse::<RecordUri>().ok()?.rkey;
         let on = match &self.parent {
             Some(parent) => parent.uri.parse::<RecordUri>().ok()?.rkey,
@@ -516,7 +566,7 @@ impl Comment {
                 },
             },
             text: self.text.clone(),
-            image,
+            image: self.image_file.clone(),
             tombstone: self.tombstone.unwrap_or(false),
             created_at: Some(self.created_at.clone()).filter(|at| at != NO_DATE),
             deleted_at: self.binned.as_ref().map(|b| b.at.clone()),
@@ -578,6 +628,61 @@ impl Reaction {
             created_at: Some(self.created_at.clone()).filter(|at| at != NO_DATE),
             legacy_id: self.legacy_id.clone(),
         })
+    }
+}
+
+/// The profiles and nodes of a wiki as they were found, to say where each is: a
+/// record names its parent by address, and a path is its parents' slugs. What a
+/// rebuild of the index walks.
+#[derive(Debug, Default)]
+pub struct Found {
+    /// By context id.
+    pub profiles: std::collections::BTreeMap<String, ContextProfile>,
+    /// By node id, with the context whose space it was found in.
+    pub nodes: std::collections::BTreeMap<String, (String, Node)>,
+}
+
+impl Found {
+    /// The path of what a context hangs in, for [`ContextProfile::row`]. `None`
+    /// when a parent was not found, or the parents go round.
+    pub fn context_parent_path(&self, context_id: &str) -> Option<String> {
+        self.above_context(context_id, 0)
+    }
+
+    /// The path of what a node hangs in, for [`Node::row`].
+    pub fn node_parent_path(&self, node_id: &str) -> Option<String> {
+        self.above_node(node_id, 0)
+    }
+
+    fn above_context(&self, context_id: &str, depth: usize) -> Option<String> {
+        let profile = self.profiles.get(context_id)?;
+        match (&profile.parent_node, &profile.parent_space) {
+            (Some(node), _) => self.node_path(&node.parse::<RecordUri>().ok()?.rkey, depth),
+            (None, Some(space)) => self.context_path(&space.parse::<SpaceUri>().ok()?.skey, depth),
+            (None, None) => Some(String::new()),
+        }
+    }
+
+    fn above_node(&self, node_id: &str, depth: usize) -> Option<String> {
+        let (context_id, node) = self.nodes.get(node_id)?;
+        match &node.parent {
+            Some(parent) => self.node_path(&parent.parse::<RecordUri>().ok()?.rkey, depth),
+            None => self.context_path(context_id, depth),
+        }
+    }
+
+    // Deeper than any wiki is: parents that go round end here and not never.
+    const DEEPEST: usize = 64;
+
+    fn context_path(&self, context_id: &str, depth: usize) -> Option<String> {
+        let above =
+            (depth < Self::DEEPEST).then(|| self.above_context(context_id, depth + 1))??;
+        Some(join(&above, &self.profiles.get(context_id)?.slug))
+    }
+
+    fn node_path(&self, node_id: &str, depth: usize) -> Option<String> {
+        let above = (depth < Self::DEEPEST).then(|| self.above_node(node_id, depth + 1))??;
+        Some(join(&above, &self.nodes.get(node_id)?.1.slug))
     }
 }
 

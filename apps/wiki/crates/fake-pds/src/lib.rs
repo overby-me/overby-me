@@ -51,11 +51,14 @@ impl Record {
 struct Repo {
     password: String,
     records: Arc<Mutex<Vec<Record>>>,
-    /// Every write call as it arrived, for a test to read the batching off.
+    /// Every write call as it arrived, for a test to read the batching off: the
+    /// method, and how many records it wrote (of an upload, how many bytes).
     calls: Arc<Mutex<Vec<(String, usize)>>>,
     spaces: spaces::Spaces,
     /// What was written into a space that was not there.
     orphans: Arc<Mutex<Vec<Record>>>,
+    /// Uploaded bytes, by the CID they were answered with.
+    blobs: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
     /// The account's `#atproto` key, which its DID document publishes.
     key: Arc<p256::ecdsa::SigningKey>,
 }
@@ -66,6 +69,7 @@ pub struct FakePds {
     calls: Arc<Mutex<Vec<(String, usize)>>>,
     spaces: spaces::Spaces,
     orphans: Arc<Mutex<Vec<Record>>>,
+    blobs: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
     key: Arc<p256::ecdsa::SigningKey>,
 }
 
@@ -77,11 +81,12 @@ impl FakePds {
             calls: Arc::default(),
             spaces: Arc::default(),
             orphans: Arc::default(),
+            blobs: Arc::default(),
             key: Arc::new(p256::ecdsa::SigningKey::random(&mut rand_core::OsRng)),
         };
         let (records, calls) = (repo.records.clone(), repo.calls.clone());
         let (spaces, key) = (repo.spaces.clone(), repo.key.clone());
-        let orphans = repo.orphans.clone();
+        let (orphans, blobs) = (repo.orphans.clone(), repo.blobs.clone());
         let app = Router::new()
             .route(
                 "/xrpc/com.atproto.server.createSession",
@@ -107,6 +112,7 @@ impl FakePds {
             calls,
             spaces,
             orphans,
+            blobs,
             key,
         }
     }
@@ -133,6 +139,11 @@ impl FakePds {
             .get(space)
             .map(|s| s.records.clone())
             .unwrap_or_default()
+    }
+
+    /// The bytes uploaded under `cid`.
+    pub fn blob(&self, cid: &str) -> Option<Vec<u8>> {
+        self.blobs.lock().expect("blobs").get(cid).cloned()
     }
 
     /// What was written into a space that was not there, which a PDS takes.

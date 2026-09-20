@@ -5,7 +5,9 @@
 //! `appview import-files <extraction.json> <dir>` then files its files, and
 //! `appview verify <extraction.json> [<dir>]` asks the cutover's gates of both.
 //! `appview mirror-spaces` writes the wiki into its atproto spaces once, reads
-//! every space back, and says whether the two agree.
+//! every space back, and says whether the two agree and whether the rows could
+//! be rebuilt from the records alone. With `--bytes` it fetches every file back
+//! too.
 
 use appview::oauth::WikiOAuth;
 use appview::{AppState, Config, Db, router};
@@ -47,11 +49,13 @@ async fn main() {
         (Some("verify"), Some(path), dir) => {
             verify(AppState::new(db, config), &path, dir.as_deref()).await
         }
-        (Some("mirror-spaces"), None, None) => mirror_spaces(AppState::new(db, config)).await,
+        (Some("mirror-spaces"), bytes, None) if bytes.as_deref().is_none_or(|b| b == "--bytes") => {
+            mirror_spaces(AppState::new(db, config), bytes.is_some()).await
+        }
         _ => {
             eprintln!(
                 "usage: appview [import <extraction.json> | import-files <extraction.json> <dir> \
-                 | verify <extraction.json> [<dir>] | mirror-spaces]"
+                 | verify <extraction.json> [<dir>] | mirror-spaces [--bytes]]"
             );
             std::process::exit(2);
         }
@@ -198,7 +202,7 @@ async fn verify(state: AppState, path: &str, dir: Option<&str>) -> ! {
     }
 }
 
-async fn mirror_spaces(mut state: AppState) -> ! {
+async fn mirror_spaces(mut state: AppState, bytes: bool) -> ! {
     let spaces = match appview::spaces::Spaces::from_config(&state.config) {
         Ok(Some(spaces)) => Arc::new(spaces),
         Ok(None) => {
@@ -215,7 +219,7 @@ async fn mirror_spaces(mut state: AppState) -> ! {
         let swept = spaces.mirror_everything(&state).await?;
         Ok::<_, Box<dyn std::error::Error + Send + Sync>>((
             swept,
-            spaces.check_everything(&state).await?,
+            spaces.check_everything(&state, bytes).await?,
         ))
     };
     match asked.await {
@@ -235,7 +239,7 @@ async fn mirror_spaces(mut state: AppState) -> ! {
             }
             let green = wrong.is_empty() && swept.waiting + swept.refused + swept.failed == 0;
             match green {
-                true => println!("every space is what the index says"),
+                true => println!("every space is what the index says, and enough to rebuild it"),
                 false => println!("the spaces are not the index yet"),
             }
             std::process::exit(i32::from(!green));

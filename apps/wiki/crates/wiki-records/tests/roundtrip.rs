@@ -154,6 +154,72 @@ fn numbers_atproto_cannot_hold_go_in_their_own_digits_and_come_back() {
 }
 
 #[test]
+fn where_a_node_is_follows_from_the_records_alone() {
+    let folder = |id: &str, slug: &str, parent: &str| {
+        let mut doc = motion();
+        doc.id = id.into();
+        doc.kind = rows::DocumentKind::Folder;
+        doc.place = place(slug, "", parent);
+        doc
+    };
+    let context = |id: &str, slug: &str, hanging: &Hanging| {
+        let ctx = rows::Context {
+            id: id.into(),
+            kind: rows::ContextKind::Group,
+            name: slug.into(),
+            place: place(slug, "", ""),
+            content: None,
+            data: None,
+            visibility: rows::Visibility::default(),
+            published_uri: None,
+            legacy_id: None,
+        };
+        ContextProfile::of(&ctx, hanging, &Held)
+    };
+    let mut found = Found::default();
+    found
+        .profiles
+        .insert("c-hb".into(), context("c-hb", "hb", &Hanging::default()));
+    // An event in a folder of the board's, and a motion in a folder of the event's.
+    let in_moeder = Hanging {
+        context_id: Some("c-hb".into()),
+        folder_id: Some("d-moeder".into()),
+    };
+    found
+        .profiles
+        .insert("c-lm".into(), context("c-lm", "landsmoede", &in_moeder));
+    for (ctx, doc) in [
+        ("c-hb", folder("d-moeder", "moeder", "c-hb")),
+        ("c-lm", folder("d-forslag", "forslag", "c-lm")),
+        ("c-lm", folder("d-motion", "kontingent", "d-forslag")),
+    ] {
+        let mut doc = doc;
+        doc.context_id = ctx.into();
+        found
+            .nodes
+            .insert(doc.id.clone(), (ctx.into(), Node::of(&doc, &Held)));
+    }
+    assert_eq!(found.context_parent_path("c-hb").as_deref(), Some(""));
+    assert_eq!(
+        found.context_parent_path("c-lm").as_deref(),
+        Some("hb/moeder")
+    );
+    assert_eq!(
+        found.node_parent_path("d-motion").as_deref(),
+        Some("hb/moeder/landsmoede/forslag")
+    );
+
+    // A parent that was not found, and parents that go round, are no path.
+    assert_eq!(found.node_parent_path("d-nowhere"), None);
+    let mut round = folder("d-forslag", "forslag", "d-motion");
+    round.context_id = "c-lm".into();
+    found
+        .nodes
+        .insert("d-forslag".into(), ("c-lm".into(), Node::of(&round, &Held)));
+    assert_eq!(found.node_parent_path("d-motion"), None);
+}
+
+#[test]
 fn directly_under_its_context_is_no_parent_at_all() {
     let mut doc = motion();
     doc.place = rows::Place {
@@ -246,10 +312,7 @@ fn a_thread_comes_back_as_it_went() {
         Some("bafy-k-1")
     );
     let uri = Held.space("c-hb").record(ORG, COMMENT, "k-2");
-    assert_eq!(
-        record.row(&uri, Some("file-9".into())),
-        Some(answer.clone())
-    );
+    assert_eq!(record.row(&uri), Some(answer.clone()));
 
     let orphan = rows::Comment {
         on_id: "no-record-yet".into(),
@@ -357,10 +420,7 @@ fn every_record_is_what_its_lexicon_says() {
         legacy_id: None,
         ..doc.clone()
     };
-    let mut full = serde_json::to_value(Node::of(&doc, &Held)).expect("json");
-    // Blobs are attached where a record is written, not by the mapping.
-    full["image"] = json!({});
-    full["file"] = json!({});
+    let full = serde_json::to_value(Node::of(&doc, &Held)).expect("json");
     held_to(
         "node",
         full,
@@ -382,8 +442,7 @@ fn every_record_is_what_its_lexicon_says() {
         context_id: Some("home".into()),
         folder_id: Some("d-f".into()),
     };
-    let mut full = serde_json::to_value(ContextProfile::of(&ctx, &hanging, &Held)).expect("json");
-    full["image"] = json!({});
+    let full = serde_json::to_value(ContextProfile::of(&ctx, &hanging, &Held)).expect("json");
     let least = rows::Context {
         place: rows::Place::default(),
         content: None,
@@ -406,15 +465,14 @@ fn every_record_is_what_its_lexicon_says() {
             did: "did:plc:bob".into(),
         },
         text: "Enig".into(),
-        image: None,
+        image: Some("file-9".into()),
         tombstone: true,
         created_at: None,
         deleted_at: Some("2026-09-05T10:00:00.000Z".into()),
         deleted_root: Some("k-1".into()),
         legacy_id: Some("2".into()),
     };
-    let mut full = serde_json::to_value(Comment::of(&said, &Held)).expect("json");
-    full["image"] = json!({});
+    let full = serde_json::to_value(Comment::of(&said, &Held)).expect("json");
     let least = rows::Comment {
         on_id: "d-motion".into(),
         tombstone: false,
@@ -439,6 +497,31 @@ fn every_record_is_what_its_lexicon_says() {
     };
     let full = serde_json::to_value(Reaction::of(&given, "c-hb", &Held)).expect("json");
     held_to("reaction", full.clone(), full);
+
+    let file = FileRow {
+        id: "file-1".into(),
+        context_id: "c-hb".into(),
+        owner_did: Some("did:plc:alice".into()),
+        sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".into(),
+        size: 4,
+        mime: "application/pdf".into(),
+        name: Some("dagsorden.pdf".into()),
+        created_at: "2026-09-01T09:00:00.000Z".into(),
+    };
+    let blob = json!({"$type": "blob", "ref": {"$link": "bafkrei"}, "mimeType": "application/pdf", "size": 4});
+    let full = File::of(&file, blob.clone());
+    let uri = Held.space("c-hb").record(ORG, FILE, "file-1");
+    assert_eq!(full.row(&uri), Some(file.clone()));
+    let least = FileRow {
+        owner_did: None,
+        name: None,
+        ..file
+    };
+    held_to(
+        "file",
+        serde_json::to_value(full).expect("json"),
+        serde_json::to_value(File::of(&least, blob)).expect("json"),
+    );
 
     // Every kind a row can have is one the lexicon knows.
     let known = |name: &str| -> BTreeSet<String> {

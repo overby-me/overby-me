@@ -72,10 +72,14 @@ impl Error {
     /// record would be refused again: past the size a PDS takes (about 1 MB of
     /// request on the alpha), or data atproto cannot hold, such as a fraction.
     pub fn is_about_the_record(&self) -> bool {
-        matches!(
-            self,
-            Error::Xrpc { status: 413, .. } | Error::Xrpc { status: 400, .. }
-                if matches!(self.xrpc_name(), Some("PayloadTooLargeError" | "InvalidRequest" | "InvalidRecord"))
-        )
+        let named = matches!(
+            self.xrpc_name(),
+            Some("PayloadTooLargeError" | "InvalidRequest" | "InvalidRecord")
+        );
+        match self {
+            Error::Xrpc { status: 413, .. } => true,
+            Error::Xrpc { status: 400, .. } => named,
+            _ => false,
+        }
     }
 }

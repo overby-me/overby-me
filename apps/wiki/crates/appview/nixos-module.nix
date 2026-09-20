@@ -54,6 +54,7 @@
     APPVIEW_SPACES_PDS = cfg.spaces.pds;
     APPVIEW_SPACES_IDENTIFIER = cfg.spaces.identifier;
     APPVIEW_SPACES_SERVICE = cfg.spaces.service;
+    APPVIEW_SPACES_BLOB_LIMIT = toString cfg.spaces.blobLimit;
   };
   # What the service and the cutover's load share: the same state, the same
   # secrets, the same confinement.
@@ -272,6 +273,16 @@ in {
           asks whether a user may read or write a space. For a `did:web` of the
           AppView's own domain, the AppView serves the DID document itself
           (`/.well-known/did.json`, pointing at `publicUrl`).
+        '';
+      };
+      blobLimit = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 5 * 1024 * 1024;
+        description = ''
+          The largest file, in bytes, the organization's PDS takes as a blob
+          (its `PDS_BLOB_UPLOAD_LIMIT`, 5 MiB as a PDS ships). A larger file is
+          not sent: it stays with the AppView alone, and `appview
+          mirror-spaces` counts it among what the PDS will not take.
         '';
       };
     };

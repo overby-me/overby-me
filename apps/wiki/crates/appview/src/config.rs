@@ -32,6 +32,9 @@ impl std::fmt::Debug for Secret {
     }
 }
 
+/// `PDS_BLOB_UPLOAD_LIMIT` as a PDS ships.
+const PDS_BLOB_LIMIT: u64 = 5 * 1024 * 1024;
+
 #[derive(Clone, Debug)]
 pub struct Config {
     /// TCP port to bind (containers inject `$PORT`).
@@ -117,6 +120,9 @@ pub struct Config {
     /// AppView, as `did#fragment` (`APPVIEW_SPACES_SERVICE`). The DID's document
     /// has to carry that service, pointing here.
     pub spaces_service: String,
+    /// The largest file the organization's PDS takes as a blob, in bytes. A
+    /// larger one stays with the AppView alone. A PDS as it comes takes 5 MiB.
+    pub spaces_blob_limit: u64,
     /// Where mail is handed over (`APPVIEW_SMTP_URL`), such as
     /// `smtps://user:password@mail.example:465` or
     /// `smtp://mail.example:587?tls=required`. With `mail_from`, an invited
@@ -226,6 +232,10 @@ impl Config {
             spaces_identifier: env("APPVIEW_SPACES_IDENTIFIER").trim().to_string(),
             spaces_password: Secret::new(env("APPVIEW_SPACES_PASSWORD").trim()),
             spaces_service: env("APPVIEW_SPACES_SERVICE").trim().to_string(),
+            spaces_blob_limit: env("APPVIEW_SPACES_BLOB_LIMIT")
+                .trim()
+                .parse()
+                .unwrap_or(PDS_BLOB_LIMIT),
             smtp_url: Secret::new(env("APPVIEW_SMTP_URL").trim()),
             mail_from: env("APPVIEW_MAIL_FROM"),
             vapid_private: Secret::new(env("VAPID_PRIVATE_KEY")),
@@ -325,6 +335,7 @@ impl Default for Config {
             spaces_identifier: String::new(),
             spaces_password: Secret::default(),
             spaces_service: String::new(),
+            spaces_blob_limit: PDS_BLOB_LIMIT,
             smtp_url: Secret::default(),
             mail_from: String::new(),
             site_name: DEFAULT_SITE_NAME.to_string(),

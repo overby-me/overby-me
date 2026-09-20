@@ -13,6 +13,7 @@
 			"collections": [
 				"wiki.radikal.contextProfile",
 				"wiki.radikal.node",
+				"wiki.radikal.file",
 				"wiki.radikal.comment",
 				"wiki.radikal.reaction",
 				"wiki.radikal.poll",

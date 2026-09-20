@@ -181,12 +181,20 @@ serves.
 
 ### Files
 
-A file is a record in the space with a blob on the PDS of whoever holds the
-record, so in the first stage the organization's, where the size limit is the
-organization's to set (the interim's largest file is 22.7 MB, a PDS's default
-limit 5 MB). The AppView keeps a copy of every blob it serves, as a syncer may,
-and goes on serving `/blob/{id}` behind its own check, since a browser holds no
-space credential.
+A file is a record of its own in the space (`wiki.radikal.file`), keyed by the
+id the wiki already knows it by, with its bytes as a blob on the PDS of whoever
+holds the record. Pages, covers and comments go on naming a file by that id, as
+they do in the datastore, so one file can be named from many places and none of
+them changes when its bytes move. In the first stage the holder is the
+organization, where the size limit is the organization's to set (the interim's
+largest file is 22.7 MB, a PDS's default limit 5 MB): a file past the limit the
+AppView is told of stays with the AppView alone and is counted as such. Only
+files that something in the space names are mirrored. A picture sent with a
+report is in the same store and is never one of them.
+
+The AppView keeps a copy of every blob it serves, as a syncer may, and goes on
+serving `/blob/{id}` behind its own check, since a browser holds no space
+credential.
 
 ### Signing in
 
@@ -308,18 +316,28 @@ configured (`APPVIEW_SPACES_*`, `services.wiki-appview.spaces`). Done so far
   both. A context is mirrored as a whole once it has been quiet for two seconds
   (a bin, a move or a purge announces one id and changes a subtree), again on a
   sweep every fifteen minutes, and at start. The mirror compares and does not
-  remember, so what failed is done by the next pass. `appview mirror-spaces`
-  does one pass and then reads every space back through a credential, as any
-  syncer would: the same records at the same versions under commits that
-  verify, or it says what differs.
+  remember, so what failed is done by the next pass.
 - S5: the board of every secret poll whose tally its members may see goes
   into its context's space, as it goes to the board account for a poll held in
   public (`crates/appview/src/board.rs`), and `board-mirror follow --space`
   keeps and recounts it as a member, by an app password of their own account.
+- Of S6, files: each file something in a space names is uploaded to the
+  organization's PDS once and written as a `wiki.radikal.file`. One nothing
+  names any more is let go of.
+- Of S6, the gates: `appview mirror-spaces` does one pass and then reads every
+  space back through a credential, as any syncer would. It wants the same
+  records at the same versions under commits that verify, and it rebuilds every
+  row from the records ALONE (a path from the parents' slugs, a context from
+  the space a record was found in) to hold it to the row that is there. That is
+  the claim this design rests on, asked of real data: the content tables are an
+  index the repos can rebuild. It says what differs, by context, record and
+  field, and with `--bytes` it fetches every file back and holds it to its hash.
 
 Not yet: registering for notifications and indexing members' own repos, which
 is nothing to do until a member holds a record (S7); the record FIRST, which is
-the second half of S4; files as blobs (S6); and spaces are made open to any
+the second half of S4; a page past what a PDS takes as one record, which has
+to go as a blob, and the rehearsal on a copy of production (the rest of S6);
+and spaces are made open to any
 application until there is a confidential client to attest as (decision 4 needs
 it).
 

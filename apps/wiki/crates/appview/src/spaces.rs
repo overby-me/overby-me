@@ -10,7 +10,7 @@
 //! pass. That is what makes it safe to run beside everything else.
 
 use crate::{AppState, Config, Store};
-use atproto_spaces::client::{Host, is_managed_by};
+use atproto_spaces::client::{Host, Record, is_managed_by};
 use atproto_spaces::credential::Credential;
 use atproto_spaces::directory::Directory;
 use atproto_spaces::sync::{self, Pulled};
@@ -26,8 +26,8 @@ use std::time::Duration;
 use tokio::time::Instant;
 use turso::Value as Sql;
 use wiki_records::{
-    Addresses, COMMENT, CONTEXT_SPACE, Comment, ContextProfile, Hanging, NODE, Node, PROFILE,
-    REACTION, Reaction, SpaceUri,
+    Addresses, COMMENT, CONTEXT_SPACE, Comment, ContextProfile, FILE, File, FileRow, Found,
+    Hanging, Kept, NODE, Node, PROFILE, REACTION, Reaction, SpaceUri,
 };
 
 pub const SPACES_DDL: &str = r#"
@@ -101,6 +101,7 @@ pub struct Spaces {
     pub service: String,
     /// How long a context is left to go quiet before it is mirrored.
     pub quiet: Duration,
+    blob_limit: u64,
     session: tokio::sync::Mutex<Option<(String, String, u64)>>,
 }
 
@@ -139,6 +140,7 @@ impl Spaces {
             password: config.spaces_password.clone(),
             service: config.spaces_service.clone(),
             quiet: QUIET,
+            blob_limit: config.spaces_blob_limit,
             session: Default::default(),
         }))
     }
@@ -245,6 +247,18 @@ impl Spaces {
         let profile = ContextProfile::of(&context, &hanging, &pass.held);
         pass.put(PROFILE, "self", Some(serde_json::to_value(profile)?))
             .await;
+
+        // The files something mirrored names. A report's picture is in the same
+        // store and is its reader's alone (`crate::feedback`).
+        let files = "SELECT b.id FROM blob b WHERE b.context_id = ?1 AND ( \
+             EXISTS (SELECT 1 FROM document d WHERE json_extract(d.data, '$.fileId') = b.id \
+                     OR json_extract(d.data, '$.image') = b.id) \
+             OR EXISTS (SELECT 1 FROM context c WHERE json_extract(c.data, '$.image') = b.id) \
+             OR EXISTS (SELECT 1 FROM comment k WHERE k.image = b.id)) \
+             ORDER BY b.created_at, b.id";
+        for id in ids(state, files, [context_id]).await? {
+            pass.put_file(&id).await;
+        }
 
         // Parents before what hangs under them, and a comment before its replies.
         let documents = "SELECT id FROM document WHERE context_id = ?1 ORDER BY length(path), path";
@@ -358,17 +372,51 @@ impl Spaces {
         Ok(swept)
     }
 
-    /// [`Self::check_context`] of every context, each difference under the
-    /// context it is in.
-    pub async fn check_everything(&self, state: &AppState) -> Result<Vec<String>, Failure> {
+    /// Read every context's space back, as [`Self::check_context`] does, and
+    /// then ask the question the redesign rests on: is the index rebuildable
+    /// from the records ALONE? Each difference, under the context it is in.
+    ///
+    /// With `bytes`, every file is fetched back too and held to its hash, which
+    /// is a download of everything the wiki keeps.
+    pub async fn check_everything(
+        &self,
+        state: &AppState,
+        bytes: bool,
+    ) -> Result<Vec<String>, Failure> {
+        let organization = self.organization().await?;
         let mut wrong = Vec::new();
+        let mut found = BTreeMap::new();
         let every = "SELECT id FROM context ORDER BY length(path), path";
         for context_id in ids(state, every, ()).await? {
-            match self.check_context(state, &context_id).await {
-                Ok(found) => wrong.extend(found.iter().map(|w| format!("{context_id}: {w}"))),
+            match self.pulled(&organization, &context_id).await {
+                Ok((records, credential)) => {
+                    let expected = Held::of(state, &organization, &context_id).await?.cids;
+                    let mut differ = versions_differ(&expected, &records);
+                    let files = records.iter().filter(|r| bytes && r.collection == FILE);
+                    for file in files {
+                        let space = Self::space_of(&organization, &context_id).to_string();
+                        let cid = file.value["blob"]["ref"]["$link"]
+                            .as_str()
+                            .unwrap_or_default();
+                        let auth = credential.auth();
+                        let said = match self.host.blob(auth, &space, &organization, cid).await {
+                            Ok(fetched) => hex(&Sha256::digest(&fetched)),
+                            Err(e) => format!("nothing ({e})"),
+                        };
+                        if file.value["sha256"] != said.as_str() {
+                            differ.push(format!(
+                                "{FILE}/{}: its bytes came back as {said}",
+                                file.rkey
+                            ));
+                        }
+                    }
+                    wrong.extend(differ.iter().map(|w| format!("{context_id}: {w}")));
+                    found.insert(context_id, records);
+                }
                 Err(e) => wrong.push(format!("{context_id}: could not be read back: {e}")),
             }
         }
+        wrong.extend(rebuilt_differs(state, &organization, &found).await?);
         Ok(wrong)
     }
 
@@ -382,48 +430,215 @@ impl Spaces {
         context_id: &str,
     ) -> Result<Vec<String>, Failure> {
         let organization = self.organization().await?;
-        let space = Self::space_of(&organization, context_id).to_string();
-        let key = self.directory.resolve(&organization).await?.signing_key;
+        let (records, _) = self.pulled(&organization, context_id).await?;
+        let expected = Held::of(state, &organization, context_id).await?.cids;
+        Ok(versions_differ(&expected, &records))
+    }
+
+    /// The organization's records in one context's space, held to its commit,
+    /// and the credential they were read with.
+    async fn pulled(
+        &self,
+        organization: &str,
+        context_id: &str,
+    ) -> Result<(Vec<Record>, Credential), Failure> {
+        let space = Self::space_of(organization, context_id).to_string();
+        let key = self.directory.resolve(organization).await?.signing_key;
         let (_, session) = self.session().await?;
         let credential = Credential::obtain(&self.host, &session, &self.host, &space, None).await?;
         // From nothing, so the whole repo is listed and held to its commit.
         let mut copy = sync::Copy::default();
-        let pulled = sync::pull(
+        let pull = sync::pull(
             &self.host,
             credential.auth(),
             &space,
-            &organization,
+            organization,
             &key,
             &mut copy,
         );
-        // A poll's board is in the same repo, and is its publisher's to account
-        // for and a member's mirror's to check (`crate::board`).
-        let mirrored = [PROFILE, NODE, COMMENT, REACTION];
-        let there: BTreeMap<(String, String), String> = match pulled.await? {
-            Pulled::Everything(records) => records
-                .into_iter()
-                .filter(|r| mirrored.contains(&r.collection.as_str()))
-                .map(|r| ((r.collection, r.rkey), r.cid))
-                .collect(),
-            Pulled::Nothing | Pulled::Changes(_) => BTreeMap::new(),
+        let records = match pull.await? {
+            Pulled::Everything(records) => records,
+            Pulled::Nothing | Pulled::Changes(_) => Vec::new(),
         };
-        let expected = Held::of(state, &organization, context_id).await?.cids;
-        let mut wrong = Vec::new();
-        for (at, cid) in &expected {
-            match there.get(at) {
-                Some(found) if found == cid => {}
-                Some(found) => wrong.push(format!(
-                    "{}/{}: the repo has {found}, the index {cid}",
-                    at.0, at.1
-                )),
-                None => wrong.push(format!("{}/{}: in the index, not in the repo", at.0, at.1)),
+        Ok((records, credential))
+    }
+}
+
+/// A poll's board is in the same repo, and is its publisher's to account for
+/// and a member's mirror's to check (`crate::board`).
+const MIRRORED: [&str; 5] = [PROFILE, NODE, COMMENT, REACTION, FILE];
+
+fn versions_differ(
+    expected: &BTreeMap<(String, String), String>,
+    records: &[Record],
+) -> Vec<String> {
+    let there: BTreeMap<(String, String), &str> = records
+        .iter()
+        .filter(|r| MIRRORED.contains(&r.collection.as_str()))
+        .map(|r| ((r.collection.clone(), r.rkey.clone()), r.cid.as_str()))
+        .collect();
+    let mut wrong = Vec::new();
+    for (at, cid) in expected {
+        match there.get(at) {
+            Some(found) if found == cid => {}
+            Some(found) => wrong.push(format!(
+                "{}/{}: the repo has {found}, the index {cid}",
+                at.0, at.1
+            )),
+            None => wrong.push(format!("{}/{}: in the index, not in the repo", at.0, at.1)),
+        }
+    }
+    for at in there.keys().filter(|at| !expected.contains_key(*at)) {
+        wrong.push(format!("{}/{}: in the repo, not in the index", at.0, at.1));
+    }
+    wrong
+}
+
+/// Rebuild every row from the records in `found` (by context) and nothing
+/// else, but for what no record carries ([`Kept`]), and hold each to the row
+/// that is there. What a rebuild would get wrong, in words.
+pub(crate) async fn rebuilt_differs(
+    state: &AppState,
+    organization: &str,
+    found: &BTreeMap<String, Vec<Record>>,
+) -> Result<Vec<String>, Failure> {
+    let store = Store::new(state.db.clone());
+    let mut tree = Found::default();
+    for (context_id, records) in found {
+        for record in records {
+            let value = record.value.clone();
+            match record.collection.as_str() {
+                PROFILE => {
+                    if let Ok(profile) = serde_json::from_value(value) {
+                        tree.profiles.insert(context_id.clone(), profile);
+                    }
+                }
+                NODE => {
+                    if let Ok(node) = serde_json::from_value(value) {
+                        tree.nodes
+                            .insert(record.rkey.clone(), (context_id.clone(), node));
+                    }
+                }
+                _ => {}
             }
         }
-        for at in there.keys().filter(|at| !expected.contains_key(*at)) {
-            wrong.push(format!("{}/{}: in the repo, not in the index", at.0, at.1));
-        }
-        Ok(wrong)
     }
+
+    let mut wrong = Vec::new();
+    for (context_id, records) in found {
+        let space = Spaces::space_of(organization, context_id);
+        for record in records
+            .iter()
+            .filter(|r| MIRRORED.contains(&r.collection.as_str()))
+        {
+            let at = space.record(organization, &record.collection, &record.rkey);
+            let value = record.value.clone();
+            // `None` for a record that does not read as what its collection says.
+            let sides: Option<(Option<Value>, Option<Value>)> = match record.collection.as_str() {
+                PROFILE => {
+                    let there = store.row_context(context_id).await?;
+                    let kept = there.as_ref().map(|row| Kept {
+                        visibility: row.visibility,
+                        published_uri: row.published_uri.clone(),
+                    });
+                    let above = tree.context_parent_path(context_id);
+                    serde_json::from_value::<ContextProfile>(value)
+                        .ok()
+                        .map(|profile| {
+                            let rebuilt = above.and_then(|above| {
+                                profile.row(&space, &above, kept.unwrap_or_default())
+                            });
+                            (json_of(&rebuilt), json_of(&there))
+                        })
+                }
+                NODE => {
+                    let there = store.row_document(&record.rkey).await?;
+                    let kept = there.as_ref().map(|row| Kept {
+                        visibility: row.visibility,
+                        published_uri: row.published_uri.clone(),
+                    });
+                    let above = tree.node_parent_path(&record.rkey);
+                    serde_json::from_value::<Node>(value).ok().map(|node| {
+                        let rebuilt =
+                            above.and_then(|above| node.row(&at, &above, kept.unwrap_or_default()));
+                        (json_of(&rebuilt), json_of(&there))
+                    })
+                }
+                FILE => {
+                    let there = file_row(state, &record.rkey).await?;
+                    serde_json::from_value::<File>(value)
+                        .ok()
+                        .map(|file| (json_of(&file.row(&at)), json_of(&there)))
+                }
+                COMMENT => {
+                    let there = store.row_comment(&record.rkey).await?;
+                    serde_json::from_value::<Comment>(value)
+                        .ok()
+                        .map(|comment| (json_of(&comment.row(&at)), json_of(&there)))
+                }
+                _ => {
+                    let there = store.row_reaction(&record.rkey).await?;
+                    serde_json::from_value::<Reaction>(value)
+                        .ok()
+                        .map(|reaction| (json_of(&reaction.row(&at)), json_of(&there)))
+                }
+            };
+            let name = format!("{context_id}: {}/{}", record.collection, record.rkey);
+            match sides {
+                None => wrong.push(format!("{name}: does not read as what it is filed as")),
+                Some((None, _)) => wrong.push(format!("{name}: no row can be rebuilt from it")),
+                Some((Some(_), None)) => wrong.push(format!("{name}: there is no such row")),
+                Some((Some(rebuilt), Some(there))) => {
+                    let differ = fields_that_differ(&rebuilt, &there);
+                    if !differ.is_empty() {
+                        wrong.push(format!(
+                            "{name}: rebuilt differently in {}",
+                            differ.join(", ")
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    // In one order, whatever order a host lists a repo in.
+    wrong.sort();
+    Ok(wrong)
+}
+
+/// A row as JSON, less what is filled in when a row is READ and is no part of
+/// it: the name and path of a group credited as an author.
+fn json_of<T: serde::Serialize>(row: &Option<T>) -> Option<Value> {
+    let mut json = serde_json::to_value(row.as_ref()?).ok()?;
+    let credited = json.get_mut("authors").and_then(Value::as_array_mut);
+    for author in credited
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object_mut)
+    {
+        author.remove("name");
+        author.remove("path");
+    }
+    Some(json)
+}
+
+/// The fields two rows differ in, by name, a level into `place`.
+fn fields_that_differ(rebuilt: &Value, there: &Value) -> Vec<String> {
+    let (Some(rebuilt), Some(there)) = (rebuilt.as_object(), there.as_object()) else {
+        return vec!["everything".to_string()];
+    };
+    let names: BTreeSet<&String> = rebuilt.keys().chain(there.keys()).collect();
+    let mut differ = Vec::new();
+    for name in names {
+        match (rebuilt.get(name), there.get(name)) {
+            (a, b) if a == b => {}
+            (Some(a), Some(b)) if name == "place" => {
+                let within = fields_that_differ(a, b);
+                differ.extend(within.iter().map(|field| format!("place.{field}")));
+            }
+            _ => differ.push(name.clone()),
+        }
+    }
+    differ
 }
 
 /// The first column of what a query finds.
@@ -470,10 +685,11 @@ fn said(record: &Value) -> String {
             pinned.remove("cid");
         }
     }
-    Sha256::digest(unpinned.to_string().as_bytes())
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    hex(&Sha256::digest(unpinned.to_string().as_bytes()))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 struct Pass<'a> {
@@ -520,13 +736,29 @@ impl Pass<'_> {
     ) -> Result<Wrote, Failure> {
         record["$type"] = Value::String(collection.to_string());
         let said = said(&record);
-        let at = (collection.to_string(), rkey.to_string());
-        if self.held.said.get(&at) == Some(&said) {
-            return Ok(match self.held.cids.contains_key(&at) {
-                true => Wrote::Same,
-                false => Wrote::Refused,
-            });
+        match self.settled(collection, rkey, &said) {
+            Some(settled) => Ok(settled),
+            None => self.send(collection, rkey, &record, said).await,
         }
+    }
+
+    /// What became of this version of a row already, if anything did.
+    fn settled(&self, collection: &str, rkey: &str, said: &str) -> Option<Wrote> {
+        let at = (collection.to_string(), rkey.to_string());
+        let same = self.held.said.get(&at).map(String::as_str) == Some(said);
+        same.then(|| match self.held.cids.contains_key(&at) {
+            true => Wrote::Same,
+            false => Wrote::Refused,
+        })
+    }
+
+    async fn send(
+        &mut self,
+        collection: &str,
+        rkey: &str,
+        record: &Value,
+        said: String,
+    ) -> Result<Wrote, Failure> {
         let space = self
             .spaces
             .ensure_space(self.state, self.context_id)
@@ -536,22 +768,35 @@ impl Pass<'_> {
         let put =
             self.spaces
                 .host
-                .put_record(&session, &space, &organization, collection, rkey, &record);
-        let cid = match put.await {
-            Ok(written) => Some(written.cid),
+                .put_record(&session, &space, &organization, collection, rkey, record);
+        match put.await {
+            Ok(written) => {
+                self.remember(collection, rkey, Some(written.cid), said)
+                    .await
+            }
             // The record itself is what the PDS will not take (too large, or
             // data it cannot hold), and asking again changes nothing: it is
             // remembered as refused until the row says something else.
             Err(e) if e.is_about_the_record() => {
                 let bytes = record.to_string().len();
                 tracing::warn!("spaces: {collection}/{rkey} ({bytes} bytes) was refused: {e}");
-                None
+                self.remember(collection, rkey, None, said).await
             }
             Err(e) => {
                 self.spaces.forget_session_if_spent(&e).await;
-                return Err(e.into());
+                Err(e.into())
             }
-        };
+        }
+    }
+
+    /// No CID is a version the PDS refused.
+    async fn remember(
+        &mut self,
+        collection: &str,
+        rkey: &str,
+        cid: Option<String>,
+        said: String,
+    ) -> Result<Wrote, Failure> {
         self.state
             .db
             .acquire()
@@ -568,6 +813,7 @@ impl Pass<'_> {
                 ],
             )
             .await?;
+        let at = (collection.to_string(), rkey.to_string());
         self.held.said.insert(at.clone(), said);
         Ok(match cid {
             Some(cid) => {
@@ -580,6 +826,63 @@ impl Pass<'_> {
                 Wrote::Refused
             }
         })
+    }
+
+    /// A file: its bytes to the PDS as a blob, and the record that names it.
+    /// The bytes go once, for what the row says tells a file that changed.
+    async fn put_file(&mut self, id: &str) {
+        self.rows.insert((FILE.to_string(), id.to_string()));
+        match self.write_file(id).await {
+            Ok(Some(Wrote::Written)) => self.swept.written += 1,
+            Ok(Some(Wrote::Same)) => self.swept.same += 1,
+            Ok(Some(Wrote::Refused)) => self.swept.refused += 1,
+            Ok(None) => {}
+            Err(e) => {
+                self.swept.failed += 1;
+                tracing::warn!("spaces: could not write the file {id}: {e}");
+            }
+        }
+    }
+
+    async fn write_file(&mut self, id: &str) -> Result<Option<Wrote>, Failure> {
+        let Some(row) = file_row(self.state, id).await? else {
+            return Ok(None);
+        };
+        let said = said(&serde_json::to_value(&row)?);
+        if let Some(settled) = self.settled(FILE, id, &said) {
+            return Ok(Some(settled));
+        }
+        if row.size.max(0) as u64 > self.spaces.blob_limit {
+            tracing::warn!(
+                "spaces: the file {id} ({} bytes) is past what the PDS takes",
+                row.size
+            );
+            return self.remember(FILE, id, None, said).await.map(Some);
+        }
+        let bytes = tokio::fs::read(crate::blob::path_of(&self.state.config, &row.sha256)).await?;
+        let (_, session) = self.spaces.session().await?;
+        let blob = match self
+            .spaces
+            .host
+            .upload_blob(&session, bytes, &row.mime)
+            .await
+        {
+            Ok(blob) => blob,
+            Err(e) if e.is_about_the_record() => {
+                tracing::warn!(
+                    "spaces: the file {id} ({} bytes) was refused: {e}",
+                    row.size
+                );
+                return self.remember(FILE, id, None, said).await.map(Some);
+            }
+            Err(e) => {
+                self.spaces.forget_session_if_spent(&e).await;
+                return Err(e.into());
+            }
+        };
+        let mut record = serde_json::to_value(File::of(&row, blob))?;
+        record["$type"] = Value::String(FILE.to_string());
+        self.send(FILE, id, &record, said).await.map(Some)
     }
 
     /// A row purged, or moved to another context, leaves a record behind here.
@@ -671,6 +974,35 @@ impl Addresses for Held {
             .get(&(collection.to_string(), id.to_string()))
             .cloned()
     }
+}
+
+/// What is kept of a file beside its bytes (`crate::blob`).
+async fn file_row(state: &AppState, id: &str) -> Result<Option<FileRow>, Failure> {
+    let conn = state.db.acquire().await?;
+    let mut rows = conn
+        .query(
+            "SELECT id, context_id, owner_did, sha256, size, mime, name, created_at \
+             FROM blob WHERE id = ?1",
+            [id],
+        )
+        .await?;
+    let Some(row) = rows.next().await? else {
+        return Ok(None);
+    };
+    let text = |i: usize| match row.get_value(i) {
+        Ok(Sql::Text(text)) => Some(text),
+        _ => None,
+    };
+    Ok(Some(FileRow {
+        id: row.get(0)?,
+        context_id: row.get(1)?,
+        owner_did: text(2),
+        sha256: row.get(3)?,
+        size: row.get(4)?,
+        mime: row.get(5)?,
+        name: text(6),
+        created_at: row.get(7)?,
+    }))
 }
 
 /// A context's row names what it hangs in by one id, a context's or a folder's.
@@ -909,7 +1241,6 @@ pub(crate) mod tests {
     use std::sync::Arc;
     use tower::ServiceExt;
     use wiki_domain_types::Visibility;
-    use wiki_records::Kept;
 
     const SERVICE: &str = "did:web:wiki.test#wiki_appview";
 
@@ -1029,7 +1360,7 @@ pub(crate) mod tests {
         let comment = of(COMMENT, "k1");
         assert_eq!(comment.value["subject"]["cid"], of(NODE, "d1").cid());
         let comment: Comment = serde_json::from_value(comment.value).expect("a comment");
-        let row = comment.row(&at.record(DID, COMMENT, "k1"), None);
+        let row = comment.row(&at.record(DID, COMMENT, "k1"));
         assert_eq!(row, store.row_comment("k1").await.expect("a row"));
 
         let reaction: Reaction =
@@ -1052,6 +1383,206 @@ pub(crate) mod tests {
             published_uri: c1.published_uri.clone(),
         };
         assert_eq!(profile.row(&at, "", kept), Some(c1));
+    }
+
+    /// What the fake holds of every space, as a read-back would have found it.
+    fn held_by(pds: &FakePds, contexts: &[&str]) -> BTreeMap<String, Vec<Record>> {
+        let of = |context_id: &&str| {
+            let records = pds.space_records(&space(context_id));
+            let found = records.into_iter().map(|r| Record {
+                cid: r.cid(),
+                collection: r.collection,
+                rkey: r.rkey,
+                value: r.value,
+            });
+            (context_id.to_string(), found.collect())
+        };
+        contexts.iter().map(of).collect()
+    }
+
+    #[tokio::test]
+    async fn a_varied_wiki_is_rebuilt_from_its_records_alone() {
+        let (state, pds, spaces) = mirroring().await;
+        // A group in a folder of another, every kind of author, a locked page, a
+        // draft, a binned subtree, a thread with a picture and a tombstone, a
+        // reactor whose account did not come across, fractions, stamps and ids
+        // from the interim.
+        run_sql(
+            &state,
+            r#"INSERT INTO document (id, context_id, parent_id, kind, title, slug, path, idx,
+                 mutable, attachable, owner_did, content, data, legacy_id, created_at, updated_at)
+               VALUES ('f1', 'c9', 'c9', 'folder', 'Møder', 'moeder', 'closed/moeder', 3,
+                 0, 0, 'did:plc:alice', NULL, '{"icon":"event"}', 'old-f1',
+                 '2024-03-01T09:00:00.000Z', '2025-01-02T10:30:00.000Z');
+               INSERT INTO document (id, context_id, parent_id, kind, title, slug, path, idx,
+                 mutable, content, data, visibility, published_uri)
+               VALUES ('p1', 'c9', 'f1', 'policy', 'Kontingent', 'kontingent',
+                 'closed/moeder/kontingent', 1, 1,
+                 '[{"type":"image","width":0.75,"children":[{"text":""}]}]',
+                 '{"threshold":66.7,"fileId":"file-1"}', 'public', 'at-uri-of-a-resolution');
+               INSERT INTO document_author (document_id, author_did, author_text, author_context, ord)
+               VALUES ('p1', 'did:plc:bob', NULL, NULL, 0), ('p1', NULL, 'Aarhus', NULL, 1),
+                      ('p1', NULL, NULL, 'c1', 2);
+               INSERT INTO context (id, kind, name, slug, path, parent_id, idx, content)
+               VALUES ('c11', 'event', 'Landsmøde', 'landsmoede', 'closed/moeder/landsmoede',
+                 'f1', 2, '[{"children":[{"text":"Velkommen"}]}]');
+               INSERT INTO document (id, context_id, parent_id, kind, title, slug, path)
+               VALUES ('a1', 'c11', 'c11', 'document', 'Dagsorden', 'dagsorden',
+                 'closed/moeder/landsmoede/dagsorden');
+               INSERT INTO document (id, context_id, parent_id, kind, title, slug, path,
+                 deleted_at, deleted_root)
+               VALUES ('b1', 'c9', 'c9', 'folder', 'Gammelt', 'gammelt', 'closed/gammelt',
+                 '2026-09-01T08:00:00.000Z', 'b1'),
+                      ('b2', 'c9', 'b1', 'document', 'Noter', 'noter', 'closed/gammelt/noter',
+                 '2026-09-01T08:00:00.000Z', 'b1');
+               INSERT INTO comment (id, on_id, root_id, context_id, author_did, author_text, text,
+                 image, tombstone, created_at, deleted_at, deleted_root, legacy_id)
+               VALUES ('k2', 'p1', 'p1', 'c9', 'did:plc:bob', NULL, 'Enig', 'file-9', 0,
+                 '2026-09-02T10:00:00.000Z', NULL, NULL, 'old-k2'),
+                      ('k3', 'k2', 'p1', 'c9', NULL, '', '', NULL, 1,
+                 '2026-09-02T10:05:00.000Z', NULL, NULL, NULL),
+                      ('k4', 'k3', 'p1', 'c9', NULL, 'En gæst', 'Også mig', NULL, 0,
+                 '2026-09-02T10:06:00.000Z', '2026-09-03T08:00:00.000Z', 'k4', NULL);
+               INSERT INTO reaction (id, subject_uri, reactor_did, emoji, legacy_id)
+               VALUES ('r2', 'k2', NULL, '❤️', 'old-r2'), ('r3', 'p1', 'did:plc:alice', '👍', NULL)"#,
+        )
+        .await;
+        let swept = spaces.mirror_everything(&state).await.expect("a pass");
+        assert_eq!(
+            (swept.waiting, swept.refused, swept.failed),
+            (0, 0, 0),
+            "{swept:?}"
+        );
+
+        let found = held_by(&pds, &["c1", "c2", "c9", "c10", "c11"]);
+        let wrong = rebuilt_differs(&state, DID, &found)
+            .await
+            .expect("a rebuild");
+        assert_eq!(wrong, Vec::<String>::new());
+
+        // And it notices: a record that says something else than its row, one
+        // whose parent is nowhere, and one that is not what it is filed as.
+        let mut found = found;
+        let c9 = found.get_mut("c9").expect("c9");
+        for record in c9.iter_mut() {
+            match record.rkey.as_str() {
+                "p1" => record.value["title"] = json!("Kontingent 2027"),
+                "k2" => record.value = json!({"text": 7}),
+                "b2" => record.value["parent"] = json!(space("c9") + "/x/wiki.radikal.node/gone"),
+                _ => {}
+            }
+        }
+        let wrong = rebuilt_differs(&state, DID, &found)
+            .await
+            .expect("a rebuild");
+        assert_eq!(
+            wrong,
+            [
+                "c9: wiki.radikal.comment/k2: does not read as what it is filed as",
+                "c9: wiki.radikal.node/b2: no row can be rebuilt from it",
+                "c9: wiki.radikal.node/p1: rebuilt differently in title",
+            ]
+        );
+    }
+
+    /// Keep `bytes` as the file `id` of c9, as an upload would have.
+    async fn a_file(state: &AppState, id: &str, mime: &str, bytes: &[u8]) {
+        let source = std::env::temp_dir().join(format!("a-file-{}", crate::util::random_token(8)));
+        tokio::fs::write(&source, bytes).await.expect("a source");
+        let blob = crate::blob::BlobMeta {
+            id: id.to_string(),
+            context_id: "c9".to_string(),
+            owner_did: Some("did:plc:alice".to_string()),
+            sha256: String::new(),
+            size: 0,
+            mime: mime.to_string(),
+            name: Some(format!("{id}.bin")),
+        };
+        crate::blob::file_a_copy(state, &source, blob)
+            .await
+            .expect("a file");
+        let _ = tokio::fs::remove_file(source).await;
+    }
+
+    #[tokio::test]
+    async fn a_file_goes_to_the_pds_once_and_one_too_large_stays_home() {
+        let (mut state, pds, spaces) = mirroring().await;
+        state.config.blob_dir = std::env::temp_dir()
+            .join(format!("appview-blobs-{}", crate::util::random_token(8)))
+            .to_string_lossy()
+            .into_owned();
+        a_file(
+            &state,
+            "file-1",
+            "application/pdf",
+            b"%PDF a made-up agenda",
+        )
+        .await;
+        a_file(&state, "file-2", "image/png", b"a picture, more or less").await;
+        a_file(&state, "file-3", "image/jpeg", &vec![7u8; 6 * 1024 * 1024]).await;
+        a_file(&state, "file-4", "image/png", b"what a report showed").await;
+        // A file node, a picture in a thread, a cover past what a PDS takes, and
+        // a report's picture, which is nobody's in the group to see.
+        run_sql(
+            &state,
+            r#"INSERT INTO document (id, context_id, parent_id, kind, title, slug, path, data)
+               VALUES ('fd1', 'c9', 'c9', 'file', 'Dagsorden', 'dagsorden', 'closed/dagsorden',
+                 '{"fileId":"file-1"}');
+               UPDATE comment SET image = 'file-2' WHERE id = 'ks';
+               UPDATE context SET data = '{"image":"file-3"}' WHERE id = 'c9'"#,
+        )
+        .await;
+        let uploads = |pds: &FakePds| {
+            let calls = pds.calls();
+            calls
+                .iter()
+                .filter(|(method, _)| method == "uploadBlob")
+                .count()
+        };
+
+        let first = spaces.mirror_context(&state, "c9").await.expect("a pass");
+        assert_eq!(
+            (first.refused, first.failed, uploads(&pds)),
+            (1, 0, 2),
+            "{first:?}"
+        );
+        let files: Vec<String> = keys(&pds, "c9")
+            .into_iter()
+            .filter(|key| key.starts_with("file/"))
+            .collect();
+        assert_eq!(files, ["file/file-1", "file/file-2"]);
+        let records = pds.space_records(&space("c9"));
+        let agenda = records
+            .iter()
+            .find(|r| r.rkey == "file-1")
+            .expect("the file");
+        assert_eq!(agenda.value["name"], "file-1.bin");
+        assert_eq!(agenda.value["blob"]["mimeType"], "application/pdf");
+        let cid = agenda.value["blob"]["ref"]["$link"]
+            .as_str()
+            .expect("a cid");
+        assert_eq!(
+            pds.blob(cid).as_deref(),
+            Some(&b"%PDF a made-up agenda"[..])
+        );
+
+        // Nothing is sent twice, and what stayed home is said every time.
+        let again = spaces.mirror_context(&state, "c9").await.expect("a pass");
+        assert_eq!((again.written, again.refused, uploads(&pds)), (0, 1, 2));
+
+        // The rows are what the records say, down to what the blob says.
+        let found = held_by(&pds, &["c9"]);
+        let wrong = rebuilt_differs(&state, DID, &found)
+            .await
+            .expect("a rebuild");
+        assert_eq!(wrong, Vec::<String>::new());
+
+        // A file nothing names any more is a file the space lets go of.
+        run_sql(&state, "UPDATE comment SET image = NULL WHERE id = 'ks'").await;
+        let let_go = spaces.mirror_context(&state, "c9").await.expect("a pass");
+        assert_eq!(let_go.deleted, 1);
+        assert!(!keys(&pds, "c9").contains(&"file/file-2".to_string()));
+        let _ = tokio::fs::remove_dir_all(&state.config.blob_dir).await;
     }
 
     #[tokio::test]
@@ -1480,7 +2011,19 @@ pub(crate) mod tests {
         let (org, org_session) = (alpha.org.clone(), alpha.org_session.clone());
         let (alice, alice_session) = account(http, pds_url, &format!("alice{run}")).await;
         let (_, bob_session) = account(http, pds_url, &format!("bob{run}")).await;
-        let (state, spaces) = alpha.serve(seeded_state().await).await;
+        let mut state = seeded_state().await;
+        state.config.blob_dir = std::env::temp_dir()
+            .join(format!("appview-blobs-{}", crate::util::random_token(8)))
+            .to_string_lossy()
+            .into_owned();
+        let (state, spaces) = alpha.serve(state).await;
+        a_file(
+            &state,
+            "file-1",
+            "application/pdf",
+            b"%PDF a made-up agenda",
+        )
+        .await;
         run_sql(
             &state,
             &format!(
@@ -1489,6 +2032,9 @@ pub(crate) mod tests {
                    VALUES ('m-real-alice', '{alice}', 'c9', 'member', 1); \
                  INSERT INTO reaction (id, subject_uri, reactor_did, emoji) \
                    VALUES ('r1', 'd1', '{alice}', '👍'); \
+                 INSERT INTO document (id, context_id, parent_id, kind, title, slug, path, data) \
+                   VALUES ('fd1', 'c9', 'c9', 'file', 'Dagsorden', 'dagsorden', \
+                           'closed/dagsorden', '{{\"fileId\":\"file-1\"}}'); \
                  UPDATE document SET data = '{{\"threshold\":0.5}}', \
                    content = '[{{\"type\":\"paragraph\",\"children\":[{{\"text\":\"Vi foreslår\"}}]}}]' \
                    WHERE id = 'd1'"
@@ -1500,13 +2046,17 @@ pub(crate) mod tests {
         assert_eq!(
             first,
             Swept {
-                written: 10,
+                written: 12,
                 ..Swept::default()
             }
         );
         // Read back as any syncer would: the same records, the same versions,
-        // under a commit the organization signed.
-        let wrong = spaces.check_everything(&state).await.expect("a check");
+        // under a commit the organization signed, every row rebuilt from its
+        // record alone, and every file's bytes as they were.
+        let wrong = spaces
+            .check_everything(&state, true)
+            .await
+            .expect("a check");
         assert_eq!(wrong, Vec::<String>::new());
 
         // A member gets in through her own PDS session, and reads the page as
@@ -1519,6 +2069,15 @@ pub(crate) mod tests {
         let read = pds.records(hers.auth(), &c9, &org).await.expect("records");
         let s1 = read.iter().find(|r| r.rkey == "s1").expect("s1");
         assert_eq!(s1.value["title"], "Secret Minutes");
+        let agenda = read.iter().find(|r| r.rkey == "file-1").expect("the file");
+        let cid = agenda.value["blob"]["ref"]["$link"]
+            .as_str()
+            .expect("a cid");
+        let bytes = pds
+            .blob(hers.auth(), &c9, &org, cid)
+            .await
+            .expect("the bytes");
+        assert_eq!(bytes, b"%PDF a made-up agenda");
         let his = Credential::obtain(pds, &bob_session, pds, &c9, None).await;
         assert_eq!(
             his.err().as_ref().and_then(|e| e.xrpc_name()),
@@ -1560,7 +2119,7 @@ pub(crate) mod tests {
         .await;
         spaces.mirror_context(&state, "c9").await.expect("a pass");
         let swept = spaces.mirror_everything(&state).await.expect("a pass");
-        assert_eq!((swept.written, swept.failed), (2, 0), "{swept:?}");
+        assert_eq!((swept.written, swept.failed), (4, 0), "{swept:?}");
         let wrong = spaces.check_context(&state, "c9").await.expect("a check");
         assert_eq!(wrong, Vec::<String>::new());
 

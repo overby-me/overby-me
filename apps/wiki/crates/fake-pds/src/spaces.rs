@@ -41,11 +41,53 @@ pub(crate) fn routes() -> Router<Repo> {
             "/xrpc/com.atproto.simplespace.updateSpace",
             post(update_space),
         )
+        .route(
+            "/xrpc/com.atproto.repo.uploadBlob",
+            // Past the limit below, so that it is this that refuses and not axum.
+            post(upload_blob).layer(axum::extract::DefaultBodyLimit::max(2 * BLOB_LIMIT)),
+        )
         .route("/xrpc/com.atproto.space.putRecord", post(put_record))
         .route("/xrpc/com.atproto.space.createRecord", post(create_record))
         .route("/xrpc/com.atproto.space.applyWrites", post(apply_writes))
         .route("/xrpc/com.atproto.space.deleteRecord", post(delete_record))
         .route("/plc/{did}", get(did_document))
+}
+
+/// `PDS_BLOB_UPLOAD_LIMIT` as a PDS ships.
+const BLOB_LIMIT: usize = 5 * 1024 * 1024;
+
+/// The bytes of a file, for a record to name. Not a real CID either.
+async fn upload_blob(
+    State(repo): State<Repo>,
+    headers: HeaderMap,
+    bytes: axum::body::Bytes,
+) -> (StatusCode, Json<Value>) {
+    use sha2::{Digest, Sha256};
+    if !authorized(&headers) {
+        return refused(StatusCode::UNAUTHORIZED, "AuthenticationRequired");
+    }
+    repo.calls
+        .lock()
+        .expect("calls")
+        .push(("uploadBlob".to_string(), bytes.len()));
+    if bytes.len() > BLOB_LIMIT {
+        return refused(StatusCode::PAYLOAD_TOO_LARGE, "PayloadTooLargeError");
+    }
+    let mime = headers.get("content-type").and_then(|v| v.to_str().ok());
+    let digest: String = Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let cid = format!("bafkfake{digest}");
+    let blob = json!({
+        "$type": "blob", "ref": {"$link": cid},
+        "mimeType": mime.unwrap_or("application/octet-stream"), "size": bytes.len(),
+    });
+    repo.blobs
+        .lock()
+        .expect("blobs")
+        .insert(cid, bytes.to_vec());
+    (StatusCode::OK, Json(json!({ "blob": blob })))
 }
 
 async fn create_space(

@@ -60,21 +60,9 @@
 						"type": "string",
 						"knownValues": ["slate/1"]
 					},
-					"image": {
-						"type": "blob",
-						"description": "A cover, or a candidate's photo.",
-						"accept": ["image/*"],
-						"maxSize": 10000000
-					},
-					"file": {
-						"type": "blob",
-						"description": "What a `file` is. Beyond what the holder's PDS accepts, the application keeps the bytes and `data` says where.",
-						"accept": ["*/*"],
-						"maxSize": 100000000
-					},
 					"data": {
 						"type": "unknown",
-						"description": "Whatever else the kind keeps beside its text."
+						"description": "Whatever else the kind keeps beside its text. A file is named in it by its id (`fileId`, `image`), which is the key of a `wiki.radikal.file` in the same wiki."
 					},
 					"authors": {
 						"type": "array",

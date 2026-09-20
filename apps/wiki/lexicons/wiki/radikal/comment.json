@@ -25,11 +25,10 @@
 						"ref": "com.atproto.repo.strongRef",
 						"description": "The comment this one answers, when it answers one."
 					},
-					"image": {
-						"type": "blob",
-						"description": "A picture said with it.",
-						"accept": ["image/*"],
-						"maxSize": 10000000
+					"imageFile": {
+						"type": "string",
+						"description": "A picture said with it, by the key of its `wiki.radikal.file`.",
+						"maxLength": 64
 					},
 					"author": {
 						"type": "ref",

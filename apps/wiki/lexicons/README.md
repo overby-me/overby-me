@@ -17,8 +17,10 @@ See `docs/atproto-stack-decisions.md` (Lexicon-to-atrium codegen pipeline) and
 A third category is neither public nor private to the backend: records held in **atproto spaces**, one
 space per context, readable by its members (`docs/atproto-spaces-redesign.md`). `context` is the space's
 type, `contextProfile` what a context is, `node` anything with a place in its tree (one record type with
-a `kind`, as the backend has one table), and `comment` and `reaction` serve in a space as they do in
-public. `spaceDefs` has what they share. Inside a space a body stays the editor's own JSON, named by
+a `kind`, as the backend has one table), `file` a file of the context with its bytes as a blob (pages
+and comments name it by its key), and `comment` and `reaction` serve in a space as they do in public.
+`spaceDefs` has what they share, and how a number atproto cannot hold is carried. Inside a space a body
+stays the editor's own JSON, named by
 `contentFormat`, so `document` is no longer excluded there. `crates/wiki-records` has them as Rust types,
 held to these files by a test, with the mapping to the backend's rows.
 
