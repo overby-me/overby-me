@@ -82,7 +82,8 @@ and by hand against the same build:
   a type the PDS does not know is not validated (`validationStatus: unknown`).
   So the mapping carries such numbers as `wiki.radikal.spaceDefs#number`.
 - **A request past about 1 MB is refused** (`PayloadTooLargeError`, 413): 900 KB
-  of record went in, 1 MB did not. A page that large cannot be one record.
+  of record went in, 1 MB did not. A page that large cannot be one record, so
+  its body goes as a blob the record names, and came back through `getBlob`.
 - **A deleted space takes writes.** After `deleteSpace`, `putRecord` into the
   same space answered 200 with a CID, `deleteRecord` 200, and a second
   `deleteSpace` 200. `createSpace` on a space that exists is `SpaceAlreadyExists`,

@@ -39,7 +39,6 @@ Run it again, from a fresh dump in `<dir>`, with
    URL, and not to a stranger; a comment lands and is read back; search finds
    the page by a word of its title, and finds a stranger nothing; a file is
    served whole to a member, and refused to a stranger and to nobody.
-
 8. **The frontend, in a browser** (`scripts/rehearse-cutover-browser.nu`): the
    build on the AppView in headless Firefox, as the returned member with the
    most seats, walking real pages: ten of every kind, the longest bodies first,
@@ -94,3 +93,9 @@ are fixed and tested there.
   by address, since a PDS on plain http is never believed about one.
 - The NixOS host: the unit that runs the load and the gates is covered by the
   VM test, on a made-up wiki.
+- The later move into atproto spaces (`atproto-spaces-redesign.md`). It has a
+  rehearsal of its own, `nu scripts/rehearse-spaces.nu <dir>`, run on what this
+  one leaves in `<dir>/stage`. It was written after this dump was deleted, so
+  it has run on a made-up wiki only: which of production's pages and files are
+  past what a PDS takes, and whether production rebuilds from its records, is
+  what the next rehearsal is there to say.

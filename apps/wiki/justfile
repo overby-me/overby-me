@@ -160,6 +160,12 @@ test-real-login *ARGS:
 test-spaces *ARGS:
     nu scripts/test-spaces.nu {{ARGS}}
 
+# The move into atproto spaces, rehearsed on a cutover already rehearsed in DIR
+# (needs docker): every record and file into the alpha's PDS, read back, and
+# every row rebuilt from its record alone.
+rehearse-spaces DIR *ARGS:
+    nu scripts/rehearse-spaces.nu {{DIR}} {{ARGS}}
+
 # The cutover, rehearsed from a dump already in DIR (docs/cutover-runbook.md):
 # extract, load, files, the gates, every carried account returns, a smoke test.
 rehearse-cutover DIR *ARGS:

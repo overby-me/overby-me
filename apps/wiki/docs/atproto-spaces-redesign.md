@@ -255,9 +255,10 @@ from the interim does not wait for any of this.
   bin are one transaction today and several records tomorrow.
 - **Backups of two things**: the organization's PDS, and the AppView's private
   tables. Only the index is rebuildable.
-- **A page has a largest size**, about 1 MB as a record on the alpha. The mirror
-  counts a larger one as refused and leaves it in the datastore alone. At the
-  move such a body has to go as a blob.
+- **A record has a largest size**, about 1 MB on the alpha. A page whose body
+  would take it past that has the body go as a file of its own, which the
+  record names (`contentBlob`), and a reader puts it back. One past what the
+  PDS takes as a file too stays in the datastore alone, and is counted.
 - **A fraction is not a number** to atproto. Inside a page's body or a node's
   settings one is carried as `wiki.radikal.spaceDefs#number`, in its own digits,
   and read back as the number it was.
@@ -340,7 +341,8 @@ configured (`APPVIEW_SPACES_*`, `services.wiki-appview.spaces`). Done so far
   keeps and recounts it as a member, by an app password of their own account.
 - Of S6, files: each file something in a space names is uploaded to the
   organization's PDS once and written as a `wiki.radikal.file`. One nothing
-  names any more is let go of.
+  names any more is let go of. A page too long to be one record sends its body
+  the same way.
 - Of S6, the gates: `appview mirror-spaces` does one pass and then reads every
   space back through a credential, as any syncer would. It wants the same
   records at the same versions under commits that verify, and it rebuilds every
@@ -349,11 +351,15 @@ configured (`APPVIEW_SPACES_*`, `services.wiki-appview.spaces`). Done so far
   the claim this design rests on, asked of real data: the content tables are an
   index the repos can rebuild. It says what differs, by context, record and
   field, and with `--bytes` it fetches every file back and holds it to its hash.
+  `scripts/rehearse-spaces.nu` runs all of it on a cutover already rehearsed
+  (`just rehearse-spaces <dir>`), against the alpha's PDS in a container that
+  is gone when it ends: what the next rehearsal on a copy of production is run
+  with, to learn which pages and files are past what a PDS takes.
 
 Not yet: registering for notifications and indexing members' own repos, which
 is nothing to do until a member holds a record (S7); the record FIRST, which is
-the second half of S4; a page past what a PDS takes as one record, which has
-to go as a blob, and the rehearsal on a copy of production (the rest of S6).
+the second half of S4; and the rehearsal on a copy of production, which is
+the owner's to start (the rest of S6).
 
 - **S1 Foundations.** The NSID. A space type and record lexicons for content,
   overlays and the board (`content` as the editor's own JSON, tagged with its

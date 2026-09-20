@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS space_record (
 );
 "#;
 
+/// What a record may come to before its body goes out as a blob. A PDS took
+/// 900 KB in one request and refused 1 MB, and a request is more than its record.
+const RECORD_ROOM: usize = 800_000;
+
 /// Where the key this application attests with is published.
 pub const JWKS_PATH: &str = "/jwks.json";
 
@@ -457,6 +461,24 @@ impl Spaces {
                             ));
                         }
                     }
+                    // A body that went out as a file is part of the page it is of.
+                    let mut records = records;
+                    for record in &mut records {
+                        let Some(cid) = wiki_records::body_blob(&record.value).map(str::to_string)
+                        else {
+                            continue;
+                        };
+                        let space = Self::space_of(&organization, &context_id).to_string();
+                        let auth = credential.auth();
+                        let body = self.host.blob(auth, &space, &organization, &cid).await;
+                        if !body.is_ok_and(|bytes| wiki_records::body_in(&mut record.value, &bytes))
+                        {
+                            differ.push(format!(
+                                "{}/{}: its body did not come back",
+                                record.collection, record.rkey
+                            ));
+                        }
+                    }
                     wrong.extend(differ.iter().map(|w| format!("{context_id}: {w}")));
                     found.insert(context_id, records);
                 }
@@ -804,10 +826,27 @@ impl Pass<'_> {
     ) -> Result<Wrote, Failure> {
         record["$type"] = Value::String(collection.to_string());
         let said = said(&record);
-        match self.settled(collection, rkey, &said) {
-            Some(settled) => Ok(settled),
-            None => self.send(collection, rkey, &record, said).await,
+        if let Some(settled) = self.settled(collection, rkey, &said) {
+            return Ok(settled);
         }
+        // A page too long to be one record: its body goes as a file, which the
+        // record then names. After `said`, so that it goes once.
+        if let Some(body) = wiki_records::body_out(&mut record, RECORD_ROOM) {
+            if body.len() as u64 > self.spaces.blob_limit {
+                let bytes = body.len();
+                tracing::warn!(
+                    "spaces: {collection}/{rkey} has a body of {bytes} bytes, past what the PDS takes"
+                );
+                return self.remember(collection, rkey, None, said).await;
+            }
+            let (_, session) = self.spaces.session().await?;
+            let host = &self.spaces.host;
+            let blob = host
+                .upload_blob(&session, body, wiki_records::BODY_MIME)
+                .await?;
+            wiki_records::body_at(&mut record, blob);
+        }
+        self.send(collection, rkey, &record, said).await
     }
 
     /// What became of this version of a row already, if anything did.
@@ -1466,11 +1505,19 @@ pub(crate) mod tests {
     fn held_by(pds: &FakePds, contexts: &[&str]) -> BTreeMap<String, Vec<Record>> {
         let of = |context_id: &&str| {
             let records = pds.space_records(&space(context_id));
-            let found = records.into_iter().map(|r| Record {
-                cid: r.cid(),
-                collection: r.collection,
-                rkey: r.rkey,
-                value: r.value,
+            let found = records.into_iter().map(|r| {
+                let cid = r.cid();
+                let mut value = r.value;
+                let body = wiki_records::body_blob(&value).and_then(|cid| pds.blob(cid));
+                if let Some(body) = body {
+                    assert!(wiki_records::body_in(&mut value, &body));
+                }
+                Record {
+                    cid,
+                    collection: r.collection,
+                    rkey: r.rkey,
+                    value,
+                }
             });
             (context_id.to_string(), found.collect())
         };
@@ -1828,21 +1875,38 @@ pub(crate) mod tests {
         let carried = spaces.mirror_context(&state, "c1").await.expect("a pass");
         assert_eq!((carried.written, carried.refused), (1, 0));
 
-        // A page past what a PDS takes in one request.
+        // A page past what a PDS takes in one request: its body goes as a file,
+        // and comes back as the page's.
         let conn = state.db.acquire().await.expect("conn");
         let long = json!({"text": "x".repeat(1_100_000)}).to_string();
         conn.execute("UPDATE document SET content = ?1 WHERE id = 'd2'", [long])
             .await
             .expect("a long page");
+        let as_a_file = spaces.mirror_context(&state, "c1").await.expect("a pass");
+        assert_eq!((as_a_file.written, as_a_file.refused), (1, 0));
+        let d2 = pds.space_records(&space("c1"));
+        let d2 = d2.iter().find(|r| r.rkey == "d2").expect("d2");
+        assert!(d2.value.get("content").is_none() && d2.value["contentBlob"]["size"].is_u64());
+        let found = held_by(&pds, &["c1"]);
+        let wrong = rebuilt_differs(&state, DID, &found)
+            .await
+            .expect("a rebuild");
+        assert_eq!(wrong, Vec::<String>::new());
+
+        // And one past what it takes as a file stays home.
+        let longer = json!({"text": "x".repeat(6 * 1024 * 1024)}).to_string();
+        conn.execute("UPDATE document SET content = ?1 WHERE id = 'd2'", [longer])
+            .await
+            .expect("a longer page");
         let before = puts(&pds);
         let refused = spaces.mirror_context(&state, "c1").await.expect("a pass");
         assert_eq!(
             (refused.refused, refused.failed, puts(&pds) - before),
-            (1, 0, 1)
+            (1, 0, 0)
         );
-        // Counted for as long as it is so, and not sent again.
+        // Counted for as long as it is so, and not sent.
         let again = spaces.mirror_context(&state, "c1").await.expect("a pass");
-        assert_eq!((again.refused, puts(&pds) - before), (1, 1));
+        assert_eq!((again.refused, puts(&pds) - before), (1, 0));
         // Until the row is something else.
         run_sql(&state, "UPDATE document SET content = NULL WHERE id = 'd2'").await;
         let shorter = spaces.mirror_context(&state, "c1").await.expect("a pass");
@@ -2173,6 +2237,12 @@ pub(crate) mod tests {
             ),
         )
         .await;
+        // A page past what a PDS takes as one record, whose body goes as a file.
+        let conn = state.db.acquire().await.expect("conn");
+        let long = json!([{"children": [{"text": "x".repeat(1_100_000)}]}]).to_string();
+        conn.execute("UPDATE document SET content = ?1 WHERE id = 'd2'", [long])
+            .await
+            .expect("a long page");
 
         let first = spaces.mirror_everything(&state).await.expect("a pass");
         assert_eq!(

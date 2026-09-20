@@ -154,6 +154,35 @@ fn numbers_atproto_cannot_hold_go_in_their_own_digits_and_come_back() {
 }
 
 #[test]
+fn a_body_too_long_for_a_record_goes_out_and_comes_back() {
+    let mut doc = motion();
+    doc.content = Some(json!([{"children": [{"text": "x".repeat(5000), "size": 1.5}]}]));
+    let uri = Held.space("c-hb").record(ORG, NODE, &doc.id);
+    let whole = serde_json::to_value(Node::of(&doc, &Held)).expect("json");
+
+    let mut record = whole.clone();
+    assert_eq!(body_out(&mut record, 1_000_000), None, "it fits");
+    let body = body_out(&mut record, 2000).expect("it does not");
+    assert!(record.get("content").is_none());
+    assert!(record.to_string().len() < 2000);
+    body_at(
+        &mut record,
+        json!({"$type": "blob", "ref": {"$link": "bafk-body"}, "mimeType": BODY_MIME, "size": body.len()}),
+    );
+    assert_eq!(body_blob(&record), Some("bafk-body"));
+
+    // With its body still out it is no row, and not a row with no body.
+    let out: Node = serde_json::from_value(record.clone()).expect("a node");
+    let theirs = kept(doc.visibility, &doc.published_uri);
+    assert_eq!(out.row(&uri, "hb/forslag", theirs.clone()), None);
+
+    assert!(body_in(&mut record, &body));
+    assert_eq!(record, whole);
+    let back: Node = serde_json::from_value(record).expect("a node");
+    assert_eq!(back.row(&uri, "hb/forslag", theirs), Some(doc));
+}
+
+#[test]
 fn where_a_node_is_follows_from_the_records_alone() {
     let folder = |id: &str, slug: &str, parent: &str| {
         let mut doc = motion();

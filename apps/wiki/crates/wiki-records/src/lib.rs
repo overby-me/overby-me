@@ -73,6 +73,11 @@ pub struct ContextProfile {
     pub content: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_format: Option<String>,
+    /// The body as a blob, where it is past what a PDS takes inside a record.
+    /// Whoever writes the record moves it there ([`body_out`]), and whoever
+    /// reads it puts it back before asking for a row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_blob: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,6 +110,11 @@ pub struct Node {
     pub content: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_format: Option<String>,
+    /// The body as a blob, where it is past what a PDS takes inside a record.
+    /// Whoever writes the record moves it there ([`body_out`]), and whoever
+    /// reads it puts it back before asking for a row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_blob: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -371,6 +381,7 @@ impl Node {
             draft: Some(doc.mutable),
             locked: Some(!place.attachable),
             content_format: doc.content.as_ref().map(|_| SLATE.to_string()),
+            content_blob: None,
             content: doc.content.as_ref().map(storable),
             data: doc.data.as_ref().map(storable),
             authors: doc.authors.iter().map(|a| author_of(a, at)).collect(),
@@ -387,6 +398,10 @@ impl Node {
 
     /// The row for a record found at `uri`, under the path its parents give it.
     pub fn row(&self, uri: &RecordUri, parent_path: &str, kept: Kept) -> Option<rows::Document> {
+        // A body still out in its blob would come back as no body at all.
+        if self.content_blob.is_some() {
+            return None;
+        }
         let kind: rows::DocumentKind =
             serde_json::from_value(serde_json::Value::String(self.kind.clone())).ok()?;
         let context_id = uri.space.skey.clone();
@@ -454,6 +469,7 @@ impl ContextProfile {
             index: Some(place.idx),
             locked: Some(!place.attachable),
             content_format: ctx.content.as_ref().map(|_| SLATE.to_string()),
+            content_blob: None,
             content: ctx.content.as_ref().map(storable),
             data: ctx.data.as_ref().map(storable),
             made_by: place.owner_did.clone(),
@@ -472,6 +488,9 @@ impl ContextProfile {
 
     /// The row for the profile of `space`, under the path its parents give it.
     pub fn row(&self, space: &SpaceUri, parent_path: &str, kept: Kept) -> Option<rows::Context> {
+        if self.content_blob.is_some() {
+            return None;
+        }
         let kind: rows::ContextKind =
             serde_json::from_value(serde_json::Value::String(self.kind.clone())).ok()?;
         let parent_id = match (&self.parent_node, &self.parent_space) {
@@ -629,6 +648,40 @@ impl Reaction {
             legacy_id: self.legacy_id.clone(),
         })
     }
+}
+
+/// Take the body out of a record that is past `room` bytes with it in: the
+/// bytes to upload as a blob of [`BODY_MIME`], for [`body_at`] to then name.
+/// `None` for a record that fits, or has no body to take out.
+pub fn body_out(record: &mut serde_json::Value, room: usize) -> Option<Vec<u8>> {
+    if record.to_string().len() <= room {
+        return None;
+    }
+    let body = record.as_object_mut()?.remove("content")?;
+    Some(body.to_string().into_bytes())
+}
+
+pub const BODY_MIME: &str = "application/json";
+
+/// Name the blob a record's body went to.
+pub fn body_at(record: &mut serde_json::Value, blob: serde_json::Value) {
+    record["contentBlob"] = blob;
+}
+
+/// The CID of the blob a record's body is in, if it is in one.
+pub fn body_blob(record: &serde_json::Value) -> Option<&str> {
+    record["contentBlob"]["ref"]["$link"].as_str()
+}
+
+/// Put a body back where [`body_out`] took it from. `false` for bytes that are
+/// not a body.
+pub fn body_in(record: &mut serde_json::Value, bytes: &[u8]) -> bool {
+    let (Ok(body), Some(fields)) = (serde_json::from_slice(bytes), record.as_object_mut()) else {
+        return false;
+    };
+    fields.remove("contentBlob");
+    fields.insert("content".to_string(), body);
+    true
 }
 
 /// The profiles and nodes of a wiki as they were found, to say where each is: a
