@@ -266,7 +266,10 @@ has none), and files (a space's blobs, with the AppView's store as a cache).
 
 ## Order of work
 
-After the cutover, and none of it in production before spaces are released.
+None of it in production before spaces are released. Done so far (2026-09-20):
+of S1, the NSID, the space type and the record lexicons, and
+`crates/wiki-records`, which maps the AppView's rows to records and back and is
+tested to lose nothing either way.
 
 - **S1 Foundations.** The NSID. A space type and record lexicons for content,
   overlays and the board (`content` as the editor's own JSON, tagged with its

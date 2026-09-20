@@ -4,7 +4,7 @@
 	"defs": {
 		"main": {
 			"type": "record",
-			"description": "A public comment on a public content item (a resolution, public document, or another comment). Internal discussion on private items stays in the org store and is never a record.",
+			"description": "A comment on a node or on another comment. In a context's space it is part of that context's discussion, read by its members; in a public repository it is a public comment on a public item. The same shape in both, so that a thread reads the same wherever it is.",
 			"key": "tid",
 			"record": {
 				"type": "object",
@@ -13,7 +13,7 @@
 					"subject": {
 						"type": "ref",
 						"ref": "com.atproto.repo.strongRef",
-						"description": "The public record this comments on."
+						"description": "What the thread hangs on: the node, or the public record."
 					},
 					"text": {
 						"type": "string",
@@ -23,7 +23,31 @@
 					"parent": {
 						"type": "ref",
 						"ref": "com.atproto.repo.strongRef",
-						"description": "Optional: the comment this is a reply to (threading)."
+						"description": "The comment this one answers, when it answers one."
+					},
+					"image": {
+						"type": "blob",
+						"description": "A picture said with it.",
+						"accept": ["image/*"],
+						"maxSize": 10000000
+					},
+					"author": {
+						"type": "ref",
+						"ref": "wiki.radikal.spaceDefs#author",
+						"description": "Who wrote it, when the record is held by the organization for them. Absent in its author's own repository, where the repository says who."
+					},
+					"tombstone": {
+						"type": "boolean",
+						"description": "Emptied by its author or an owner and kept because answers hang on it: no text, no author, no picture."
+					},
+					"binned": {
+						"type": "ref",
+						"ref": "wiki.radikal.spaceDefs#binned"
+					},
+					"legacyId": {
+						"type": "string",
+						"description": "Its id in the interim, for what was carried over.",
+						"maxLength": 64
 					},
 					"createdAt": {
 						"type": "string",

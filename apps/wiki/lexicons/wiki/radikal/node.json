@@ -1,0 +1,113 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.node",
+	"defs": {
+		"main": {
+			"type": "record",
+			"description": "Anything with a place in a context's tree: a folder, a page, a file, a motion, an amendment, an election, a candidacy, a question, and the place of a poll or a canvas (whose ballots and cells are never records). One record type with a `kind`, as the backend has one table: what differs between kinds is who may make them where, which is a rule of the application and not a shape. Keyed by the node's id, so that its address survives a rename and a move.",
+			"key": "any",
+			"record": {
+				"type": "object",
+				"required": ["kind", "title", "slug", "createdAt"],
+				"properties": {
+					"kind": {
+						"type": "string",
+						"knownValues": [
+							"folder",
+							"document",
+							"file",
+							"policy",
+							"change",
+							"position",
+							"candidate",
+							"question",
+							"poll",
+							"canvas"
+						]
+					},
+					"title": {
+						"type": "string",
+						"maxLength": 3000,
+						"maxGraphemes": 300
+					},
+					"slug": {
+						"type": "string",
+						"description": "Its segment of the path, unique among the live nodes under its parent.",
+						"maxLength": 512
+					},
+					"parent": {
+						"type": "string",
+						"format": "at-uri",
+						"description": "The node it sits in, in this space. Absent directly under the context."
+					},
+					"index": {
+						"type": "integer",
+						"description": "Its place among its siblings, where someone set one."
+					},
+					"draft": {
+						"type": "boolean",
+						"description": "Not submitted yet: its author's to change, and listed to nobody else."
+					},
+					"locked": {
+						"type": "boolean",
+						"description": "Nothing new may be put under it (no further amendments, no further candidates)."
+					},
+					"content": {
+						"type": "unknown",
+						"description": "Its text, in the format `contentFormat` names."
+					},
+					"contentFormat": {
+						"type": "string",
+						"knownValues": ["slate/1"]
+					},
+					"image": {
+						"type": "blob",
+						"description": "A cover, or a candidate's photo.",
+						"accept": ["image/*"],
+						"maxSize": 10000000
+					},
+					"file": {
+						"type": "blob",
+						"description": "What a `file` is. Beyond what the holder's PDS accepts, the application keeps the bytes and `data` says where.",
+						"accept": ["*/*"],
+						"maxSize": 100000000
+					},
+					"data": {
+						"type": "unknown",
+						"description": "Whatever else the kind keeps beside its text."
+					},
+					"authors": {
+						"type": "array",
+						"maxLength": 50,
+						"items": {
+							"type": "ref",
+							"ref": "wiki.radikal.spaceDefs#author"
+						}
+					},
+					"madeBy": {
+						"type": "string",
+						"description": "The account that made it, when the record is held by the organization for them: a DID, or a carried account's id.",
+						"maxLength": 256
+					},
+					"createdAt": {
+						"type": "string",
+						"format": "datetime"
+					},
+					"updatedAt": {
+						"type": "string",
+						"format": "datetime"
+					},
+					"binned": {
+						"type": "ref",
+						"ref": "wiki.radikal.spaceDefs#binned"
+					},
+					"legacyId": {
+						"type": "string",
+						"description": "Its id in the interim, for what was carried over.",
+						"maxLength": 64
+					}
+				}
+			}
+		}
+	}
+}

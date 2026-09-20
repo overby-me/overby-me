@@ -23,4 +23,5 @@ members = [
   "oauth-spike",
   "schema",
   "spaces-spike",
+  "wiki-records",
 ]

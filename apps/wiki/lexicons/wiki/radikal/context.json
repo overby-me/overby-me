@@ -1,0 +1,24 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.context",
+	"defs": {
+		"main": {
+			"type": "space",
+			"description": "A group, an event, a site or the home of a wiki: what its members share, and nobody else. One space per context, under the organization's DID, keyed by the context's id and never by its slug, which a rename changes. `docs/atproto-spaces-redesign.md` has who holds which record in it.",
+			"key": "any",
+			"name": "Radikal Wiki group or event",
+			"name:lang": {
+				"da": "Gruppe eller begivenhed på Radikal Wiki"
+			},
+			"collections": [
+				"wiki.radikal.contextProfile",
+				"wiki.radikal.node",
+				"wiki.radikal.comment",
+				"wiki.radikal.reaction",
+				"wiki.radikal.poll",
+				"wiki.radikal.ballotEntry",
+				"wiki.radikal.pollCloseOut"
+			]
+		}
+	}
+}

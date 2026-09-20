@@ -203,7 +203,12 @@ pub fn generate(lexicons: &BTreeMap<String, Value>) -> String {
         let defs = lexicon["defs"].as_object().unwrap_or(&empty);
         let main = defs.get("main");
         let kind = main.and_then(|m| m["type"].as_str()).unwrap_or_default();
-        if kind == "record" {
+        // Only what is CALLED gets a client, with the definitions its calls
+        // share: a record, a space's type and a permission set are shapes and
+        // grants, as are the definitions only records refer to.
+        if ["record", "space", "permission-set"].contains(&kind)
+            || (main.is_none() && stem != "defs")
+        {
             continue;
         }
         let mut module = Module {

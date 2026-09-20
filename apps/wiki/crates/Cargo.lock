@@ -5424,6 +5424,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wiki-records"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wiki-domain-types",
+]
+
+[[package]]
 name = "wiki-schema"
 version = "0.1.0"
 dependencies = [

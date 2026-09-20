@@ -71,6 +71,12 @@ workspace when the rewrite starts.
   repo, raises an alarm when a record it has seen is gone or rewritten, and
   recounts every closed poll against its signed close-out. Packaged as
   `wiki-board-mirror`.
+- `wiki-records`: a context's atproto space as Rust types (the lexicons
+  `contextProfile`, `node`, `comment` and `reaction` under
+  `lexicons/wiki/radikal/`), and the mapping between those records and the rows
+  the AppView keeps. Tested to lose nothing either way and to say what the
+  lexicons say: a write through records and a rebuild of the index from records
+  both stand on it (`docs/atproto-spaces-redesign.md`, S1).
 - `spaces-spike`: can a redesign of the wiki on atproto spaces (proposal 0016,
   non-public records) stand on what the alpha does, and can a syncer's checks
   be made from Rust? The set hash (LtHash over BLAKE3) and the deniable signed

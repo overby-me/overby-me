@@ -32,6 +32,7 @@ let
         ./../oauth-spike
         ./../schema
         ./../spaces-spike
+        ./../wiki-records
       ];
     };
   cargoLock = {

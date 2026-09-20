@@ -1,0 +1,88 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.contextProfile",
+	"defs": {
+		"main": {
+			"type": "record",
+			"description": "What a context is: its kind, its name, where it hangs and what its front page says. One per space, in the organization's repo. Who belongs to it is NOT here or anywhere in the space: the roster is the organization's alone.",
+			"key": "literal:self",
+			"record": {
+				"type": "object",
+				"required": ["kind", "name", "slug", "createdAt"],
+				"properties": {
+					"kind": {
+						"type": "string",
+						"knownValues": ["home", "group", "event", "site"]
+					},
+					"name": {
+						"type": "string",
+						"maxLength": 3000,
+						"maxGraphemes": 300
+					},
+					"slug": {
+						"type": "string",
+						"description": "Its segment of the path. Empty for the home.",
+						"maxLength": 512
+					},
+					"parentSpace": {
+						"type": "string",
+						"format": "at-uri",
+						"description": "The space it hangs in. Absent for the home. Whoever reads only this space never needs that one."
+					},
+					"parentNode": {
+						"type": "string",
+						"format": "at-uri",
+						"description": "The folder in the parent space it sits in, when it is not directly under that context."
+					},
+					"index": {
+						"type": "integer",
+						"description": "Its place among its siblings, where someone set one."
+					},
+					"locked": {
+						"type": "boolean",
+						"description": "Nothing new may be put directly under it."
+					},
+					"content": {
+						"type": "unknown",
+						"description": "The front page, in the format `contentFormat` names."
+					},
+					"contentFormat": {
+						"type": "string",
+						"knownValues": ["slate/1"]
+					},
+					"image": {
+						"type": "blob",
+						"accept": ["image/*"],
+						"maxSize": 10000000
+					},
+					"data": {
+						"type": "unknown",
+						"description": "Whatever else the kind keeps beside its text."
+					},
+					"madeBy": {
+						"type": "string",
+						"description": "The account that made it: a DID, or a carried account's id.",
+						"maxLength": 256
+					},
+					"createdAt": {
+						"type": "string",
+						"format": "datetime"
+					},
+					"updatedAt": {
+						"type": "string",
+						"format": "datetime"
+					},
+					"binned": {
+						"type": "ref",
+						"ref": "wiki.radikal.spaceDefs#binned"
+					},
+					"legacyId": {
+						"type": "string",
+						"description": "Its id in the interim, for what was carried over.",
+						"maxLength": 64
+					}
+				}
+			}
+		}
+	}
+}
