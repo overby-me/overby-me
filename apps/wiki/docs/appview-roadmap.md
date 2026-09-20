@@ -63,6 +63,14 @@ The interim's own browser suite (`test-browser.nu`) runs against the AppView
 too (`--appview`), with no account: 143 of its 144 checks pass, and the one
 that does not is the stylesheet's.
 
+What comes after the cutover is a redesign, not a milestone of this list:
+atproto gained non-public records (spaces, in alpha since 2026-08-20), and the
+owner asked that the wiki use them. `docs/atproto-spaces-redesign.md` has the
+design, the owner's five calls and the order of work (S1 to S7);
+`crates/spaces-spike` asked the alpha PDS whether the design's footing holds,
+and it does. None of it touches the cutover, and none of it runs in production
+before spaces are released.
+
 ## Findings that shape the plan
 
 - **The workspace did not build in the devshell.** `atrium-oauth`'s default HTTP
@@ -264,7 +272,9 @@ is merged and its tests pass.
   Bluesky's AppView. The real sign-in below reads a handle this way, and posts.
 - [ ] A confidential client (`private_key_jwt` and a served JWKS). Not needed
   until the publish seam writes to members' repos and wants long-lived PDS
-  tokens; the AppView's own sessions do not depend on them.
+  tokens; the AppView's own sessions do not depend on them. The spaces redesign
+  needs it (S1): a space that admits applications by an allow list has them
+  attest with this key.
 - [x] One full login in a real browser against a real PDS
   (`scripts/test-real-login.nu`). It was thought to need a human; it needed a
   PDS whose password is known. The real `appview` runs against nixpkgs'

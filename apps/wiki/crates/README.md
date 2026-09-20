@@ -71,6 +71,12 @@ workspace when the rewrite starts.
   repo, raises an alarm when a record it has seen is gone or rewritten, and
   recounts every closed poll against its signed close-out. Packaged as
   `wiki-board-mirror`.
+- `spaces-spike`: can a redesign of the wiki on atproto spaces (proposal 0016,
+  non-public records) stand on what the alpha does, and can a syncer's checks
+  be made from Rust? The set hash (LtHash over BLAKE3) and the deniable signed
+  commit, tested over a repo a real spaces PDS served; what else the PDS was
+  asked is in `spaces-spike/FINDINGS.md`, the design in
+  `docs/atproto-spaces-redesign.md`.
 - `fake-pds`: a PDS for tests, in no package: one account, its records in
   memory, the calls the board's publisher and the mirror make of a real one.
 - `fake-plc`: a `did:plc` directory for a sign-in rehearsed on one machine, in

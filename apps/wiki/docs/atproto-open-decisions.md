@@ -59,6 +59,22 @@ choices that need a human call.
 
 ## Open (need a call)
 
+- **atproto spaces** (raised 2026-09-20, when the owner asked that the wiki use them; the redesign is
+  `docs/atproto-spaces-redesign.md`, what the alpha PDS was asked is `crates/spaces-spike/FINDINGS.md`).
+  Spaces give atproto non-public records, which the domain model was built on not having. Five calls, none
+  of which holds up the cutover from the interim: (1) the organization's own account, the DID every space
+  is anchored on, and the spaces-capable PDS it lives on; (2) the NSID, which now also names the space
+  type and is in every space URI for good; (3) how far records move from the organization's repos to
+  their authors' (everything with the organization first, which asks nothing of any member; members'
+  contributions in members' repos later, if at all); (4) which applications may read a space (an allow
+  list, recommended, or any a member consents to); (5) when (recommended: cut over on the AppView as
+  built, move to spaces once they are released; they are an alpha not to run production against).
+  Revisits four entries under Decided: **Identity / PDS** (members stay free to choose a host, the
+  organization's own account needs a spaces-capable one), **Visibility** ("optionally public" was
+  "optionally becomes a record"; on spaces every context is a space and being public is who the managing
+  app lets read), **Lexicon scope** (still the boundary only, but the boundary now includes what members
+  see, so content gets lexicons; the private half still has none), and the files default below (a
+  space's blobs on the holder's PDS, the AppView's store as a cache; a PDS as it comes refuses over 5 MB).
 - **ballot-spec pinned semantics (D1 to D8)**: the executable ballot spec
   (`crates/ballot-spec/DECISIONS.md`) pins eight semantics no design doc had decided, notably: delegation
   chains are transitive; cycles and hops to ineligible DIDs void the delegation (weight stays with the

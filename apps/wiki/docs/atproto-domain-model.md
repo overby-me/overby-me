@@ -28,8 +28,10 @@ public half:
 
 Two constraints shape the whole design, and both matter:
 
-- **atproto has no private records.** Anything private is simply DB-only, never a
-  record. "Optionally public" therefore means "optionally *becomes* a record" —
+- **atproto has no private records.** (True when written. atproto spaces, in
+  alpha since 2026-08-20, are non-public records; `atproto-spaces-redesign.md` is
+  what that changes here. What follows describes the AppView as built.) Anything
+  private is simply DB-only, never a record. "Optionally public" therefore means "optionally *becomes* a record" —
   publish creates it, un-publish tombstones it.
 - **A few things are never public regardless of the toggle.** Secret ballots
   (obviously). And for a political org, **membership/affiliation** probably —

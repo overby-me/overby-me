@@ -1,0 +1,81 @@
+# spaces-spike: findings
+
+Question: does the atproto spaces alpha (proposal 0016, "permissioned data") do
+what a redesign of the wiki on it would lean on, and can the part a syncer must
+get exactly right be done from Rust? Asked of the real thing, on 2026-09-20:
+`ghcr.io/bluesky-social/atproto:pds-spaces-alpha` (PDS 0.5.32) in a container on
+this machine, registering its made-up accounts with `crates/fake-plc`. The
+redesign is `docs/atproto-spaces-redesign.md`.
+
+## What held
+
+- **A space under an organization's account.** `com.atproto.simplespace.createSpace`
+  as the account `wikiorg.test`, type `com.example.wiki.context`, a key of our
+  choosing: `at://{org}/space/com.example.wiki.context/c-spike1`. The account
+  writes records into its own repo in the space (`com.atproto.space.putRecord`).
+- **The credential flow.** `getDelegationToken` on the user's PDS (ES256K, `typ`
+  `atproto-space-delegation+jwt`, 60 seconds, `aud` the authority's
+  `#atproto_space_host`), exchanged at `getSpaceCredential` with a DPoP proof for
+  a credential of two hours bound to the proof's key (`cnf.jkt`). Reads then
+  take `Authorization: DPoP <credential>` and a proof with `ath`. The credential
+  as a bare bearer is refused. A proof is an ES256 JWT over `htm`, `htu`, `iat`,
+  `jti`, with no server nonce.
+- **The managing app decides who gets in.** With `readPolicy` and `writePolicy`
+  set to `managing-app`, the PDS asked a stand-in of ours
+  `com.atproto.simplespace.checkUserAccess?space=..&user=..&access=read|write`,
+  under a service token (`iss` the authority, `aud` our `did#fragment`, `lxm` the
+  method). Answering from a rule of ours gave one account a credential and
+  refused another with `UserNotAuthorized`. No member list on the PDS: the
+  AppView's roster can be the only one.
+- **Write notifications.** After `registerNotify` (good for 24 hours) a member's
+  write arrived as `com.atproto.space.notifyWrite {space, repo, rev, hash}` under
+  the same kind of service token. An outsider's write was asked about
+  (`access=write`), refused, and not forwarded.
+- **Sync.** `listRepos` is the writer set with each repo's `rev` and `hash`.
+  `listRepoOps` returns the log with values inlined and the signed commit at its
+  end; a record edited or deleted later appears as an operation without its
+  stale value. `getRepo` serves a CAR, `getLatestCommit` a commit with a fresh
+  nonce each time.
+- **Files.** A blob uploaded with the ordinary `com.atproto.repo.uploadBlob` and
+  named by a record in a space is served by `com.atproto.space.getBlob` to a
+  credential, and NOT by the public `com.atproto.sync.getBlob`.
+- **The commit, from Rust** (`src/lib.rs`, tests over a fixture the PDS served).
+  The set hash is LtHash as the proposal has it: `{collection}/{rkey}/{cid}`
+  through BLAKE3's XOF to 2048 bytes, 1024 little-endian `u16` lanes added or
+  subtracted with wraparound, and the commit's `hash` the SHA-256 of the state.
+  Listing the records and following the log (an edit is a removal of `prev` and
+  an addition) arrive at the same hash. The signature is ECDSA over SHA-256 of
+  the context (the tag `atproto-space-v1`, then space, author, revision and
+  nonce, each behind a big-endian `u16` length), by the author's `#atproto` key,
+  secp256k1 on this PDS. The MAC is HMAC-SHA256 of the hash under
+  `HKDF-Expand(ikm, context, 32)`, which for 32 bytes is one HMAC block. A
+  commit moved to another space fails its signature; another hash fails the MAC.
+
+## What to build on knowing
+
+- **Nobody is stopped from writing.** An account that is no member wrote into
+  its own repo for the space, and `listRepoOps` served that repo to a credential
+  that named it. The write policy decides only who is in the writer set and
+  whose notifications are forwarded. Whatever syncs a space decides what counts,
+  record by record: the wiki's rules on who may make what where have to run at
+  ingest, as they run on its own write path today.
+- **Reading is all of a space or none of it.** Another account's repo answered
+  `RepoNotFound` to a session and everything to a credential. Nothing narrower
+  exists, so nothing narrower than "every member of the context" can live in a
+  context's space.
+- **Files over 5 MB are refused by a PDS as it comes.** 4 MB went in; 6 MB broke
+  the connection (`PDS_BLOB_UPLOAD_LIMIT` defaults to 5242880). The interim
+  holds files up to 22.7 MB. On a PDS the organization runs this is a setting;
+  on a member's it is not.
+- **Password sessions work for every space method on this build.** The proposal
+  speaks of OAuth scopes (`space:<type>?...`); the alpha did not ask for them of
+  a `createSession` token. Not to be relied on.
+- **`org` is a reserved handle.** Found by wanting it.
+
+## What was not asked
+
+OAuth `space:` scopes and the consent screen; a client attestation and
+`appAccess: #allowList`; `deleteSpace` and `notifySpaceDeleted`; a member on
+another PDS than the authority's (every account here shared one); account
+migration; how long a PDS keeps its operation log. The alpha promises breaking
+changes weekly, so all of the above is as of the date at the top.

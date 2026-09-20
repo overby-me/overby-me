@@ -31,6 +31,7 @@ let
         ./../migration-loader
         ./../oauth-spike
         ./../schema
+        ./../spaces-spike
       ];
     };
   cargoLock = {

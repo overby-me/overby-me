@@ -14,6 +14,13 @@ in two categories:
 See `docs/atproto-stack-decisions.md` (Lexicon-to-atrium codegen pipeline) and
 `docs/atproto-domain-model.md`.
 
+A third category is coming and is not here yet: records that are neither public
+nor private to the backend, held in **atproto spaces** (one space per context,
+readable by its members). `docs/atproto-spaces-redesign.md` says which entities
+move there (S1 of its order of work drafts the space type and those lexicons);
+it also lifts the exclusion of `document` below, since inside a space the body
+can stay the editor's own JSON.
+
 ## Scope
 
 Only entities that are meaningfully and safely publishable get a lexicon:
