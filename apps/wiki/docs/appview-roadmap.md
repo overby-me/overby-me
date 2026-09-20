@@ -59,9 +59,9 @@ A real sign-in has been made too, on one machine (`scripts/test-real-login.nu`):
 the real `appview`, a real PDS, the PDS's own sign-in and consent pages in a
 browser, the token exchange, the profile read and a post written to the PDS.
 
-The interim's own browser suite (`test-browser.nu`) is written against the
-interim's backend and an account on it, and has not been ported; the AppView's
-is the smaller one named above.
+The interim's own browser suite (`test-browser.nu`) runs against the AppView
+too (`--appview`), with no account: 143 of its 144 checks pass, and the one
+that does not is the stylesheet's.
 
 ## Findings that shape the plan
 
@@ -691,7 +691,28 @@ asks Bluesky's public API itself. The steps:
   import unit and red by exit code. `appview-dev` serves a loaded datastore
   and signs a DID in as though its provider confirmed an address, which is how
   every one of the 314 recognizable accounts was taken over in one pass.
-- [ ] The interim's browser suite ported to run against an AppView.
+- [x] The interim's browser suite ported to run against an AppView
+  (`nu test-browser.nu --firefox --appview`, `just test-browser-on-appview`):
+  the same 2300 lines and the same checks, with a mode that starts a dev
+  AppView, walks in through `#code=`, and swaps the suite's in-page `gql()` for
+  an adapter that answers its 26 GraphQL documents from XRPC in Hasura's shape
+  (`test-browser-appview-adapter.js`), so that one suite holds both backends to
+  the same thing. 143 of 144 checks pass. The one that does not is the
+  stylesheet's and fails whatever the backend: the nav rail's active pill is a
+  colour-distance of 35 from the rail, under the suite's 40. Three checks do
+  not apply and say so (a token refresh, which a month-long bearer has not got;
+  permission rows, which are code here, so the check is that whoever made a
+  group runs it; a secret ballot's choices, which no server can read back, so
+  they are read off the count while the ballot is the only one). The suite had
+  never been run without an account on the interim, and had drifted from the
+  screens: the add-content dialog's kinds are buttons and no longer a select,
+  a new event asks which group it belongs to, a new poll is an action of the
+  page, making a page or a candidate lands in its editor, a person's page is
+  `/profile/:id`, and autosave is off for what is already submitted. Those
+  steps are brought up to date for both backends. Its pull-to-refresh check
+  wrapped `fetch` and handed it on with no receiver, which made the real
+  `fetch` refuse every later request of a client that calls it bare, as the
+  AppView's does: the check passed while the drawer went empty behind it.
 
 ## Working rules
 

@@ -136,10 +136,17 @@ test-appview:
 test-browser *ARGS:
     nu test-browser.nu {{ARGS}}
 
-# The same, for the build on the AppView (`--features appview`), against a dev
-# AppView it starts itself: needs no account and nothing outside this machine.
+# The build on the AppView (`--features appview`), against a dev AppView it
+# starts itself: needs no account and nothing outside this machine. What only
+# that backend has (a secret ballot blinded in the browser, the board, a vote
+# given to another, a change arriving live).
 test-browser-appview *ARGS:
     nu scripts/test-browser-appview.nu {{ARGS}}
+
+# `test-browser`'s own suite against the AppView: every screen and write-flow
+# the interim is held to, signed in as the dev AppView's owner.
+test-browser-on-appview *ARGS:
+    nu test-browser.nu --firefox --appview {{ARGS}}
 
 # One REAL sign-in, all of it on this machine: the real `appview`, a real PDS
 # from nixpkgs, a stand-in `did:plc` directory, and the frontend in headless
