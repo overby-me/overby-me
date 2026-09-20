@@ -20,11 +20,35 @@ const ALREADY_VOTED: &str = "already voted";
 
 #[derive(Serialize, Deserialize, Default)]
 struct Kept {
-    /// One per unit of the voter's weight.
+    /// One per unit of the voter's weight, until it has landed.
     tokens: Vec<KeptToken>,
-    /// Every ballot has landed. The tokens are dropped then: kept, they would
-    /// show whoever opens this browser next how its owner voted.
+    /// Every ballot has landed.
     cast: bool,
+    /// What is kept of each ballot that landed: the only proof that an entry on
+    /// the board is this voter's, which nobody can make again
+    /// (`docs/ballot-verify-ux.md`). Guarded as the session is, and gone with
+    /// it at sign-out: it says how its owner voted.
+    #[serde(default)]
+    stubs: Vec<Stub>,
+}
+
+/// One landed ballot, as its voter keeps it.
+#[derive(Serialize, Deserialize, Clone)]
+struct Stub {
+    token: String,
+    choices: Vec<i64>,
+    position: i64,
+    /// The custodian's signed receipt, whole, as evidence for a dispute.
+    receipt: serde_json::Value,
+}
+
+fn stub_of(receipt: &appview_client::defs::ReceiptView) -> Stub {
+    Stub {
+        token: receipt.token.clone(),
+        choices: receipt.choices.clone(),
+        position: receipt.position,
+        receipt: serde_json::to_value(receipt).unwrap_or_default(),
+    }
 }
 
 // No `Debug`: a `{:?}` of this in a log line would be the vote's secret.
@@ -205,7 +229,7 @@ pub async fn vote_cast_secret(
             choices: choices.clone(),
         };
         match ask_quiet(false, || nobody.cast_ballot(&ballot)).await {
-            Ok(_) => {}
+            Ok(landed) => state.stubs.push(stub_of(&landed.receipt)),
             // Spent by an earlier attempt whose answer never arrived. What THAT
             // one said is what counts, so ask the board rather than assume.
             Err(Error::Api { error, .. }) if error == "AlreadySpent" => {
@@ -217,17 +241,20 @@ pub async fn vote_cast_secret(
                     .await
                     .map_err(|error| reported(what, &error))?;
                 stands &= landed.entry.choices == choices;
+                state.stubs.push(stub_of(&landed.receipt));
             }
             Err(error) => return Err(reported(what, &error)),
         }
         state.tokens[index].landed = true;
         keep(&key, &state);
     }
+    // The blinding secrets have done their work; the stubs are what is kept.
     keep(
         &key,
         &Kept {
             tokens: Vec::new(),
             cast: true,
+            stubs: state.stubs,
         },
     );
     match stands {
@@ -264,4 +291,157 @@ pub(crate) fn forget_the_cast(did: &str, poll: &str) {
     if let Some(json) = earlier {
         MEMORY.with(|memory| memory.borrow_mut().insert(key, json));
     }
+}
+
+/// How each ballot this device cast in `poll` stands on the board. Asked as
+/// nobody, by the token alone: asking as oneself would pair the two.
+pub async fn my_ballots(token: &str, poll: &str) -> Vec<crate::model::BallotStanding> {
+    use crate::model::BallotStanding;
+    let Some(me) = super::whoami(token).await else {
+        return Vec::new();
+    };
+    let nobody = client(None);
+    let mut out = Vec::new();
+    for stub in kept(&key(&me, poll)).stubs {
+        let mine = get_board_entry::Params {
+            poll: poll.to_string(),
+            token: stub.token.clone(),
+        };
+        out.push(
+            match ask_quiet(true, || nobody.get_board_entry(&mine)).await {
+                Ok(found) if found.entry.choices == stub.choices => BallotStanding::Counted {
+                    position: u64::try_from(found.position).unwrap_or(0),
+                },
+                Ok(_) => BallotStanding::RecordedDifferently,
+                Err(error) if super::is_absent(&error) => BallotStanding::NotOnTheBoard,
+                // No answer is not an answer: say nothing of this one.
+                Err(_) => continue,
+            },
+        );
+    }
+    out
+}
+
+/// Forget every stub on this device. With the session, at sign-out.
+pub(crate) fn forget_all() {
+    MEMORY.with(|memory| memory.borrow_mut().clear());
+    #[cfg(target_arch = "wasm32")]
+    if let Some(storage) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()) {
+        let ours: Vec<String> = (0..storage.length().unwrap_or(0))
+            .filter_map(|i| storage.key(i).ok().flatten())
+            .filter(|k| k.starts_with("wiki.ballot."))
+            .collect();
+        for key in ours {
+            let _ = storage.remove_item(&key);
+        }
+    }
+}
+
+/// Count a closed poll's board again, here: every ballot's signature under the
+/// poll's key, the first of a repeated token, the rules, and then the count,
+/// the board's digest and the custodian's signature on the close-out. The code
+/// that counts is `ballot_spec`, which is what the AppView counted with.
+pub async fn recount_poll(
+    access_token: Option<&str>,
+    poll: &str,
+) -> Result<crate::model::Recounted, String> {
+    use ballot_spec::custody::{board_digest, verify, CloseOut};
+    use ballot_spec::provisional::{decode_bytes, ProvisionalEntry};
+    let view = read_poll(access_token, poll).await.ok_or("no such poll")?;
+    let client = client(access_token);
+    let params = appview_client::get_board::Params {
+        poll: poll.to_string(),
+    };
+    let board = super::ask("getBoard", true, || client.get_board(&params)).await?;
+    let key = super::ask("getBoardKey", true, || client.get_board_key())
+        .await?
+        .key;
+
+    let mut problems = Vec::new();
+    let index = |n: i64| usize::try_from(n).unwrap_or(usize::MAX);
+    let published: Vec<ProvisionalEntry> = board
+        .entries
+        .iter()
+        .map(|e| ProvisionalEntry {
+            token: e.token.clone(),
+            msg_randomizer: e.msg_randomizer.clone(),
+            signature: e.signature.clone(),
+            choices: e.choices.iter().map(|c| index(*c)).collect(),
+        })
+        .collect();
+    let mut ballots = Vec::new();
+    for entry in &published {
+        let Ok((token, randomizer, signature)) = decode_bytes(entry) else {
+            problems.push("a ballot on the board cannot be read".to_string());
+            continue;
+        };
+        let msg_randomizer = randomizer
+            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+            .map(ballot_spec::MessageRandomizer);
+        ballots.push(ballot_spec::BoardEntry {
+            token,
+            msg_randomizer,
+            signature: ballot_spec::Signature(signature),
+            choices: entry.choices.clone(),
+        });
+    }
+    let issuer = view
+        .issuer_pubkey
+        .as_deref()
+        .and_then(|b64| unb64(b64).ok())
+        .and_then(|der| ballot_spec::IssuerPublicKey::from_der(&der).ok())
+        .ok_or("the poll has no readable issuer key")?;
+    let rules = ballot_spec::BallotRules {
+        options: view.options.len(),
+        min: index(view.min),
+        max: index(view.max),
+        blank: view.blank,
+    };
+    let counted = ballot_spec::recount(&issuer, &rules, ballots);
+    for (at, why) in &counted.dropped {
+        problems.push(format!("ballot {at} does not count: {why:?}"));
+    }
+    let announced: Vec<u64> = view
+        .counts
+        .unwrap_or_default()
+        .iter()
+        .map(|n| u64::try_from(*n).unwrap_or(0))
+        .collect();
+    if counted.counts != announced {
+        problems.push(format!(
+            "counted {:?}, and {announced:?} was announced",
+            counted.counts
+        ));
+    }
+    match (&view.closeout, &view.closed_at) {
+        (Some(close), Some(closed_at)) => {
+            let claimed = CloseOut {
+                poll: poll.to_string(),
+                entries: u64::try_from(close.entries).unwrap_or(0),
+                issued: u64::try_from(close.issued).unwrap_or(0),
+                counts: close
+                    .counts
+                    .iter()
+                    .map(|n| u64::try_from(*n).unwrap_or(0))
+                    .collect(),
+                board_digest: close.board_digest.clone(),
+                closed_at: closed_at.clone(),
+            };
+            if close.key != key || !verify(&key, &claimed.payload(), &close.sig) {
+                problems.push("the close-out is not signed by this site's custody key".into());
+            }
+            if board_digest(&published) != claimed.board_digest {
+                problems.push("the board is not the board that was signed for".into());
+            }
+            if claimed.entries > claimed.issued {
+                problems.push("more ballots on the board than tokens were issued".into());
+            }
+        }
+        _ if !view.open => problems.push("the poll is closed and nothing signs for it".into()),
+        _ => {}
+    }
+    Ok(crate::model::Recounted {
+        ballots: published.len(),
+        problems,
+    })
 }

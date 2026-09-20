@@ -489,6 +489,19 @@ motion and goes to the bin with it) and a `poll` row of the same id
   account as eligible, and the vote would be lost with it. The vote screen
   has a card for it on this backend (`components/vote/delegation.rs`); the
   interim has no delegation and shows none.
+- [x] The voter's own check, in the browser (`src/appview/ballot.rs`,
+  `components/vote/audit.rs`). What a cast answers is kept on the device as a
+  stub (the token, the choices, the position, the signed receipt), which
+  `docs/ballot-verify-ux.md` asks for, and goes at sign-out, since it says how
+  its owner voted. The vote screen asks the board for that ballot as nobody
+  and says where it stands: there as cast, there and different, or gone. Once
+  the poll is closed, "count the ballots again" fetches the board and counts it
+  on the device with the code the AppView counted with (`ballot_spec::recount`):
+  each ballot's signature under the poll's key, the first of a repeated token,
+  the rules, then the counts, the board's digest and the custodian's signature
+  on the close-out. The browser run does both against a real poll. Not built:
+  taking a stub off the device as a file, and the bundle a dispute would hand
+  to a third party.
 
 Decided here without the owner, and cheap to change now:
 

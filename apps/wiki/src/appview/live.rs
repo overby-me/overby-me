@@ -1067,6 +1067,30 @@ async fn a_secret_ballot_is_cast_blind_and_only_once_as_the_poll_screen_does_it(
         (vec![1, 1, 0], 2),
         "one ballot each, whatever was retried"
     );
+
+    // What each kept of their ballot finds it on the board, as it was cast.
+    use crate::model::BallotStanding;
+    let hers = super::my_ballots(&alice, &poll).await;
+    assert!(
+        matches!(hers[..], [BallotStanding::Counted { .. }]),
+        "{hers:?}"
+    );
+    // And once it is closed, anyone who may see the counts counts it again,
+    // here, and holds the signed close-out to what they counted.
+    let shut = NodesSetInput {
+        mutable: Some(false),
+        ..Default::default()
+    };
+    super::update_node(Some(&carol), &poll, shut)
+        .await
+        .expect("closePoll");
+    let recounted = super::recount_poll(Some(&alice), &poll)
+        .await
+        .expect("a recount");
+    assert_eq!(
+        (recounted.ballots, recounted.problems),
+        (2, Vec::<String>::new())
+    );
 }
 
 /// The `/ws` a browser holds, from a test: one frame out, the next one back.

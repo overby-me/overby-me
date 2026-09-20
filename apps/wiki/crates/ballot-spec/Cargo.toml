@@ -12,10 +12,12 @@ rand = "0.10.2"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11.0"
 
-# For `custody`: what the board's custodian signs. Optional, so that a voter's
-# browser, which only blinds and casts, does not carry a second curve.
+# For `custody`: what the board's custodian signs, and what anyone checking a
+# board verifies. Optional, so that blinding and casting alone need one curve.
 multibase = { version = "0.9", optional = true }
-p256 = { version = "0.13", features = ["ecdsa"], optional = true }
+# No default features: p256's `std` turns on rand_core's getrandom 0.2, which
+# does not build for wasm32-unknown-unknown, and nothing here draws randomness.
+p256 = { version = "0.13", default-features = false, features = ["ecdsa"], optional = true }
 
 [dev-dependencies]
 proptest = "1.11.0"

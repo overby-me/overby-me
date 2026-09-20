@@ -116,6 +116,8 @@ pub fn sign_out() {
         }
         crate::offline::clear();
     }
+    // A ballot stub says how its owner voted: it goes with the session.
+    super::ballot::forget_all();
 }
 
 #[derive(Debug, Clone)]

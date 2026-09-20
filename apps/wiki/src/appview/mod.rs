@@ -8,6 +8,12 @@
 pub mod account;
 pub mod api;
 mod ballot;
+#[allow(unused_imports)]
+pub use ballot::{my_ballots, recount_poll};
+
+/// Whether a secret ballot leaves a stub on this device that can be checked
+/// against the board, and the board can be recounted here.
+pub const BALLOT_RECEIPTS: bool = true;
 mod bin;
 mod canvas;
 pub(crate) mod hub;

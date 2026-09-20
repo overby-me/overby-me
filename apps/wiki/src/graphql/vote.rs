@@ -413,3 +413,18 @@ pub async fn set_delegation(
 ) -> Result<(), String> {
     Err("this backend has no delegation".to_string())
 }
+
+/// Whether a secret ballot leaves a stub on this device that can be checked
+/// against the board, and the board can be recounted. Not on this backend.
+pub const BALLOT_RECEIPTS: bool = false;
+
+pub async fn my_ballots(_access_token: &str, _poll_id: &str) -> Vec<model::BallotStanding> {
+    Vec::new()
+}
+
+pub async fn recount_poll(
+    _access_token: Option<&str>,
+    _poll_id: &str,
+) -> Result<model::Recounted, String> {
+    Err("this backend has no board to recount".to_string())
+}

@@ -59,6 +59,20 @@ def wait-for-text [sid: string, needle: string, secs: int]: nothing -> bool {
     false
 }
 
+# Click what `find` (a JS expression) names, once it is there. False when it
+# never appears: a click on nothing passes silently, and the step after it then
+# fails for no reason it can name.
+def click-when-there [sid: string, find: string, secs: int]: nothing -> bool {
+    let probe = ("const e = " + $find + "; if (!e) return false; e.click(); return true;")
+    mut waited = 0
+    while $waited < ($secs * 2) {
+        if (js $sid $probe) == true { return true }
+        sleep 500ms
+        $waited = $waited + 1
+    }
+    false
+}
+
 def xrpc [token: string, method: string, body: any] {
     ^curl -s -X POST -H $"authorization: Bearer ($token)" -H "content-type: application/json" -d ($body | to json -r) $"(api).($method)" | from json
 }
@@ -338,6 +352,22 @@ def main [
         log-fail $"a secret ballot: the screen said so: ($said_so), the server counts ($counted.ballots) ballots as ($counted.counts)"
     }
 
+    # The voter's own check, from the stub this browser kept: the ballot is on
+    # the board as cast. Then the chair closes, and the board is counted again
+    # HERE, signatures and all, and held to the signed close-out.
+    let on_the_board = (wait-for-text $sid "on the board as you cast it" 20)
+    xrpc $owner closePoll { id: $secret } | ignore
+    let offered = (wait-for-text $sid "Count the ballots again" 30)
+    js $sid 'const b = [...document.querySelectorAll("button")].find(b => b.innerText.includes("Count the ballots again")); if (b) b.click(); return 1;' | ignore
+    let recounted = (wait-for-text $sid "Counted again here: 1 ballots" 60)
+    if $on_the_board and $offered and $recounted {
+        $passed = $passed + 1
+        log-ok "a voter finds their ballot on the board, and recounts the closed poll in the browser"
+    } else {
+        $failed = $failed + 1
+        log-fail $"the ballot audit: found on the board: ($on_the_board), recount offered: ($offered), recount matched: ($recounted)"
+    }
+
     # A vote given to another member from the card on the vote screen, read off
     # the server, and taken back. After the ballots above: it would move them.
     go $sid "/hovedbestyrelsen?app=vote"
@@ -509,9 +539,8 @@ def main [
     # Signing out, last: it ends the session here and at the AppView.
     go $sid "/hovedbestyrelsen"
     wait-for-text $sid "Forslag" 30 | ignore
-    js $sid 'const t = document.querySelector(".drawer-account-trigger"); if (t) t.click(); return 1;' | ignore
-    sleep 1sec
-    js $sid 'const out = [...document.querySelectorAll("button.list-item")].find(b => b.innerText.replace(/\s+/g, " ").trim() === "logout Log out"); if (out) out.click(); return 1;' | ignore
+    let menu = (click-when-there $sid 'document.querySelector(".drawer-account-trigger")' 15)
+    let item = (click-when-there $sid '[...document.querySelectorAll("button.list-item")].find(b => b.innerText.replace(/\s+/g, " ").trim() === "logout Log out")' 10)
     let signed_out = (wait-for-text $sid "Log in" 15)
     sleep 2sec
     let still = (^curl -s -o /dev/null -w "%{http_code}" -H $"authorization: Bearer ($owner)" $"(api).getSession" | str trim)
@@ -520,7 +549,7 @@ def main [
         log-ok "signing out ends the session here and at the AppView"
     } else {
         $failed = $failed + 1
-        log-fail $"signing out: back at the door: ($signed_out), the session then answered ($still)"
+        log-fail $"signing out: the account menu opened: ($menu), log out was there: ($item), back at the door: ($signed_out), the session then answered ($still)"
     }
 
     # The app's own errors, as the browser console heard them.

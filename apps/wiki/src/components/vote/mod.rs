@@ -8,6 +8,7 @@ use crate::i18n::t;
 use crate::model::NodeWithChildren;
 use crate::session::use_session;
 
+mod audit;
 mod delegation;
 mod policy;
 mod poll;

@@ -24,7 +24,7 @@ exclude = ["crates", "vendor"]
 # does not compile it.
 appview-client = { path = "crates/appview-client", optional = true }
 # A secret ballot is blinded and unblinded by the voter, so in the browser.
-ballot-spec = { path = "crates/ballot-spec", optional = true }
+ballot-spec = { path = "crates/ballot-spec", optional = true, features = ["custody"] }
 # (xlsx roster parsing moved to the backend to keep calamine/zip/inflate out of
 # the wasm bundle — see nhost::parse_roster / backend roster.rs.)
 # Pictures embedded in a Word document become `data:` urls, which is base64.
