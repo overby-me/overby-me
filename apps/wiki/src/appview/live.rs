@@ -1318,3 +1318,50 @@ async fn two_views_asking_for_one_node_at_once_share_the_request() {
     ask().await.expect("the page again");
     assert_eq!(super::TAKEOFFS.with(std::cell::Cell::get), before + 2);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_vote_is_given_to_another_member_and_taken_back_as_the_vote_screen_does_it() {
+    let server = Server::start();
+    let (carol, alice) = (server.session(CAROL), server.session(ALICE));
+    let (group, _) = a_group_with_a_page(&carol).await;
+    super::invite_member_by_node(Some(&carol), &group, ALICE, "Alice")
+        .await
+        .expect("invite");
+    let waiting = super::query_invitations(Some(&alice), ALICE, "")
+        .await
+        .expect("invitations");
+    super::accept_invitation(Some(&alice), &waiting[0].id.0, ALICE)
+        .await
+        .expect("accept");
+
+    assert_eq!(
+        super::set_delegation(Some(&alice), &group, Some(ALICE)).await,
+        Err("your vote is yours already".to_string()),
+        "a refusal the card can show as it is"
+    );
+    super::set_delegation(Some(&alice), &group, Some(CAROL))
+        .await
+        .expect("setDelegation");
+    let hers = super::query_delegations(Some(&alice), &group, ALICE)
+        .await
+        .expect("hers");
+    assert_eq!(
+        hers.given_to.expect("given").display_name,
+        "Carol",
+        "named, for the card to say who"
+    );
+    let carols = super::query_delegations(Some(&carol), &group, CAROL)
+        .await
+        .expect("carol's");
+    assert_eq!(carols.given_to, None);
+    assert_eq!(carols.received_from.len(), 1);
+    assert_eq!(carols.received_from[0].id.0, ALICE);
+
+    super::set_delegation(Some(&alice), &group, None)
+        .await
+        .expect("taken back");
+    let after = super::query_delegations(Some(&alice), &group, ALICE)
+        .await
+        .expect("hers");
+    assert_eq!(after, crate::model::Delegations::default());
+}

@@ -14,6 +14,7 @@ pub mod comment;
 pub mod config;
 pub mod context;
 pub mod db;
+pub mod delegation;
 pub mod feed;
 pub mod feedback;
 pub mod firehose;
@@ -265,6 +266,14 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.sendInvitation",
             post(mail::send_invitation),
+        )
+        .route(
+            "/xrpc/com.example.wiki.setDelegation",
+            post(delegation::set_delegation),
+        )
+        .route(
+            "/xrpc/com.example.wiki.listDelegations",
+            get(delegation::list_delegations),
         )
         .route(
             "/xrpc/com.example.wiki.updateMember",

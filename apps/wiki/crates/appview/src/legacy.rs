@@ -38,6 +38,7 @@ const NAMED: &[(&str, &str)] = &[
     ("feedback", "owner_did"),
     ("canvas_cell", "painter"),
     ("push_subscription", "did"),
+    ("standing_delegation", "to_did"),
 ];
 
 /// Columns where a person may appear once per the other columns listed. Where
@@ -48,6 +49,7 @@ const NAMED_ONCE: &[(&str, &str, &[&str])] = &[
     ("speaker_entry", "speaker_did", &["list_id", "kind"]),
     ("canvas_painter", "did", &["canvas_id"]),
     ("feedback_reporter", "reporter", &["feedback_id"]),
+    ("standing_delegation", "from_did", &["context_id"]),
 ];
 
 /// A seat that changed hands: `(context id, member id)`.

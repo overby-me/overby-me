@@ -698,6 +698,8 @@ pub async fn open_poll(
             if voters == 0 {
                 return Err(OpenError::NoVoters);
             }
+            // Votes given away before now go with whoever they were given to.
+            crate::delegation::carry_into(&conn, &id, &parent.context_id).await?;
             ballot_store::freeze_at_open(&conn, &id).await?;
             Ok(())
         }

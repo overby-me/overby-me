@@ -819,6 +819,31 @@ async fn the_vote() {
         ..Default::default()
     };
 
+    // A vote given away, seen by both its ends, and taken back before anything
+    // opens: what follows is each voting for themselves.
+    alice
+        .set_delegation(&set_delegation::Input {
+            context_id: group.clone(),
+            to_did: Some(Some(BOB.into())),
+        })
+        .await
+        .expect("setDelegation");
+    let given = bob
+        .list_delegations(&list_delegations::Params {
+            context: group.clone(),
+        })
+        .await
+        .expect("listDelegations");
+    assert_eq!((given.delegations.len(), given.all), (1, false));
+    assert_eq!(given.delegations[0].from_did, ALICE);
+    alice
+        .set_delegation(&set_delegation::Input {
+            context_id: group.clone(),
+            to_did: Some(None),
+        })
+        .await
+        .expect("taken back");
+
     let show_of_hands = carol.open_poll(&open(false)).await.expect("openPoll");
     assert!(show_of_hands.open && !show_of_hands.secret);
     bob.cast_open_ballot(&cast_open_ballot::Input {

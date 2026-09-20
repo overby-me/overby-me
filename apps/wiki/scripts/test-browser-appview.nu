@@ -338,6 +338,26 @@ def main [
         log-fail $"a secret ballot: the screen said so: ($said_so), the server counts ($counted.ballots) ballots as ($counted.counts)"
     }
 
+    # A vote given to another member from the card on the vote screen, read off
+    # the server, and taken back. After the ballots above: it would move them.
+    go $sid "/hovedbestyrelsen?app=vote"
+    wait-for-text $sid "You cast it yourself" 30 | ignore
+    type-into $sid "#delegate-search" "Medl"
+    sleep 2sec
+    js $sid 'const o = document.querySelector(".delegate-option"); if (o) o.click(); return 1;' | ignore
+    let given = (wait-for-text $sid "Given to Member" 15)
+    let standing = (^curl -s -H $"authorization: Bearer ($owner)" $"(api).listDelegations?context=($ids.group)" | from json | get delegations)
+    let recorded = (($standing | length) == 1) and (($standing | first | get to_did) == "did:plc:member")
+    js $sid 'const b = [...document.querySelectorAll("button")].find(b => b.innerText.replace(/\s+/g, " ").trim() === "undo Take it back"); if (b) b.click(); return 1;' | ignore
+    let back = (wait-for-text $sid "You cast it yourself" 15)
+    if $given and $recorded and $back {
+        $passed = $passed + 1
+        log-ok "a vote is given to another member on the vote screen, and taken back"
+    } else {
+        $failed = $failed + 1
+        log-fail $"delegation: the card said given: ($given), the server has it: ($recorded), taken back: ($back)"
+    }
+
     # Joining the queue: shown at once, and the row shown early goes away.
     go $sid "/hovedbestyrelsen?app=speak"
     wait-for-text $sid "Talerliste" 30 | ignore

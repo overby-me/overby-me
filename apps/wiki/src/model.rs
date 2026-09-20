@@ -240,6 +240,14 @@ pub struct UserRef {
     pub avatar_url: String,
 }
 
+/// Where the reader's vote in a context stands: with them, or given to someone,
+/// and whose they cast beside their own.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Delegations {
+    pub given_to: Option<UserRef>,
+    pub received_from: Vec<UserRef>,
+}
+
 /// A user row from the profile / user-search queries.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UserSearchFields {

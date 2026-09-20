@@ -117,7 +117,9 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   (signed in: blind signatures on tokens the server cannot read) and `castBallot` (NO session: a
   token and a choice). `getPoll` and `listPolls` (queries) are the state and the tally as the
   caller may see them, `getBoard` is every ballot for whoever may see the counts, and
-  `getBoardEntry` is how a voter finds their own, asked as nobody like the cast.
+  `getBoardEntry` is how a voter finds their own, asked as nobody like the cast. `setDelegation`
+  gives the caller's vote in a context to another member or takes it back, and `listDelegations`
+  (a query) is what stands: a poll freezes it as it opens.
 - `shareToBluesky` posts a page to the caller's own account, on their own PDS.
 - `renderMetafile` draws the EMF and WMF figures inside Word and PowerPoint files, which no browser
   can, so that the renderer stays out of the bundle.

@@ -8,7 +8,10 @@
 use super::seen::saw_node;
 use super::{ask, ask_quiet, client, reported};
 use crate::model::{BallotRules, InsertedNode, Jsonb, PollSummaryFields, Timestamptz, Uuid};
-use appview_client::{cast_open_ballot, close_poll, defs, get_poll, list_polls, open_poll};
+use appview_client::{
+    cast_open_ballot, close_poll, defs, get_poll, list_delegations, list_polls, open_poll,
+    set_delegation,
+};
 
 /// A poll's `data` as the interim keeps it, which is what its components read.
 pub(crate) fn poll_data(poll: &defs::PollView) -> serde_json::Value {
@@ -204,4 +207,59 @@ pub async fn query_context_polls(
             }
         })
         .collect())
+}
+
+/// Whether this backend lets a member give their vote to another.
+pub const DELEGATION: bool = true;
+
+/// Where `user_id`'s vote in a context stands, and whose they cast beside it.
+pub async fn query_delegations(
+    access_token: Option<&str>,
+    context_id: &str,
+    user_id: &str,
+) -> Result<crate::model::Delegations, String> {
+    let client = client(access_token);
+    let params = list_delegations::Params {
+        context: context_id.to_string(),
+    };
+    let standing = ask("listDelegations", true, || client.list_delegations(&params)).await?;
+    let person = |did: &str| super::map::user_ref(&standing.profiles, did);
+    Ok(crate::model::Delegations {
+        given_to: standing
+            .delegations
+            .iter()
+            .find(|d| d.from_did == user_id)
+            .map(|d| person(&d.to_did)),
+        received_from: standing
+            .delegations
+            .iter()
+            .filter(|d| d.to_did == user_id)
+            .map(|d| person(&d.from_did))
+            .collect(),
+    })
+}
+
+/// Give the caller's vote in a context to `to`, or take it back with `None`.
+pub async fn set_delegation(
+    access_token: Option<&str>,
+    context_id: &str,
+    to: Option<&str>,
+) -> Result<(), String> {
+    let client = client(access_token);
+    let input = set_delegation::Input {
+        context_id: context_id.to_string(),
+        to_did: Some(to.map(str::to_string)),
+    };
+    // Quiet: "they hold no vote here" is an answer for the card to show.
+    ask_quiet(false, || client.set_delegation(&input))
+        .await
+        .map(|_| ())
+        .map_err(|error| match &error {
+            appview_client::Error::Api {
+                status: 400,
+                message,
+                ..
+            } => message.clone(),
+            _ => reported("setDelegation", &error),
+        })
 }

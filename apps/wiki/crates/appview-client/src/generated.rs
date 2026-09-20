@@ -1660,6 +1660,47 @@ impl list_contributions::Params {
     }
 }
 
+pub mod list_delegations {
+    #[allow(unused_imports)]
+    use super::defs;
+    #[allow(unused_imports)]
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
+    pub struct DelegationView {
+        pub from_did: String,
+        pub made_at: String,
+        pub to_did: String,
+    }
+
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
+    pub struct Output {
+        /// Whether the caller was served everyone's.
+        pub all: bool,
+        pub delegations: Vec<DelegationView>,
+        /// A map from DID to `userView`-shaped profile, for both ends of each.
+        pub profiles: serde_json::Value,
+    }
+
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
+    pub struct Params {
+        pub context: String,
+    }
+
+}
+
+impl list_delegations::Params {
+    pub(crate) fn pairs(&self) -> Vec<(&'static str, String)> {
+        let pairs = vec![
+            ("context", self.context.to_string()),
+        ];
+        pairs
+    }
+}
+
 pub mod list_deleted {
     #[allow(unused_imports)]
     use super::defs;
@@ -2547,6 +2588,29 @@ pub mod set_canvas_open {
 
 }
 
+pub mod set_delegation {
+    #[allow(unused_imports)]
+    use super::defs;
+    #[allow(unused_imports)]
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
+    pub struct Input {
+        pub context_id: String,
+        /// Who casts the caller's vote. Absent or null takes it back.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub to_did: Option<Option<String>>,
+    }
+
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
+    pub struct Output {
+        pub ok: bool,
+    }
+
+}
+
 pub mod set_document_authors {
     #[allow(unused_imports)]
     use super::defs;
@@ -3134,6 +3198,12 @@ impl Client {
         answer.json()
     }
 
+    /// The delegations standing in a context that are the caller's to see: the one they gave and those they were given, or all of them for an owner of the context, who chairs its votes. For members only.
+    pub async fn list_delegations(&self, params: &list_delegations::Params) -> Result<list_delegations::Output, Error> {
+        let answer = self.call(crate::Verb::Get, "com.example.wiki.listDelegations", params.pairs(), crate::Body::None).await?;
+        answer.json()
+    }
+
     /// The bin of a context, newest first: each document that was deleted, but not the ones that only went along with a parent, which come back with it. An owner of the context sees all of it; anyone else sees what they created.
     pub async fn list_deleted(&self, params: &list_deleted::Params) -> Result<list_deleted::Output, Error> {
         let answer = self.call(crate::Verb::Get, "com.example.wiki.listDeleted", params.pairs(), crate::Body::None).await?;
@@ -3317,6 +3387,12 @@ impl Client {
     /// An owner opens a canvas to the room, or locks it so that it takes no more paint.
     pub async fn set_canvas_open(&self, input: &set_canvas_open::Input) -> Result<set_canvas_open::Output, Error> {
         let answer = self.call(crate::Verb::Post, "com.example.wiki.setCanvasOpen", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
+        answer.json()
+    }
+
+    /// Give the caller's vote in a context to another member who holds voting rights there, or take it back. It stands until it is taken back or either of them leaves. A poll copies the delegations standing as it opens and freezes them: a chain follows through, a cycle or a delegate without voting rights is void, and one made or taken back while the poll is open moves nothing in it. What stands behind an assignment is the delegator's own session.
+    pub async fn set_delegation(&self, input: &set_delegation::Input) -> Result<set_delegation::Output, Error> {
+        let answer = self.call(crate::Verb::Post, "com.example.wiki.setDelegation", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 

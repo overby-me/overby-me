@@ -1075,6 +1075,16 @@ impl Store {
         if self.is_last_owner(&conn, id).await? {
             return Err(WriteError::LastOwner);
         }
+        // Whoever leaves takes what they gave and were given with them: a vote
+        // cannot stand with someone who is not there to cast it.
+        conn.execute(
+            "DELETE FROM standing_delegation WHERE (context_id, from_did) IN \
+               (SELECT context_id, user_did FROM member WHERE id = ?1) \
+             OR (context_id, to_did) IN \
+               (SELECT context_id, user_did FROM member WHERE id = ?1)",
+            [id],
+        )
+        .await?;
         let removed = conn
             .execute("DELETE FROM member WHERE id = ?1", [id])
             .await?;

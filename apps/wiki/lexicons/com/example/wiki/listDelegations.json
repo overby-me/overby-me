@@ -1,0 +1,61 @@
+{
+	"lexicon": 1,
+	"id": "com.example.wiki.listDelegations",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "The delegations standing in a context that are the caller's to see: the one they gave and those they were given, or all of them for an owner of the context, who chairs its votes. For members only.",
+			"parameters": {
+				"type": "params",
+				"required": ["context"],
+				"properties": {
+					"context": { "type": "string" }
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["delegations", "all", "profiles"],
+					"properties": {
+						"delegations": {
+							"type": "array",
+							"items": { "type": "ref", "ref": "#delegationView" }
+						},
+						"all": {
+							"type": "boolean",
+							"description": "Whether the caller was served everyone's."
+						},
+						"profiles": {
+							"type": "unknown",
+							"description": "A map from DID to `userView`-shaped profile, for both ends of each."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such context, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is not a member of the context."
+				}
+			]
+		},
+		"delegationView": {
+			"type": "object",
+			"required": ["from_did", "to_did", "made_at"],
+			"properties": {
+				"from_did": { "type": "string", "format": "did" },
+				"to_did": { "type": "string", "format": "did" },
+				"made_at": { "type": "string", "format": "datetime" }
+			}
+		}
+	}
+}

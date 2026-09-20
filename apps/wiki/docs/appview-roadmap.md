@@ -447,9 +447,22 @@ motion and goes to the bin with it) and a `poll` row of the same id
   (`docs/ballot-board-custody.md`). Until then the board is served from here:
   to whoever may see the counts, in token order (board order is the order the
   room voted in), and one entry at a time to a voter who knows their token.
-- [ ] Delegation. The roster resolves it (`freeze_at_open`) and issuance and
-  counting honour the weights, but nothing writes a delegation: the interim has
-  none, and what signs an assignment is undecided.
+- [x] Delegation (`crates/appview/src/delegation.rs`). A member with voting
+  rights gives their vote in a context to another who holds one
+  (`setDelegation`), until they take it back or either leaves; a poll copies
+  the delegations standing as it opens and freezes them, so the roster's rules
+  apply as they were specified and tested (a chain follows through, a cycle or
+  a delegate without a vote is void, weight is conserved) and one made later
+  moves nothing in an open poll. `listDelegations` shows a member their own,
+  given and received, and an owner all of them. What signs an assignment was
+  undecided, and is decided here: the delegator's own session. No member holds
+  a key to sign one with, so `assignment_sig` records how it was authorized,
+  and what keeps it honest is that both ends see it, the chair sees them all,
+  and a poll tells every voter the weight it froze for them. A vote cannot be
+  given to an account nobody has signed in as yet: the roster counts a carried
+  account as eligible, and the vote would be lost with it. The vote screen
+  has a card for it on this backend (`components/vote/delegation.rs`); the
+  interim has no delegation and shows none.
 
 Decided here without the owner, and cheap to change now:
 
