@@ -9,6 +9,7 @@
 pub mod authz;
 pub mod ballot;
 pub mod blob;
+pub mod board;
 pub mod canvas;
 pub mod comment;
 pub mod config;
@@ -266,6 +267,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.sendInvitation",
             post(mail::send_invitation),
+        )
+        .route(
+            "/xrpc/com.example.wiki.getBoardKey",
+            get(board::get_board_key),
         )
         .route(
             "/xrpc/com.example.wiki.setDelegation",

@@ -75,6 +75,7 @@ pub mod cast_ballot {
     pub struct Output {
         /// Where on the board the ballot landed. Kept by the voter with the token.
         pub position: i64,
+        pub receipt: defs::ReceiptView,
     }
 
 }
@@ -404,6 +405,21 @@ pub mod defs {
         pub updated_at: Option<String>,
     }
 
+    /// The custodian's signed word on what a board was when it closed and what it came to. A tally is official once this is signed, and a recount is checked against it. Signed as `receiptView` is, over the lines after `wiki-poll-closeout-v1`: poll id, entries, issued, counts joined by commas, board_digest, closed_at.
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
+    pub struct CloseOutView {
+        /// SHA-256, in hex, over the entries' digests in token order: the same board in whatever order it was cast, published or read.
+        pub board_digest: String,
+        pub closed_at: String,
+        pub counts: Vec<i64>,
+        pub entries: i64,
+        /// Unit tokens handed out: the bound on `entries` that anyone can check.
+        pub issued: i64,
+        pub key: String,
+        pub sig: String,
+    }
+
     /// An internal threaded comment on a document or another comment.
     #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
     #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
@@ -676,6 +692,9 @@ pub mod defs {
         pub blank: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub closed_at: Option<String>,
+        /// A closed secret poll's signed close-out. Absent with `counts`, which it states, and for a poll carried over from the interim, which has none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub closeout: Option<CloseOutView>,
         pub context_id: String,
         /// One count per option. Absent where the tally is hidden from the caller.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -744,6 +763,24 @@ pub mod defs {
         pub reactor_did: Option<String>,
         /// What is reacted to: the id of a comment or a document, or the at-uri of a mirrored post.
         pub subject_uri: String,
+    }
+
+    /// The custodian's signed word that one ballot is on a poll's board, saying what it said. A board without that entry, or with other choices under that token, contradicts it. The signature is ECDSA P-256 over SHA-256 of these fields as lines of text, in this order, after the line `wiki-ballot-receipt-v1`: poll, position, token, choices joined by commas, entry_digest, at (`crates/ballot-spec/src/custody.rs`).
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
+    pub struct ReceiptView {
+        /// When it was signed, to the minute: enough for a dispute, too coarse to pair with a log.
+        pub at: String,
+        pub choices: Vec<i64>,
+        /// SHA-256, in hex, of the entry's token, message randomizer, signature and choices as lines of text.
+        pub entry_digest: String,
+        /// The custody key, as a `did:key`. What `getBoardKey` answers.
+        pub key: String,
+        pub poll: String,
+        pub position: i64,
+        /// `r || s`, base64url without padding.
+        pub sig: String,
+        pub token: String,
     }
 
     /// A person. The DID is the identity; the rest is profile, absent until it has been read from their PDS.
@@ -976,6 +1013,8 @@ pub mod get_board_entry {
     pub struct Output {
         pub entry: defs::BoardEntryView,
         pub position: i64,
+        /// Signed again for whoever asks: the answer to their cast, which carried the first, may never have reached them.
+        pub receipt: defs::ReceiptView,
     }
 
     #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -996,6 +1035,20 @@ impl get_board_entry::Params {
         ];
         pairs
     }
+}
+
+pub mod get_board_key {
+    #[allow(unused_imports)]
+    use super::defs;
+    #[allow(unused_imports)]
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
+    pub struct Output {
+        pub key: String,
+    }
+
 }
 
 pub mod get_canvas {
@@ -3081,6 +3134,12 @@ impl Client {
     /// The ballot a token was spent on: how a voter checks that theirs is on the board and says what they said. It works where the counts are hidden too, since knowing a token is having cast it. Like `castBallot` it takes no session and reads none: asked as nobody, it does not pair a voter with their token.
     pub async fn get_board_entry(&self, params: &get_board_entry::Params) -> Result<get_board_entry::Output, Error> {
         let answer = self.call(crate::Verb::Get, "com.example.wiki.getBoardEntry", params.pairs(), crate::Body::None).await?;
+        answer.json()
+    }
+
+    /// The key this AppView signs ballot receipts and close-outs with, as a `did:key` (P-256). For anyone, signed in or not: a receipt names its key too, and this is what that is checked against. It is kept for nothing else, and is not a poll's issuer key.
+    pub async fn get_board_key(&self) -> Result<get_board_key::Output, Error> {
+        let answer = self.call(crate::Verb::Get, "com.example.wiki.getBoardKey", Vec::new(), crate::Body::None).await?;
         answer.json()
     }
 

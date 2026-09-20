@@ -62,7 +62,7 @@ const TALLY_BEAT: Duration = if cfg!(test) {
     Duration::from_secs(1)
 };
 
-type Failure = Box<dyn std::error::Error + Send + Sync>;
+pub(crate) type Failure = Box<dyn std::error::Error + Send + Sync>;
 
 /// What this module keeps between requests.
 #[derive(Default)]
@@ -429,6 +429,10 @@ pub struct PollView {
     /// Absent for a caller who is not on the poll's roster.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub viewer: Option<ViewerView>,
+    /// A closed secret poll's signed close-out. Absent with `counts`, which it
+    /// states, and for a poll carried over from the interim, which has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub closeout: Option<crate::board::CloseOutView>,
 }
 
 /// Whether `did` sees a poll's counts and its board. The interim's rule: a poll
@@ -503,7 +507,12 @@ async fn view(state: &AppState, poll: PollRow, did: Option<&str>) -> Result<Poll
         Some(did) => viewer(state, &poll, did).await?,
         None => None,
     };
+    let closeout = match shown && !poll.open {
+        true => crate::board::close_out_of(state, &poll.id).await?,
+        false => None,
+    };
     Ok(PollView {
+        closeout,
         eligible: eligible_weight(state, &poll.id).await?,
         ballots: tally.ballots,
         counts: shown.then_some(tally.counts),
@@ -814,18 +823,40 @@ async fn close(state: &AppState, poll: &PollRow) -> Result<(), Failure> {
                 result.ballots
             );
         }
+        let closed_at = crate::util::now_stamp();
         conn.execute(
             "UPDATE poll SET counts = ?2, ballots = ?3, issued = ?4, issuer_secret = NULL, \
-               closed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+               closed_at = ?5 \
              WHERE id = ?1",
             vec![
                 Value::Text(poll.id.clone()),
                 Value::Text(serde_json::to_string(&result.counts)?),
                 Value::Integer(result.ballots as i64),
                 Value::Integer(issued as i64),
+                Value::Text(closed_at.clone()),
             ],
         )
         .await?;
+        if poll.secret {
+            // A tally is official once this is signed: what the board was, and
+            // what it came to, in one statement anyone can hold it to.
+            let entries: Vec<_> = crate::ballot::board(state, &poll.id)
+                .await?
+                .ballots()
+                .await?
+                .iter()
+                .map(encode_entry)
+                .collect();
+            let close = ballot_spec::custody::CloseOut {
+                poll: poll.id.clone(),
+                entries: entries.len() as u64,
+                issued,
+                counts: result.counts.clone(),
+                board_digest: ballot_spec::custody::board_digest(&entries),
+                closed_at,
+            };
+            crate::board::close_out(&conn, &state.config, &close).await?;
+        }
         Ok(())
     }
     .await;
@@ -1007,11 +1038,19 @@ pub async fn get_board_entry(
         Ok::<_, Failure>(board.find(&token).await?)
     };
     match found.await {
-        Ok(Some((position, entry))) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "position": position, "entry": encode_entry(&entry) })),
-        )
-            .into_response(),
+        Ok(Some((position, entry))) => {
+            // Signed again for whoever asks: the answer to their cast, which
+            // carried the first one, may never have reached them.
+            let entry = encode_entry(&entry);
+            let receipt = crate::board::receipt(&state.config, &poll.id, position, &entry);
+            (
+                StatusCode::OK,
+                Json(
+                    serde_json::json!({ "position": position, "entry": entry, "receipt": receipt }),
+                ),
+            )
+                .into_response()
+        }
         Ok(None) => err(
             StatusCode::NOT_FOUND,
             "NotFound",
@@ -1206,6 +1245,8 @@ pub async fn cast_ballot(State(state): State<AppState>, Json(body): Json<CastBod
         signature: Signature(signature),
         choices: body.entry.choices.clone(),
     };
+    // As it will stand on the board, which is what a receipt is for.
+    let as_cast = encode_entry(&entry);
     let cast = async {
         let board = crate::ballot::board(&state, &poll.id).await?;
         let _turn = state.db.write_turn().await;
@@ -1214,9 +1255,10 @@ pub async fn cast_ballot(State(state): State<AppState>, Json(body): Json<CastBod
     match cast.await {
         Ok(Ok(position)) => {
             announce_tally(&state, &poll);
+            let receipt = crate::board::receipt(&state.config, &poll.id, position, &as_cast);
             (
                 StatusCode::OK,
-                Json(serde_json::json!({ "position": position })),
+                Json(serde_json::json!({ "position": position, "receipt": receipt })),
             )
                 .into_response()
         }
@@ -1469,6 +1511,112 @@ mod tests {
         let (status, v) = post(router(state.clone()), CAST, None, ballot.clone()).await;
         assert_eq!(status, StatusCode::OK, "{v}");
         ballot
+    }
+
+    /// A receipt as its signature covers it, from the JSON a cast answers with.
+    fn receipt_of(v: &serde_json::Value) -> (ballot_spec::custody::Receipt, String, String) {
+        let text = |key: &str| v[key].as_str().expect(key).to_string();
+        let receipt = ballot_spec::custody::Receipt {
+            poll: text("poll"),
+            position: v["position"].as_u64().expect("position"),
+            token: text("token"),
+            choices: serde_json::from_value(v["choices"].clone()).expect("choices"),
+            entry_digest: text("entry_digest"),
+            at: text("at"),
+        };
+        (receipt, text("key"), text("sig"))
+    }
+
+    /// Every ballot passes through the AppView, which could drop one or write
+    /// other choices under its token. What it signs is what it is held to.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_cast_is_receipted_and_a_close_is_signed_for() {
+        use ballot_spec::custody::{CloseOut, board_digest, verify};
+        let state = state().await;
+        let alice = token_for(&state, "did:plc:alice").await;
+        let bob = token_for(&state, "did:plc:bob").await;
+        let poll = open(&state, &alice, for_against(true)).await;
+        let id = poll["id"].as_str().expect("id");
+
+        let wallet = Wallet::new(&poll, 1);
+        let blinded = json!({"poll": id, "blinded": wallet.blinded()});
+        let (_, signed) = post(router(state.clone()), ISSUE, Some(&bob), blinded).await;
+        let ballot = with_poll(wallet.ballot(&signed, 0, &[1]), id);
+        let (status, cast) = post(router(state.clone()), CAST, None, ballot.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{cast}");
+
+        let (_, published) = get(router(state.clone()), "/xrpc/com.example.wiki.getBoardKey").await;
+        let (receipt, key, sig) = receipt_of(&cast["receipt"]);
+        assert_eq!(
+            published["key"],
+            key.as_str(),
+            "signed by the key the site names"
+        );
+        assert_eq!((receipt.position, &receipt.choices), (0, &vec![1]));
+        assert_eq!(receipt.token, ballot["token"].as_str().expect("token"));
+        assert_eq!(
+            receipt.at.len(),
+            "2026-05-01T18:30Z".len(),
+            "to the minute: {}",
+            receipt.at
+        );
+        assert!(verify(&key, &receipt.payload(), &sig));
+        let rewritten = ballot_spec::custody::Receipt {
+            choices: vec![0],
+            ..receipt.clone()
+        };
+        assert!(
+            !verify(&key, &rewritten.payload(), &sig),
+            "other choices under the token"
+        );
+
+        // The answer to a cast can be lost, and the receipt with it: whoever
+        // knows the token is given another, asking as nobody.
+        let mine = format!(
+            "/xrpc/com.example.wiki.getBoardEntry?poll={id}&token={}",
+            receipt.token
+        );
+        let (_, found) = get(router(state.clone()), &mine).await;
+        let (again, key, sig) = receipt_of(&found["receipt"]);
+        assert_eq!(again.entry_digest, receipt.entry_digest);
+        assert!(verify(&key, &again.payload(), &sig));
+
+        vote(&state, &poll, &alice, &[0]).await;
+        let (_, closed) = post(
+            router(state.clone()),
+            CLOSE,
+            Some(&alice),
+            json!({"id": id}),
+        )
+        .await;
+        let signed_for = &closed["closeout"];
+        assert_eq!(signed_for["counts"], json!([1, 1, 0]), "{closed}");
+        assert_eq!(
+            (&signed_for["entries"], &signed_for["issued"]),
+            (&json!(2), &json!(2))
+        );
+        let board = format!("/xrpc/com.example.wiki.getBoard?poll={id}");
+        let (_, board) = get_as(router(state.clone()), &board, &bob).await;
+        let entries: Vec<ProvisionalEntry> =
+            serde_json::from_value(board["entries"].clone()).expect("entries");
+        let text = |key: &str| signed_for[key].as_str().expect(key).to_string();
+        assert_eq!(
+            text("board_digest"),
+            board_digest(&entries),
+            "the board anyone reads"
+        );
+        let close = CloseOut {
+            poll: id.to_string(),
+            entries: 2,
+            issued: 2,
+            counts: vec![1, 1, 0],
+            board_digest: text("board_digest"),
+            closed_at: closed["closed_at"].as_str().expect("closed_at").to_string(),
+        };
+        assert!(verify(&text("key"), &close.payload(), &text("sig")));
+        // Signed once: reading it again is the same statement, not a new one.
+        let later = poll_as(&state, id, &bob).await;
+        assert_eq!(later["closeout"]["sig"], signed_for["sig"]);
     }
 
     #[tokio::test(flavor = "current_thread")]

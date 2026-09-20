@@ -21,6 +21,9 @@ pub use blind_rsa_signatures::{
 use blind_rsa_signatures::{KeyPair, PublicKey, Randomized, SecretKey, Sha384};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// What the board's custodian signs: receipts and the close-out.
+#[cfg(feature = "custody")]
+pub mod custody;
 /// PROVISIONAL board-entry wire encoding (base64url), pending decision D7.
 pub mod provisional;
 

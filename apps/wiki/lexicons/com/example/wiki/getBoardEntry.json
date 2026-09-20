@@ -22,7 +22,7 @@
 				"encoding": "application/json",
 				"schema": {
 					"type": "object",
-					"required": ["position", "entry"],
+					"required": ["position", "entry", "receipt"],
 					"properties": {
 						"position": {
 							"type": "integer"
@@ -30,6 +30,11 @@
 						"entry": {
 							"type": "ref",
 							"ref": "com.example.wiki.defs#boardEntryView"
+						},
+						"receipt": {
+							"type": "ref",
+							"ref": "com.example.wiki.defs#receiptView",
+							"description": "Signed again for whoever asks: the answer to their cast, which carried the first, may never have reached them."
 						}
 					}
 				}

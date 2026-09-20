@@ -12,5 +12,13 @@ rand = "0.10.2"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11.0"
 
+# For `custody`: what the board's custodian signs. Optional, so that a voter's
+# browser, which only blinds and casts, does not carry a second curve.
+multibase = { version = "0.9", optional = true }
+p256 = { version = "0.13", features = ["ecdsa"], optional = true }
+
 [dev-dependencies]
 proptest = "1.11.0"
+
+[features]
+custody = ["dep:multibase", "dep:p256"]

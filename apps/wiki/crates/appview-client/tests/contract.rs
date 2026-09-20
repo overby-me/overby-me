@@ -905,6 +905,27 @@ async fn the_vote() {
         .await
         .expect("castBallot");
     assert_eq!(cast.position, 0);
+    // The receipt is the custodian's, by the key the site names to anyone.
+    let named = wiki.client.get_board_key().await.expect("getBoardKey");
+    assert_eq!(named.key, cast.receipt.key);
+    let receipt = ballot_spec::custody::Receipt {
+        poll: cast.receipt.poll.clone(),
+        position: u64::try_from(cast.receipt.position).expect("a position"),
+        token: cast.receipt.token.clone(),
+        choices: cast
+            .receipt
+            .choices
+            .iter()
+            .map(|c| usize::try_from(*c).expect("an index"))
+            .collect(),
+        entry_digest: cast.receipt.entry_digest.clone(),
+        at: cast.receipt.at.clone(),
+    };
+    assert!(ballot_spec::custody::verify(
+        &named.key,
+        &receipt.payload(),
+        &cast.receipt.sig
+    ));
     let board = alice
         .get_board(&get_board::Params {
             poll: secret.id.clone(),
@@ -920,6 +941,15 @@ async fn the_vote() {
         .await
         .expect("getBoardEntry");
     assert_eq!(mine.entry.choices, [1]);
+    assert_eq!(mine.receipt.entry_digest, cast.receipt.entry_digest);
+    let result = carol
+        .close_poll(&close_poll::Input {
+            id: secret.id.clone(),
+        })
+        .await
+        .expect("closePoll");
+    let signed_for = result.closeout.expect("a closed secret poll is signed for");
+    assert_eq!((signed_for.entries, signed_for.counts), (1, vec![0, 1, 0]));
     let listed = alice
         .list_polls(&list_polls::Params {
             parent: Some(motion.id),

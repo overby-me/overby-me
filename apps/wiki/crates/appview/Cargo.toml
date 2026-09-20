@@ -33,7 +33,7 @@ atrium-oauth = { version = "0.1.7", default-features = false }
 # The AppView is a stateful persistent process (not scale-to-zero serverless):
 # axum HTTP + WebSocket, a Turso datastore, an in-process broadcast channel.
 axum = { version = "0.8", features = ["ws"] }
-ballot-spec = { path = "../ballot-spec" }
+ballot-spec = { path = "../ballot-spec", features = ["custody"] }
 # The durable ballot service: the public board (kill-9-proven atomic cast) + the
 # private roster DDL, plus the off-node replica sink wired into this datastore.
 ballot-store = { path = "../ballot-store" }

@@ -421,7 +421,76 @@
 							"description": "An open poll: the caller's own ballot, once cast."
 						}
 					}
+				},
+				"closeout": {
+					"type": "ref",
+					"ref": "#closeOutView",
+					"description": "A closed secret poll's signed close-out. Absent with `counts`, which it states, and for a poll carried over from the interim, which has none."
 				}
+			}
+		},
+		"receiptView": {
+			"type": "object",
+			"description": "The custodian's signed word that one ballot is on a poll's board, saying what it said. A board without that entry, or with other choices under that token, contradicts it. The signature is ECDSA P-256 over SHA-256 of these fields as lines of text, in this order, after the line `wiki-ballot-receipt-v1`: poll, position, token, choices joined by commas, entry_digest, at (`crates/ballot-spec/src/custody.rs`).",
+			"required": [
+				"poll",
+				"position",
+				"token",
+				"choices",
+				"entry_digest",
+				"at",
+				"key",
+				"sig"
+			],
+			"properties": {
+				"poll": { "type": "string" },
+				"position": { "type": "integer" },
+				"token": { "type": "string" },
+				"choices": { "type": "array", "items": { "type": "integer" } },
+				"entry_digest": {
+					"type": "string",
+					"description": "SHA-256, in hex, of the entry's token, message randomizer, signature and choices as lines of text."
+				},
+				"at": {
+					"type": "string",
+					"description": "When it was signed, to the minute: enough for a dispute, too coarse to pair with a log."
+				},
+				"key": {
+					"type": "string",
+					"description": "The custody key, as a `did:key`. What `getBoardKey` answers."
+				},
+				"sig": {
+					"type": "string",
+					"description": "`r || s`, base64url without padding."
+				}
+			}
+		},
+		"closeOutView": {
+			"type": "object",
+			"description": "The custodian's signed word on what a board was when it closed and what it came to. A tally is official once this is signed, and a recount is checked against it. Signed as `receiptView` is, over the lines after `wiki-poll-closeout-v1`: poll id, entries, issued, counts joined by commas, board_digest, closed_at.",
+			"required": [
+				"entries",
+				"issued",
+				"counts",
+				"board_digest",
+				"closed_at",
+				"key",
+				"sig"
+			],
+			"properties": {
+				"entries": { "type": "integer" },
+				"issued": {
+					"type": "integer",
+					"description": "Unit tokens handed out: the bound on `entries` that anyone can check."
+				},
+				"counts": { "type": "array", "items": { "type": "integer" } },
+				"board_digest": {
+					"type": "string",
+					"description": "SHA-256, in hex, over the entries' digests in token order: the same board in whatever order it was cast, published or read."
+				},
+				"closed_at": { "type": "string", "format": "datetime" },
+				"key": { "type": "string" },
+				"sig": { "type": "string" }
 			}
 		},
 		"nodeRef": {

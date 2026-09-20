@@ -439,6 +439,8 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "blind-rsa-signatures",
+ "multibase",
+ "p256",
  "proptest",
  "rand 0.10.2",
  "serde",

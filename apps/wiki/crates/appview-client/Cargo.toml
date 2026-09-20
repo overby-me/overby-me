@@ -15,7 +15,7 @@ appview = { path = "../appview" }
 # Itself, with `strict` on: the tests are where an unknown field must fail.
 appview-client = { path = ".", features = ["strict"] }
 axum = "0.8"
-ballot-spec = { path = "../ballot-spec" }
+ballot-spec = { path = "../ballot-spec", features = ["custody"] }
 base64 = "0.22"
 lexgen = { path = "../lexgen" }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }

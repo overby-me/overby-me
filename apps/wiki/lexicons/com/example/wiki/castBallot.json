@@ -41,11 +41,15 @@
 				"encoding": "application/json",
 				"schema": {
 					"type": "object",
-					"required": ["position"],
+					"required": ["position", "receipt"],
 					"properties": {
 						"position": {
 							"type": "integer",
 							"description": "Where on the board the ballot landed. Kept by the voter with the token."
+						},
+						"receipt": {
+							"type": "ref",
+							"ref": "com.example.wiki.defs#receiptView"
 						}
 					}
 				}

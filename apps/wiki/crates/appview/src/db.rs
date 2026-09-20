@@ -89,6 +89,8 @@ impl Db {
         // The ballot service's durable tables (public board + private roster),
         // both IF NOT EXISTS, so they live in the same datastore as the entities.
         crate::ballot::init_ballot_schema(self).await?;
+        // After it: a close-out names a poll.
+        conn.execute_batch(crate::board::BOARD_CUSTODY_DDL).await?;
         Ok(())
     }
 }
