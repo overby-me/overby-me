@@ -84,9 +84,19 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    // Fatal, as the two above: a site set up to mail its invitations that
+    // cannot is one whose members wait for a mail that is not coming.
+    let mailer = match appview::mail::Mailer::from_config(&config) {
+        Ok(mailer) => mailer.map(Arc::new),
+        Err(e) => {
+            tracing::error!("mail is misconfigured: {e}");
+            std::process::exit(1);
+        }
+    };
     let addr = format!("0.0.0.0:{}", config.port);
     let mut state = AppState::new(db, config).with_oauth(oauth);
     state.replica = replica;
+    state.mailer = mailer;
 
     // The firehose consumer runs for the life of the process, materializing
     // public records into the view and broadcasting deltas to /ws clients. It

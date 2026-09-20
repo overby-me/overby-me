@@ -22,6 +22,7 @@ pub mod import;
 pub mod legacy;
 pub mod live;
 pub mod logs;
+pub mod mail;
 pub mod metafile;
 pub mod metafile_svg;
 pub mod oauth;
@@ -81,6 +82,8 @@ pub struct AppState {
     pub feedback: Arc<feedback::Shared>,
     /// What `crate::canvas` keeps between requests.
     pub canvases: Arc<canvas::Shared>,
+    /// Where invitations are mailed from, when the site mails any (`crate::mail`).
+    pub mailer: Option<Arc<mail::Mailer>>,
 }
 
 impl AppState {
@@ -105,6 +108,7 @@ impl AppState {
             polls: Arc::default(),
             feedback: Arc::default(),
             canvases: Arc::default(),
+            mailer: None,
         }
     }
 
@@ -257,6 +261,10 @@ fn build_router(state: AppState) -> Router {
         .route(
             "/xrpc/com.example.wiki.inviteMembers",
             post(xrpc::invite_members),
+        )
+        .route(
+            "/xrpc/com.example.wiki.sendInvitation",
+            post(mail::send_invitation),
         )
         .route(
             "/xrpc/com.example.wiki.updateMember",

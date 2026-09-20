@@ -47,6 +47,7 @@
     APPVIEW_SITE_OWNER = lib.optionalString (cfg.siteOwner != null) cfg.siteOwner;
     VAPID_PUBLIC_KEY = cfg.vapidPublicKey;
     VAPID_SUBJECT = cfg.vapidSubject;
+    APPVIEW_MAIL_FROM = cfg.mailFrom;
   };
   # What the service and the cutover's load share: the same state, the same
   # secrets, the same confinement.
@@ -194,7 +195,21 @@ in {
         EnvironmentFile so none of it enters the store: `APPVIEW_SECRET` (signs
         file links and seals a running poll's issuer key; without it one is
         made and kept in the state directory), `VAPID_PRIVATE_KEY` (Web Push;
-        without it no notification is sent) and `BETTERSTACK_SOURCE_TOKEN`.
+        without it no notification is sent), `APPVIEW_SMTP_URL` (see `mailFrom`)
+        and `BETTERSTACK_SOURCE_TOKEN`.
+      '';
+    };
+
+    mailFrom = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      example = "RadikalWiki <wiki@example.org>";
+      description = ''
+        Who invitations are mailed from. With it and `APPVIEW_SMTP_URL` in
+        `secretsFile` (such as `smtps://user:password@mail.example.org:465`), an
+        address put on a roster is mailed the link to its seat. With neither,
+        nothing is mailed and an owner hands the links out. With only one of
+        the two the service refuses to start.
       '';
     };
 

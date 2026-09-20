@@ -48,8 +48,8 @@ the bin and comes back, search finds a page by its text, a change made
 elsewhere arrives without a reload, and signing out ends the session at the
 AppView too.
 
-Not built: mail to an invited address (M4), and the parts of voting that wait
-on a decision that is the owner's to make (M6). What needs a person and cannot
+Not built: the parts of voting that wait on a decision that is the owner's to
+make (M6). What needs a person and cannot
 be tested from here: one real browser login, and with it the token exchange,
 the profile read and posting to a PDS. The interim's own browser suite
 (`test-browser.nu`) is written against the interim's backend and an account on
@@ -388,10 +388,17 @@ The steps:
   always keeping an owner who can sign in.
 - [x] The caller's invitations: list, accept, and decline or leave by removing
   oneself; claim links for every roster row.
-- [ ] Reaching an invited address. Nothing sends mail, so an owner hands out
-  claim links by hand. Since M2 binds by the account's confirmed address, that
-  is only needed for members whose PDS is not one configured as trusted, or
-  whose account has another address than the roster's.
+- [x] Reaching an invited address (`crates/appview/src/mail.rs`). With
+  `APPVIEW_SMTP_URL` and `APPVIEW_MAIL_FROM` set, an address put on a roster
+  is mailed the link to its seat as it is invited, in both of the site's
+  languages, beside the request and paced; `sendInvitation` mails one seat
+  again, or a seat carried over from the interim for the first time. Without
+  the two settings nothing is mailed and an owner hands the links out, as
+  before; with only one the service refuses to start. Since M2 binds by the
+  account's confirmed address, the mail is only NEEDED by members whose PDS is
+  not one configured as trusted, or whose account has another address than the
+  roster's. Tested against an SMTP server of the test's own. The account at a
+  mail provider is the owner's to make.
 - [x] Author chips (`setDocumentAuthors`): accounts, names with no account, or a
   group. The interim lets a group be named as an author, and the extractor read
   every chip that pointed at a node as a person, so a branch that put a motion

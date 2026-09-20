@@ -40,7 +40,7 @@
 				"encoding": "application/json",
 				"schema": {
 					"type": "object",
-					"required": ["inserted", "skipped", "without_email"],
+					"required": ["inserted", "skipped", "without_email", "mailing"],
 					"properties": {
 						"inserted": {
 							"type": "integer"
@@ -52,6 +52,10 @@
 						"without_email": {
 							"type": "integer",
 							"description": "Of those inserted, how many have no address and are reachable only by their claim link."
+						},
+						"mailing": {
+							"type": "integer",
+							"description": "Of those inserted, how many are being mailed their claim link: a seat with an address and no account. 0 on a site that sends no mail."
 						}
 					}
 				}

@@ -86,6 +86,13 @@ pub struct Config {
     /// Keys the signed blob links (`APPVIEW_SECRET`). Unset, one is made on
     /// first start and kept beside the database file.
     pub secret: Secret,
+    /// Where mail is handed over (`APPVIEW_SMTP_URL`), such as
+    /// `smtps://user:password@mail.example:465` or
+    /// `smtp://mail.example:587?tls=required`. With `mail_from`, an invited
+    /// address is mailed its claim link; without both, nothing is mailed.
+    pub smtp_url: Secret,
+    /// Who the mail is from (`APPVIEW_MAIL_FROM`): `Wiki <wiki@example.org>`.
+    pub mail_from: String,
     /// What a home made at start is called (`APPVIEW_SITE_NAME`). One loaded
     /// from the interim keeps its own name.
     pub site_name: String,
@@ -179,6 +186,8 @@ impl Config {
                     .filter(|h| !h.is_empty())
                     .collect(),
             },
+            smtp_url: Secret::new(env("APPVIEW_SMTP_URL").trim()),
+            mail_from: env("APPVIEW_MAIL_FROM"),
             vapid_private: Secret::new(env("VAPID_PRIVATE_KEY")),
             vapid_public: env("VAPID_PUBLIC_KEY"),
             vapid_subject,
@@ -267,6 +276,8 @@ impl Default for Config {
             max_member_blob_bytes: DEFAULT_MAX_MEMBER_BLOB_BYTES,
             max_context_blob_bytes: DEFAULT_MAX_CONTEXT_BLOB_BYTES,
             secret: Secret::new(crate::util::random_token(32)),
+            smtp_url: Secret::default(),
+            mail_from: String::new(),
             site_name: DEFAULT_SITE_NAME.to_string(),
             site_owner: None,
         }

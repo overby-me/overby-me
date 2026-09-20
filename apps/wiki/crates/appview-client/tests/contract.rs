@@ -565,6 +565,15 @@ async fn the_members() {
         "and no addresses"
     );
 
+    // This AppView sends no mail, and says so rather than seeming to.
+    let unsent = carol
+        .send_invitation(&send_invitation::Input {
+            member: seat.id.clone(),
+        })
+        .await
+        .expect_err("no mail is configured here");
+    assert_eq!(unsent.name(), Some("MailNotConfigured"));
+
     carol
         .update_member(&update_member::Input {
             id: seat.id.clone(),

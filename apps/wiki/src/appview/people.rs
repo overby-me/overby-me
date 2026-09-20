@@ -21,6 +21,8 @@ pub struct RosterImport {
     pub skipped: usize,
     /// Of those inserted, how many the file gave no address for.
     pub without_email: usize,
+    /// Of those inserted, how many are being mailed a link to their seat.
+    pub mailing: usize,
 }
 
 /// A page of a context's roster, and how many match in all.
@@ -99,6 +101,7 @@ async fn invite(
         inserted: count(done.inserted),
         skipped: count(done.skipped),
         without_email: count(done.without_email),
+        mailing: count(done.mailing),
     })
 }
 

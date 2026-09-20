@@ -135,7 +135,8 @@ Procedures (POST, authenticated; the caller's DID comes from the session, never 
   `getMemberClaimLink` (a query) gives an active owner the token to hand out. A seat held by an
   account carried over from the interim counts as pending for both: its person takes the whole
   account over by signing in with the address it was registered under, and everyone else is handed
-  that one seat by link.
+  that one seat by link. On a site that sends mail, `inviteMembers` mails that link to every new seat
+  with an address and no account, and `sendInvitation` mails one seat again.
 
 These files are not only documentation. `crates/appview-client` is generated from them, and its
 contract tests call every method on the real router with a client that refuses any field a lexicon

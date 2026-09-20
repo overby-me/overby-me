@@ -289,6 +289,11 @@
 				"email": {
 					"type": "string",
 					"description": "Present only when the caller owns the context."
+				},
+				"mailed_at": {
+					"type": "string",
+					"format": "datetime",
+					"description": "When the claim link was last mailed to `email`. Present only when the caller owns the context."
 				}
 			}
 		},

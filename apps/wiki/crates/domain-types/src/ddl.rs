@@ -140,6 +140,7 @@ CREATE TABLE member (
   created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   email       TEXT,
   claim_token TEXT UNIQUE,
+  mailed_at   TEXT,                                        -- when the claim link was last mailed to `email`
   legacy_id   TEXT UNIQUE
 );
 CREATE UNIQUE INDEX member_bound   ON member(context_id, user_did) WHERE user_did IS NOT NULL;

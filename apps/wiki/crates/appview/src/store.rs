@@ -308,6 +308,9 @@ pub struct MemberRow {
     /// [`MemberQuery::for_owner`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
+    /// When the claim link was last mailed to `email`. For owners, as `email` is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mailed_at: Option<String>,
 }
 
 /// Which members of a context to list.
@@ -353,6 +356,9 @@ pub struct InviteOutcome {
     /// Of those inserted, how many the roster gave no address for. On the list,
     /// but only reachable by handing them their claim link.
     pub without_email: usize,
+    /// Of those inserted, how many are being mailed their claim link. None on a
+    /// site that sends no mail.
+    pub mailing: usize,
 }
 
 /// What a change to a member may set. `None` leaves a field as it is.
@@ -824,7 +830,7 @@ impl Store {
             .query(
                 &format!(
                     "SELECT m.id, m.user_did, m.role, m.active, m.accepted, m.hidden, m.name, \
-                            u.display_name, u.handle, u.avatar_url, m.email \
+                            u.display_name, u.handle, u.avatar_url, m.email, m.mailed_at \
                      {from} \
                      ORDER BY coalesce(m.name, u.display_name, u.handle) IS NULL, \
                               lower(coalesce(m.name, u.display_name, u.handle)), m.id \
@@ -847,6 +853,7 @@ impl Store {
                 handle: opt_text(&row, 8),
                 avatar_url: opt_text(&row, 9),
                 email: opt_text(&row, 10).filter(|_| q.for_owner),
+                mailed_at: opt_text(&row, 11).filter(|_| q.for_owner),
             });
         }
         Ok((out, total))
@@ -854,12 +861,14 @@ impl Store {
 
     /// Put people on a context's roster. Anyone the context already has, by
     /// address or by account, is skipped, and so is an address the batch itself
-    /// repeats. One write transaction, so two imports cannot interleave.
+    /// repeats. One write transaction, so two imports cannot interleave. Also
+    /// returns the seats a claim link can be mailed to: those with an address
+    /// and no account yet.
     pub async fn invite(
         &self,
         context_id: &str,
         invites: &[Invite],
-    ) -> Result<InviteOutcome, DbError> {
+    ) -> Result<(InviteOutcome, Vec<crate::mail::Seat>), DbError> {
         let conn = self.db.acquire().await?;
         conn.execute("BEGIN IMMEDIATE", ()).await?;
         let outcome = self.invite_in(&conn, context_id, invites).await;
@@ -880,8 +889,9 @@ impl Store {
         conn: &turso::Connection,
         context_id: &str,
         invites: &[Invite],
-    ) -> Result<InviteOutcome, DbError> {
+    ) -> Result<(InviteOutcome, Vec<crate::mail::Seat>), DbError> {
         let mut outcome = InviteOutcome::default();
+        let mut to_mail = Vec::new();
         for invite in invites {
             let name = invite
                 .name
@@ -928,29 +938,35 @@ impl Store {
                 conn.execute("INSERT OR IGNORE INTO user (did) VALUES (?1)", [did])
                     .await?;
             }
+            let member_id = format!("m-{}", crate::util::random_token(16));
+            // An account is bound already, so it has nothing to claim.
+            let claim_token = did.is_none().then(|| crate::util::random_token(24));
             conn.execute(
                 "INSERT INTO member (id, context_id, user_did, name, email, claim_token) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 vec![
-                    Value::Text(format!("m-{}", crate::util::random_token(16))),
+                    Value::Text(member_id.clone()),
                     Value::Text(context_id.to_string()),
                     opt_str_val(did),
                     opt_str_val(name),
                     opt_str_val(email.as_deref()),
-                    // An account is bound already, so it has nothing to claim.
-                    match did {
-                        Some(_) => Value::Null,
-                        None => Value::Text(crate::util::random_token(24)),
-                    },
+                    opt_str_val(claim_token.as_deref()),
                 ],
             )
             .await?;
             outcome.inserted += 1;
+            if let (Some(email), Some(claim_token)) = (email.clone(), claim_token) {
+                to_mail.push(crate::mail::Seat {
+                    member_id,
+                    email,
+                    claim_token,
+                });
+            }
             if did.is_none() && email.is_none() {
                 outcome.without_email += 1;
             }
         }
-        Ok(outcome)
+        Ok((outcome, to_mail))
     }
 
     /// A member row's authorization facts.

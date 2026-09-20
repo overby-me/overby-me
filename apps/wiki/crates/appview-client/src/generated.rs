@@ -642,6 +642,9 @@ pub mod defs {
         /// Kept off the list everyone sees. Only an owner is served such a row.
         pub hidden: bool,
         pub id: String,
+        /// When the claim link was last mailed to `email`. Present only when the caller owns the context.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub mailed_at: Option<String>,
         /// The roster's name for them: the only label an unclaimed invitation has.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub name: Option<String>,
@@ -1461,6 +1464,8 @@ pub mod invite_members {
     #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
     pub struct Output {
         pub inserted: i64,
+        /// Of those inserted, how many are being mailed their claim link: a seat with an address and no account. 0 on a site that sends no mail.
+        pub mailing: i64,
         /// Already on this roster, or repeated in the batch.
         pub skipped: i64,
         /// Of those inserted, how many have no address and are reachable only by their claim link.
@@ -2500,6 +2505,27 @@ impl search_people::Params {
     }
 }
 
+pub mod send_invitation {
+    #[allow(unused_imports)]
+    use super::defs;
+    #[allow(unused_imports)]
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
+    pub struct Input {
+        /// The member id.
+        pub member: String,
+    }
+
+    #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+    #[cfg_attr(feature = "strict", serde(deny_unknown_fields))]
+    pub struct Output {
+        pub ok: bool,
+    }
+
+}
+
 pub mod set_canvas_open {
     #[allow(unused_imports)]
     use super::defs;
@@ -3279,6 +3305,12 @@ impl Client {
     /// The people whose name or handle contains the query, whatever its case, for the pickers that invite someone or credit an author. Ten at most, and nothing for fewer than two letters. With `contexts`, also the groups and events by that name that the caller may read, since a group can be an author.
     pub async fn search_people(&self, params: &search_people::Params) -> Result<search_people::Output, Error> {
         let answer = self.call(crate::Verb::Get, "com.example.wiki.searchPeople", params.pairs(), crate::Body::None).await?;
+        answer.json()
+    }
+
+    /// Mail a seat's claim link to the address on it, for an owner of that seat's context: again after a mail that was lost, or for the first time to a seat carried over from the interim. `inviteMembers` mails a new seat by itself. An unknown member answers Forbidden too, so the method is no oracle for member ids.
+    pub async fn send_invitation(&self, input: &send_invitation::Input) -> Result<send_invitation::Output, Error> {
+        let answer = self.call(crate::Verb::Post, "com.example.wiki.sendInvitation", Vec::new(), crate::Body::Json(serde_json::to_value(input)?)).await?;
         answer.json()
     }
 

@@ -341,6 +341,9 @@ pub struct RosterImport {
     /// Of those inserted, how many the file gave no address for. On the roster,
     /// but not invitable until someone fills one in.
     pub without_email: usize,
+    /// Of those inserted, how many are being mailed a link to their seat. Always
+    /// 0 here: this backend sends no mail, and the AppView may.
+    pub mailing: usize,
 }
 
 /// The rows worth sending: anything naming a person or an address, lowercased,
@@ -427,6 +430,7 @@ pub async fn invite_members(
         inserted,
         skipped: submitted - inserted,
         without_email: without_email.min(inserted),
+        mailing: 0,
     })
 }
 

@@ -700,7 +700,7 @@ pub async fn invite_members(
         .invite(&body.context_id, &body.invites)
         .await
     {
-        Ok(outcome) => {
+        Ok((mut outcome, seats)) => {
             state.publish(
                 Topic::Context(body.context_id.clone()),
                 "member",
@@ -709,6 +709,15 @@ pub async fn invite_members(
             // An invited account hears of it on its own feed, where its home lists it.
             for did in body.invites.iter().filter_map(|i| i.did.as_deref()) {
                 state.publish(Topic::User(did.to_string()), "invitation", &body.context_id);
+            }
+            // An invited address hears of it by mail, where the site sends any.
+            if state.mailer.is_some() && !seats.is_empty() {
+                outcome.mailing = seats.len();
+                tokio::spawn(crate::mail::invite_all(
+                    state.clone(),
+                    body.context_id.clone(),
+                    seats,
+                ));
             }
             (StatusCode::OK, Json(outcome)).into_response()
         }
@@ -3763,7 +3772,7 @@ pub(crate) mod tests {
         assert_eq!(status, StatusCode::OK, "{v}");
         assert_eq!(
             v,
-            serde_json::json!({"inserted": 3, "skipped": 3, "without_email": 2}),
+            serde_json::json!({"inserted": 3, "skipped": 3, "without_email": 2, "mailing": 0}),
             "Eva once and two Finns go in; Eva again, Carla and Bob are already here"
         );
 
