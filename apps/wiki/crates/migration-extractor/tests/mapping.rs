@@ -116,12 +116,11 @@ fn a_poll_open_at_the_dump_comes_across_closed_and_is_reported() {
     let ex = extract(&nodes, &[], &[]);
     assert_eq!(ex.polls[0].ballots, 0);
     assert!(
-        ex.report
-            .unmapped_source
-            .contains_key("nodes(vote/poll).mutable"),
+        ex.report.reshaped.contains_key("nodes(vote/poll).mutable"),
         "{:?}",
-        ex.report.unmapped_source
+        ex.report.reshaped
     );
+    assert!(ex.report.unmapped_source.is_empty(), "a decision is no gap");
 }
 
 #[test]
@@ -590,8 +589,9 @@ fn non_content_data_is_carried_and_unknown_mimes_hit_the_report() {
             "wiki/file",
             json!({"fileId": "x", "type": "image/png"}),
         ),
-        node("x1", "conference/conference", json!(null)), // legacy one-off
-        node("sl", "speak/list", json!(null)),            // known, and left behind on purpose
+        node("x1", "conference/conference", json!({"programme": "kept?"})), // legacy one-off
+        node("x2", "map/map", json!(null)),                                 // and an empty one
+        node("sl", "speak/list", json!(null)), // known, and left behind on purpose
     ];
     let ex = extract(&nodes, &[], &[]);
 
@@ -612,13 +612,15 @@ fn non_content_data_is_carried_and_unknown_mimes_hit_the_report() {
         ex.report.unmapped_source.keys().collect::<Vec<_>>()
     );
 
-    // The legacy mime is unknown; a speaker list is known and not carried, so it
-    // is not flagged.
+    // A legacy mime that HOLDS something is a gap; an empty one loses a name
+    // and is counted as left behind, like the speaker list that is never carried.
     assert!(
         ex.report
             .unmapped_mimes
             .contains_key("conference/conference")
     );
+    assert!(!ex.report.unmapped_mimes.contains_key("map/map"));
+    assert_eq!(ex.report.left_behind["map/map, empty"], 1);
     assert!(!ex.report.unmapped_mimes.contains_key("speak/list"));
     // Two content docs extracted (candidate + file).
     assert_eq!(ex.documents.len(), 2);
@@ -658,6 +660,55 @@ fn tree() -> Vec<InterimNode> {
         ),
         n("s", "wiki/site", "blog", Some("home"), json!({})),
     ]
+}
+
+/// Production holds hundreds of rows whose parent was deleted outright before
+/// the interim had a bin. The interim reaches none of them. Re-rooted, they came
+/// back at the top of their group under a path made of their own key, where two
+/// of them with one key failed the whole load on the path index.
+#[test]
+fn what_hangs_off_a_deleted_row_is_left_behind_and_counted() {
+    let under = |id: &str, mime: &str, parent: &str| {
+        node_with(
+            id,
+            mime,
+            json!({"key": "forslag", "parentId": parent, "contextId": "g"}),
+        )
+    };
+    let mut nodes = tree();
+    nodes.extend([
+        under("o1", "vote/policy", "gone"),
+        under("o2", "vote/change", "o1"),
+        under("o3", "vote/comment", "o2"),
+        under("o4", "vote/policy", "gone-too"),
+        under("kept", "vote/policy", "f"),
+    ]);
+    let members = [
+        member("a1", "o1", Some("u1"), None),
+        member("a2", "kept", Some("u1"), None),
+    ];
+    let ex = extract(&nodes, &members, &[]);
+
+    let carried: Vec<&str> = ex.documents.iter().map(|d| d.id.as_str()).collect();
+    assert!(carried.contains(&"kept"), "{carried:?}");
+    assert!(
+        !carried.iter().any(|id| id.starts_with('o')) && ex.comments.is_empty(),
+        "{carried:?}"
+    );
+    let paths: std::collections::BTreeSet<&str> =
+        ex.documents.iter().map(|d| d.place.path.as_str()).collect();
+    assert_eq!(paths.len(), ex.documents.len(), "one path each: {paths:?}");
+
+    let left = &ex.report.left_behind;
+    assert_eq!(left["vote/policy, orphaned"], 2);
+    assert_eq!(left["vote/change, orphaned"], 1);
+    assert_eq!(left["vote/comment, orphaned"], 1);
+    assert_eq!(left["members, on an orphaned node"], 1);
+    assert!(
+        ex.report.unmapped_source.is_empty() && ex.report.unmapped_mimes.is_empty(),
+        "a decision is no gap: {:?}",
+        ex.report
+    );
 }
 
 /// The interim's root is a context like any other: its members run the site, and
@@ -899,17 +950,88 @@ fn whoever_made_a_context_still_owns_it_after_the_move() {
     let ex = extract(&[context_owned_by(Some("gs"))], &[plain], &[]);
     assert_eq!(ex.members.len(), 1);
     assert!(owns(&ex, "gs"));
-    assert_eq!(
-        ex.report.unmapped_source["nodes.ownerId (context)"].count,
-        1
-    );
+    assert_eq!(ex.report.reshaped["nodes.ownerId (context)"].count, 1);
+    assert!(ex.report.unmapped_source.is_empty(), "a decision is no gap");
 
     // Already an owner by their row: nothing to do, and nothing to report.
     let mut already = member("m1", "ctx1", Some("gs"), None);
     already.owner = true;
     let ex = extract(&[context_owned_by(Some("gs"))], &[already], &[]);
     assert_eq!(ex.members.len(), 1);
-    assert!(ex.report.unmapped_source.is_empty());
+    assert!(ex.report.reshaped.is_empty());
+}
+
+/// `members.nodeId` is tied to nothing in the interim, so an account can be
+/// deleted from under its seats and its author chips. Production held four such
+/// rows, and each failed the whole load on a foreign key that named no row.
+#[test]
+fn what_a_deleted_account_held_is_carried_without_it() {
+    let nodes = vec![
+        context_owned_by(None),
+        node("d1", "wiki/document", json!({})),
+    ];
+    let users: Vec<InterimUser> = serde_json::from_value(json!([{"id": "u-here"}])).expect("users");
+    let seat = |id: &str, account: Option<&str>, email: Option<&str>| {
+        let mut m = member(id, "ctx1", account, email);
+        m.owner = true;
+        m
+    };
+    let mut unnamed = member("a2", "d1", Some("u-gone"), None);
+    unnamed.name = None;
+    let members = [
+        seat("m1", Some("u-gone"), Some(" Gone@X.dk ")),
+        seat("m2", Some("u-gone-too"), None),
+        seat("m3", Some("u-gone-three"), Some("waits@x.dk")),
+        seat("m4", None, Some("waits@x.dk")),
+        seat("m5", Some("u-here"), None),
+        member("a1", "d1", Some("u-gone"), None),
+        unnamed,
+    ];
+    let ex = extract(&nodes, &members, &users);
+
+    let m1 = ex.members.iter().find(|m| m.id == "m1").expect("m1");
+    assert_eq!(
+        (m1.user_did.as_deref(), m1.email.as_deref(), m1.accepted),
+        (None, Some("gone@x.dk"), false),
+        "it waits for its address, as a seat nobody took"
+    );
+    assert_eq!((m1.role, m1.claim_token.as_deref()), (Role::Owner, None));
+    let kept: Vec<&str> = ex.members.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(kept, ["m4", "m5", "m1"], "one waiting seat to an address");
+    assert_eq!(
+        ex.documents[0].authors,
+        [Author::FreeText {
+            display: "Member a1".into()
+        }]
+    );
+
+    let known = ["u-here"];
+    assert!(
+        ex.members
+            .iter()
+            .filter_map(|m| m.user_did.as_deref())
+            .all(|did| known.contains(&did)),
+        "nothing left for the foreign key to refuse"
+    );
+    let report = &ex.report;
+    assert_eq!(report.reshaped["members.nodeId, account gone"].count, 1);
+    assert_eq!(
+        report.reshaped["members(author).nodeId, account gone"].count,
+        1
+    );
+    assert_eq!(
+        report.left_behind["members, account gone and no address"],
+        1
+    );
+    assert_eq!(
+        report.left_behind["members, account gone and its address already waits"],
+        1
+    );
+    assert_eq!(
+        report.left_behind["members(author), account gone and unnamed"],
+        1
+    );
+    assert!(report.unmapped_source.is_empty(), "{report:?}");
 }
 
 #[test]

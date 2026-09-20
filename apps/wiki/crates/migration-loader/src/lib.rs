@@ -52,6 +52,12 @@ pub enum LoadError {
         node: String,
         parent: String,
     },
+    /// A row names an account that is neither in the extraction nor already
+    /// loaded. Refused here, because the engine's own refusal names neither.
+    UnknownAccount {
+        row: String,
+        account: String,
+    },
 }
 
 impl std::fmt::Display for LoadError {
@@ -62,6 +68,9 @@ impl std::fmt::Display for LoadError {
             LoadError::ForeignKeysOff => write!(f, "foreign keys are not enforced"),
             LoadError::DanglingParent { node, parent } => {
                 write!(f, "node {node} has no loadable parent {parent}")
+            }
+            LoadError::UnknownAccount { row, account } => {
+                write!(f, "{row} names account {account}, which nothing loads")
             }
         }
     }
@@ -245,12 +254,52 @@ async fn check_parents(conn: &Connection, ex: &Extraction) -> Result<(), LoadErr
     Ok(())
 }
 
+/// Refuse an extraction in which a row names an account nobody is loading. The
+/// interim ties `members.nodeId` to nothing, so an account deleted there leaves
+/// such rows behind, and one of them fails the whole load. Not reactions, which
+/// are kept without their reactor.
+async fn check_accounts(conn: &Connection, ex: &Extraction) -> Result<(), LoadError> {
+    let arriving: BTreeSet<&str> = ex.users.iter().map(|u| u.did.as_str()).collect();
+    let owners = ex
+        .contexts
+        .iter()
+        .map(|c| (&c.id, &c.place))
+        .chain(ex.documents.iter().map(|d| (&d.id, &d.place)))
+        .filter_map(|(id, place)| {
+            Some((format!("the owner of {id}"), place.owner_did.as_deref()?))
+        });
+    let authors = ex.documents.iter().flat_map(|d| {
+        d.authors
+            .iter()
+            .filter_map(move |a| Some((format!("an author of {}", d.id), a.did()?)))
+    });
+    let members = ex
+        .members
+        .iter()
+        .filter_map(|m| Some((format!("member {}", m.id), m.user_did.as_deref()?)));
+    let comments = ex
+        .comments
+        .iter()
+        .filter_map(|c| Some((format!("comment {}", c.id), c.author.did()?)));
+    for (row, account) in owners.chain(authors).chain(members).chain(comments) {
+        if arriving.contains(account) || exists(conn, "user", "did", account).await? {
+            continue;
+        }
+        return Err(LoadError::UnknownAccount {
+            row,
+            account: account.to_string(),
+        });
+    }
+    Ok(())
+}
+
 /// Load an `Extraction` into `conn` (which must already have `ENTITY_SCHEMA`
 /// applied), in FK order and idempotently by primary key. Returns the count of
 /// newly inserted rows per table.
 pub async fn load(conn: &Connection, ex: &Extraction) -> Result<LoadStats, LoadError> {
     enforce_foreign_keys(conn).await?;
     check_parents(conn, ex).await?;
+    check_accounts(conn, ex).await?;
     let mut stats = LoadStats::default();
 
     // 1. Users: the FK target every author / member / comment references.
@@ -784,6 +833,27 @@ mod tests {
             }
             other => panic!("expected a dangling-parent error, got {other:?}"),
         }
+    }
+
+    /// The engine says only "FOREIGN KEY constraint failed", which at a cutover
+    /// names neither of 19000 seats.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_seat_of_an_account_nobody_loads_is_refused_by_name() {
+        let conn = staging().await;
+        let mut ex = sample();
+        ex.members[0].user_did = Some("did:plc:deleted".into());
+        match load(&conn, &ex).await {
+            Err(LoadError::UnknownAccount { row, account }) => {
+                assert_eq!(row, "member m1");
+                assert_eq!(account, "did:plc:deleted");
+            }
+            other => panic!("expected an unknown-account error, got {other:?}"),
+        }
+        assert_eq!(
+            count(&conn, "user").await,
+            0,
+            "refused before anything loads"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

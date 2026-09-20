@@ -162,6 +162,10 @@ pub struct FieldGapReport {
     /// listed so that none of them is a silent one.
     #[serde(default)]
     pub left_behind: BTreeMap<String, u64>,
+    /// Source values that arrive in another shape than they had, with what
+    /// became of them. Decisions like `left_behind`, and as little a gap.
+    #[serde(default)]
+    pub reshaped: BTreeMap<String, GapEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -172,13 +176,16 @@ pub struct GapEntry {
 
 impl FieldGapReport {
     fn note_source(&mut self, key: &str, note: &str) {
-        let e = self
-            .unmapped_source
-            .entry(key.to_string())
-            .or_insert(GapEntry {
-                count: 0,
-                note: note.to_string(),
-            });
+        Self::count_into(&mut self.unmapped_source, key, note);
+    }
+    fn note_reshaped(&mut self, key: &str, note: &str) {
+        Self::count_into(&mut self.reshaped, key, note);
+    }
+    fn count_into(bucket: &mut BTreeMap<String, GapEntry>, key: &str, note: &str) {
+        let e = bucket.entry(key.to_string()).or_insert(GapEntry {
+            count: 0,
+            note: note.to_string(),
+        });
         e.count += 1;
     }
     fn note_mime(&mut self, mime: &str) {
@@ -322,12 +329,42 @@ pub fn extract(
         .map(|n| n.id.as_str());
     let mut context_ids = mimes_of(CONTEXT_MIMES);
     context_ids.extend(home);
+    let tree: BTreeMap<&str, &InterimNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let orphaned = orphans(nodes, &tree, home);
+    context_ids.retain(|id| !orphaned.contains(id));
     let mut authors_by_node: BTreeMap<String, Vec<Author>> = BTreeMap::new();
+
+    // `members.nodeId` is tied to nothing in the interim, so an account can be
+    // deleted from under its rows. Only a dump that carries accounts can tell.
+    let accounts: BTreeSet<&str> = users.iter().map(|u| u.id.as_str()).collect();
+    let gone = |id: &str| !accounts.is_empty() && !accounts.contains(id) && !tree.contains_key(id);
+    let mut seats_of_the_gone = Vec::new();
 
     for m in members {
         let parent = m.parent_id.as_deref().unwrap_or_default();
+        if orphaned.contains(parent) {
+            out.report.note_left_behind("members, on an orphaned node");
+            continue;
+        }
+        let named = m.name.as_deref().map(str::trim).filter(|n| !n.is_empty());
         if content_ids.contains(parent) {
             let author = match &m.node_id {
+                Some(id) if gone(id) => match named {
+                    Some(name) => {
+                        out.report.note_reshaped(
+                            "members(author).nodeId, account gone",
+                            "an author whose account was deleted is carried by name",
+                        );
+                        Author::FreeText {
+                            display: name.to_string(),
+                        }
+                    }
+                    None => {
+                        out.report
+                            .note_left_behind("members(author), account gone and unnamed");
+                        continue;
+                    }
+                },
                 // A chip points at a node, and a group is a node too: a branch
                 // that put a motion forward is not a person with that id.
                 Some(id) if context_ids.contains(id.as_str()) => Author::Context {
@@ -358,6 +395,10 @@ pub fn extract(
             );
             continue;
         }
+        if m.node_id.as_deref().is_some_and(gone) {
+            seats_of_the_gone.push((m, parent));
+            continue;
+        }
         // Normalize the email (census: 11 case/space variant clusters).
         let email = m.email.as_deref().map(normalized).filter(|e| !e.is_empty());
         // A claim link is spent once its seat is taken. Carried along, it would
@@ -385,13 +426,18 @@ pub fn extract(
             legacy_id: Some(m.id.clone()),
         });
     }
+    keep_the_seats_of_the_gone(&seats_of_the_gone, &mut out);
     realize_context_owners(nodes, &context_ids, &mut out);
 
-    let tree: BTreeMap<&str, &InterimNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let parents: BTreeSet<&str> = nodes
+        .iter()
+        .filter_map(|n| n.parent_id.as_deref())
+        .collect();
     // The ids that become a `context` or a `document`: the rows a `parent_id`
     // can still point at after the move.
     let migrated: BTreeSet<&str> = nodes
         .iter()
+        .filter(|n| !orphaned.contains(n.id.as_str()))
         .filter(|n| {
             let mime = n.mime_id.as_deref().unwrap_or("");
             CONTEXT_MIMES.contains(&mime)
@@ -404,6 +450,10 @@ pub fn extract(
 
     for n in nodes {
         let mime = n.mime_id.as_deref().unwrap_or("");
+        if orphaned.contains(n.id.as_str()) {
+            out.report.note_left_behind(&format!("{mime}, orphaned"));
+            continue;
+        }
         let is_home = home == Some(n.id.as_str());
         if CONTEXT_MIMES.contains(&mime) || is_home {
             let name = match &n.name {
@@ -502,6 +552,12 @@ pub fn extract(
                 "vote/vote" | "canvas/pixel" => {}
                 // What a projector showed while a meeting ran, and nothing after.
                 "speak/list" | "speak/speak" => out.report.note_left_behind(mime),
+                // A legacy one-off with nothing in it and nothing under it loses
+                // a name. One that HOLDS anything stays a gap to triage, and so
+                // does a second home, which is no legacy mime but a broken tree.
+                other if other != HOME_MIME && is_empty_shell(n, &parents) => {
+                    out.report.note_left_behind(&format!("{other}, empty"));
+                }
                 other => out.report.note_mime(other),
             }
         }
@@ -547,6 +603,53 @@ fn binned_with(
             .is_some_and(|r| r.mime_id.as_deref() == Some(COMMENT_MIME));
         root != n.id && (migrated.contains(root) || a_comment)
     })
+}
+
+/// The ids that hang off nothing: an ancestor's row is gone (deleted outright,
+/// before the interim had a bin), so no URL reaches them and no page lists them.
+/// Carried, they would come back at the top of their group. Empty for a dump
+/// with no home, whose top level hangs off nothing by design.
+fn orphans<'a>(
+    nodes: &'a [InterimNode],
+    tree: &BTreeMap<&str, &InterimNode>,
+    home: Option<&str>,
+) -> BTreeSet<&'a str> {
+    if home.is_none() {
+        return BTreeSet::new();
+    }
+    nodes
+        .iter()
+        .filter(|n| !reaches_a_root(n, tree))
+        .map(|n| n.id.as_str())
+        .collect()
+}
+
+/// Bounded, so a parent cycle in bad data ends, as an orphan.
+fn reaches_a_root(n: &InterimNode, tree: &BTreeMap<&str, &InterimNode>) -> bool {
+    let mut at = n;
+    for _ in 0..64 {
+        let Some(parent) = at.parent_id.as_deref() else {
+            return true;
+        };
+        let Some(above) = tree.get(parent) else {
+            return false;
+        };
+        at = above;
+    }
+    false
+}
+
+/// No data of its own, and no row under it (binned ones included: a restore
+/// would look for this parent).
+fn is_empty_shell(n: &InterimNode, parents: &BTreeSet<&str>) -> bool {
+    let bare = match &n.data {
+        None | Some(serde_json::Value::Null) => true,
+        Some(serde_json::Value::Object(o)) => o.is_empty(),
+        Some(serde_json::Value::Array(a)) => a.is_empty(),
+        Some(serde_json::Value::String(t)) => t.trim().is_empty(),
+        Some(_) => false,
+    };
+    bare && !parents.contains(n.id.as_str())
 }
 
 /// In the bin on its own account. Reactions and reports have no bin where they
@@ -695,7 +798,7 @@ fn poll_of(n: &InterimNode, nodes: &[InterimNode], report: &mut FieldGapReport) 
     };
     let flag = |key: &str| data_of(n, key).and_then(|v| v.as_bool()).unwrap_or(false);
     if n.mutable == Some(true) {
-        report.note_source(
+        report.note_reshaped(
             "nodes(vote/poll).mutable",
             "a poll open at the dump is migrated closed, with what it had taken",
         );
@@ -827,6 +930,49 @@ fn reaction_of(n: &InterimNode) -> Option<Reaction> {
     })
 }
 
+/// A roster says who belongs, account or none. A seat whose account was deleted
+/// goes back to waiting for its address, as it was before anyone took it, and
+/// after the rest: one address holds one waiting seat in a context, and the
+/// row that was always waiting is the one to keep.
+fn keep_the_seats_of_the_gone(seats: &[(&InterimMember, &str)], out: &mut Extraction) {
+    let mut waiting: BTreeSet<(String, String)> = out
+        .members
+        .iter()
+        .filter(|m| m.user_did.is_none())
+        .filter_map(|m| Some((m.context_id.clone(), m.email.clone()?)))
+        .collect();
+    for (m, context) in seats {
+        let email = m.email.as_deref().map(normalized).filter(|e| !e.is_empty());
+        let Some(email) = email else {
+            out.report
+                .note_left_behind("members, account gone and no address");
+            continue;
+        };
+        if !waiting.insert((context.to_string(), email.clone())) {
+            out.report
+                .note_left_behind("members, account gone and its address already waits");
+            continue;
+        }
+        out.report.note_reshaped(
+            "members.nodeId, account gone",
+            "a seat whose account was deleted waits for its address again",
+        );
+        out.members.push(Member {
+            id: m.id.clone(),
+            user_did: None,
+            context_id: context.to_string(),
+            role: if m.owner { Role::Owner } else { Role::Member },
+            active: m.active,
+            name: m.name.clone().filter(|n| !n.trim().is_empty()),
+            hidden: m.hidden,
+            accepted: false,
+            email: Some(email),
+            claim_token: None,
+            legacy_id: Some(m.id.clone()),
+        });
+    }
+}
+
 /// Whoever made a context owns it, whether or not a member row says so: the
 /// interim's read rules and its `is_active_owner` both count `nodes.owner_id`.
 /// The new model knows owners only as members, so without this the general
@@ -852,7 +998,7 @@ fn realize_context_owners(
             Some(member) if member.role == Role::Owner => {}
             Some(member) => {
                 member.role = Role::Owner;
-                out.report.note_source(
+                out.report.note_reshaped(
                     "nodes.ownerId (context)",
                     "the owner of a context, realized as an owner membership",
                 );
@@ -871,7 +1017,7 @@ fn realize_context_owners(
                     claim_token: None,
                     legacy_id: None,
                 });
-                out.report.note_source(
+                out.report.note_reshaped(
                     "nodes.ownerId (context)",
                     "the owner of a context, realized as an owner membership",
                 );

@@ -44,6 +44,9 @@ fn main() {
     for (what, count) in &ex.report.left_behind {
         eprintln!("left behind on purpose: {count} x {what}");
     }
+    for (what, entry) in &ex.report.reshaped {
+        eprintln!("reshaped: {} x {what}: {}", entry.count, entry.note);
+    }
     std::fs::write(
         "report.json",
         serde_json::to_string_pretty(&ex.report).unwrap(),
