@@ -673,6 +673,7 @@ dependencies = [
 name = "board-mirror"
 version = "0.1.0"
 dependencies = [
+ "atproto-spaces",
  "ballot-spec",
  "base64 0.22.1",
  "fake-pds",

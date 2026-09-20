@@ -1,6 +1,9 @@
 //! `board-mirror follow --pds <url> --repo <did> --dir <dir> [--every <secs>]`
 //! keeps an independent copy of a published ballot board;
-//! `board-mirror check --dir <dir> [--key <did:key>]` counts it. Both exit
+//! `board-mirror follow --space <at-uri> --pds <url> --as <handle> --dir <dir>`
+//! keeps one of the board in a group's space, as a member whose app password is
+//! in `BOARD_MIRROR_PASSWORD`;
+//! `board-mirror check --dir <dir> [--key <did:key>]` counts it. All exit
 //! non-zero when the custodian's word does not hold up.
 
 use std::path::PathBuf;
@@ -16,12 +19,44 @@ async fn main() {
     let dir = flag(&args, "--dir").map(PathBuf::from);
     match (args.first().map(String::as_str), dir) {
         (Some("follow"), Some(dir)) => {
-            let (Some(pds), Some(repo)) = (flag(&args, "--pds"), flag(&args, "--repo")) else {
+            let Some(pds) = flag(&args, "--pds") else {
                 return usage();
             };
+            let in_space = match (flag(&args, "--space"), flag(&args, "--as")) {
+                (Some(space), Some(identifier)) => {
+                    // Not a flag: a command line is there for every process to read.
+                    let Ok(password) = std::env::var("BOARD_MIRROR_PASSWORD") else {
+                        eprintln!("BOARD_MIRROR_PASSWORD is not set");
+                        std::process::exit(2);
+                    };
+                    let member = board_mirror::Member {
+                        pds: pds.clone(),
+                        identifier,
+                        password,
+                    };
+                    let directory = flag(&args, "--plc");
+                    let directory = directory.unwrap_or("https://plc.directory".into());
+                    Some((member, space, directory))
+                }
+                (None, None) => None,
+                _ => return usage(),
+            };
+            let repo = flag(&args, "--repo");
+            if in_space.is_none() && repo.is_none() {
+                return usage();
+            }
             let every = flag(&args, "--every").and_then(|s| s.parse::<u64>().ok());
             loop {
-                match board_mirror::follow_once(&pds, &repo, &dir).await {
+                let followed = match &in_space {
+                    Some((member, space, directory)) => {
+                        board_mirror::follow_space_once(member, space, directory, &dir).await
+                    }
+                    None => {
+                        let repo = repo.as_deref().unwrap_or_default();
+                        board_mirror::follow_once(&pds, repo, &dir).await
+                    }
+                };
+                match followed {
                     Ok(seen) => {
                         println!("{} new, {} alarms", seen.new, seen.alarms.len());
                         for alarm in &seen.alarms {
@@ -68,6 +103,8 @@ async fn main() {
 fn usage() {
     eprintln!(
         "usage: board-mirror follow --pds <url> --repo <did> --dir <dir> [--every <secs>]\n       \
+         board-mirror follow --space <at-uri> --pds <your pds> --as <your handle> --dir <dir> \
+         [--plc <url>] [--every <secs>]   (BOARD_MIRROR_PASSWORD: an app password)\n       \
          board-mirror check --dir <dir> [--key <did:key>]"
     );
     std::process::exit(2);

@@ -190,6 +190,11 @@ pub async fn get_board_key(State(state): State<AppState>) -> Response {
 // of what a vote came to, so only a poll opened as public has one: a closed
 // group's counts are its members' to know, and a hidden tally is its owners'.
 //
+// Where the wiki is mirrored into atproto spaces (`crate::spaces`), the board of
+// every secret poll also goes into its context's space, which its members read
+// and nobody else: one of them can then keep the copy. Not a poll that hides
+// its tally, whose board is its owners' alone, which no space can be.
+//
 // Ballots are not published as they are cast. A record's arrival is a public
 // event with a time on it, and one record a cast would pair every ballot with
 // its voter's moment at the keyboard. They wait until a few can go together, in
@@ -204,6 +209,19 @@ CREATE TABLE IF NOT EXISTS board_publication (
   closed_uri TEXT                                          -- the close-out, once it is out
 );
 CREATE TABLE IF NOT EXISTS board_published (
+  poll_id  TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (poll_id, position)
+);
+-- The same two for the board that goes into the poll's context's space.
+CREATE TABLE IF NOT EXISTS space_board_publication (
+  poll_id    TEXT PRIMARY KEY REFERENCES poll(id),
+  poll_uri   TEXT NOT NULL,
+  poll_cid   TEXT NOT NULL,
+  poll_rkey  TEXT NOT NULL,
+  closed_uri TEXT
+);
+CREATE TABLE IF NOT EXISTS space_board_published (
   poll_id  TEXT NOT NULL,
   position INTEGER NOT NULL,
   PRIMARY KEY (poll_id, position)
@@ -299,8 +317,171 @@ impl BoardAccount {
     }
 }
 
+/// Where a board goes out.
+enum Out<'a> {
+    /// The board account's public repo: a poll opened as public, to anyone.
+    Public(&'a BoardAccount),
+    /// Each poll's context's space, in the organization's repo there.
+    Space {
+        spaces: &'a crate::spaces::Spaces,
+        organization: String,
+        session: String,
+    },
+}
+
+impl Out<'_> {
+    /// The account whose repo the board is in.
+    fn authority(&self) -> &str {
+        match self {
+            Out::Public(account) => &account.did,
+            Out::Space { organization, .. } => organization,
+        }
+    }
+
+    /// Where what went out is kept track of: the announcements, the positions.
+    fn tables(&self) -> (&'static str, &'static str) {
+        match self {
+            Out::Public(_) => ("board_publication", "board_published"),
+            Out::Space { .. } => ("space_board_publication", "space_board_published"),
+        }
+    }
+
+    /// Which polls have a board here.
+    fn polls(&self) -> &'static str {
+        match self {
+            Out::Public(_) => "p.public_board = 1",
+            Out::Space { .. } => "p.hide_tally = 0",
+        }
+    }
+
+    /// Make a record that is not there yet. Answers where it is, and its CID.
+    async fn create(
+        &self,
+        state: &AppState,
+        poll: &PublicPoll,
+        collection: &str,
+        rkey: &str,
+        record: &serde_json::Value,
+    ) -> Result<(String, String), Failure> {
+        match self {
+            Out::Public(account) => {
+                let body = serde_json::json!({
+                    "repo": account.did, "collection": collection, "rkey": rkey, "record": record,
+                });
+                let out = account.call(state, "createRecord", &body).await?;
+                match (out["uri"].as_str(), out["cid"].as_str()) {
+                    (Some(uri), Some(cid)) => Ok((uri.to_string(), cid.to_string())),
+                    _ => Err("the board's PDS made a record and did not say where".into()),
+                }
+            }
+            Out::Space {
+                spaces,
+                organization,
+                session,
+            } => {
+                let space = spaces
+                    .ensure_space(state, &poll.context_id)
+                    .await?
+                    .to_string();
+                let made = spaces
+                    .host
+                    .create_record(session, &space, organization, collection, rkey, record)
+                    .await;
+                if let Err(e) = &made {
+                    spaces.forget_session_if_spent(e).await;
+                }
+                let made = made?;
+                Ok((made.uri, made.cid))
+            }
+        }
+    }
+
+    /// Make a batch of ballots in one commit, all or none: `(rkey, record)` each.
+    async fn create_entries(
+        &self,
+        state: &AppState,
+        poll: &PublicPoll,
+        entries: Vec<(String, serde_json::Value)>,
+    ) -> Result<(), Failure> {
+        match self {
+            Out::Public(account) => {
+                let writes: Vec<serde_json::Value> = entries
+                    .iter()
+                    .map(|(rkey, value)| {
+                        serde_json::json!({
+                            "$type": "com.atproto.repo.applyWrites#create",
+                            "collection": ENTRY_NSID, "rkey": rkey, "value": value,
+                        })
+                    })
+                    .collect();
+                let body = serde_json::json!({ "repo": account.did, "writes": writes });
+                account.call(state, "applyWrites", &body).await?;
+            }
+            Out::Space {
+                spaces,
+                organization,
+                session,
+            } => {
+                let space = spaces
+                    .ensure_space(state, &poll.context_id)
+                    .await?
+                    .to_string();
+                let records: Vec<_> = entries
+                    .into_iter()
+                    .map(|(rkey, value)| (ENTRY_NSID.to_string(), rkey, value))
+                    .collect();
+                spaces
+                    .host
+                    .create_records(session, &space, organization, &records)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Say something else in a record that is there: a poll's announcement,
+    /// once it has closed.
+    async fn put(
+        &self,
+        state: &AppState,
+        poll: &PublicPoll,
+        collection: &str,
+        rkey: &str,
+        record: &serde_json::Value,
+    ) -> Result<(), Failure> {
+        match self {
+            Out::Public(account) => {
+                let body = serde_json::json!({
+                    "repo": account.did, "collection": collection, "rkey": rkey, "record": record,
+                });
+                account.call(state, "putRecord", &body).await?;
+            }
+            Out::Space {
+                spaces,
+                organization,
+                session,
+            } => {
+                let space = spaces.ensure_space(state, &poll.context_id).await?;
+                spaces
+                    .host
+                    .put_record(
+                        session,
+                        &space.to_string(),
+                        organization,
+                        collection,
+                        rkey,
+                        record,
+                    )
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+}
+
 struct PublicPoll {
     id: String,
+    context_id: String,
     question: String,
     options: Vec<String>,
     min: i64,
@@ -311,22 +492,22 @@ struct PublicPoll {
     created_at: String,
 }
 
-async fn public_polls(conn: &Connection) -> Result<Vec<PublicPoll>, DbError> {
-    // Those with anything left to say: not yet closed out in public.
-    let mut rows = conn
-        .query(
-            "SELECT p.id, p.question, p.options, p.min_choices, p.max_choices, p.blank, p.open, \
-                    p.issuer_pubkey, p.created_at \
-             FROM poll p LEFT JOIN board_publication b ON b.poll_id = p.id \
-             WHERE p.public_board = 1 AND p.secret = 1 AND p.issuer_pubkey IS NOT NULL \
-               AND b.closed_uri IS NULL \
-             ORDER BY p.created_at",
-            (),
-        )
-        .await?;
-    let mut out = Vec::new();
+async fn polls_due(conn: &Connection, out: &Out<'_>) -> Result<Vec<PublicPoll>, DbError> {
+    // Those with anything left to say: not yet closed out there.
+    let (publication, _) = out.tables();
+    let sql = format!(
+        "SELECT p.id, p.question, p.options, p.min_choices, p.max_choices, p.blank, p.open, \
+                p.issuer_pubkey, p.created_at, p.context_id \
+         FROM poll p LEFT JOIN {publication} b ON b.poll_id = p.id \
+         WHERE {} AND p.secret = 1 AND p.issuer_pubkey IS NOT NULL \
+           AND b.closed_uri IS NULL \
+         ORDER BY p.created_at",
+        out.polls()
+    );
+    let mut rows = conn.query(&sql, ()).await?;
+    let mut due = Vec::new();
     while let Some(row) = rows.next().await? {
-        out.push(PublicPoll {
+        due.push(PublicPoll {
             id: row.get(0)?,
             question: row.get(1)?,
             options: serde_json::from_str(&row.get::<String>(2)?).unwrap_or_default(),
@@ -336,9 +517,10 @@ async fn public_polls(conn: &Connection) -> Result<Vec<PublicPoll>, DbError> {
             open: row.get::<i64>(6)? != 0,
             issuer_pubkey: row.get(7)?,
             created_at: row.get(8)?,
+            context_id: row.get(9)?,
         });
     }
-    Ok(out)
+    Ok(due)
 }
 
 /// What one pass put out.
@@ -352,16 +534,36 @@ pub struct Published {
 /// Publish what is due: each public poll's announcement, the ballots that have
 /// waited long enough, and the close-out of one that has closed.
 pub async fn publish_due(state: &AppState, account: &BoardAccount) -> Result<Published, Failure> {
+    publish_to(state, &Out::Public(account)).await
+}
+
+/// [`publish_due`], of every secret poll whose tally its members may see, into
+/// its context's space.
+pub async fn publish_due_in_spaces(
+    state: &AppState,
+    spaces: &crate::spaces::Spaces,
+) -> Result<Published, Failure> {
+    let (organization, session) = spaces.session().await?;
+    let out = Out::Space {
+        spaces,
+        organization,
+        session,
+    };
+    publish_to(state, &out).await
+}
+
+async fn publish_to(state: &AppState, out: &Out<'_>) -> Result<Published, Failure> {
     use rand::seq::SliceRandom;
     let conn = state.db.acquire().await?;
+    let (publication, published_table) = out.tables();
     let mut done = Published::default();
-    for poll in public_polls(&conn).await? {
-        let announced = announcement(state, account, &conn, &poll, &mut done).await?;
+    for poll in polls_due(&conn, out).await? {
+        let announced = announcement(state, out, &conn, &poll, &mut done).await?;
         let (poll_uri, poll_cid, poll_rkey) = &announced;
 
         let mut waiting = Vec::new();
         let board = crate::ballot::board(state, &poll.id).await?;
-        let published = positions_out(&conn, &poll.id).await?;
+        let published = positions_out(&conn, published_table, &poll.id).await?;
         for (position, entry) in board.ballots().await?.iter().enumerate() {
             if !published.contains(&(position as u64)) {
                 waiting.push((
@@ -375,31 +577,29 @@ pub async fn publish_due(state: &AppState, account: &BoardAccount) -> Result<Pub
             for batch in waiting.chunks(MAX_WRITES) {
                 let left_at = crate::util::now_stamp();
                 let micros = crate::util::now_millis().max(0) as u64 * 1000;
-                let writes: Vec<serde_json::Value> = batch
+                let records = batch
                     .iter()
                     .enumerate()
                     .map(|(i, (_, entry))| {
-                        serde_json::json!({
-                            "$type": "com.atproto.repo.applyWrites#create",
-                            "collection": ENTRY_NSID,
-                            "rkey": tid(micros + i as u64, rand::random::<u16>()),
-                            "value": {
-                                "$type": ENTRY_NSID,
-                                "pollRef": { "uri": poll_uri, "cid": poll_cid },
-                                "token": entry.token,
-                                "msgRandomizer": entry.msg_randomizer,
-                                "signature": entry.signature,
-                                "choices": entry.choices,
-                                "createdAt": left_at,
-                            },
-                        })
+                        let value = serde_json::json!({
+                            "$type": ENTRY_NSID,
+                            "pollRef": { "uri": poll_uri, "cid": poll_cid },
+                            "token": entry.token,
+                            "msgRandomizer": entry.msg_randomizer,
+                            "signature": entry.signature,
+                            "choices": entry.choices,
+                            "createdAt": left_at,
+                        });
+                        (tid(micros + i as u64, rand::random::<u16>()), value)
                     })
                     .collect();
-                let body = serde_json::json!({ "repo": account.did, "writes": writes });
-                account.call(state, "applyWrites", &body).await?;
+                out.create_entries(state, &poll, records).await?;
                 for (position, _) in batch {
                     conn.execute(
-                        "INSERT OR IGNORE INTO board_published (poll_id, position) VALUES (?1, ?2)",
+                        &format!(
+                            "INSERT OR IGNORE INTO {published_table} (poll_id, position) \
+                             VALUES (?1, ?2)"
+                        ),
                         vec![
                             Value::Text(poll.id.clone()),
                             Value::Integer(*position as i64),
@@ -417,34 +617,32 @@ pub async fn publish_due(state: &AppState, account: &BoardAccount) -> Result<Pub
         let Some(close) = close_out_of(state, &poll.id).await? else {
             continue;
         };
-        let record = poll_record(state, account, &poll, "closed");
-        let body = serde_json::json!({
-            "repo": account.did, "collection": POLL_NSID, "rkey": poll_rkey, "record": record,
+        let record = poll_record(state, out, &poll, "closed");
+        out.put(state, &poll, POLL_NSID, poll_rkey, &record).await?;
+        let close_out = serde_json::json!({
+            "$type": CLOSEOUT_NSID,
+            // By its address alone: closing the announcement changed its CID.
+            "poll": poll_uri,
+            "pollId": poll.id,
+            "entries": close.entries,
+            "issued": close.issued,
+            "counts": close.counts,
+            "boardDigest": close.board_digest,
+            "closedAt": close.closed_at,
+            "key": close.key,
+            "sig": close.sig,
+            "createdAt": crate::util::now_stamp(),
         });
-        account.call(state, "putRecord", &body).await?;
-        let body = serde_json::json!({
-            "repo": account.did,
-            "collection": CLOSEOUT_NSID,
-            "rkey": tid(crate::util::now_millis().max(0) as u64 * 1000, rand::random::<u16>()),
-            "record": {
-                "$type": CLOSEOUT_NSID,
-                // By its address alone: closing the announcement changed its CID.
-                "poll": poll_uri,
-                "pollId": poll.id,
-                "entries": close.entries,
-                "issued": close.issued,
-                "counts": close.counts,
-                "boardDigest": close.board_digest,
-                "closedAt": close.closed_at,
-                "key": close.key,
-                "sig": close.sig,
-                "createdAt": crate::util::now_stamp(),
-            },
-        });
-        let out = account.call(state, "createRecord", &body).await?;
+        let rkey = tid(
+            crate::util::now_millis().max(0) as u64 * 1000,
+            rand::random::<u16>(),
+        );
+        let (closed_uri, _) = out
+            .create(state, &poll, CLOSEOUT_NSID, &rkey, &close_out)
+            .await?;
         conn.execute(
-            "UPDATE board_publication SET closed_uri = ?2 WHERE poll_id = ?1",
-            [poll.id.as_str(), out["uri"].as_str().unwrap_or_default()],
+            &format!("UPDATE {publication} SET closed_uri = ?2 WHERE poll_id = ?1"),
+            [poll.id.as_str(), closed_uri.as_str()],
         )
         .await?;
         done.closed += 1;
@@ -454,7 +652,7 @@ pub async fn publish_due(state: &AppState, account: &BoardAccount) -> Result<Pub
 
 fn poll_record(
     state: &AppState,
-    account: &BoardAccount,
+    out: &Out<'_>,
     poll: &PublicPoll,
     poll_state: &str,
 ) -> serde_json::Value {
@@ -464,7 +662,7 @@ fn poll_record(
         "question": poll.question,
         "options": poll.options,
         "state": poll_state,
-        "closingAuthority": account.did,
+        "closingAuthority": out.authority(),
         "issuerPubkey": poll.issuer_pubkey,
         "custodyKey": custodian(&state.config).did_key(),
         "minVote": poll.min,
@@ -479,14 +677,15 @@ fn poll_record(
 /// the CID every ballot names to say which poll it was cast in.
 async fn announcement(
     state: &AppState,
-    account: &BoardAccount,
+    out: &Out<'_>,
     conn: &Connection,
     poll: &PublicPoll,
     done: &mut Published,
 ) -> Result<(String, String, String), Failure> {
+    let (publication, _) = out.tables();
     let mut rows = conn
         .query(
-            "SELECT poll_uri, poll_cid, poll_rkey FROM board_publication WHERE poll_id = ?1",
+            &format!("SELECT poll_uri, poll_cid, poll_rkey FROM {publication} WHERE poll_id = ?1"),
             [poll.id.as_str()],
         )
         .await?;
@@ -498,33 +697,28 @@ async fn announcement(
         crate::util::now_millis().max(0) as u64 * 1000,
         rand::random::<u16>(),
     );
-    let body = serde_json::json!({
-        "repo": account.did,
-        "collection": POLL_NSID,
-        "rkey": rkey,
-        "record": poll_record(state, account, poll, "open"),
-    });
-    let out = account.call(state, "createRecord", &body).await?;
-    let (Some(uri), Some(cid)) = (out["uri"].as_str(), out["cid"].as_str()) else {
-        return Err("the board's PDS made a record and did not say where".into());
-    };
+    let record = poll_record(state, out, poll, "open");
+    let (uri, cid) = out.create(state, poll, POLL_NSID, &rkey, &record).await?;
     conn.execute(
-        "INSERT INTO board_publication (poll_id, poll_uri, poll_cid, poll_rkey) \
-         VALUES (?1, ?2, ?3, ?4)",
-        [poll.id.as_str(), uri, cid, rkey.as_str()],
+        &format!(
+            "INSERT INTO {publication} (poll_id, poll_uri, poll_cid, poll_rkey) \
+             VALUES (?1, ?2, ?3, ?4)"
+        ),
+        [poll.id.as_str(), uri.as_str(), cid.as_str(), rkey.as_str()],
     )
     .await?;
     done.announced += 1;
-    Ok((uri.to_string(), cid.to_string(), rkey))
+    Ok((uri, cid, rkey))
 }
 
 async fn positions_out(
     conn: &Connection,
+    published: &str,
     poll_id: &str,
 ) -> Result<std::collections::BTreeSet<u64>, DbError> {
     let mut rows = conn
         .query(
-            "SELECT position FROM board_published WHERE poll_id = ?1",
+            &format!("SELECT position FROM {published} WHERE poll_id = ?1"),
             [poll_id],
         )
         .await?;
@@ -535,17 +729,34 @@ async fn positions_out(
     Ok(out)
 }
 
-/// Publish what is due, every `board_batch_secs`, for the life of the process.
-/// Does nothing where no board account is configured. A pass that fails is
-/// logged and tried again: what is waiting stays waiting, and nothing is lost.
+/// Publish what is due, every `board_batch_secs`, for the life of the process:
+/// to the board account, into the spaces, or both, as each is configured. A
+/// pass that fails is logged and tried again: what is waiting stays waiting,
+/// and nothing is lost.
 pub async fn run_publisher(state: AppState) {
-    if state.config.board_pds.is_empty() {
+    if state.config.board_pds.is_empty() && state.spaces.is_none() {
         return;
     }
     let every = std::time::Duration::from_secs(state.config.board_batch_secs.max(1));
+    let said = |to: &str, done: Published| {
+        if done != Published::default() {
+            tracing::info!(
+                "board, {to}: announced {}, published {} ballots, closed out {}",
+                done.announced,
+                done.entries,
+                done.closed
+            );
+        }
+    };
     let mut account: Option<BoardAccount> = None;
     loop {
         tokio::time::sleep(every).await;
+        if let Some(spaces) = &state.spaces {
+            match publish_due_in_spaces(&state, spaces).await {
+                Ok(done) => said("in the spaces", done),
+                Err(e) => tracing::warn!("publishing a board into its space failed: {e}"),
+            }
+        }
         if account.is_none() {
             match BoardAccount::sign_in(&state).await {
                 Ok(signed_in) => account = signed_in,
@@ -554,13 +765,7 @@ pub async fn run_publisher(state: AppState) {
         }
         let Some(session) = &account else { continue };
         match publish_due(&state, session).await {
-            Ok(done) if done != Published::default() => tracing::info!(
-                "board: announced {}, published {} ballots, closed out {}",
-                done.announced,
-                done.entries,
-                done.closed
-            ),
-            Ok(_) => {}
+            Ok(done) => said("in public", done),
             Err(e) => {
                 tracing::warn!("publishing the board failed, to be tried again: {e}");
                 // A session lapses, and asking for a new one costs nothing.
@@ -749,6 +954,250 @@ mod tests {
         .await;
         publish_due(state, &account).await.expect("a pass");
         custodian(&state.config).did_key()
+    }
+
+    /// [`publishing`], with the wiki mirrored into spaces at the same PDS.
+    async fn publishing_in_spaces() -> (AppState, FakePds, Vec<String>) {
+        let (mut state, pds, voters) = publishing().await;
+        state.config.spaces_pds = pds.url.clone();
+        state.config.spaces_identifier = "wiki.test".to_string();
+        state.config.spaces_password = crate::config::Secret::new(PASSWORD);
+        state.config.spaces_service = "did:web:wiki.test#wiki_appview".to_string();
+        let spaces = crate::spaces::Spaces::from_config(&state.config)
+            .expect("whole")
+            .expect("spaces");
+        state.spaces = Some(std::sync::Arc::new(spaces));
+        (state, pds, voters)
+    }
+
+    fn in_space(pds: &FakePds, context_id: &str, collection: &str) -> Vec<fake_pds::Record> {
+        let space = format!(
+            "at://{}/space/wiki.radikal.context/{context_id}",
+            fake_pds::DID
+        );
+        let mut records = pds.space_records(&space);
+        records.retain(|r| r.collection == collection);
+        records
+    }
+
+    #[tokio::test]
+    async fn a_closed_groups_board_goes_into_its_space_and_nowhere_else() {
+        let (state, pds, voters) = publishing_in_spaces().await;
+        let spaces = state.spaces.clone().expect("spaces");
+        // c9 is closed, so nothing of this poll is for the world.
+        let poll = open(&state, &voters[0], for_against(true)).await;
+        assert_eq!(poll["public_board"], false);
+        let id = poll["id"].as_str().expect("id");
+        for (voter, choice) in voters.iter().zip([0, 1, 0]) {
+            vote(&state, &poll, voter, &[choice]).await;
+        }
+        let first = publish_due_in_spaces(&state, &spaces)
+            .await
+            .expect("a pass");
+        assert_eq!(
+            first,
+            Published {
+                announced: 1,
+                entries: 3,
+                closed: 0
+            }
+        );
+        let announced = in_space(&pds, "c9", POLL_NSID);
+        assert_eq!(announced[0].value["closingAuthority"], fake_pds::DID);
+        let entries = in_space(&pds, "c9", ENTRY_NSID);
+        assert_eq!(entries.len(), 3);
+        // A ballot names the announcement where it is: in the space.
+        let uri = entries[0].value["pollRef"]["uri"].as_str().expect("uri");
+        assert!(uri.contains("/space/wiki.radikal.context/c9/"), "{uri}");
+        let batches: Vec<_> = pds
+            .calls()
+            .into_iter()
+            .filter(|c| c.0 == "space.applyWrites")
+            .collect();
+        assert_eq!(
+            batches,
+            [("space.applyWrites".to_string(), 3)],
+            "in one write"
+        );
+
+        // What mirrors the pages has no row for these, and leaves them alone.
+        spaces.mirror_context(&state, "c9").await.expect("a pass");
+        assert_eq!(in_space(&pds, "c9", ENTRY_NSID).len(), 3);
+
+        post(
+            router(state.clone()),
+            CLOSE,
+            Some(&voters[0]),
+            json!({"id": id}),
+        )
+        .await;
+        let last = publish_due_in_spaces(&state, &spaces)
+            .await
+            .expect("a pass");
+        assert_eq!((last.entries, last.closed), (0, 1));
+        assert_eq!(in_space(&pds, "c9", POLL_NSID)[0].value["state"], "closed");
+        assert_eq!(
+            in_space(&pds, "c9", CLOSEOUT_NSID)[0].value["counts"],
+            json!([2, 1, 0])
+        );
+        let again = publish_due_in_spaces(&state, &spaces)
+            .await
+            .expect("a pass");
+        assert_eq!(again, Published::default(), "said once");
+
+        // Nothing went to the board account, which is for polls held in public.
+        let account = BoardAccount::sign_in(&state)
+            .await
+            .expect("a session")
+            .expect("configured");
+        let public = publish_due(&state, &account).await.expect("a pass");
+        assert_eq!(public, Published::default());
+        assert!(pds.records(POLL_NSID).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_hidden_tally_is_its_owners_and_no_space_is_that_narrow() {
+        let (state, pds, voters) = publishing_in_spaces().await;
+        let spaces = state.spaces.clone().expect("spaces");
+        let mut hidden = for_against(true);
+        hidden["hide_tally"] = json!(true);
+        let poll = open(&state, &voters[0], hidden).await;
+        for (voter, choice) in voters.iter().zip([0, 1, 0]) {
+            vote(&state, &poll, voter, &[choice]).await;
+        }
+        let pass = publish_due_in_spaces(&state, &spaces)
+            .await
+            .expect("a pass");
+        assert_eq!(pass, Published::default());
+        assert!(in_space(&pds, "c9", POLL_NSID).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_space_made_again_gets_its_boards_again() {
+        let (state, pds, voters) = publishing_in_spaces().await;
+        let spaces = state.spaces.clone().expect("spaces");
+        let poll = open(&state, &voters[0], for_against(true)).await;
+        for (voter, choice) in voters.iter().zip([0, 1, 0]) {
+            vote(&state, &poll, voter, &[choice]).await;
+        }
+        publish_due_in_spaces(&state, &spaces)
+            .await
+            .expect("a pass");
+        spaces.mirror_everything(&state).await.expect("a pass");
+        pds.tamper_spaces(|all| all.retain(|uri, _| !uri.ends_with("/c9")));
+        // The sweep finds the space gone and forgets what went into it.
+        spaces.mirror_everything(&state).await.expect("a pass");
+        let again = publish_due_in_spaces(&state, &spaces)
+            .await
+            .expect("a pass");
+        assert_eq!((again.announced, again.entries), (1, 3));
+        assert_eq!(in_space(&pds, "c9", ENTRY_NSID).len(), 3);
+    }
+
+    /// A closed group's board in a real space: kept and counted by a member
+    /// with nothing but her own account, which the PDS asks this AppView about.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs a spaces PDS: run scripts/test-spaces.nu"]
+    async fn a_member_mirrors_a_board_out_of_a_real_space() {
+        use crate::spaces::tests::{ALPHA_PASSWORD, Alpha, account};
+        let alpha = Alpha::with_an_organization().await;
+        let (http, pds_url, run) = (&alpha.http, &alpha.pds_url, &alpha.run);
+        let (member, _) = account(http, pds_url, &format!("mirror{run}")).await;
+        account(http, pds_url, &format!("outsider{run}")).await;
+
+        let (state, _, voters) = publishing().await;
+        let (state, spaces) = alpha.serve(state).await;
+        crate::Store::new(state.db.clone())
+            .upsert_user_min(&member)
+            .await
+            .expect("a user");
+        join(&state, &member, "c9").await;
+
+        let poll = open(&state, &voters[0], for_against(true)).await;
+        let id = poll["id"].as_str().expect("id");
+        for (voter, choice) in voters.iter().zip([0, 1, 0, 0]) {
+            vote(&state, &poll, voter, &[choice]).await;
+        }
+        let out = publish_due_in_spaces(&state, &spaces)
+            .await
+            .expect("a pass");
+        assert_eq!((out.announced, out.entries), (1, 4));
+        post(
+            router(state.clone()),
+            CLOSE,
+            Some(&voters[0]),
+            json!({"id": id}),
+        )
+        .await;
+        let out = publish_due_in_spaces(&state, &spaces)
+            .await
+            .expect("a pass");
+        assert_eq!(out.closed, 1);
+
+        let c9 = format!("at://{}/space/wiki.radikal.context/c9", alpha.org);
+        let as_member = |name: &str| board_mirror::Member {
+            pds: pds_url.clone(),
+            identifier: format!("{name}{run}.test"),
+            password: ALPHA_PASSWORD.to_string(),
+        };
+        let dir = mirror_dir();
+        let seen = board_mirror::follow_space_once(&as_member("mirror"), &c9, &alpha.plc_url, &dir)
+            .await
+            .expect("a member reads the space");
+        assert_eq!(
+            (seen.new, seen.alarms.len()),
+            (6, 0),
+            "a poll, four ballots, a close-out"
+        );
+        let key = custodian(&state.config).did_key();
+        let counted = board_mirror::check(&dir, Some(&key));
+        assert_eq!(counted.len(), 1);
+        assert_eq!(counted[0].problems, Vec::<String>::new());
+        assert_eq!(counted[0].counts, Some(vec![3, 1, 0]));
+
+        // Who the roster does not name is not let in to look.
+        let other = mirror_dir();
+        let refused =
+            board_mirror::follow_space_once(&as_member("outsider"), &c9, &alpha.plc_url, &other)
+                .await;
+        assert!(
+            refused
+                .as_ref()
+                .is_err_and(|e| e.to_string().contains("UserNotAuthorized")),
+            "{refused:?}"
+        );
+
+        // A ballot taken back by the organization is a ballot the member kept.
+        let listed = alpha.pds.space_setup(&alpha.org_session, &c9).await;
+        assert!(listed.expect("an answer").is_some());
+        let kept: Vec<board_mirror::Seen> = std::fs::read_to_string(dir.join("board.jsonl"))
+            .expect("the copy")
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        let ballot = kept
+            .iter()
+            .find(|s| s.uri.contains(ENTRY_NSID))
+            .expect("a ballot");
+        let rkey = ballot.uri.rsplit('/').next().expect("a key");
+        alpha
+            .pds
+            .delete_record(&alpha.org_session, &c9, &alpha.org, ENTRY_NSID, rkey)
+            .await
+            .expect("a delete");
+        let after =
+            board_mirror::follow_space_once(&as_member("mirror"), &c9, &alpha.plc_url, &dir)
+                .await
+                .expect("a member reads the space");
+        let said: Vec<&str> = after.alarms.iter().map(|a| a.what.as_str()).collect();
+        assert_eq!(said, ["gone"]);
+        assert_eq!(
+            board_mirror::check(&dir, Some(&key))[0].counts,
+            Some(vec![3, 1, 0]),
+            "the mirror's own copy still counts as it did"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_dir_all(other);
     }
 
     fn mirror_dir() -> std::path::PathBuf {

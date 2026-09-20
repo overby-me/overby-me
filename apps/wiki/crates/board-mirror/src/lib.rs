@@ -7,6 +7,11 @@
 //! account and no word from the AppView, keeps what it sees in a file it only
 //! ever appends to, and says so when something it has seen is gone or changed.
 //!
+//! A board that went into a group's atproto space is not public, and is read
+//! the way a member's application reads the space: [`follow_space_once`], by an
+//! app password of the member's own account, holding the organization's repo to
+//! the commit the organization signed.
+//!
 //! [`check`] then counts each closed poll for itself, from its own copy: the
 //! ballots' signatures under the poll's published key, the first of a repeated
 //! token, the rules, the digest of the board, and the custodian's signature on
@@ -45,9 +50,14 @@ pub struct Alarm {
 }
 
 /// Whether `uri` is a record of `collection`. By the whole segment: one of
-/// these names begins with another.
+/// these names begins with another. A record in a space has the space and its
+/// author before its collection.
 fn is_a(uri: &str, collection: &str) -> bool {
-    uri.split('/').nth(3) == Some(collection)
+    let mut segments = uri.split('/').skip(3);
+    match segments.next() {
+        Some("space") => segments.nth(3) == Some(collection),
+        first => first == Some(collection),
+    }
 }
 
 fn now() -> String {
@@ -136,15 +146,84 @@ fn only_closed(before: &serde_json::Value, after: &serde_json::Value) -> bool {
 /// Look at the board account's repo once: keep what is new, and raise an alarm
 /// for anything seen before that is gone or says something else.
 pub async fn follow_once(pds: &str, repo: &str, dir: &Path) -> Result<Followed, Failure> {
+    let mut there = Vec::new();
+    for collection in [POLL, ENTRY, CLOSEOUT] {
+        there.extend(list(pds, repo, collection).await?);
+    }
+    keep(there, dir)
+}
+
+/// A member of the group whose board is mirrored, as their own PDS knows them.
+pub struct Member {
+    pub pds: String,
+    /// A handle or a DID.
+    pub identifier: String,
+    /// An app password: all it is used for is to be let into the space.
+    pub password: String,
+}
+
+/// [`follow_once`], of the board in a group's space
+/// (`at://{organization}/space/{type}/{key}`), read as `member`. `directory` is
+/// where a `did:plc` resolves. The organization's repo is listed whole and held
+/// to the commit the organization signed, so a host cannot serve one member a
+/// board of its own making.
+pub async fn follow_space_once(
+    member: &Member,
+    space: &str,
+    directory: &str,
+    dir: &Path,
+) -> Result<Followed, Failure> {
+    use atproto_spaces::client::Host;
+    let organization = space
+        .strip_prefix("at://")
+        .and_then(|rest| rest.split('/').next())
+        .ok_or("a space is at://{organization}/space/{type}/{key}")?;
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()?;
+    let own = Host::new(http.clone(), &member.pds);
+    let (_, session) = own
+        .create_session(&member.identifier, &member.password)
+        .await?;
+    let authority = atproto_spaces::directory::Directory::new(http.clone(), directory)
+        .resolve(organization)
+        .await?;
+    let host = authority.space_host().or(authority.pds());
+    let host = Host::new(http, host.ok_or("the organization names no host")?);
+    let credential =
+        atproto_spaces::credential::Credential::obtain(&own, &session, &host, space, None).await?;
+    let pulled = atproto_spaces::sync::pull(
+        &host,
+        credential.auth(),
+        space,
+        organization,
+        &authority.signing_key,
+        &mut atproto_spaces::sync::Copy::default(),
+    )
+    .await?;
+    let atproto_spaces::sync::Pulled::Everything(records) = pulled else {
+        return Err("a first pull was not the whole repo".into());
+    };
+    let there = records
+        .into_iter()
+        .filter(|r| [POLL, ENTRY, CLOSEOUT].contains(&r.collection.as_str()))
+        .map(|r| Seen {
+            seen_at: now(),
+            uri: format!("{space}/{organization}/{}/{}", r.collection, r.rkey),
+            cid: r.cid,
+            value: r.value,
+        })
+        .collect();
+    keep(there, dir)
+}
+
+/// Hold what is `there` now against the copy in `dir`, and add to the copy.
+fn keep(there: Vec<Seen>, dir: &Path) -> Result<Followed, Failure> {
     std::fs::create_dir_all(dir)?;
     let (board, alarms) = (dir.join("board.jsonl"), dir.join("alarms.jsonl"));
     let mut known: BTreeMap<String, Seen> = BTreeMap::new();
     for seen in read_lines::<Seen>(&board) {
         known.insert(seen.uri.clone(), seen);
-    }
-    let mut there = Vec::new();
-    for collection in [POLL, ENTRY, CLOSEOUT] {
-        there.extend(list(pds, repo, collection).await?);
     }
     let mut out = Followed::default();
     let mut raise = |uri: &str, what: String| -> Result<(), Failure> {

@@ -42,6 +42,8 @@ pub(crate) fn routes() -> Router<Repo> {
             post(update_space),
         )
         .route("/xrpc/com.atproto.space.putRecord", post(put_record))
+        .route("/xrpc/com.atproto.space.createRecord", post(create_record))
+        .route("/xrpc/com.atproto.space.applyWrites", post(apply_writes))
         .route("/xrpc/com.atproto.space.deleteRecord", post(delete_record))
         .route("/plc/{did}", get(did_document))
 }
@@ -138,46 +140,119 @@ async fn put_record(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> (StatusCode, Json<Value>) {
-    if !authorized(&headers) {
-        return refused(StatusCode::UNAUTHORIZED, "AuthenticationRequired");
+    let one = [(
+        body["collection"].clone(),
+        body["rkey"].clone(),
+        body["record"].clone(),
+    )];
+    match write(&repo, &headers, &body, "space.putRecord", &one, false) {
+        Ok(mut written) => (StatusCode::OK, Json(written.remove(0))),
+        Err(refused) => refused,
     }
-    let (Some(space), Some(collection), Some(rkey)) = (
-        body["space"].as_str(),
-        body["collection"].as_str(),
-        body["rkey"].as_str(),
-    ) else {
+}
+
+async fn create_record(
+    State(repo): State<Repo>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> (StatusCode, Json<Value>) {
+    let one = [(
+        body["collection"].clone(),
+        body["rkey"].clone(),
+        body["record"].clone(),
+    )];
+    match write(&repo, &headers, &body, "space.createRecord", &one, true) {
+        Ok(mut written) => (StatusCode::OK, Json(written.remove(0))),
+        Err(refused) => refused,
+    }
+}
+
+/// Creates only, which is all the board's publisher asks for.
+async fn apply_writes(
+    State(repo): State<Repo>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> (StatusCode, Json<Value>) {
+    let writes = body["writes"].as_array().cloned().unwrap_or_default();
+    let creates = "com.atproto.space.applyWrites#create";
+    if writes.iter().any(|w| w["$type"] != creates) {
         return refused(StatusCode::BAD_REQUEST, "InvalidRequest");
-    };
-    if body["repo"].as_str() != Some(DID) || body["record"]["$type"].as_str() != Some(collection) {
-        return refused(StatusCode::BAD_REQUEST, "InvalidRequest");
+    }
+    let all: Vec<_> = writes
+        .iter()
+        .map(|w| {
+            (
+                w["collection"].clone(),
+                w["rkey"].clone(),
+                w["value"].clone(),
+            )
+        })
+        .collect();
+    match write(&repo, &headers, &body, "space.applyWrites", &all, true) {
+        Ok(results) => (StatusCode::OK, Json(json!({ "results": results }))),
+        Err(refused) => refused,
+    }
+}
+
+/// One commit: every record is taken or none is. `(collection, rkey, record)`.
+fn write(
+    repo: &Repo,
+    headers: &HeaderMap,
+    body: &Value,
+    method: &str,
+    records: &[(Value, Value, Value)],
+    fresh: bool,
+) -> Result<Vec<Value>, (StatusCode, Json<Value>)> {
+    if !authorized(headers) {
+        return Err(refused(StatusCode::UNAUTHORIZED, "AuthenticationRequired"));
     }
     repo.calls
         .lock()
         .expect("calls")
-        .push(("space.putRecord".to_string(), 1));
-    if let Some(refused) = unstorable(&body["record"]) {
-        return refused;
+        .push((method.to_string(), records.len()));
+    let Some(space) = body["space"].as_str() else {
+        return Err(refused(StatusCode::BAD_REQUEST, "InvalidRequest"));
+    };
+    if body["repo"].as_str() != Some(DID) {
+        return Err(refused(StatusCode::BAD_REQUEST, "InvalidRequest"));
     }
     // As the real one: a write into a space that is gone is taken, into a repo
     // nobody can be given a credential for. Kept apart, so a test can tell.
     let mut spaces = repo.spaces.lock().expect("spaces");
     let mut orphans = repo.orphans.lock().expect("orphans");
-    let records = match spaces.get_mut(space) {
+    let held = match spaces.get_mut(space) {
         Some(space) => &mut space.records,
         None => &mut *orphans,
     };
-    let record = Record {
-        collection: collection.to_string(),
-        rkey: rkey.to_string(),
-        value: body["record"].clone(),
-    };
-    records.retain(|r| !(r.collection == record.collection && r.rkey == record.rkey));
-    records.push(record.clone());
-    let uri = format!("{space}/{DID}/{collection}/{rkey}");
-    (
-        StatusCode::OK,
-        Json(json!({ "uri": uri, "cid": record.cid() })),
-    )
+    let mut taken = Vec::new();
+    for (collection, rkey, value) in records {
+        let (Some(collection), Some(rkey)) = (collection.as_str(), rkey.as_str()) else {
+            return Err(refused(StatusCode::BAD_REQUEST, "InvalidRequest"));
+        };
+        if value["$type"].as_str() != Some(collection) {
+            return Err(refused(StatusCode::BAD_REQUEST, "InvalidRequest"));
+        }
+        if let Some(refused) = unstorable(value) {
+            return Err(refused);
+        }
+        let there = |r: &Record| r.collection == collection && r.rkey == rkey;
+        if fresh && (held.iter().any(there) || taken.iter().any(there)) {
+            return Err(refused(StatusCode::BAD_REQUEST, "RecordAlreadyExists"));
+        }
+        taken.push(Record {
+            collection: collection.to_string(),
+            rkey: rkey.to_string(),
+            value: value.clone(),
+        });
+    }
+    let mut results = Vec::new();
+    for record in taken {
+        held.retain(|r| !(r.collection == record.collection && r.rkey == record.rkey));
+        let uri = format!("{space}/{DID}/{}/{}", record.collection, record.rkey);
+        results.push(json!({ "uri": uri, "cid": record.cid() }));
+        held.push(record);
+    }
+    Ok(results)
 }
 
 async fn delete_record(

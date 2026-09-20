@@ -93,7 +93,7 @@ impl std::ops::AddAssign for Swept {
 }
 
 pub struct Spaces {
-    host: Host,
+    pub(crate) host: Host,
     directory: Directory,
     identifier: String,
     password: crate::config::Secret,
@@ -144,7 +144,7 @@ impl Spaces {
     }
 
     /// The organization's DID and a session of its own at its PDS.
-    async fn session(&self) -> Result<(String, String), SpaceError> {
+    pub(crate) async fn session(&self) -> Result<(String, String), SpaceError> {
         let mut held = self.session.lock().await;
         if let Some((did, token, since)) = held.as_ref()
             && jwt::now() < since + SESSION_SECS
@@ -161,7 +161,7 @@ impl Spaces {
 
     /// A PDS says a session has run out as a request it could not read, and
     /// the one held here is then asked for again.
-    async fn forget_session_if_spent(&self, error: &SpaceError) {
+    pub(crate) async fn forget_session_if_spent(&self, error: &SpaceError) {
         let spent = matches!(error.xrpc_name(), Some("ExpiredToken" | "InvalidToken"))
             || matches!(error, SpaceError::Xrpc { status: 401, .. });
         if spent {
@@ -182,7 +182,11 @@ impl Spaces {
         }
     }
 
-    async fn ensure_space(&self, state: &AppState, context_id: &str) -> Result<SpaceUri, Failure> {
+    pub(crate) async fn ensure_space(
+        &self,
+        state: &AppState,
+        context_id: &str,
+    ) -> Result<SpaceUri, Failure> {
         let (organization, session) = self.session().await?;
         let space = Self::space_of(&organization, context_id);
         if !ids(
@@ -392,9 +396,13 @@ impl Spaces {
             &key,
             &mut copy,
         );
+        // A poll's board is in the same repo, and is its publisher's to account
+        // for and a member's mirror's to check (`crate::board`).
+        let mirrored = [PROFILE, NODE, COMMENT, REACTION];
         let there: BTreeMap<(String, String), String> = match pulled.await? {
             Pulled::Everything(records) => records
                 .into_iter()
+                .filter(|r| mirrored.contains(&r.collection.as_str()))
                 .map(|r| ((r.collection, r.rkey), r.cid))
                 .collect(),
             Pulled::Nothing | Pulled::Changes(_) => BTreeMap::new(),
@@ -436,16 +444,20 @@ async fn ids(
     Ok(out)
 }
 
+/// Forget a space that is gone, and with it that its polls' boards went out: a
+/// space made again gets them again. Answers how many records it had.
 async fn forget_rows(state: &AppState, context_id: &str) -> Result<usize, Failure> {
     let conn = state.db.acquire().await?;
-    let records = conn
-        .execute(
-            "DELETE FROM space_record WHERE context_id = ?1",
-            [context_id],
-        )
-        .await?;
-    conn.execute("DELETE FROM space WHERE context_id = ?1", [context_id])
-        .await?;
+    let records = "DELETE FROM space_record WHERE context_id = ?1";
+    let records = conn.execute(records, [context_id]).await?;
+    for table in ["space_board_published", "space_board_publication", "space"] {
+        let of = match table {
+            "space" => "context_id = ?1",
+            _ => "poll_id IN (SELECT id FROM poll WHERE context_id = ?1)",
+        };
+        conn.execute(&format!("DELETE FROM {table} WHERE {of}"), [context_id])
+            .await?;
+    }
     Ok(records as usize)
 }
 
@@ -888,7 +900,7 @@ pub async fn notify_space_deleted(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::xrpc::tests::{post, seeded_state};
     use axum::body::Body;
@@ -1366,10 +1378,13 @@ mod tests {
         assert_eq!(ask(&plain, &uri, None).await.0, StatusCode::NOT_IMPLEMENTED);
     }
 
-    async fn account(http: &reqwest::Client, pds: &str, name: &str) -> (String, String) {
+    pub(crate) const ALPHA_PASSWORD: &str = "a-password-for-a-made-up-account";
+
+    /// A made-up account on the alpha's PDS: its DID, and a session.
+    pub(crate) async fn account(http: &reqwest::Client, pds: &str, name: &str) -> (String, String) {
         let body = json!({
             "handle": format!("{name}.test"), "email": format!("{name}@wiki.test"),
-            "password": "a-password-for-a-made-up-account",
+            "password": ALPHA_PASSWORD,
         });
         let asked = http
             .post(format!("{pds}/xrpc/com.atproto.server.createAccount"))
@@ -1387,53 +1402,85 @@ mod tests {
         )
     }
 
+    /// The alpha's PDS and the directory beside it, as `scripts/test-spaces.nu`
+    /// runs them, with a new organization on it.
+    pub(crate) struct Alpha {
+        pub http: reqwest::Client,
+        pub pds_url: String,
+        pub plc_url: String,
+        pub pds: Host,
+        /// What makes this run's handles its own.
+        pub run: String,
+        pub org: String,
+        pub org_session: String,
+    }
+
+    impl Alpha {
+        pub(crate) async fn with_an_organization() -> Alpha {
+            let pds_url = std::env::var("SPACES_ALPHA_PDS").expect("SPACES_ALPHA_PDS");
+            let plc_url = std::env::var("SPACES_ALPHA_PLC").expect("SPACES_ALPHA_PLC");
+            let http = reqwest::Client::new();
+            let run = jwt::nonce()[..8].to_string();
+            let (org, org_session) = account(&http, &pds_url, &format!("wiki{run}")).await;
+            Alpha {
+                pds: Host::new(http.clone(), &pds_url),
+                http,
+                pds_url,
+                plc_url,
+                run,
+                org,
+                org_session,
+            }
+        }
+
+        /// Mirror `state` into the organization's spaces, and serve it over
+        /// HTTP under a DID of its own in the directory, as the spaces name it:
+        /// the PDS then asks THIS AppView who gets in.
+        pub(crate) async fn serve(&self, mut state: AppState) -> (AppState, Arc<Spaces>) {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("a port");
+            let endpoint = format!("http://{}", listener.local_addr().expect("an address"));
+            let app_did = format!("did:plc:{:a<24}", format!("app{}", self.run));
+            let op = json!({
+                "type": "plc_operation", "prev": null, "sig": "unchecked",
+                "rotationKeys": [], "alsoKnownAs": [], "verificationMethods": {},
+                "services": {"wiki_appview": {"type": "WikiAppView", "endpoint": endpoint}},
+            });
+            let registered = self
+                .http
+                .post(format!("{}/{app_did}", self.plc_url))
+                .json(&op);
+            let registered = registered.send().await.expect("the directory");
+            assert!(registered.status().is_success());
+
+            state.config.spaces_pds = self.pds_url.clone();
+            state.config.spaces_identifier = format!("wiki{}.test", self.run);
+            state.config.spaces_password = crate::config::Secret::new(ALPHA_PASSWORD);
+            state.config.spaces_service = format!("{app_did}#wiki_appview");
+            state.config.plc_url = self.plc_url.clone();
+            let spaces = Spaces::from_config(&state.config)
+                .expect("whole")
+                .expect("spaces");
+            let spaces = Arc::new(spaces);
+            state.spaces = Some(spaces.clone());
+            let router = crate::router(state.clone());
+            tokio::spawn(async move { axum::serve(listener, router).await });
+            (state, spaces)
+        }
+    }
+
     /// The same wiki, mirrored into the alpha's PDS, which asks this AppView
     /// over HTTP who may read: the whole of stage one against the real thing.
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs a spaces PDS: run scripts/test-spaces.nu"]
     async fn the_wiki_in_a_real_pds() {
-        let pds_url = std::env::var("SPACES_ALPHA_PDS").expect("SPACES_ALPHA_PDS");
-        let plc_url = std::env::var("SPACES_ALPHA_PLC").expect("SPACES_ALPHA_PLC");
-        let http = reqwest::Client::new();
-        let run = &jwt::nonce()[..8];
-        let (org, org_session) = account(&http, &pds_url, &format!("wiki{run}")).await;
-        let (alice, alice_session) = account(&http, &pds_url, &format!("alice{run}")).await;
-        let (_, bob_session) = account(&http, &pds_url, &format!("bob{run}")).await;
-
-        // This AppView, under a DID of its own in the directory, as the
-        // organization's spaces will name it.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("a port");
-        let endpoint = format!("http://{}", listener.local_addr().expect("an address"));
-        let app_did = format!("did:plc:{:a<24}", format!("app{run}"));
-        let op = json!({
-            "type": "plc_operation", "prev": null, "sig": "unchecked",
-            "rotationKeys": [], "alsoKnownAs": [], "verificationMethods": {},
-            "services": {"wiki_appview": {"type": "WikiAppView", "endpoint": endpoint}},
-        });
-        let registered = http.post(format!("{plc_url}/{app_did}")).json(&op);
-        assert!(
-            registered
-                .send()
-                .await
-                .expect("the directory")
-                .status()
-                .is_success()
-        );
-
-        let mut state = seeded_state().await;
-        state.config.spaces_pds = pds_url.clone();
-        state.config.spaces_identifier = format!("wiki{run}.test");
-        state.config.spaces_password =
-            crate::config::Secret::new("a-password-for-a-made-up-account");
-        state.config.spaces_service = format!("{app_did}#wiki_appview");
-        state.config.plc_url = plc_url;
-        let spaces = Spaces::from_config(&state.config)
-            .expect("whole")
-            .expect("spaces");
-        let spaces = Arc::new(spaces);
-        state.spaces = Some(spaces.clone());
+        let alpha = Alpha::with_an_organization().await;
+        let (http, pds_url, run) = (&alpha.http, &alpha.pds_url, &alpha.run);
+        let (org, org_session) = (alpha.org.clone(), alpha.org_session.clone());
+        let (alice, alice_session) = account(http, pds_url, &format!("alice{run}")).await;
+        let (_, bob_session) = account(http, pds_url, &format!("bob{run}")).await;
+        let (state, spaces) = alpha.serve(seeded_state().await).await;
         run_sql(
             &state,
             &format!(
@@ -1448,8 +1495,6 @@ mod tests {
             ),
         )
         .await;
-        let router = crate::router(state.clone());
-        tokio::spawn(async move { axum::serve(listener, router).await });
 
         let first = spaces.mirror_everything(&state).await.expect("a pass");
         assert_eq!(
@@ -1466,22 +1511,22 @@ mod tests {
 
         // A member gets in through her own PDS session, and reads the page as
         // it was written. Who the roster does not name does not.
-        let pds = Host::new(http.clone(), &pds_url);
+        let pds = &alpha.pds;
         let c9 = Spaces::space_of(&org, "c9").to_string();
-        let hers = Credential::obtain(&pds, &alice_session, &pds, &c9, None)
+        let hers = Credential::obtain(pds, &alice_session, pds, &c9, None)
             .await
             .expect("a credential for a member");
         let read = pds.records(hers.auth(), &c9, &org).await.expect("records");
         let s1 = read.iter().find(|r| r.rkey == "s1").expect("s1");
         assert_eq!(s1.value["title"], "Secret Minutes");
-        let his = Credential::obtain(&pds, &bob_session, &pds, &c9, None).await;
+        let his = Credential::obtain(pds, &bob_session, pds, &c9, None).await;
         assert_eq!(
             his.err().as_ref().and_then(|e| e.xrpc_name()),
             Some("UserNotAuthorized")
         );
         // What is open is anyone's to read, with its fraction back in place.
         let c1 = Spaces::space_of(&org, "c1").to_string();
-        let anyones = Credential::obtain(&pds, &bob_session, &pds, &c1, None)
+        let anyones = Credential::obtain(pds, &bob_session, pds, &c1, None)
             .await
             .expect("a credential for anyone");
         let read = pds

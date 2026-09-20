@@ -10,7 +10,9 @@
 # signed commits, write notifications, and a file. Of the AppView
 # (`crates/appview/src/spaces.rs`): a wiki mirrored into its spaces and read
 # back, the PDS asking the AppView itself who gets in, and a space deleted
-# behind its back. When the alpha moves, this is what says where.
+# behind its back. Of the ballot board (`crates/appview/src/board.rs`,
+# `crates/board-mirror`): a closed group's board in its space, kept and
+# recounted by a member. When the alpha moves, this is what says where.
 #
 # Usage: nu scripts/test-spaces.nu [--keep]
 # Exit codes: 0 passed · 1 failed · 2 setup failed (docker, the image, the PDS)
@@ -80,6 +82,7 @@ def main [
     let suites = [
         [-p atproto-spaces --test alpha]
         [-p appview --lib spaces::tests::the_wiki_in_a_real_pds]
+        [-p appview --lib board::tests::a_member_mirrors_a_board_out_of_a_real_space]
     ]
     mut failed = false
     for suite in $suites {

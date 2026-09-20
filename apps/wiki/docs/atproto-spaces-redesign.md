@@ -174,6 +174,11 @@ syncer with a credential, run by a member. That a commit is deniable costs
 nothing here: what has to be undeniable is signed inside the records, by the
 custody key, as now.
 
+The one exception is a poll that hides its tally: its counts and its board are
+its context's owners' alone, and a space is never narrower than its members. It
+has no board in the space, and keeps the receipts and the close-out the AppView
+serves.
+
 ### Files
 
 A file is a record in the space with a blob on the PDS of whoever holds the
@@ -307,6 +312,10 @@ configured (`APPVIEW_SPACES_*`, `services.wiki-appview.spaces`). Done so far
   does one pass and then reads every space back through a credential, as any
   syncer would: the same records at the same versions under commits that
   verify, or it says what differs.
+- S5: the board of every secret poll whose tally its members may see goes
+  into its context's space, as it goes to the board account for a poll held in
+  public (`crates/appview/src/board.rs`), and `board-mirror follow --space`
+  keeps and recounts it as a member, by an app password of their own account.
 
 Not yet: registering for notifications and indexing members' own repos, which
 is nothing to do until a member holds a record (S7); the record FIRST, which is

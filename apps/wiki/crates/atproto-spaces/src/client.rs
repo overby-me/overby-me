@@ -209,6 +209,70 @@ impl Host {
         })
     }
 
+    /// Make a record where there must be none yet (`RecordAlreadyExists`).
+    pub async fn create_record(
+        &self,
+        session: &str,
+        space: &str,
+        repo: &str,
+        collection: &str,
+        rkey: &str,
+        record: &Value,
+    ) -> Result<Written, Error> {
+        let body = json!({"space": space, "repo": repo, "collection": collection, "rkey": rkey, "record": record});
+        let said = self
+            .procedure(
+                "com.atproto.space.createRecord",
+                &body,
+                Auth::Bearer(session),
+            )
+            .await?;
+        Ok(Written {
+            uri: text(&said, "uri")?,
+            cid: text(&said, "cid")?,
+        })
+    }
+
+    /// Make several records of one repo in one commit, all or none: `(collection,
+    /// rkey, record)` each. What arrives together says nothing of the order it
+    /// was made in.
+    pub async fn create_records(
+        &self,
+        session: &str,
+        space: &str,
+        repo: &str,
+        records: &[(String, String, Value)],
+    ) -> Result<Vec<Written>, Error> {
+        let writes: Vec<Value> = records
+            .iter()
+            .map(|(collection, rkey, value)| {
+                json!({
+                    "$type": "com.atproto.space.applyWrites#create",
+                    "collection": collection, "rkey": rkey, "value": value,
+                })
+            })
+            .collect();
+        let body = json!({"space": space, "repo": repo, "writes": writes});
+        let said = self
+            .procedure(
+                "com.atproto.space.applyWrites",
+                &body,
+                Auth::Bearer(session),
+            )
+            .await?;
+        said["results"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|result| {
+                Ok(Written {
+                    uri: text(result, "uri")?,
+                    cid: text(result, "cid")?,
+                })
+            })
+            .collect()
+    }
+
     pub async fn delete_record(
         &self,
         session: &str,

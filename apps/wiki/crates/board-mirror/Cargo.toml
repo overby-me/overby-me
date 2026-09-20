@@ -7,6 +7,9 @@ edition = "2024"
 # someone who is NOT the organization: it reads the board account's public repo
 # and trusts nothing the AppView says (`docs/ballot-board-custody.md`).
 [dependencies]
+# For a board in a group's space: the credential a member reads it with, and
+# the signed commit the copy is held to.
+atproto-spaces = { path = "../atproto-spaces" }
 ballot-spec = { path = "../ballot-spec", features = ["custody"] }
 base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = [

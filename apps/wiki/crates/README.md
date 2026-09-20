@@ -69,8 +69,9 @@ workspace when the rewrite starts.
 - `board-mirror`: for someone who is NOT the organization. It keeps its own
   append-only copy of a published ballot board from the board account's public
   repo, raises an alarm when a record it has seen is gone or rewritten, and
-  recounts every closed poll against its signed close-out. Packaged as
-  `wiki-board-mirror`.
+  recounts every closed poll against its signed close-out. With `--space` it
+  does the same of a board in a group's atproto space, as a member, by an app
+  password of their own account. Packaged as `wiki-board-mirror`.
 - `atproto-spaces`: atproto spaces (proposal 0016, non-public records) as far as
   the AppView needs them: tokens and DPoP, the credential flow, the record and
   sync calls, a repo's set hash and signed commit, keeping a copy of a repo

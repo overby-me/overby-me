@@ -127,3 +127,19 @@ independent mirror. Why it fits the decided scheme:
 5. Mirror commitment: who runs the independent board mirror, and is one running a precondition for
    the first binding poll?
 6. Board location: the org's main repo, or a dedicated board account (C1) with org-held keys?
+
+## The board in a group's space (2026-09-20)
+
+A public repo can carry only the board of a poll held in public: anything else would tell the world
+a closed group's counts. Where the wiki is mirrored into atproto spaces
+(`atproto-spaces-redesign.md`), the board of every secret poll ALSO goes into the space of the group
+it was held in, in the organization's repo there, with the same batching, the same records and the
+same signed close-out. A space is read by the group's members and nobody else, so the independent
+copy no longer depends on the poll having been public: any member can keep one, with
+`board-mirror follow --space <at-uri> --pds <their PDS> --as <their handle>` and an app password of
+their own account. The mirror lists the organization's repo whole and holds it to the commit the
+organization signed, so a host cannot serve one member a board of its own making.
+
+One kind of poll has no board in a space: one that hides its tally. Its counts and its board are
+for the group's owners alone, open or closed, and nothing narrower than "every member" can live in
+a space. It keeps the receipts and the close-out the AppView serves, as before.
