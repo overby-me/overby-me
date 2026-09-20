@@ -3,7 +3,12 @@
 //! (`com.atproto.server.createSession`, `com.atproto.repo.createRecord`,
 //! `putRecord`, `applyWrites`, `listRecords`, `deleteRecord`). It checks the
 //! password and the bearer, since a publisher that forgot either would pass
-//! against anything laxer and fail against the real thing.
+//! against anything laxer and fail against the real thing. And what the AppView
+//! asks of the organization's PDS for its spaces ([`spaces`]).
+
+mod spaces;
+
+pub use spaces::Space;
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -11,9 +16,13 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 pub const DID: &str = "did:plc:boardaccount0000000000000";
+/// A second DID the directory knows, under the same key: someone whose tokens
+/// verify and who is nobody to the service they call.
+pub const STRANGER: &str = "did:plc:stranger00000000000000000";
 const ACCESS: &str = "fake-access-jwt";
 
 /// One record: its collection, its key, and what it says.
@@ -44,12 +53,20 @@ struct Repo {
     records: Arc<Mutex<Vec<Record>>>,
     /// Every write call as it arrived, for a test to read the batching off.
     calls: Arc<Mutex<Vec<(String, usize)>>>,
+    spaces: spaces::Spaces,
+    /// What was written into a space that was not there.
+    orphans: Arc<Mutex<Vec<Record>>>,
+    /// The account's `#atproto` key, which its DID document publishes.
+    key: Arc<p256::ecdsa::SigningKey>,
 }
 
 pub struct FakePds {
     pub url: String,
     records: Arc<Mutex<Vec<Record>>>,
     calls: Arc<Mutex<Vec<(String, usize)>>>,
+    spaces: spaces::Spaces,
+    orphans: Arc<Mutex<Vec<Record>>>,
+    key: Arc<p256::ecdsa::SigningKey>,
 }
 
 impl FakePds {
@@ -58,8 +75,13 @@ impl FakePds {
             password: password.to_string(),
             records: Arc::default(),
             calls: Arc::default(),
+            spaces: Arc::default(),
+            orphans: Arc::default(),
+            key: Arc::new(p256::ecdsa::SigningKey::random(&mut rand_core::OsRng)),
         };
         let (records, calls) = (repo.records.clone(), repo.calls.clone());
+        let (spaces, key) = (repo.spaces.clone(), repo.key.clone());
+        let orphans = repo.orphans.clone();
         let app = Router::new()
             .route(
                 "/xrpc/com.atproto.server.createSession",
@@ -70,6 +92,7 @@ impl FakePds {
             .route("/xrpc/com.atproto.repo.applyWrites", post(apply_writes))
             .route("/xrpc/com.atproto.repo.deleteRecord", post(delete_record))
             .route("/xrpc/com.atproto.repo.listRecords", get(list_records))
+            .merge(spaces::routes())
             .with_state(repo);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -82,7 +105,51 @@ impl FakePds {
             url,
             records,
             calls,
+            spaces,
+            orphans,
+            key,
         }
+    }
+
+    /// Where the account's DID resolves, for what takes a directory's URL.
+    pub fn plc_url(&self) -> String {
+        format!("{}/plc", self.url)
+    }
+
+    /// The URIs of the account's spaces.
+    pub fn spaces(&self) -> Vec<String> {
+        self.spaces
+            .lock()
+            .expect("spaces")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    /// The account's records in one space. Empty for a space that is not there.
+    pub fn space_records(&self, space: &str) -> Vec<Record> {
+        let spaces = self.spaces.lock().expect("spaces");
+        spaces
+            .get(space)
+            .map(|s| s.records.clone())
+            .unwrap_or_default()
+    }
+
+    /// What was written into a space that was not there, which a PDS takes.
+    pub fn orphans(&self) -> Vec<Record> {
+        self.orphans.lock().expect("orphans").clone()
+    }
+
+    /// What a custodian gone bad, or an owner at another console, would do to
+    /// the account's spaces behind the AppView's back.
+    pub fn tamper_spaces(&self, change: impl FnOnce(&mut BTreeMap<String, Space>)) {
+        change(&mut self.spaces.lock().expect("spaces"));
+    }
+
+    /// The token this PDS would call `audience` under, for `method`, as the
+    /// account. `issuer` is the account's DID unless a test says otherwise.
+    pub fn service_token(&self, issuer: &str, audience: &str, method: &str) -> String {
+        spaces::service_token(&self.key, issuer, audience, method)
     }
 
     pub fn records(&self, collection: &str) -> Vec<Record> {

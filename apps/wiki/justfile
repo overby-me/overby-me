@@ -154,8 +154,9 @@ test-browser-on-appview *ARGS:
 test-real-login *ARGS:
     nu scripts/test-real-login.nu {{ARGS}}
 
-# `crates/atproto-spaces` against the real spaces PDS, in a container (needs
-# docker): atproto spaces are an alpha, and this is what says when it moved.
+# `crates/atproto-spaces` and the AppView's mirror against the real spaces PDS,
+# in a container (needs docker): atproto spaces are an alpha, and this is what
+# says when it moved.
 test-spaces *ARGS:
     nu scripts/test-spaces.nu {{ARGS}}
 

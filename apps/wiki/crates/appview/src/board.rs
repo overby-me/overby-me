@@ -795,7 +795,9 @@ mod tests {
                 .iter_mut()
                 .find(|r| r.collection == ENTRY_NSID)
                 .expect("another");
-            next.value["choices"] = json!([1]);
+            // For what nobody chose, so that it is a change whichever ballot
+            // the repo happens to list next.
+            next.value["choices"] = json!([2]);
         });
         let after = board_mirror::follow_once(&pds.url, fake_pds::DID, &dir)
             .await

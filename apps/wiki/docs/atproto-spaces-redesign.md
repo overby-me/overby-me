@@ -55,6 +55,13 @@ Read from the proposal, and where marked ✓ asked of the real alpha PDS by
   consent screen shows the type's name.
 - Files are blobs on the author's PDS, served through the space. ✓ A PDS as it
   comes refuses blobs over 5 MB. ✓
+- Record data has **no fractions**. A PDS refuses a record holding one, or an
+  integer past 2^53, or a request past about 1 MB. ✓
+- A write into a space that has been **deleted succeeds**, and deleting a space
+  or a record twice is no error: whether a space is still there, and still set
+  up as it was made, has to be asked (`getSpace`). ✓
+- The authority's own account reads its spaces without the managing app being
+  asked. ✓
 - Spaces give **access control, not confidentiality**. A PDS can read what it
   hosts, and so can every application admitted to a space.
 - When an account is deleted, everyone downstream is expected to delete what it
@@ -107,7 +114,7 @@ A record lives in the repo of whoever the wiki's rules say may change it.
 | The organization, in its own repo in the space | the context's profile (name, kind, parent, front page, cover); folders, documents, files, elections; a poll's announcement, its board and its close-out; everything carried over from the interim | Only owners make these, and they are the group's: an agenda must not vanish because whoever typed it deleted their account. |
 | The organization, as an **overlay** on a member's record | a submission (the version frozen, with its text); a placement (moved, renamed or reordered by an owner); a lock; a removal to the bin | An owner cannot edit another account's repo. They say what they did in the organization's, by reference, as the alpha's own sample app does for its removals. |
 | The member, in their own repo in the space | a motion, an amendment, a candidacy, a question, a comment, a reaction | Theirs to write, to change until submitted, and to take with them. |
-| Nobody: the AppView's own datastore, as now | the roster with addresses, roles, claim links and hidden seats; sessions; eligibility, token issuance, delegation and every ballot; speaker lists, the projector, the canvas; push subscriptions; reports; the map of carried accounts | Narrower than a space can be (owners only), or has to be atomic and authoritative (a vote), or is gone when the meeting is. |
+| Nobody: the AppView's own datastore, as now | the roster with addresses, roles, claim links and hidden seats; sessions; eligibility, token issuance, delegation and every ballot; speaker lists, the projector, the canvas; push subscriptions; reports; the map of carried accounts; whether a context is open to everyone, and where a page was published on the open network | Narrower than a space can be (owners only), or has to be atomic and authoritative (a vote), or is gone when the meeting is. |
 
 A **submission** carries the text, not only a reference to it. A member can
 always edit or delete what is in their own repo, and deleting their account
@@ -137,9 +144,11 @@ Three, where it has one and a half today.
   through theirs), and indexes what it wrote at once, so that a member reads
   their own write without waiting for sync.
 - **The managing app.** `checkUserAccess(space, user, access)` from the roster:
-  read for an active member or anyone on a public context, write for who may
-  write. Asked by the organization's PDS under a service token the AppView
-  verifies.
+  read for a member, or for anyone where the context is open and not in the
+  bin, write for a member. Voting rights play no part, as they play none in
+  reading today. Asked by the
+  organization's PDS under a service token the AppView verifies, and answered
+  to nobody else.
 - **A syncer.** For every space: register for notifications, pull the log of
   each repo that advanced, verify the commit, and index. Sweep the writer set
   now and then, since notifications are hints. Every record is held to the
@@ -225,6 +234,12 @@ from the interim does not wait for any of this.
   bin are one transaction today and several records tomorrow.
 - **Backups of two things**: the organization's PDS, and the AppView's private
   tables. Only the index is rebuildable.
+- **A page has a largest size**, about 1 MB as a record on the alpha. The mirror
+  counts a larger one as refused and leaves it in the datastore alone. At the
+  move such a body has to go as a blob.
+- **A fraction is not a number** to atproto. Inside a page's body or a node's
+  settings one is carried as `wiki.radikal.spaceDefs#number`, in its own digits,
+  and read back as the number it was.
 
 ## Decisions, as taken
 
@@ -266,14 +281,38 @@ has none), and files (a space's blobs, with the AppView's store as a cache).
 
 ## Order of work
 
-None of it in production before spaces are released. Done so far (2026-09-20):
-of S1, the NSID, the space type and the record lexicons, and
-`crates/wiki-records`, which maps the AppView's rows to records and back and is
-tested to lose nothing either way; and S2 but for the CAR reader, in
-`crates/atproto-spaces`, whose test runs against the alpha PDS in a container
-(`just test-spaces`): a space the test's own stand-in for the AppView decides
-access to, the credential flow, a copy of a repo held to its signed commit
-through an edit, a removal and a corruption, write notifications, and a file.
+None of it in production before spaces are released, and all of it off unless
+configured (`APPVIEW_SPACES_*`, `services.wiki-appview.spaces`). Done so far
+(2026-09-20), each held to the alpha PDS in a container by `just test-spaces`:
+
+- Of S1: the NSID, the space type and the record lexicons, and
+  `crates/wiki-records`, which maps the AppView's rows to records and back and
+  is tested to lose nothing either way. What a record does not carry is named
+  by a type (`Kept`), so that a rebuild cannot forget it.
+- S2 but for the CAR reader, in `crates/atproto-spaces`: the calls, the
+  credential flow, a copy of a repo held to its signed commit through an edit, a
+  removal and a corruption, write notifications, a file, and the service token a
+  PDS calls a managing app under.
+- Of S3, in `crates/appview/src/spaces.rs`: `checkUserAccess` answered from the
+  roster, `notifyWrite` and `notifySpaceDeleted`, all three to the
+  organization's own PDS and nobody else; the AppView's DID document when it is
+  named by a `did:web`; and the sweep, which asks of every space whether it is
+  still there and still under this AppView, makes again one that is gone, and
+  takes back one that someone opened.
+- The first half of S4: every page, context, comment and reaction is written to
+  both. A context is mirrored as a whole once it has been quiet for two seconds
+  (a bin, a move or a purge announces one id and changes a subtree), again on a
+  sweep every fifteen minutes, and at start. The mirror compares and does not
+  remember, so what failed is done by the next pass. `appview mirror-spaces`
+  does one pass and then reads every space back through a credential, as any
+  syncer would: the same records at the same versions under commits that
+  verify, or it says what differs.
+
+Not yet: registering for notifications and indexing members' own repos, which
+is nothing to do until a member holds a record (S7); the record FIRST, which is
+the second half of S4; files as blobs (S6); and spaces are made open to any
+application until there is a confidential client to attest as (decision 4 needs
+it).
 
 - **S1 Foundations.** The NSID. A space type and record lexicons for content,
   overlays and the board (`content` as the editor's own JSON, tagged with its

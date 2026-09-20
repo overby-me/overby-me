@@ -68,8 +68,13 @@ atproto gained non-public records (spaces, in alpha since 2026-08-20), and the
 owner asked that the wiki use them. `docs/atproto-spaces-redesign.md` has the
 design, the owner's five calls and the order of work (S1 to S7);
 `crates/spaces-spike` asked the alpha PDS whether the design's footing holds,
-and it does. None of it touches the cutover, and none of it runs in production
-before spaces are released.
+and it does. Built so far, and held to that PDS by `just test-spaces`: the
+lexicons and the mapping between rows and records, the protocol in Rust, and in
+the AppView the first stage itself (`src/spaces.rs`): every page, comment and
+reaction also written as a record into a space per context, under the
+organization's account, with the AppView answering the PDS on who gets in. It
+is off unless configured. None of it touches the cutover, and none of it runs in
+production before spaces are released.
 
 ## Findings that shape the plan
 

@@ -1,13 +1,16 @@
 #!/usr/bin/env nu
 
-# test-spaces.nu: `crates/atproto-spaces` against a real spaces PDS.
+# test-spaces.nu: the wiki's use of atproto spaces against a real spaces PDS.
 #
 # atproto spaces are an alpha that promises breaking changes weekly. This pulls
 # the alpha's PDS image, runs it in a container beside the stand-in directory
-# (`crates/fake-plc`), and runs the crate's ignored test against the two: a
-# space under an organization's account with a managing app deciding access,
-# records, the credential flow, sync held to signed commits, write
-# notifications, and a file. When the alpha moves, this is what says where.
+# (`crates/fake-plc`), and runs the ignored tests against the two. Of
+# `crates/atproto-spaces`: a space under an organization's account with a
+# managing app deciding access, records, the credential flow, sync held to
+# signed commits, write notifications, and a file. Of the AppView
+# (`crates/appview/src/spaces.rs`): a wiki mirrored into its spaces and read
+# back, the PDS asking the AppView itself who gets in, and a space deleted
+# behind its back. When the alpha moves, this is what says where.
 #
 # Usage: nu scripts/test-spaces.nu [--keep]
 # Exit codes: 0 passed · 1 failed · 2 setup failed (docker, the image, the PDS)
@@ -74,10 +77,17 @@ def main [
 
     $env.SPACES_ALPHA_PDS = $"http://localhost:($PDS_PORT)"
     $env.SPACES_ALPHA_PLC = $"http://127.0.0.1:($PLC_PORT)"
-    let ran = (do -i { ^cargo test --manifest-path crates/Cargo.toml -p atproto-spaces --test alpha -- --ignored --nocapture } | complete)
-    print $ran.stdout
-    if $ran.exit_code != 0 { print -e $ran.stderr }
+    let suites = [
+        [-p atproto-spaces --test alpha]
+        [-p appview --lib spaces::tests::the_wiki_in_a_real_pds]
+    ]
+    mut failed = false
+    for suite in $suites {
+        let ran = (do -i { ^cargo test --manifest-path crates/Cargo.toml ...$suite -- --ignored --nocapture } | complete)
+        print $ran.stdout
+        if $ran.exit_code != 0 { print -e $ran.stderr; $failed = true }
+    }
     if not $keep { cleanup }
-    if $ran.exit_code != 0 { log-fail $"against PDS ($version)"; exit 1 }
+    if $failed { log-fail $"against PDS ($version)"; exit 1 }
     log-info $"Passed against PDS ($version)."
 }

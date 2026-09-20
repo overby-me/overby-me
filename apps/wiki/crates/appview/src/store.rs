@@ -1845,6 +1845,108 @@ impl Store {
         Ok(out)
     }
 
+    // -- Rows as they are, the bin included and no caller asked about: for
+    //    what mirrors them as records (`crate::spaces`). --
+
+    pub(crate) async fn row_document(&self, id: &str) -> Result<Option<Document>, DbError> {
+        let base = {
+            let conn = self.db.acquire().await?;
+            let mut rows = conn
+                .query(
+                    &format!("SELECT {DOC_COLS} FROM document d WHERE d.id = ?1"),
+                    [id],
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => doc_base(&row)?,
+                None => return Ok(None),
+            }
+        };
+        let mut doc = self.hydrate_document(base).await?;
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query("SELECT legacy_id FROM document WHERE id = ?1", [id])
+            .await?;
+        if let Some(row) = rows.next().await? {
+            doc.legacy_id = opt_text(&row, 0);
+        }
+        Ok(Some(doc))
+    }
+
+    pub(crate) async fn row_context(&self, id: &str) -> Result<Option<Context>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!("SELECT {CTX_FULL}, legacy_id FROM context c WHERE c.id = ?1"),
+                [id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => {
+                let mut ctx = ctx_from_row(&row)?;
+                ctx.legacy_id = opt_text(&row, row.column_count() - 1);
+                Ok(Some(ctx))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) async fn row_comment(&self, id: &str) -> Result<Option<Comment>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT id, on_id, root_id, context_id, author_did, author_text, text, image, \
+                        tombstone, created_at, deleted_at, deleted_root, legacy_id \
+                 FROM comment WHERE id = ?1",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(Comment {
+            id: row.get::<String>(0)?,
+            on_id: row.get::<String>(1)?,
+            root_id: row.get::<String>(2)?,
+            context_id: row.get::<String>(3)?,
+            author: match (opt_text(&row, 4), opt_text(&row, 5)) {
+                (Some(did), _) => Author::User { did },
+                (None, display) => Author::FreeText {
+                    display: display.unwrap_or_default(),
+                },
+            },
+            text: row.get::<String>(6)?,
+            image: opt_text(&row, 7),
+            tombstone: row.get::<i64>(8)? != 0,
+            created_at: opt_text(&row, 9),
+            deleted_at: opt_text(&row, 10),
+            deleted_root: opt_text(&row, 11),
+            legacy_id: opt_text(&row, 12),
+        }))
+    }
+
+    pub(crate) async fn row_reaction(&self, id: &str) -> Result<Option<Reaction>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT id, subject_uri, reactor_did, emoji, created_at, legacy_id \
+                 FROM reaction WHERE id = ?1",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(Reaction {
+            id: row.get::<String>(0)?,
+            subject_uri: row.get::<String>(1)?,
+            reactor_did: opt_text(&row, 2),
+            emoji: row.get::<String>(3)?,
+            created_at: opt_text(&row, 4),
+            legacy_id: opt_text(&row, 5),
+        }))
+    }
+
     // -- Write side (Phase 1): a freshly-authenticated DID authors its own
     //    content. Membership/authz gating (is_active_member) is deferred with the
     //    DID-binding flow; these inserts are unconditional given a caller DID. --

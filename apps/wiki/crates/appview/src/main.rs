@@ -4,6 +4,8 @@
 //! `appview import <extraction.json>` loads a migrated wiki instead, and exits;
 //! `appview import-files <extraction.json> <dir>` then files its files, and
 //! `appview verify <extraction.json> [<dir>]` asks the cutover's gates of both.
+//! `appview mirror-spaces` writes the wiki into its atproto spaces once, reads
+//! every space back, and says whether the two agree.
 
 use appview::oauth::WikiOAuth;
 use appview::{AppState, Config, Db, router};
@@ -45,10 +47,11 @@ async fn main() {
         (Some("verify"), Some(path), dir) => {
             verify(AppState::new(db, config), &path, dir.as_deref()).await
         }
+        (Some("mirror-spaces"), None, None) => mirror_spaces(AppState::new(db, config)).await,
         _ => {
             eprintln!(
                 "usage: appview [import <extraction.json> | import-files <extraction.json> <dir> \
-                 | verify <extraction.json> [<dir>]]"
+                 | verify <extraction.json> [<dir>] | mirror-spaces]"
             );
             std::process::exit(2);
         }
@@ -98,10 +101,18 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    let spaces = match appview::spaces::Spaces::from_config(&config) {
+        Ok(spaces) => spaces.map(Arc::new),
+        Err(e) => {
+            tracing::error!("spaces are misconfigured: {e}");
+            std::process::exit(1);
+        }
+    };
     let addr = format!("0.0.0.0:{}", config.port);
     let mut state = AppState::new(db, config).with_oauth(oauth);
     state.replica = replica;
     state.mailer = mailer;
+    state.spaces = spaces;
 
     // The firehose consumer runs for the life of the process, materializing
     // public records into the view and broadcasting deltas to /ws clients. It
@@ -110,6 +121,8 @@ async fn main() {
     // And the board's publisher, which does nothing where no board account is
     // configured.
     tokio::spawn(appview::board::run_publisher(state.clone()));
+    // And the mirror into atproto spaces, likewise where none are configured.
+    tokio::spawn(appview::spaces::run(state.clone()));
 
     let app = router(state);
 
@@ -180,6 +193,55 @@ async fn verify(state: AppState, path: &str, dir: Option<&str>) -> ! {
         }
         Err(e) => {
             eprintln!("verify failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn mirror_spaces(mut state: AppState) -> ! {
+    let spaces = match appview::spaces::Spaces::from_config(&state.config) {
+        Ok(Some(spaces)) => Arc::new(spaces),
+        Ok(None) => {
+            eprintln!("no spaces are configured (APPVIEW_SPACES_*)");
+            std::process::exit(2);
+        }
+        Err(e) => {
+            eprintln!("spaces are misconfigured: {e}");
+            std::process::exit(2);
+        }
+    };
+    state.spaces = Some(spaces.clone());
+    let asked = async {
+        let swept = spaces.mirror_everything(&state).await?;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>((
+            swept,
+            spaces.check_everything(&state).await?,
+        ))
+    };
+    match asked.await {
+        Ok((swept, wrong)) => {
+            println!(
+                "records: {} written, {} deleted, {} as they were, {} waiting for what they \
+                 point at, {} the PDS will not take, {} that failed",
+                swept.written,
+                swept.deleted,
+                swept.same,
+                swept.waiting,
+                swept.refused,
+                swept.failed
+            );
+            for line in &wrong {
+                println!("{line}");
+            }
+            let green = wrong.is_empty() && swept.waiting + swept.refused + swept.failed == 0;
+            match green {
+                true => println!("every space is what the index says"),
+                false => println!("the spaces are not the index yet"),
+            }
+            std::process::exit(i32::from(!green));
+        }
+        Err(e) => {
+            eprintln!("mirror-spaces failed: {e}");
             std::process::exit(1);
         }
     }

@@ -72,10 +72,35 @@ redesign is `docs/atproto-spaces-redesign.md`.
   a `createSession` token. Not to be relied on.
 - **`org` is a reserved handle.** Found by wanting it.
 
+Found later the same day, by the AppView's mirror (`crates/appview/src/spaces.rs`)
+and by hand against the same build:
+
+- **No fractions.** A record with `0.5` in it is an `InvalidRequest` ("Expected
+  one of null, boolean, integer, string, cid, bytes, array or object"). `1.0` and
+  `1e3` are read as the integers they are. An integer past 2^53 is a 500. An
+  array where a lexicon would want an object is taken, as is `null`: a record of
+  a type the PDS does not know is not validated (`validationStatus: unknown`).
+  So the mapping carries such numbers as `wiki.radikal.spaceDefs#number`.
+- **A request past about 1 MB is refused** (`PayloadTooLargeError`, 413): 900 KB
+  of record went in, 1 MB did not. A page that large cannot be one record.
+- **A deleted space takes writes.** After `deleteSpace`, `putRecord` into the
+  same space answered 200 with a CID, `deleteRecord` 200, and a second
+  `deleteSpace` 200. `createSpace` on a space that exists is `SpaceAlreadyExists`,
+  and one deleted can be made again. `getSpace` is what says whether a space is
+  there (`SpaceNotFound`) and how it is set up, so the mirror asks it on every
+  sweep, and `updateSpace` takes back one whose policy was changed.
+- **The owner is not asked about.** The organization got a credential for its
+  own space while the managing app it named could not be resolved at all.
+- **The managing app, for real.** With the AppView itself as the managing app,
+  a member got a credential through her own session and read the organization's
+  repo; who the roster did not name was `UserNotAuthorized`; anyone got in to a
+  context that is open.
+
 ## What was not asked
 
 OAuth `space:` scopes and the consent screen; a client attestation and
-`appAccess: #allowList`; `deleteSpace` and `notifySpaceDeleted`; a member on
+`appAccess: #allowList`; `notifySpaceDeleted` as the PDS sends it (the AppView
+answers it, and nothing registered to be told); a member on
 another PDS than the authority's (every account here shared one); account
 migration; how long a PDS keeps its operation log. The alpha promises breaking
 changes weekly, so all of the above is as of the date at the top.

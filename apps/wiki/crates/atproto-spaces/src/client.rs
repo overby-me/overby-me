@@ -56,6 +56,18 @@ pub struct Writer {
     pub rev: String,
 }
 
+fn managed_by(app: &str) -> Value {
+    json!({"$type": "com.atproto.simplespace.defs#managingAppPolicy", "managingApp": app})
+}
+
+/// Whether `setup` (of [`Host::space_setup`]) leaves both who reads and who
+/// writes to `app` and to nobody else.
+pub fn is_managed_by(setup: &Value, app: &str) -> bool {
+    [&setup["readPolicy"], &setup["writePolicy"]]
+        .iter()
+        .all(|policy| policy["$type"] == managed_by(app)["$type"] && policy["managingApp"] == app)
+}
+
 fn text(value: &Value, name: &str) -> Result<String, Error> {
     value[name]
         .as_str()
@@ -238,7 +250,7 @@ impl Host {
         skey: &str,
         managing_app: &str,
     ) -> Result<String, Error> {
-        let policy = json!({"$type": "com.atproto.simplespace.defs#managingAppPolicy", "managingApp": managing_app});
+        let policy = managed_by(managing_app);
         let body = json!({
             "type": space_type, "skey": skey,
             "readPolicy": policy, "writePolicy": policy,
@@ -252,6 +264,41 @@ impl Host {
             )
             .await?;
         text(&said, "uri")
+    }
+
+    /// How a space is set up, or `None` for one that is not there. Writing
+    /// into a space that is gone succeeds, so this is the only way to know.
+    pub async fn space_setup(&self, session: &str, space: &str) -> Result<Option<Value>, Error> {
+        let asked = self
+            .query(
+                "com.atproto.simplespace.getSpace",
+                &[("space", space)],
+                Auth::Bearer(session),
+            )
+            .await;
+        match asked {
+            Ok(setup) => Ok(Some(setup)),
+            Err(e) if e.xrpc_name() == Some("SpaceNotFound") => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Put a space under a managing app, whoever decided its access before.
+    pub async fn manage_space(
+        &self,
+        session: &str,
+        space: &str,
+        managing_app: &str,
+    ) -> Result<(), Error> {
+        let policy = managed_by(managing_app);
+        let body = json!({"space": space, "readPolicy": policy, "writePolicy": policy});
+        self.procedure(
+            "com.atproto.simplespace.updateSpace",
+            &body,
+            Auth::Bearer(session),
+        )
+        .await
+        .map(|_| ())
     }
 
     pub async fn delete_space(&self, session: &str, space: &str) -> Result<(), Error> {

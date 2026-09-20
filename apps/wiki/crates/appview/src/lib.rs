@@ -39,6 +39,7 @@ pub mod search;
 pub mod session;
 pub mod share;
 pub mod slug;
+pub mod spaces;
 pub mod speak;
 pub mod statecookie;
 pub mod store;
@@ -87,6 +88,9 @@ pub struct AppState {
     pub canvases: Arc<canvas::Shared>,
     /// Where invitations are mailed from, when the site mails any (`crate::mail`).
     pub mailer: Option<Arc<mail::Mailer>>,
+    /// The organization's account, when content is mirrored into atproto spaces
+    /// (`crate::spaces`).
+    pub spaces: Option<Arc<spaces::Spaces>>,
 }
 
 impl AppState {
@@ -112,6 +116,7 @@ impl AppState {
             feedback: Arc::default(),
             canvases: Arc::default(),
             mailer: None,
+            spaces: None,
         }
     }
 
@@ -194,6 +199,21 @@ fn build_router(state: AppState) -> Router {
         .route(
             oauth::CLIENT_METADATA_PATH,
             get(oauth::client_metadata_handler),
+        )
+        // What the organization's PDS asks and tells, where the wiki is
+        // mirrored into atproto spaces (`crate::spaces`).
+        .route("/.well-known/did.json", get(spaces::did_document))
+        .route(
+            "/xrpc/com.atproto.simplespace.checkUserAccess",
+            get(spaces::check_user_access),
+        )
+        .route(
+            "/xrpc/com.atproto.space.notifyWrite",
+            post(spaces::notify_write),
+        )
+        .route(
+            "/xrpc/com.atproto.space.notifySpaceDeleted",
+            post(spaces::notify_space_deleted),
         )
         // The native XRPC read surface (identity-free content lookups).
         .route("/xrpc/wiki.radikal.getDocument", get(xrpc::get_document))

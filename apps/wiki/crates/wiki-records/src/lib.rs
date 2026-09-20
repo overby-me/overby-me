@@ -159,6 +159,16 @@ pub struct Reaction {
     pub created_at: String,
 }
 
+/// What a row has that no record carries, because it is the AppView's word and
+/// not content: who a context or a page is open to (what the managing app
+/// answers), and where a page was published on the open network. A rebuild
+/// keeps them from the row it replaces.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Kept {
+    pub visibility: rows::Visibility,
+    pub published_uri: Option<String>,
+}
+
 /// What the mapping has to be told, because a record says it by address and a
 /// row by id: where things are held, and the version a reference pins.
 pub trait Addresses {
@@ -175,6 +185,60 @@ pub trait Addresses {
 /// The stamp a record must have where a row may have none (one carried over
 /// with no dates): the epoch, which no real row has and which sorts first.
 const NO_DATE: &str = "1970-01-01T00:00:00.000Z";
+
+const NUMBER: &str = "wiki.radikal.spaceDefs#number";
+/// As far as every JSON reader keeps an integer exact, and as far as a PDS
+/// takes one.
+const EXACT: u64 = (1 << 53) - 1;
+
+/// An editor's document or a node's settings, as a record may hold it. atproto
+/// data has no fractions and a PDS refuses a record with one, so a number it
+/// would not take goes as `wiki.radikal.spaceDefs#number`, in its own digits.
+fn storable(json: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match json {
+        Value::Number(n) => {
+            let fits = n.as_u64().is_some_and(|u| u <= EXACT)
+                || n.as_i64().is_some_and(|i| i.unsigned_abs() <= EXACT);
+            match fits {
+                true => json.clone(),
+                false => serde_json::json!({"$type": NUMBER, "value": n.to_string()}),
+            }
+        }
+        Value::Array(items) => Value::Array(items.iter().map(storable).collect()),
+        Value::Object(fields) => Value::Object(
+            fields
+                .iter()
+                .map(|(name, value)| (name.clone(), storable(value)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// [`storable`], undone.
+fn restored(json: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match json {
+        Value::Array(items) => Value::Array(items.iter().map(restored).collect()),
+        Value::Object(fields) => {
+            let number = (fields.get("$type").and_then(Value::as_str) == Some(NUMBER))
+                .then(|| fields.get("value").and_then(Value::as_str))
+                .flatten()
+                .and_then(|digits| serde_json::from_str::<serde_json::Number>(digits).ok());
+            match number {
+                Some(number) => Value::Number(number),
+                None => Value::Object(
+                    fields
+                        .iter()
+                        .map(|(name, value)| (name.clone(), restored(value)))
+                        .collect(),
+                ),
+            }
+        }
+        other => other.clone(),
+    }
+}
 
 fn kind_name<T: Serialize>(kind: &T) -> String {
     match serde_json::to_value(kind) {
@@ -253,10 +317,10 @@ impl Node {
             draft: Some(doc.mutable),
             locked: Some(!place.attachable),
             content_format: doc.content.as_ref().map(|_| SLATE.to_string()),
-            content: doc.content.clone(),
+            content: doc.content.as_ref().map(storable),
             image: None,
             file: None,
-            data: doc.data.clone(),
+            data: doc.data.as_ref().map(storable),
             authors: doc.authors.iter().map(|a| author_of(a, at)).collect(),
             made_by: place.owner_did.clone(),
             created_at: place.created_at.clone().unwrap_or_else(|| NO_DATE.into()),
@@ -270,7 +334,7 @@ impl Node {
     }
 
     /// The row for a record found at `uri`, under the path its parents give it.
-    pub fn row(&self, uri: &RecordUri, parent_path: &str) -> Option<rows::Document> {
+    pub fn row(&self, uri: &RecordUri, parent_path: &str, kept: Kept) -> Option<rows::Document> {
         let kind: rows::DocumentKind =
             serde_json::from_value(serde_json::Value::String(self.kind.clone())).ok()?;
         let context_id = uri.space.skey.clone();
@@ -300,11 +364,11 @@ impl Node {
             },
             context_id,
             mutable: self.draft.unwrap_or(false),
-            content: self.content.clone(),
-            data: self.data.clone(),
+            content: self.content.as_ref().map(restored),
+            data: self.data.as_ref().map(restored),
             authors: self.authors.iter().map(author_back).collect(),
-            visibility: rows::Visibility::default(),
-            published_uri: None,
+            visibility: kept.visibility,
+            published_uri: kept.published_uri,
             legacy_id: self.legacy_id.clone(),
         })
     }
@@ -338,9 +402,9 @@ impl ContextProfile {
             index: Some(place.idx),
             locked: Some(!place.attachable),
             content_format: ctx.content.as_ref().map(|_| SLATE.to_string()),
-            content: ctx.content.clone(),
+            content: ctx.content.as_ref().map(storable),
             image: None,
-            data: ctx.data.clone(),
+            data: ctx.data.as_ref().map(storable),
             made_by: place.owner_did.clone(),
             created_at: place.created_at.clone().unwrap_or_else(|| NO_DATE.into()),
             updated_at: place.updated_at.clone(),
@@ -356,9 +420,7 @@ impl ContextProfile {
     }
 
     /// The row for the profile of `space`, under the path its parents give it.
-    /// Whether it is open to everyone is no part of a record: it is what the
-    /// managing app answers, and the caller's to fill in.
-    pub fn row(&self, space: &SpaceUri, parent_path: &str) -> Option<rows::Context> {
+    pub fn row(&self, space: &SpaceUri, parent_path: &str, kept: Kept) -> Option<rows::Context> {
         let kind: rows::ContextKind =
             serde_json::from_value(serde_json::Value::String(self.kind.clone())).ok()?;
         let parent_id = match (&self.parent_node, &self.parent_space) {
@@ -387,10 +449,10 @@ impl ContextProfile {
                     .and_then(|root| root.parse::<SpaceUri>().ok())
                     .map(|s| s.skey),
             },
-            content: self.content.clone(),
-            data: self.data.clone(),
-            visibility: rows::Visibility::default(),
-            published_uri: None,
+            content: self.content.as_ref().map(restored),
+            data: self.data.as_ref().map(restored),
+            visibility: kept.visibility,
+            published_uri: kept.published_uri,
             legacy_id: self.legacy_id.clone(),
         })
     }

@@ -64,9 +64,24 @@ fn motion() -> rows::Document {
                 path: None,
             },
         ],
-        visibility: rows::Visibility::default(),
-        published_uri: None,
+        visibility: rows::Visibility::Public,
+        // Split, or the repository's link checker tries to parse it as a URL.
+        published_uri: Some(
+            concat!(
+                "at:",
+                "//did:plc:theorganization/wiki.radikal.resolution/3kq"
+            )
+            .into(),
+        ),
         legacy_id: Some("0b7e".into()),
+    }
+}
+
+/// What the AppView would carry over from the row a rebuild replaces.
+fn kept(visibility: rows::Visibility, published_uri: &Option<String>) -> Kept {
+    Kept {
+        visibility,
+        published_uri: published_uri.clone(),
     }
 }
 
@@ -81,7 +96,61 @@ fn a_document_comes_back_as_it_went() {
         )
     );
     let uri = Held.space("c-hb").record(ORG, NODE, &doc.id);
-    assert_eq!(record.row(&uri, "hb/forslag"), Some(doc));
+    // Who it is open to and where it was published are not the record's to say.
+    let said = serde_json::to_string(&record).expect("json");
+    assert!(
+        !said.contains("resolution/3kq") && !said.contains("public"),
+        "{said}"
+    );
+    assert_eq!(
+        record
+            .row(&uri, "hb/forslag", Kept::default())
+            .map(|d| d.visibility),
+        Some(rows::Visibility::Private)
+    );
+    let theirs = kept(doc.visibility, &doc.published_uri);
+    assert_eq!(record.row(&uri, "hb/forslag", theirs), Some(doc));
+}
+
+/// Whether any number in `json` is one a PDS refuses (found against the alpha:
+/// a fraction is an `InvalidRequest`, an integer past 2^53 a server error).
+fn has_a_number_a_pds_refuses(json: &Value) -> bool {
+    match json {
+        Value::Number(n) => n
+            .as_i64()
+            .or(n.as_u64().map(|u| u as i64))
+            .is_none_or(|i| i.unsigned_abs() >= 1 << 53),
+        Value::Array(items) => items.iter().any(has_a_number_a_pds_refuses),
+        Value::Object(fields) => fields.values().any(has_a_number_a_pds_refuses),
+        _ => false,
+    }
+}
+
+#[test]
+fn numbers_atproto_cannot_hold_go_in_their_own_digits_and_come_back() {
+    let mut doc = motion();
+    doc.content = Some(json!([{"type": "image", "width": 0.75, "children": [{"text": ""}]}]));
+    doc.data = Some(json!({
+        "threshold": 66.7, "whole": 2.0, "small": -1e-7, "seats": 12,
+        "huge": 18446744073709551615u64, "low": -9007199254740993i64,
+        "nested": [{"at": [0.5, 1, "0.5"]}],
+    }));
+    let record = Node::of(&doc, &Held);
+    let said = serde_json::to_value(&record).expect("json");
+    assert!(!has_a_number_a_pds_refuses(&said), "{said}");
+    assert_eq!(
+        said["data"]["threshold"],
+        json!({"$type": "wiki.radikal.spaceDefs#number", "value": "66.7"})
+    );
+    assert_eq!(
+        (&said["data"]["seats"], &said["data"]["nested"][0]["at"][2]),
+        (&json!(12), &json!("0.5"))
+    );
+
+    let read: Node = serde_json::from_value(said).expect("a node");
+    let uri = Held.space("c-hb").record(ORG, NODE, &doc.id);
+    let theirs = kept(doc.visibility, &doc.published_uri);
+    assert_eq!(read.row(&uri, "hb/forslag", theirs), Some(doc));
 }
 
 #[test]
@@ -100,7 +169,8 @@ fn directly_under_its_context_is_no_parent_at_all() {
         (None, None)
     );
     let uri = Held.space("c-hb").record(ORG, NODE, &doc.id);
-    assert_eq!(record.row(&uri, "hb"), Some(doc));
+    let theirs = kept(doc.visibility, &doc.published_uri);
+    assert_eq!(record.row(&uri, "hb", theirs), Some(doc));
 }
 
 #[test]
@@ -132,7 +202,10 @@ fn a_context_comes_back_as_it_went_wherever_it_hangs() {
             .as_deref()
             .is_some_and(|n| n.ends_with("/d-moeder"))
     );
-    assert_eq!(record.row(&Held.space("c-lm"), "hb/moeder"), Some(ctx));
+    assert_eq!(
+        record.row(&Held.space("c-lm"), "hb/moeder", Kept::default()),
+        Some(ctx)
+    );
 
     // Directly in it.
     let directly = Hanging {
@@ -142,7 +215,10 @@ fn a_context_comes_back_as_it_went_wherever_it_hangs() {
     let ctx = event("c-hb");
     let record = ContextProfile::of(&ctx, &directly, &Held);
     assert_eq!(record.parent_node, None);
-    assert_eq!(record.row(&Held.space("c-lm"), "hb/moeder"), Some(ctx));
+    assert_eq!(
+        record.row(&Held.space("c-lm"), "hb/moeder", Kept::default()),
+        Some(ctx)
+    );
 }
 
 #[test]

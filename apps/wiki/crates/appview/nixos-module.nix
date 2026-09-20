@@ -51,6 +51,9 @@
     APPVIEW_BOARD_PDS = cfg.board.pds;
     APPVIEW_BOARD_IDENTIFIER = cfg.board.identifier;
     APPVIEW_BOARD_BATCH_SECS = toString cfg.board.batchSeconds;
+    APPVIEW_SPACES_PDS = cfg.spaces.pds;
+    APPVIEW_SPACES_IDENTIFIER = cfg.spaces.identifier;
+    APPVIEW_SPACES_SERVICE = cfg.spaces.service;
   };
   # What the service and the cutover's load share: the same state, the same
   # secrets, the same confinement.
@@ -199,7 +202,8 @@ in {
         file links and seals a running poll's issuer key; without it one is
         made and kept in the state directory), `VAPID_PRIVATE_KEY` (Web Push;
         without it no notification is sent), `APPVIEW_SMTP_URL` (see `mailFrom`),
-        `APPVIEW_BOARD_PASSWORD` (see `board`) and `BETTERSTACK_SOURCE_TOKEN`.
+        `APPVIEW_BOARD_PASSWORD` (see `board`), `APPVIEW_SPACES_PASSWORD` (see
+        `spaces`) and `BETTERSTACK_SOURCE_TOKEN`.
       '';
     };
 
@@ -233,6 +237,41 @@ in {
           How often waiting ballots are published. They go out at least three
           together and shuffled, or all at the close, so that no ballot's
           publication says when it was cast.
+        '';
+      };
+    };
+
+    spaces = {
+      pds = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        example = "https://pds.example.org";
+        description = ''
+          The PDS of the organization's account, for mirroring the wiki into
+          atproto spaces (`docs/atproto-spaces-redesign.md`): one space per
+          group or event, every page, comment and reaction a record in it, held
+          by that account. Needs a PDS that has spaces, which as of 2026-09 is
+          an alpha nothing real belongs on. With `identifier`, `service` and
+          `APPVIEW_SPACES_PASSWORD` in `secretsFile` (an app password of that
+          account). Unset, nothing is mirrored. With only some of the four the
+          service refuses to start.
+        '';
+      };
+      identifier = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        example = "wiki.example.org";
+        description = "The handle or DID of the organization's account.";
+      };
+      service = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        example = "did:web:appview.example.org#wiki_appview";
+        description = ''
+          This AppView as the spaces name it, a DID and a fragment: who the PDS
+          asks whether a user may read or write a space. For a `did:web` of the
+          AppView's own domain, the AppView serves the DID document itself
+          (`/.well-known/did.json`, pointing at `publicUrl`).
         '';
       };
     };

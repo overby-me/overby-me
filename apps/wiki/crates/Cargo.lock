@@ -127,6 +127,7 @@ version = "0.1.0"
 dependencies = [
  "addr2line",
  "aes-gcm",
+ "atproto-spaces",
  "atrium-api",
  "atrium-common",
  "atrium-identity",
@@ -163,6 +164,7 @@ dependencies = [
  "tracing-subscriber",
  "turso",
  "wiki-domain-types",
+ "wiki-records",
  "wiki-schema",
  "zip",
 ]
@@ -1562,7 +1564,10 @@ dependencies = [
 name = "fake-pds"
 version = "0.1.0"
 dependencies = [
+ "atproto-spaces",
  "axum",
+ "p256",
+ "rand_core 0.6.4",
  "serde",
  "serde_json",
  "sha2 0.10.9",

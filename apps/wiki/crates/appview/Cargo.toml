@@ -21,6 +21,7 @@ addr2line = "0.24"
 # libcurl/openssl: `aes-gcm` for the aes128gcm content encoding, `p256` for the
 # ECDH agreement and the ES256 VAPID signature, `hkdf` for the key derivation.
 aes-gcm = "0.10"
+atproto-spaces = { path = "../atproto-spaces" }
 atrium-api = { version = "0.25.8", default-features = false, features = [
   "agent"
 ] }
@@ -81,6 +82,7 @@ rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = [
   "gzip",
   "http2",
+  "json",
   "rustls-tls"
 ] }
 serde = { version = "1", features = ["derive"] }
@@ -111,6 +113,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 turso = "0.7"
 wiki-domain-types = { path = "../domain-types" }
+wiki-records = { path = "../wiki-records" }
 wiki-schema = { path = "../schema" }
 
 [dev-dependencies]

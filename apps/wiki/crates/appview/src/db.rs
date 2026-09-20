@@ -93,6 +93,7 @@ impl Db {
         conn.execute_batch(crate::board::BOARD_CUSTODY_DDL).await?;
         conn.execute_batch(crate::board::BOARD_PUBLICATION_DDL)
             .await?;
+        conn.execute_batch(crate::spaces::SPACES_DDL).await?;
         Ok(())
     }
 }

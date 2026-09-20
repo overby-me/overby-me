@@ -43,6 +43,17 @@
 					"description": "The record whose removal took this one along. A restore undoes that one act and not a guess at a subtree."
 				}
 			}
+		},
+		"number": {
+			"type": "object",
+			"description": "A number that atproto data cannot hold, inside `content` or `data`: a fraction, or an integer past 2^53 - 1. In its own digits, as JSON writes a number.",
+			"required": ["value"],
+			"properties": {
+				"value": {
+					"type": "string",
+					"maxLength": 64
+				}
+			}
 		}
 	}
 }

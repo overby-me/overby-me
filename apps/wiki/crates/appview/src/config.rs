@@ -103,6 +103,20 @@ pub struct Config {
     pub board_password: Secret,
     /// How often what is waiting is published (`APPVIEW_BOARD_BATCH_SECS`).
     pub board_batch_secs: u64,
+    /// The PDS of the organization's own account (`APPVIEW_SPACES_PDS`), which
+    /// every context's atproto space is anchored on
+    /// (`docs/atproto-spaces-redesign.md`). With the three settings below, what
+    /// is written here is also written there as records. Without all four,
+    /// nothing is, which is how the AppView runs until spaces are released.
+    pub spaces_pds: String,
+    /// That account's handle or DID (`APPVIEW_SPACES_IDENTIFIER`).
+    pub spaces_identifier: String,
+    /// An app password of that account (`APPVIEW_SPACES_PASSWORD`).
+    pub spaces_password: Secret,
+    /// What a space names as its managing app and tells of writes: this
+    /// AppView, as `did#fragment` (`APPVIEW_SPACES_SERVICE`). The DID's document
+    /// has to carry that service, pointing here.
+    pub spaces_service: String,
     /// Where mail is handed over (`APPVIEW_SMTP_URL`), such as
     /// `smtps://user:password@mail.example:465` or
     /// `smtp://mail.example:587?tls=required`. With `mail_from`, an invited
@@ -208,6 +222,10 @@ impl Config {
             board_identifier: env("APPVIEW_BOARD_IDENTIFIER").trim().to_string(),
             board_password: Secret::new(env("APPVIEW_BOARD_PASSWORD").trim()),
             board_batch_secs: env("APPVIEW_BOARD_BATCH_SECS").parse().unwrap_or(30),
+            spaces_pds: env("APPVIEW_SPACES_PDS").trim_end_matches('/').to_string(),
+            spaces_identifier: env("APPVIEW_SPACES_IDENTIFIER").trim().to_string(),
+            spaces_password: Secret::new(env("APPVIEW_SPACES_PASSWORD").trim()),
+            spaces_service: env("APPVIEW_SPACES_SERVICE").trim().to_string(),
             smtp_url: Secret::new(env("APPVIEW_SMTP_URL").trim()),
             mail_from: env("APPVIEW_MAIL_FROM"),
             vapid_private: Secret::new(env("VAPID_PRIVATE_KEY")),
@@ -303,6 +321,10 @@ impl Default for Config {
             board_identifier: String::new(),
             board_password: Secret::default(),
             board_batch_secs: 30,
+            spaces_pds: String::new(),
+            spaces_identifier: String::new(),
+            spaces_password: Secret::default(),
+            spaces_service: String::new(),
             smtp_url: Secret::default(),
             mail_from: String::new(),
             site_name: DEFAULT_SITE_NAME.to_string(),

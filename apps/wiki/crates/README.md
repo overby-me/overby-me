@@ -77,7 +77,10 @@ workspace when the rewrite starts.
   honest, and checking the service tokens a PDS calls back with. Its ignored
   test runs against the real alpha PDS in a container
   (`apps/wiki/scripts/test-spaces.nu`), which is how a breaking change of the
-  alpha's shows.
+  alpha's shows. The AppView's use of it is `appview/src/spaces.rs`, off unless
+  configured: the wiki mirrored into a space per context, and the AppView as
+  the managing app the organization's PDS asks. That has an ignored test of its
+  own in the same script.
 - `wiki-records`: a context's atproto space as Rust types (the lexicons
   `contextProfile`, `node`, `comment` and `reaction` under
   `lexicons/wiki/radikal/`), and the mapping between those records and the rows
@@ -91,7 +94,9 @@ workspace when the rewrite starts.
   asked is in `spaces-spike/FINDINGS.md`, the design in
   `docs/atproto-spaces-redesign.md`.
 - `fake-pds`: a PDS for tests, in no package: one account, its records in
-  memory, the calls the board's publisher and the mirror make of a real one.
+  memory, the calls the board's publisher and the mirror make of a real one,
+  and the space calls the AppView makes, answered as the alpha was found to
+  answer them (`spaces-spike/FINDINGS.md`).
 - `fake-plc`: a `did:plc` directory for a sign-in rehearsed on one machine, in
   no package. A REAL PDS registers its accounts with a directory, and the
   public one is no place for made-up accounts; this one keeps what it is told
