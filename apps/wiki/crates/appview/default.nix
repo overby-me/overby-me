@@ -25,6 +25,7 @@ let
         ./../domain-types
         ./../durability-harness
         ./../fake-pds
+        ./../fake-plc
         ./../lexgen
         ./../migration-extractor
         ./../migration-loader

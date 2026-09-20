@@ -73,6 +73,11 @@ workspace when the rewrite starts.
   `wiki-board-mirror`.
 - `fake-pds`: a PDS for tests, in no package: one account, its records in
   memory, the calls the board's publisher and the mirror make of a real one.
+- `fake-plc`: a `did:plc` directory for a sign-in rehearsed on one machine, in
+  no package. A REAL PDS registers its accounts with a directory, and the
+  public one is no place for made-up accounts; this one keeps what it is told
+  and checks none of it (`apps/wiki/scripts/test-real-login.nu`, with
+  `APPVIEW_PLC_URL` pointing the AppView at it).
 - `appview`: the backend itself. `docs/appview-roadmap.md` says what it does
   today and what is left.
 

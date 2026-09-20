@@ -55,9 +55,11 @@ recognized by its address takes its old account over without a failure, and a
 smoke test reads and writes it over HTTP. `nu scripts/rehearse-cutover.nu`
 runs all of that again from a fresh dump.
 
-What needs a person and cannot be tested from here: one real browser login,
-and with it the token exchange, the profile read and posting to a PDS. The
-interim's own browser suite (`test-browser.nu`) is written against the
+A real sign-in has been made too, on one machine (`scripts/test-real-login.nu`):
+the real `appview`, a real PDS, the PDS's own sign-in and consent pages in a
+browser, the token exchange, the profile read and a post written to the PDS.
+
+The interim's own browser suite (`test-browser.nu`) is written against the
 interim's backend and an account on it, and has not been ported; the AppView's
 is the smaller one named above.
 
@@ -259,12 +261,27 @@ is merged and its tests pass.
 - [x] Profile hydration on login (`crates/appview/src/profile.rs`): the handle,
   display name and avatar, read from the member's own PDS beside the login and
   never in its way. PDS-agnostic: `getSession` and the profile record, not
-  Bluesky's AppView. Like posting, it has not met a real PDS yet.
+  Bluesky's AppView. The real sign-in below reads a handle this way, and posts.
 - [ ] A confidential client (`private_key_jwt` and a served JWKS). Not needed
   until the publish seam writes to members' repos and wants long-lived PDS
   tokens; the AppView's own sessions do not depend on them.
-- [ ] One full login in a real browser against a real PDS. Everything around
-  the token exchange is covered; the exchange itself needs a human.
+- [x] One full login in a real browser against a real PDS
+  (`scripts/test-real-login.nu`). It was thought to need a human; it needed a
+  PDS whose password is known. The real `appview` runs against nixpkgs'
+  `bluesky-pds`, which registers a made-up account with a stand-in `did:plc`
+  directory (`crates/fake-plc`, which `APPVIEW_PLC_URL` points the AppView at),
+  and headless Firefox goes through the wiki's form, the PDS's own sign-in and
+  consent pages, and back: the pushed request with DPoP and PKCE, the token
+  exchange, the handle read from the PDS, a post written into the account's
+  repo and read back from the PDS, and sign-out. It found two faults that every
+  test before it walked around by planting a session: the router dropped the
+  `#code=` a sign-in comes back with before anything read it, so a person who
+  had just signed in saw the sign-in form again; and what followed the exchange
+  navigated from above the router, which took the app down. The browser suite
+  now walks in through the address bar too, with a code the dev AppView mints
+  (`GET /dev/code`). Not covered: a PDS on plain http is never believed about
+  an address, so taking an old account over by address is proven by the cutover
+  rehearsal and not here.
 
 ### M2: authorization core
 

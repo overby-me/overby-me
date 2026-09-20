@@ -235,13 +235,33 @@ def main [
     let form = (js $sid 'return !!document.getElementById("auth-handle")')
     if $form == true { $passed = $passed + 1; log-ok "signing in asks for a handle" } else { $failed = $failed + 1; log-fail "no handle field on the sign-in screen" }
 
-    # What `finish_sign_in` stores once a provider has sent the browser back.
-    let stored = ({
-        user: { id: "did:plc:owner", email: "@owner.test", display_name: "Owner", avatar_url: "" },
-        access_token: $owner, refresh_token: $owner, node_id: null,
-        access_token_expires_at: 4102444800000.0
-    } | to json -r)
-    js $sid $"localStorage.setItem\('wiki_session', ($stored | to json -r)\); return 1" | ignore
+    # In through the address bar, as a provider sends a browser back: a one-time
+    # code after `#`. A planted session walked around two faults a real sign-in
+    # found here: the router dropped the code as it started, and what followed
+    # the exchange navigated from above the router and took the app down.
+    let code = (^curl -s $"http://127.0.0.1:($API_PORT)/dev/code?did=did:plc:owner" | from json | get code)
+    # Not to the path the browser is on: that would be a change of fragment and
+    # no load, where coming back from a provider is always a load.
+    go $sid $"/#code=($code)"
+    let walked_in = (wait-for-text $sid "Owner" 30)
+    let kept = (js $sid 'const s = JSON.parse(localStorage.getItem("wiki_session") || "null"); return s && s.access_token ? s.access_token : ""')
+    let at_the_form = (js $sid 'return !!document.getElementById("auth-handle")')
+    let browser_token = if ($kept | is-not-empty) and $at_the_form == false and $walked_in {
+        $passed = $passed + 1
+        log-ok "a sign-in that comes back with a code ends signed in, and off the sign-in form"
+        $kept
+    } else {
+        $failed = $failed + 1
+        log-fail $"coming back with a code: a session was kept: ($kept | is-not-empty), still at the form: ($at_the_form), the account menu names them: ($walked_in)"
+        # So that the rest of the run says something of its own.
+        let stored = ({
+            user: { id: "did:plc:owner", email: "@owner.test", display_name: "Owner", avatar_url: "" },
+            access_token: $owner, refresh_token: $owner, node_id: null,
+            access_token_expires_at: 4102444800000.0
+        } | to json -r)
+        js $sid $"localStorage.setItem\('wiki_session', ($stored | to json -r)\); return 1" | ignore
+        $owner
+    }
 
     let screens = [
         [name path text];
@@ -543,7 +563,7 @@ def main [
     let item = (click-when-there $sid '[...document.querySelectorAll("button.list-item")].find(b => b.innerText.replace(/\s+/g, " ").trim() === "logout Log out")' 10)
     let signed_out = (wait-for-text $sid "Log in" 15)
     sleep 2sec
-    let still = (^curl -s -o /dev/null -w "%{http_code}" -H $"authorization: Bearer ($owner)" $"(api).getSession" | str trim)
+    let still = (^curl -s -o /dev/null -w "%{http_code}" -H $"authorization: Bearer ($browser_token)" $"(api).getSession" | str trim)
     if $signed_out and $still == "401" {
         $passed = $passed + 1
         log-ok "signing out ends the session here and at the AppView"

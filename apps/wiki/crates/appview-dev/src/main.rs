@@ -8,7 +8,9 @@
 //!
 //! The first DID runs the site (owns the home). One line of JSON on stdout says
 //! where it listens and which session is whose: `{"url": .., "sessions": {..}}`.
-//! Never deployed: it mints sessions for anyone it is asked to.
+//! `GET /dev/code?did=..` answers the one-time code a completed login hands the
+//! browser, which is how a test walks in through the address bar as a person
+//! does. Never deployed: it mints sessions for anyone it is asked to.
 //!
 //! For rehearsing a cutover, `--db FILE` serves a datastore that `appview
 //! import` filled (nobody is made its owner), `<did>=<address>` signs that DID
@@ -203,5 +205,27 @@ async fn main() {
         hello["everyone_returns"] = returned;
     }
     println!("{hello}");
-    axum::serve(listener, router(state)).await.expect("serving");
+    let dev = axum::Router::new()
+        .route("/dev/code", axum::routing::get(code_for))
+        .with_state(db);
+    axum::serve(listener, router(state).merge(dev))
+        .await
+        .expect("serving");
+}
+
+/// What `/callback` leaves a browser with, for a DID nobody had to prove.
+async fn code_for(
+    axum::extract::State(db): axum::extract::State<Db>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+) -> Result<axum::Json<serde_json::Value>, axum::http::StatusCode> {
+    let did = query
+        .as_deref()
+        .and_then(|q| q.strip_prefix("did="))
+        .filter(|did| did.starts_with("did:"))
+        .ok_or(axum::http::StatusCode::BAD_REQUEST)?;
+    let code = appview::session::Sessions::new(db)
+        .issue_code(did)
+        .await
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(axum::Json(serde_json::json!({ "code": code })))
 }

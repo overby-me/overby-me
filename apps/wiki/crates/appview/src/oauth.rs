@@ -266,7 +266,10 @@ impl WikiOAuth {
         let http_client = Arc::new(http.clone());
         let resolver = OAuthResolverConfig {
             did_resolver: CommonDidResolver::new(CommonDidResolverConfig {
-                plc_directory_url: DEFAULT_PLC_DIRECTORY_URL.to_string(),
+                plc_directory_url: match config.plc_url.as_str() {
+                    "" => DEFAULT_PLC_DIRECTORY_URL.to_string(),
+                    own => own.to_string(),
+                },
                 http_client: Arc::clone(&http_client),
             }),
             handle_resolver: AtprotoHandleResolver::new(AtprotoHandleResolverConfig {

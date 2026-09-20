@@ -26,6 +26,19 @@ fn back_to_where_they_were() {
     };
 }
 
+thread_local! {
+    /// The code a sign-in came back with, from [`capture_returned_code`] until
+    /// [`finish_sign_in`] spends it.
+    static RETURNED: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Called from `main`, BEFORE the router mounts: the router rewrites the address
+/// as it starts and drops the fragment, and the code with it, which left a
+/// person who had just signed in looking at the sign-in form again.
+pub fn capture_returned_code() {
+    RETURNED.with(|kept| *kept.borrow_mut() = returned_code());
+}
+
 /// The one-time code a sign-in came back with, taken out of the address bar so
 /// that it is not left in the history to be spent again by a reload.
 fn returned_code() -> Option<String> {
@@ -46,7 +59,7 @@ fn returned_code() -> Option<String> {
 /// Finish a sign-in that the account's provider has just sent back here. Run
 /// once at startup; does nothing on an ordinary page load.
 pub async fn finish_sign_in() {
-    let Some(code) = returned_code() else {
+    let Some(code) = RETURNED.with(|kept| kept.borrow_mut().take()) else {
         return;
     };
     match crate::nhost::sign_in_with_code(&code).await {

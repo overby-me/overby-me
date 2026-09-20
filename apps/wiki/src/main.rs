@@ -141,6 +141,9 @@ fn main() {
     // now, before the router mounts and rewrites `/`'s query away; Layout then
     // exchanges the token and shows the set-password form.
     components::layout::capture_reset_token();
+    // Likewise the one-time code a sign-in on the AppView comes back with.
+    #[cfg(feature = "appview")]
+    components::auth::capture_returned_code();
 
     // PWA: install the manifest / icon / theme-color head tags and register the
     // service worker (offline where the SW controls the root).
@@ -404,9 +407,6 @@ fn App() -> Element {
 
     // Keep the NHost access token fresh (renew before expiry / on return).
     use_future(session::run_token_refresh);
-    // On the AppView a sign-in comes back as a one-time code in the address.
-    #[cfg(feature = "appview")]
-    use_future(components::auth::finish_sign_in);
 
     // @font-face for the self-hosted (asset-bundled) fonts. Built here so the src
     // URLs are the content-hashed asset paths, avoiding any CSS url() rewriting

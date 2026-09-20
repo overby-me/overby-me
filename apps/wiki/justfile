@@ -141,6 +141,17 @@ test-browser *ARGS:
 test-browser-appview *ARGS:
     nu scripts/test-browser-appview.nu {{ARGS}}
 
+# One REAL sign-in, all of it on this machine: the real `appview`, a real PDS
+# from nixpkgs, a stand-in `did:plc` directory, and the frontend in headless
+# Firefox through the PDS's own sign-in and consent pages and back.
+test-real-login *ARGS:
+    nu scripts/test-real-login.nu {{ARGS}}
+
+# The cutover, rehearsed from a dump already in DIR (docs/cutover-runbook.md):
+# extract, load, files, the gates, every carried account returns, a smoke test.
+rehearse-cutover DIR *ARGS:
+    nu scripts/rehearse-cutover.nu {{DIR}} {{ARGS}}
+
 # Drive assets/sw.js against stubbed Cache/fetch and assert every path answers
 # with a Response. The service worker only matters when the network is failing,
 # which is exactly when nobody is watching it.

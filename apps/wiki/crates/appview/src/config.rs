@@ -54,6 +54,10 @@ pub struct Config {
     /// (`APPVIEW_PUBLIC_URL`). Empty means a loopback dev instance, which
     /// selects the OAuth loopback client profile.
     pub public_url: String,
+    /// The directory `did:plc` identities are looked up in (`APPVIEW_PLC_URL`).
+    /// Unset, the public one. For a PDS that registers with a directory of its
+    /// own, which is what a login rehearsed on one machine needs.
+    pub plc_url: String,
     /// Browser origins that may call the API (CORS) and receive a login
     /// redirect (`APPVIEW_FRONTEND_ORIGINS`, comma-separated). Empty keeps the
     /// API same-origin.
@@ -190,6 +194,7 @@ impl Config {
                 .unwrap_or_else(|_| "in.logs.betterstack.com".to_string()),
             betterstack_token: Secret::new(env("BETTERSTACK_SOURCE_TOKEN")),
             ballot_replica_log: env("BALLOT_REPLICA_LOG"),
+            plc_url: env("APPVIEW_PLC_URL").trim_end_matches('/').to_string(),
             public_url,
             trusted_email_pds: match env("APPVIEW_TRUSTED_EMAIL_PDS") {
                 hosts if hosts.trim().is_empty() => default_trusted_email_pds(),
@@ -281,6 +286,7 @@ impl Default for Config {
             betterstack_host: "in.logs.betterstack.com".to_string(),
             betterstack_token: Secret::default(),
             ballot_replica_log: String::new(),
+            plc_url: String::new(),
             public_url: String::new(),
             frontend_origins: Vec::new(),
             trusted_email_pds: default_trusted_email_pds(),
