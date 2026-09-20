@@ -26,6 +26,16 @@ pub fn HomeApp() -> Element {
         .map(|n| n.is_owner.unwrap_or(false) || n.is_context_owner.unwrap_or(false))
         .unwrap_or(false);
     let welcome_data = root_node.as_ref().and_then(|n| n.data.clone()).map(|d| d.0);
+    // On the AppView nobody registers an email here: an invitation finds a
+    // person by the address their provider confirms, or by a claim link.
+    let (remember_email, no_invitations_hint) = if cfg!(feature = "appview") {
+        (
+            "layout.rememberEmailAtproto",
+            "layout.noInvitationsHintAtproto",
+        )
+    } else {
+        ("layout.rememberEmail", "layout.noInvitationsHint")
+    };
     let has_welcome = welcome_data
         .as_ref()
         .and_then(|d| d.get("content"))
@@ -125,10 +135,10 @@ pub fn HomeApp() -> Element {
                             super::content::SlateRenderer { data: welcome_data.clone() }
                         } else if is_auth {
                             p { class: "body-large mb-1", "{t(\"layout.acceptInvitations\")}" }
-                            p { class: "body-medium", "{t(\"layout.noInvitationsHint\")}" }
+                            p { class: "body-medium", "{t(no_invitations_hint)}" }
                         } else {
                             p { class: "body-large mb-1", "{t(\"layout.loginOrRegister\")}" }
-                            p { class: "body-medium mb-2", "{t(\"layout.rememberEmail\")}" }
+                            p { class: "body-medium mb-2", "{t(remember_email)}" }
                         }
                         if !is_auth {
                             div { class: "stack stack-h mt-2",
