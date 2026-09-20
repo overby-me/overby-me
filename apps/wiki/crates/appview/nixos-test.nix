@@ -95,6 +95,8 @@ pkgs.testers.nixosTest {
     # The load. The service has run, so its datastore already has a home of its
     # own making, which has to make way for the one loaded.
     machine.succeed("systemctl start wiki-appview-import.service")
+    gates = machine.succeed("journalctl -u wiki-appview-import.service --no-pager")
+    assert "every gate is green" in gates, gates
     machine.fail("systemctl is-active wiki-appview.service")
     machine.succeed("systemctl start wiki-appview.service")
     machine.wait_for_open_port(8080)

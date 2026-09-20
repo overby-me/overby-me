@@ -132,7 +132,7 @@ async fn readable(
     Ok(runs_the_site.then_some(blob))
 }
 
-fn path_of(config: &Config, sha256: &str) -> PathBuf {
+pub(crate) fn path_of(config: &Config, sha256: &str) -> PathBuf {
     let shard = sha256.get(..2).unwrap_or("00");
     PathBuf::from(&config.blob_dir).join(shard).join(sha256)
 }

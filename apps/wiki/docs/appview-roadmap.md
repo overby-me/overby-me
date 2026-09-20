@@ -25,7 +25,7 @@ generated schema, the Store seam, the OAuth stores and callback, the firehose
 consumer, the durable ballot core, the loader and the deploy unit all exist. This
 document is the phase after it: turning that skeleton into the backend.
 
-## Where it stands (2026-09-19)
+## Where it stands (2026-09-20)
 
 Built and tested in `crates/appview`, milestone by milestone below: sessions on
 atproto OAuth, the read and write gates, the node tree the frontend routes by,
@@ -48,12 +48,18 @@ the bin and comes back, search finds a page by its text, a change made
 elsewhere arrives without a reload, and signing out ends the session at the
 AppView too.
 
-Not built: the parts of voting that wait on a decision that is the owner's to
-make (M6). What needs a person and cannot
-be tested from here: one real browser login, and with it the token exchange,
-the profile read and posting to a PDS. The interim's own browser suite
-(`test-browser.nu`) is written against the interim's backend and an account on
-it, and has not been ported; the AppView's is the smaller one named above.
+The cutover has been rehearsed on a dump of production
+(`docs/cutover-rehearsal.md`): the real wiki loads, its files come across
+whole, every gate of the runbook is green, every account that can be
+recognized by its address takes its old account over without a failure, and a
+smoke test reads and writes it over HTTP. `nu scripts/rehearse-cutover.nu`
+runs all of that again from a fresh dump.
+
+What needs a person and cannot be tested from here: one real browser login,
+and with it the token exchange, the profile read and posting to a PDS. The
+interim's own browser suite (`test-browser.nu`) is written against the
+interim's backend and an account on it, and has not been ported; the AppView's
+is the smaller one named above.
 
 ## Findings that shape the plan
 
@@ -623,10 +629,10 @@ asks Bluesky's public API itself. The steps:
   `scripts/test-browser-appview.nu` drives the built app in headless Firefox.
   Like the interim's layer it asks for a node once when two views want it at
   the same moment (a page and its crumbs, the drawer and the search box), and
-  remembers nothing once the answer lands. Left as it was: the home page's two
-  hints about which email to register with are the interim's words: here an invitation by address finds a person through the
-  address their provider confirms, else by claim link, which is for whoever
-  writes the site's copy to say.
+  remembers nothing once the answer lands. The home page's two hints about
+  which email to register with are the interim's; on this build they say what
+  is true here, that an invitation finds a person through the address their
+  provider confirms, else by claim link.
 - [x] The extractor and the load cover every kind the interim holds: the tree,
   members, comments, reactions, what each poll came to, canvases with their
   cells, reports, which contexts are open to everyone, and the address each
@@ -645,12 +651,30 @@ asks Bluesky's public API itself. The steps:
   confinement, takes the extraction as a systemd credential and the files as a
   read-only bind, and stops the service while it loads. The VM test loads a
   made-up wiki this way and reads it back over HTTP.
-- [ ] The field-gap report empty on a real dump, which is the owner's to take.
+- [x] The field-gap report empty on a real dump (`docs/cutover-rehearsal.md`).
+  It was not, and could not have been: a context's owner becoming an owner
+  membership and an open poll coming across closed were filed as gaps, in the
+  bucket the gate holds to empty. Decisions have a bucket of their own now
+  (`reshaped`, beside `left_behind`). The real gaps were two legacy one-off
+  pages with nothing in them, which are left behind as empty shells, while one
+  that held anything would still stop the flip.
 - [x] A browser run against the AppView (`just test-browser-appview`): small,
   and its own, since the interim's suite is written against the interim's
   backend and an account on it.
-- [ ] Staging rehearsal of the runbook, and the interim's browser suite ported
-  to run against an AppView.
+- [x] Staging rehearsal of the runbook, on a dump of production, as one
+  command (`scripts/rehearse-cutover.nu`). The first load of real data failed
+  twice, on what no made-up wiki had: 528 rows under a parent that was deleted
+  outright before the interim had a bin, which the extractor re-rooted silently
+  under colliding paths and now leaves behind, counted by kind; and four rows
+  naming an account that was deleted from under them, which the interim allows
+  and a foreign key does not (a seat waits for its address again, an author is
+  carried by name, and the loader names the row where the engine named
+  nothing). The runbook's gates were prose, to be checked by hand in a state
+  directory nobody can look into; they are `appview verify` now, run by the
+  import unit and red by exit code. `appview-dev` serves a loaded datastore
+  and signs a DID in as though its provider confirmed an address, which is how
+  every one of the 314 recognizable accounts was taken over in one pass.
+- [ ] The interim's browser suite ported to run against an AppView.
 
 ## Working rules
 

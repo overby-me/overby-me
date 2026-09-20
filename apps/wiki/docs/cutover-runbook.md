@@ -4,8 +4,9 @@ The decided migration strategy is a single big-bang cutover
 (`docs/atproto-open-decisions.md`): freeze the interim app, move the content and
 membership rows into a staging Turso db, verify, then flip the frontend at the
 env seams. This is the ordered checklist, the go/no-go verification gates, and
-the rollback. It is paper until run; the pieces it assembles are built and
-tested.
+the rollback. Steps 2 to 6 and the smoke test have been rehearsed on a dump of
+production (`docs/cutover-rehearsal.md`), and are one command to rehearse
+again: `nu scripts/rehearse-cutover.nu <dir>`.
 
 ## Pieces (all EXISTING and tested unless marked)
 
@@ -13,10 +14,14 @@ tested.
   interim Hasura surface into the `{ nodes, members, users, permissions }`
   snapshot (admin secret from the environment, never committed). `users` holds
   each account's address and whether the interim verified it; `permissions`
-  holds the rows that open a context to everyone.
+  holds the rows that open a context to everyone. Each table is read a page at
+  a time by id with a pause between, since the interim is one small shared
+  project, and held to its own count, so a capped or torn read fails there.
 - **Extractor**: `crates/migration-extractor`, which maps the snapshot into the
   canonical domain types and emits a `FieldGapReport`; `extract` binary writes
-  `extraction.json` + `report.json`.
+  `extraction.json` + `report.json`. The report keeps gaps (`unmapped_source`,
+  `unmapped_mimes`, `unfilled_required`) apart from decisions (`left_behind`,
+  `reshaped`), so that the first can be held to empty.
 - **Generated schema**: `crates/domain-types::DDL` (re-exported as
   `wiki_schema::ENTITY_SCHEMA`), validated on rusqlite + turso by
   `crates/schema/tests/roundtrip.rs`. Every entity table carries
@@ -28,10 +33,13 @@ tested.
   account is recognized by. One transaction, so a load that fails leaves the
   datastore as it found it. It refuses a datastore somebody has signed in to,
   where loading again would bring back whatever was deleted since.
+- **The gates**: `appview verify <extraction.json> [<files dir>]`
+  (`crates/appview/src/verify.rs`), which asks the verification gates below of
+  the loaded datastore and exits non-zero on a red one.
 - **Accounts**: `crates/appview/src/legacy.rs`. See "Who people are afterwards".
-- **Env seams (the flip)**: `WIKI_GRAPHQL_URL` (`src/nhost.rs:13`) and
-  `WIKI_BACKEND_URL` (`src/backend_api.rs:18`), both `option_env!` compile-time
-  overrides; the file-blob path flips at the single `backend_api::file_url` seam.
+- **The flip**: the frontend built with the `appview` cargo feature and
+  `WIKI_APPVIEW_URL` naming the AppView (`src/appview/mod.rs`). The build
+  without the feature is the interim's, and is the rollback.
 - **Ballot service** (parallel track, not on the content cutover path):
   `crates/ballot-store` (durable board + private eligibility/issuance). The
   interim has only `vote/poll` + anonymous `vote/vote`; historical secret
@@ -42,10 +50,13 @@ tested.
   and `/healthz`). Acceptance (`nixos-rebuild build-vm` behind Ferron, restart
   soak) is the operator step.
 - **The AppView itself** answers every data call the frontend makes
-  (`docs/appview-api-coverage.md`). What is NOT BUILT is the other end of the
-  flip: the frontend's own data layer still speaks GraphQL to Hasura
-  (`docs/appview-roadmap.md`, M9), so there is nothing to flip to yet, and this
-  runbook is rehearsed against staging first.
+  (`docs/appview-api-coverage.md`), and the frontend has a data layer that
+  speaks to it (`docs/appview-roadmap.md`, M9).
+- **The rehearsal**: `scripts/rehearse-cutover.nu <dir>`, from a dump already
+  in `<dir>`: extract, load, file the files, the gates, then every carried
+  account returns at once (`appview-dev --db ... --everyone-returns`, a dev
+  tool that is never deployed) and a smoke test over HTTP as nobody, as a
+  returned member and as a stranger.
 
 ## Ordered checklist
 
@@ -53,9 +64,10 @@ tested.
    (no new nodes/members/votes) so the dump is a consistent point-in-time. Record
    the freeze timestamp.
 2. **Read-only dump.** `HASURA_URL=… HASURA_ADMIN_SECRET=… nu
-   scripts/dump-interim-snapshot.nu | save --force snapshot.json`. Confirm the
-   printed row counts (nodes / members / users) match the census; if Hasura
-   capped a table, add pagination and re-dump (a silent cap loses data).
+   scripts/dump-interim-snapshot.nu | save --force snapshot.json`. It holds
+   each table to its own count and fails on a difference, which with the
+   interim frozen means a capped read. Keep the file private: it holds every
+   member's address.
 3. **Extract.** `cargo run -p migration-extractor -- snapshot.json` → produces
    `extraction.json` + `report.json`. This step is PII-bearing; run it in the
    owner-approved environment, not CI.
@@ -79,59 +91,68 @@ tested.
    `.files` to where the two are ON THE HOST (strings, never Nix paths: a path
    would copy every member's address into the world-readable store), rebuild,
    and `systemctl start wiki-appview-import`. It stops the service, loads, files
-   the files, and leaves the service stopped for the gates below;
-   `journalctl -u wiki-appview-import` has what it printed. The VM test
-   (`crates/appview/nixos-test.nix`) runs exactly this.
-6. **Verification gates** (below): go/no-go. Any red gate stops the cutover.
-7. **Flip.** Build the frontend with `WIKI_GRAPHQL_URL` / `WIKI_BACKEND_URL`
-   pointed at the AppView, and change the `backend_api::file_url` body to the
-   AppView blob path (`/blob/<id>`). Deploy the frontend.
+   the files, asks the gates, and leaves the service stopped;
+   `journalctl -u wiki-appview-import` has what it printed, and a red gate
+   fails the unit. The VM test (`crates/appview/nixos-test.nix`) runs exactly
+   this.
+6. **Verification gates** (below): go/no-go. `appview verify extraction.json
+   files` prints each, green or red, and what it counted. Any red gate stops
+   the cutover. Then read `report.json`: what was left behind and what was
+   carried in another shape are decisions, and each count is to be one you
+   expected.
+7. **Flip.** Build the frontend with the `appview` feature and
+   `WIKI_APPVIEW_URL` naming the AppView. Deploy the frontend.
 8. **Smoke test** the live app against the AppView: load a group, open a
    document with multiple authors, post a comment, fetch a file.
 9. **Unfreeze** (or, if a gate or smoke test fails, **roll back**).
 
 ## Verification gates (go/no-go)
 
-All must be green before the flip:
+All must be green before the flip. `appview verify` asks each of them, under
+the names in bold:
 
-- **Row counts.** Per-table counts in staging Turso equal the expected mapped
-  counts from the dump (contexts = group+event+site nodes and the one home;
-  documents = content nodes, polls and canvases;
-  members = roster rows; users = interim users; comments = `vote/comment` nodes).
-- **`legacy_id` coverage.** Every loaded entity row has a non-NULL `legacy_id`,
-  and the count of distinct `legacy_id`s per table equals the source uuid count
-  for that table (no row silently dropped or merged).
-- **Field-gap report is clean.** `report.json`'s `unmapped_source`,
+- **Everything arrived.** Every row of the extraction is in its table, by id:
+  users, contexts, documents, members, comments, reactions, polls, canvases,
+  reports, and the accounts to be recognized by address. What the datastore
+  has besides (a configured site owner) is counted and is not red.
+- **Known by the id they had.** Every loaded entity row carries its
+  `legacy_id`, which is what makes a second load add nothing.
+- **Nothing without a home.** `report.json`'s `unmapped_source`,
   `unmapped_mimes`, and `unfilled_required` are all empty. A non-empty
   `unfilled_required` means a NOT NULL or a meaning was dropped; a non-empty
   `unmapped_*` means a source field or mime had no home and must be triaged
   (mapping rule, interim junk sweep, or schema amendment) before flipping.
-  `left_behind` is not a gap and need not be empty: it counts what is dropped on
-  purpose (deleted reactions and reports, spent claim links, speaker lists,
-  addresses nobody verified). Read it, and see that each count is one you
-  expected.
-- **People can get back in.** The count under `users.email, not verified` is how
-  many account holders cannot be recognized by address and will need a claim
-  link for each seat. If it is most of them, the interim never verified
-  addresses, and that is a decision to take before the flip, not after.
-- **Membership dedup landed.** The census's ~1962 distinct invite emails behind
-  ~17655 roster rows collapse under the `member_pending` partial unique
-  (`context_id, email` where `user_did IS NULL`): the count of pending-invite
-  rows equals the distinct `(context, normalized-email)` pairs, with no duplicate
-  pending invite per context.
-- **Every node is where its URL says.** Each loaded context and document has a
-  non-empty `path`, no two live rows share one across the two tables, and a
-  sample of the interim's most-visited paths resolves through `getNode` to the
-  row with the same `legacy_id`. A node the extractor re-rooted appears in
-  `report.json` under `nodes.parentId -> <kind>`, and that list is triaged.
-- **Every file came across.** Each `data.fileId` on a loaded document names a
-  `blob` row, whose `size` equals what NHost reported and whose bytes on disk
-  hash to its `sha256`. A sample opens through `/blob/<id>` as a member of its
-  context, and is refused to a stranger.
-- **Authorship preserved.** `document_author` row count ≥ document count and no
-  document with a source author chip has zero author rows (the free-text authors,
-  about 42 percent, survived rather than being dropped by the old scalar
-  `author_did`).
+  `left_behind` and `reshaped` are not gaps and need not be empty. The first
+  counts what is dropped on purpose: deleted reactions and reports, spent claim
+  links, speaker lists, addresses nobody verified, a legacy one-off page with
+  nothing in it, and ORPHANS, the rows under a parent that was deleted outright
+  before the interim had a bin, which no URL reaches there and which would
+  come back at the top of their group if carried. The second counts what is
+  carried in another shape: a context's owner as an owner membership, a poll
+  open at the dump as a closed one (close the polls before the freeze, or
+  accept that), a seat or an author chip of a DELETED account as a seat waiting
+  for its address and an author by name. Read both, and see that each count is
+  one you expected.
+- **People can get back in.** How many accounts are recognized by address; the
+  rest need a claim link for each seat. Red below half: then the interim never
+  verified addresses, and that is a decision to take before the flip, not
+  after.
+- **One waiting seat to an address.** No address waits twice in one context
+  (the `member_pending` partial unique, `context_id, email` where `user_did IS
+  NULL`), so whoever takes a seat leaves none behind them.
+- **Every node is where its URL says.** Each live context and document has a
+  path, no two share one across the two tables, and each path is its parent's
+  path and its own slug, so the tree and the URLs agree. The rehearsal's smoke
+  test opens a real page by its old URL; a sample of the most-visited ones by
+  hand does no harm.
+- **Every file came across.** Each file something points at has a `blob` row,
+  of the size NHost reported, whose bytes on disk hash to its `sha256`. A file
+  the interim's own storage no longer had was lost before the move: counted,
+  not red. The rehearsal's smoke test opens one through `/blob/<id>` as a
+  member of its context, and is refused as a stranger.
+- **Authorship preserved.** Every document has the authors its chips named, by
+  account, by name or as a group (the free-text authors, about 42 percent,
+  survived rather than being dropped by the old scalar `author_did`).
 
 ## Mail, and the ballot board
 
@@ -190,10 +211,9 @@ it keeps its seats, its name and what it wrote, and cannot sign in.
 ## Rollback
 
 The interim app is untouched by the dump (read-only) and the load targets a
-SEPARATE staging Turso db, so rollback is: revert the frontend to the build
-pointed at NHost/Hasura (drop the `WIKI_*_URL` overrides and the `file_url`
-change), redeploy, and unfreeze the interim app. No interim data was mutated, so
-there is nothing to restore. Keep the interim project alive until the AppView has
+SEPARATE staging Turso db, so rollback is: deploy the frontend built without
+the `appview` feature, which is the interim's, and unfreeze the interim app. No
+interim data was mutated, so there is nothing to restore. Keep the interim project alive until the AppView has
 run clean for an agreed soak window.
 
 ## Assisted-DID branch (placeholder)

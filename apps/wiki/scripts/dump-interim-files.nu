@@ -19,6 +19,9 @@
 # A file already in <dir> at the size storage reports is not fetched again, so a
 # run that was cut short is simply run again. `import-files` checks each size
 # against the manifest, and refuses a file that came across short.
+#
+# One file at a time with a pause between (DUMP_PAUSE_MS, default 150): storage
+# shares one small project with everything else the interim runs on.
 
 def main [dir: path] {
   let hasura = ($env | get -o HASURA_URL | default "")
@@ -41,6 +44,7 @@ def main [dir: path] {
   mkdir $dir
   $files | to json | save --force ($dir | path join "manifest.json")
 
+  let pause = ($env | get -o DUMP_PAUSE_MS | default "150" | into int | into duration --unit ms)
   mut fetched = 0
   mut kept = 0
   for file in $files {
@@ -51,6 +55,8 @@ def main [dir: path] {
     }
     http get --raw --headers $headers $"($storage)/files/($file.id)" | save --force --raw $target
     $fetched += 1
+    if ($fetched mod 100) == 0 { print -e $"  ($fetched) fetched" }
+    sleep $pause
   }
   print -e $"($files | length) files in storage: ($fetched) fetched, ($kept) here already"
 }

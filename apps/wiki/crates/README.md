@@ -30,15 +30,17 @@ workspace when the rewrite starts.
   post, member, comment, reaction), and the shapes a migrated poll, canvas and
   report travel in.
 - `migration-extractor`: the read-only interim-to-domain-types mapping with a
-  field-gap report, which also counts what is left behind on purpose. Pure and
-  hermetic (tested on synthetic fixtures; a live dump is an owner-approved
-  separate step). The `extract` binary reads a dumped snapshot and writes
-  `extraction.json` + `report.json`.
+  field-gap report, which keeps gaps apart from decisions: what is left behind
+  on purpose (orphans under a row that was deleted outright, among others) and
+  what is carried in another shape. Pure and hermetic (tested on synthetic
+  fixtures; a live dump is an owner-approved separate step). The `extract`
+  binary reads a dumped snapshot and writes `extraction.json` + `report.json`.
 - `migration-loader`: writes an extraction's entity rows into a Turso db,
   parents first and idempotently, with foreign keys enforced so a dump that
-  points at a row it does not contain fails at the rehearsal. A library: the
-  command that runs it is `appview import`, which also loads what lives in the
-  AppView's own tables.
+  points at a row it does not contain fails at the rehearsal, and by name: a
+  parent that is nowhere, an account nothing loads. A library: the command that
+  runs it is `appview import`, which also loads what lives in the AppView's own
+  tables; `appview verify` then asks the cutover's gates of the result.
 - `ballot-store`: the durable half of the ballot scheme: every poll's public
   board in one store, with its kill-9-proven atomic cast and a seal that ends
   it; the private roster DDL; and the off-node replica log.
@@ -59,6 +61,11 @@ workspace when the rewrite starts.
   laptop can talk to:
   `APPVIEW_FRONTEND_ORIGINS=http://127.0.0.1:8080 appview-dev --port 8136 did:plc:me`,
   then `WIKI_APPVIEW_URL=http://127.0.0.1:8136 dx serve --features appview`.
+  It also rehearses a cutover (`apps/wiki/scripts/rehearse-cutover.nu`):
+  `--db FILE` serves a datastore `appview import` filled, `did:plc:me=<address>`
+  signs in as though a PDS had confirmed that address, which is how a person
+  takes their old account over, and `--everyone-returns` does so for every
+  carried account and says how it went.
 - `board-mirror`: for someone who is NOT the organization. It keeps its own
   append-only copy of a published ballot board from the board account's public
   repo, raises an alarm when a record it has seen is gone or rewritten, and

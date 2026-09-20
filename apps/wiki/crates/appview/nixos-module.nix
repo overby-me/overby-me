@@ -21,8 +21,8 @@
 # The cutover's load runs here too. The service is a DynamicUser with a private
 # state directory, so nobody can run `appview import` against it by hand: set
 # `import.extraction` (and `import.files`) and `systemctl start
-# wiki-appview-import`, which stops the service, loads, and leaves it to be
-# started again.
+# wiki-appview-import`, which stops the service, loads, asks the cutover's gates
+# of what it loaded (`appview verify`), and leaves it to be started again.
 #
 # Ferron (nixpkgs `ferron`, a Rust web server) has no upstream NixOS module, so
 # this module defines its systemd unit directly with a generated KDL config.
@@ -330,10 +330,15 @@ in {
           # read neither /root nor anything else the files are likely to be in.
           LoadCredential = ["extraction.json:${cfg.import.extraction}"];
           BindReadOnlyPaths = lib.optional (cfg.import.files != null) "${cfg.import.files}:/run/wiki-appview-import-files";
+          # The gates last: a red one fails the unit, which is the no-go.
           ExecStart =
             ["${lib.getExe cfg.package} import %d/extraction.json"]
             ++ lib.optional (cfg.import.files != null)
-            "${lib.getExe cfg.package} import-files %d/extraction.json /run/wiki-appview-import-files";
+            "${lib.getExe cfg.package} import-files %d/extraction.json /run/wiki-appview-import-files"
+            ++ [
+              ("${lib.getExe cfg.package} verify %d/extraction.json"
+                + lib.optionalString (cfg.import.files != null) " /run/wiki-appview-import-files")
+            ];
         };
     };
 

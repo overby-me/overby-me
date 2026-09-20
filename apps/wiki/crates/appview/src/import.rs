@@ -159,8 +159,8 @@ pub struct FileStats {
 }
 
 /// A file something in the extraction points at, and whose it is to read.
-struct Wanted {
-    id: String,
+pub(crate) struct Wanted {
+    pub(crate) id: String,
     context_id: String,
     owner: Option<String>,
     name: Option<String>,
@@ -169,17 +169,17 @@ struct Wanted {
 
 /// What the interim's storage said of a file (its `files` rows, as dumped).
 #[derive(Debug, serde::Deserialize)]
-struct Listed {
-    id: String,
+pub(crate) struct Listed {
+    pub(crate) id: String,
     #[serde(default)]
     name: Option<String>,
     #[serde(rename = "mimeType", default)]
     mime_type: Option<String>,
     #[serde(default)]
-    size: Option<u64>,
+    pub(crate) size: Option<u64>,
 }
 
-fn wanted(ex: &Extraction, home: Option<&str>) -> Vec<Wanted> {
+pub(crate) fn wanted(ex: &Extraction, home: Option<&str>) -> Vec<Wanted> {
     let text = |data: &Option<serde_json::Value>, key: &str| {
         data.as_ref()
             .and_then(|d| d.get(key))
@@ -506,7 +506,7 @@ async fn load_feedback(conn: &Connection, report: &Feedback) -> Result<bool, Imp
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::profile::{account_from, apply};
     use crate::xrpc::tests::{get_as, token_for};
@@ -518,7 +518,7 @@ mod tests {
     const ALICE: &str = "did:plc:alice";
 
     /// A small wiki as the interim dumps it, through the real extractor.
-    fn interim() -> Extraction {
+    pub(crate) fn interim() -> Extraction {
         let at = "2026-01-05T10:00:00+00:00";
         let node = |id: &str, mime: &str, key: &str, parent: &str, more: serde_json::Value| {
             let mut row = json!({
@@ -586,7 +586,7 @@ mod tests {
         extract_snapshot(&snapshot)
     }
 
-    async fn fresh() -> AppState {
+    pub(crate) async fn fresh() -> AppState {
         let db = Db::open(":memory:").await.expect("open");
         db.init_schema().await.expect("schema");
         AppState::new(db, Config::default())
@@ -845,6 +845,11 @@ mod tests {
         let files = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/files"));
         let copied = import_files(&state, &ex, files).await.expect("files");
         assert_eq!((copied.copied, copied.failed.len()), (1, 0), "{copied:?}");
+        // The unit runs the gates after the load, and a red one fails it.
+        let gates = crate::verify::verify(&state, &ex, Some(files))
+            .await
+            .expect("verify");
+        assert!(gates.iter().all(|gate| gate.red.is_empty()), "{gates:#?}");
         let _ = std::fs::remove_dir_all(&blobs);
     }
 

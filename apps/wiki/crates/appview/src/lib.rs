@@ -45,6 +45,7 @@ pub mod store;
 pub mod symbolicate;
 pub mod tree;
 pub mod util;
+pub mod verify;
 pub mod xrpc;
 
 pub use config::Config;

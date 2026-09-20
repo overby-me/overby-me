@@ -2,7 +2,8 @@
 //! `$PORT` as a long-running process (NOT scale-to-zero serverless).
 //!
 //! `appview import <extraction.json>` loads a migrated wiki instead, and exits;
-//! `appview import-files <extraction.json> <dir>` then files its files.
+//! `appview import-files <extraction.json> <dir>` then files its files, and
+//! `appview verify <extraction.json> [<dir>]` asks the cutover's gates of both.
 
 use appview::oauth::WikiOAuth;
 use appview::{AppState, Config, Db, router};
@@ -41,9 +42,13 @@ async fn main() {
         (Some("import-files"), Some(path), Some(dir)) => {
             import_files(AppState::new(db, config), &path, &dir).await
         }
+        (Some("verify"), Some(path), dir) => {
+            verify(AppState::new(db, config), &path, dir.as_deref()).await
+        }
         _ => {
             eprintln!(
-                "usage: appview [import <extraction.json> | import-files <extraction.json> <dir>]"
+                "usage: appview [import <extraction.json> | import-files <extraction.json> <dir> \
+                 | verify <extraction.json> [<dir>]]"
             );
             std::process::exit(2);
         }
@@ -147,6 +152,34 @@ async fn import(db: &Db, path: &str) -> ! {
         }
         Err(e) => {
             eprintln!("import failed, nothing was loaded: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// The cutover's gates. Exits non-zero on a red one, so that a unit running it
+/// fails where a person would have had to notice.
+async fn verify(state: AppState, path: &str, dir: Option<&str>) -> ! {
+    let asked = async {
+        let raw = tokio::fs::read(path).await?;
+        let ex = serde_json::from_slice(&raw)?;
+        let dir = dir.map(std::path::Path::new);
+        Ok::<_, Box<dyn std::error::Error>>(appview::verify::verify(&state, &ex, dir).await?)
+    };
+    match asked.await {
+        Ok(gates) => {
+            for line in gates.iter().flat_map(|gate| gate.lines()) {
+                println!("{line}");
+            }
+            let red = gates.iter().filter(|gate| !gate.red.is_empty()).count();
+            match red {
+                0 => println!("every gate is green"),
+                n => println!("{n} of {} gates are red: no flip", gates.len()),
+            }
+            std::process::exit(i32::from(red > 0));
+        }
+        Err(e) => {
+            eprintln!("verify failed: {e}");
             std::process::exit(1);
         }
     }
