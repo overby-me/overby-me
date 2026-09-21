@@ -252,6 +252,12 @@ fn write(
         .lock()
         .expect("calls")
         .push((method.to_string(), records.len()));
+    if let Some(left) = repo.budget.lock().expect("budget").as_mut() {
+        match left.checked_sub(records.len()) {
+            Some(rest) => *left = rest,
+            None => return Err(refused(StatusCode::TOO_MANY_REQUESTS, "RateLimitExceeded")),
+        }
+    }
     let Some(space) = body["space"].as_str() else {
         return Err(refused(StatusCode::BAD_REQUEST, "InvalidRequest"));
     };

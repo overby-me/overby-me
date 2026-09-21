@@ -259,6 +259,10 @@ from the interim does not wait for any of this.
   would take it past that has the body go as a file of its own, which the
   record names (`contentBlob`), and a reader puts it back. One past what the
   PDS takes as a file too stays in the datastore alone, and is counted.
+- **A PDS rate limits an account's writes**, and the first mirror of a wiki
+  writes every record once. On the organization's own PDS the limit is the
+  organization's to set. Told to slow down, the mirror stops asking and the next
+  sweep carries on from what was written.
 - **A fraction is not a number** to atproto. Inside a page's body or a node's
   settings one is carried as `wiki.radikal.spaceDefs#number`, in its own digits,
   and read back as the number it was.

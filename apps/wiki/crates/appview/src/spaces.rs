@@ -287,6 +287,7 @@ impl Spaces {
             held: Held::of(state, &organization, context_id).await?,
             rows: BTreeSet::new(),
             swept: Swept::default(),
+            limited: false,
         };
 
         let hanging = hanging_of(&store, &context).await?;
@@ -335,6 +336,11 @@ impl Spaces {
             pass.put(REACTION, &id, record.transpose()?).await;
         }
 
+        // Not every row was met, so what has no row cannot be told.
+        if pass.limited {
+            tracing::warn!("spaces: {context_id} stopped at {:?}", pass.swept);
+            return Err(Limited.into());
+        }
         pass.delete_what_has_no_row().await?;
         Ok(pass.swept)
     }
@@ -413,6 +419,7 @@ impl Spaces {
                 }
                 match self.mirror_context(state, &context_id).await {
                     Ok(done) => swept += done,
+                    Err(e) if e.is::<Limited>() => return Err(e),
                     Err(e) => {
                         swept.failed += 1;
                         tracing::warn!("spaces: could not mirror {context_id}: {e}");
@@ -790,6 +797,29 @@ struct Pass<'a> {
     /// Every row met, with a record or still waiting for one.
     rows: BTreeSet<(String, String)>,
     swept: Swept,
+    /// The PDS said to slow down: nothing more is asked of it this pass.
+    limited: bool,
+}
+
+/// A pass that stopped because the PDS is rate limiting. The first mirror of a
+/// wiki writes every record once, which a PDS as it ships may not take in one
+/// go: the sweep carries on from where this one stopped.
+#[derive(Debug)]
+struct Limited;
+
+impl std::fmt::Display for Limited {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the PDS is rate limiting: the next sweep carries on")
+    }
+}
+
+impl std::error::Error for Limited {}
+
+fn is_rate_limit(error: &Failure) -> bool {
+    matches!(
+        error.downcast_ref::<SpaceError>(),
+        Some(SpaceError::Xrpc { status: 429, .. })
+    )
 }
 
 enum Wrote {
@@ -802,6 +832,9 @@ impl Pass<'_> {
     /// A failure is counted and the pass goes on: one record that cannot be
     /// written must not keep the rest of a context from being.
     async fn put(&mut self, collection: &str, rkey: &str, record: Option<Value>) {
+        if self.limited {
+            return;
+        }
         self.rows.insert((collection.to_string(), rkey.to_string()));
         let Some(record) = record else {
             self.swept.waiting += 1;
@@ -813,6 +846,7 @@ impl Pass<'_> {
             Ok(Wrote::Refused) => self.swept.refused += 1,
             Err(e) => {
                 self.swept.failed += 1;
+                self.limited = is_rate_limit(&e);
                 tracing::warn!("spaces: could not write {collection}/{rkey}: {e}");
             }
         }
@@ -938,6 +972,9 @@ impl Pass<'_> {
     /// A file: its bytes to the PDS as a blob, and the record that names it.
     /// The bytes go once, for what the row says tells a file that changed.
     async fn put_file(&mut self, id: &str) {
+        if self.limited {
+            return;
+        }
         self.rows.insert((FILE.to_string(), id.to_string()));
         match self.write_file(id).await {
             Ok(Some(Wrote::Written)) => self.swept.written += 1,
@@ -946,6 +983,7 @@ impl Pass<'_> {
             Ok(None) => {}
             Err(e) => {
                 self.swept.failed += 1;
+                self.limited = is_rate_limit(&e);
                 tracing::warn!("spaces: could not write the file {id}: {e}");
             }
         }
@@ -1747,6 +1785,32 @@ pub(crate) mod tests {
             ["contextProfile/self", "node/d1", "reaction/r1"]
         );
         assert!(keys(&pds, "c9").contains(&"node/d2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn a_pds_that_says_slow_down_is_left_alone_until_the_next_sweep() {
+        let (state, pds, spaces) = mirroring().await;
+        let puts = |pds: &FakePds| {
+            let calls = pds.calls();
+            calls
+                .iter()
+                .filter(|(method, _)| method == "space.putRecord")
+                .count()
+        };
+        pds.take_only(Some(3));
+        let stopped = spaces.mirror_everything(&state).await;
+        assert!(stopped.is_err_and(|e| e.is::<Limited>()));
+        assert_eq!(puts(&pds), 4, "three taken, one refused, and no more asked");
+
+        // The next sweep carries on from what was written, and ends whole.
+        pds.take_only(None);
+        let rest = spaces.mirror_everything(&state).await.expect("a pass");
+        assert_eq!((rest.written, rest.same, rest.failed), (7, 3, 0));
+        let found = held_by(&pds, &["c1", "c2", "c9", "c10"]);
+        let wrong = rebuilt_differs(&state, DID, &found)
+            .await
+            .expect("a rebuild");
+        assert_eq!(wrong, Vec::<String>::new());
     }
 
     #[tokio::test]

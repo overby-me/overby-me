@@ -59,6 +59,9 @@ struct Repo {
     orphans: Arc<Mutex<Vec<Record>>>,
     /// Uploaded bytes, by the CID they were answered with.
     blobs: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+    /// How many more records the spaces take before the PDS says 429. `None`
+    /// for as many as come.
+    budget: Arc<Mutex<Option<usize>>>,
     /// The account's `#atproto` key, which its DID document publishes.
     key: Arc<p256::ecdsa::SigningKey>,
 }
@@ -70,6 +73,7 @@ pub struct FakePds {
     spaces: spaces::Spaces,
     orphans: Arc<Mutex<Vec<Record>>>,
     blobs: Arc<Mutex<BTreeMap<String, Vec<u8>>>>,
+    budget: Arc<Mutex<Option<usize>>>,
     key: Arc<p256::ecdsa::SigningKey>,
 }
 
@@ -82,11 +86,13 @@ impl FakePds {
             spaces: Arc::default(),
             orphans: Arc::default(),
             blobs: Arc::default(),
+            budget: Arc::default(),
             key: Arc::new(p256::ecdsa::SigningKey::random(&mut rand_core::OsRng)),
         };
         let (records, calls) = (repo.records.clone(), repo.calls.clone());
         let (spaces, key) = (repo.spaces.clone(), repo.key.clone());
         let (orphans, blobs) = (repo.orphans.clone(), repo.blobs.clone());
+        let budget = repo.budget.clone();
         let app = Router::new()
             .route(
                 "/xrpc/com.atproto.server.createSession",
@@ -113,6 +119,7 @@ impl FakePds {
             spaces,
             orphans,
             blobs,
+            budget,
             key,
         }
     }
@@ -139,6 +146,12 @@ impl FakePds {
             .get(space)
             .map(|s| s.records.clone())
             .unwrap_or_default()
+    }
+
+    /// Rate limit the spaces: `records` more are taken, and then none until
+    /// this is called again. `None` lifts the limit.
+    pub fn take_only(&self, records: Option<usize>) {
+        *self.budget.lock().expect("budget") = records;
     }
 
     /// The bytes uploaded under `cid`.
