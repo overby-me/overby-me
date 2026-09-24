@@ -32,11 +32,5 @@
       pavucontrol
       kooha
       rustdesk-flutter
-    ]
-    # Every Linux host, both arches: upstream's CI ships an amd64 and an arm64
-    # deb, so the tablet gets the office suite too.  It costs the phone's
-    # flashed rootfs about 1.4 GB, which make-ext4-fs sizes to fit.
-    ++ lib.optionals pkgs.stdenv.isLinux [
-      euro-office
     ];
 }
