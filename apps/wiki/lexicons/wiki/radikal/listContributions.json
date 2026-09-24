@@ -1,0 +1,61 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.listContributions",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "What a person, or a group, has put forward, as far as the caller may read it: motions, amendments, candidacies and questions they own or are named as an author of, and for a person their comments. Drafts included, since they are theirs too. Give `did` or `context`.",
+			"parameters": {
+				"type": "params",
+				"properties": {
+					"did": {
+						"type": "string",
+						"format": "did"
+					},
+					"context": {
+						"type": "string",
+						"description": "A group or an event, for what it is named as the author of."
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100,
+						"default": 20
+					},
+					"offset": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 2000,
+						"default": 0
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["items", "profiles"],
+					"properties": {
+						"items": {
+							"type": "array",
+							"items": {
+								"type": "ref",
+								"ref": "wiki.radikal.defs#feedItemView"
+							}
+						},
+						"profiles": {
+							"type": "unknown",
+							"description": "A map from DID to profile, for every `by_did` in `items`."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "InvalidRequest",
+					"description": "Neither `did` nor `context`, or both."
+				}
+			]
+		}
+	}
+}

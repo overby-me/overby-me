@@ -38,6 +38,16 @@ optional firehose-fed query cache in the Dioxus WASM client.
   proves process-crash atomicity, not power loss; Antithesis coverage is upstream's claim, recorded not
   locally reproduced. VERDICT: the gate stays CLOSED pre-1.0 (ballot core launches on the SQLite bridge),
   and the harness transfers unchanged as the core's permanent durability suite.
+- Engine bump (2026-09-19, turso crate 0.7.2, still pre-1.0): the workspace moved from 0.2.2, with no API
+  change. 0.7 recognizes `PRAGMA foreign_keys` and ENFORCES foreign keys once it is set (off by default,
+  as on stock SQLite, so every connection sets it and reads it back), accepts `EXISTS` and
+  `IN (subquery)` in WHERE, `ON CONFLICT DO UPDATE`, `INSERT OR IGNORE`, `RETURNING`, triggers, and an
+  INSERT that omits a nullable UNIQUE column, closing every dialect gap recorded above. Recursive CTEs
+  are still unsupported, so the node hierarchy is NOT a recursive query yet: a path resolves a segment
+  at a time. The kill -9 harness passes unchanged on 0.7.2. All of it is pinned by
+  `turso_dialect_the_appview_relies_on` in `crates/schema/tests/roundtrip.rs`. Enforcement immediately
+  surfaced two defects the old engine hid: the firehose filed records under contexts the view had never
+  seen, and the loader relied on unenforced keys to load a child context before its parent.
 - Load-bearing integrity control (engine-independent): mandatory off-node replication of the append-only
   ballot log, which does not exist in the backend yet and is the real work. Run the core with SQLite/Turso
   hardened durability (WAL + synchronous FULL + fullfsync, verified via PRAGMA readback) on power-loss-
@@ -48,7 +58,7 @@ optional firehose-fed query cache in the Dioxus WASM client.
 
 ## Realtime and the firehose consumer
 
-Decision: consume Jetstream (JSON over WebSocket, filtered to `com.example.wiki.*` collections and member DIDs)
+Decision: consume Jetstream (JSON over WebSocket, filtered to `wiki.radikal.*` collections and member DIDs)
 as the change-feed; push local authoritative deltas over one axum WebSocket fed by an in-process broadcast
 channel (`tokio::sync::broadcast`), since the AppView is a single persistent process holding the Turso ballot core,
 the Turso view + tantivy index, the firehose connection, and the WebSocket server. No DB LISTEN/NOTIFY is required.
@@ -102,7 +112,7 @@ CIDv1/multihash/multibase.
 Decision: lexicons are canonical at the federation boundary only; Rust serde types are canonical for the
 private half.
 
-- Adoption: author `com.example.wiki.*` lexicons for the PUBLIC subset (post, statement, resolution, public
+- Adoption: author `wiki.radikal.*` lexicons for the PUBLIC subset (post, statement, resolution, public
   group/event/document, comment); feed them through `atrium-lex`/`atrium-codegen` to generate Rust record
   types; register NSID authority via a DNS TXT record on an org-owned domain per the Lexicon Resolution
   spec.
@@ -134,7 +144,7 @@ Decision: three complementary validation layers, not one schema doing all three.
 Decision: axum (on hyper/tower/tokio) is the server framework; reqwest (rustls-tls) is the single outbound
 client; rustls is the TLS stack.
 
-- Adoption: axum routes expose XRPC (`com.atproto.*` proxied plus `com.example.wiki.*` queries), the OAuth
+- Adoption: axum routes expose XRPC (`com.atproto.*` proxied plus `wiki.radikal.*` queries), the OAuth
   callback, and one `/ws` WebSocket per client multiplexing all live channels; reuse ONE configured
   `reqwest::Client` (connection-pooled, HTTP/2, `default-features=false` + `rustls-tls` + webpki-roots) as
   the transport for `atrium-xrpc` and all PDS/plc.directory/DID-doc/handle-resolution calls; run as a

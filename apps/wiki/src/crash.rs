@@ -137,36 +137,62 @@ fn report_fetch_js(message: &str) -> String {
         false => format!("{message}\n\n--- what led here ---\n{trail}"),
     };
 
-    let url = format!(
-        "{}/feedback?kind=crash&message={}&path={}&app={}&commit={}&ua={}",
-        crate::backend_api::BACKEND_URL,
-        js_sys::encode_uri_component(&message),
-        js_sys::encode_uri_component(&path),
-        js_sys::encode_uri_component(env!("CARGO_PKG_VERSION")),
-        // Which build crashed. The offsets in the stack only mean anything
-        // against the binary they came from, and the backend already keys its
-        // symbol lookup on the bundle hash in the stack — this says the same in
-        // terms a person can act on.
-        js_sys::encode_uri_component(crate::build_info::COMMIT),
-        js_sys::encode_uri_component(&ua),
-    );
-
     // `keepalive` is the load-bearing option. This overlay puts a Reload button
     // in front of someone whose app has just died, and pressing it is the
-    // obvious thing to do — but the report is a request in flight from a page
+    // obvious thing to do, but the report is a request in flight from a page
     // that is then torn down, and an ordinary fetch dies with it. The first
     // report for a build takes a couple of seconds (the backend fetches that
     // build's symbols), which is exactly long enough to lose the race. With
     // keepalive the browser owns the request and finishes it regardless.
-    format!(
-        "fetch({url},{{method:'POST',keepalive:true,headers:{headers}}})",
-        url = js_string(&url),
-        headers = if token.is_empty() {
-            "{}".to_string()
-        } else {
-            format!("{{Authorization:'Bearer '+{}}}", js_string(&token))
-        },
-    )
+    let bearer = match token.is_empty() {
+        true => String::new(),
+        false => format!("Authorization:'Bearer '+{}", js_string(&token)),
+    };
+
+    // The AppView takes a report as the JSON body of `submitFeedback`.
+    #[cfg(feature = "appview")]
+    {
+        let url = format!(
+            "{}/xrpc/wiki.radikal.submitFeedback",
+            crate::backend_api::BACKEND_URL
+        );
+        let report = serde_json::json!({
+            "kind": "crash",
+            "message": message,
+            "path": path,
+            "app": env!("CARGO_PKG_VERSION"),
+            "commit": crate::build_info::COMMIT,
+            "ua": ua,
+        });
+        let comma = if bearer.is_empty() { "" } else { "," };
+        format!(
+            "fetch({url},{{method:'POST',keepalive:true,\
+             headers:{{'content-type':'application/json'{comma}{bearer}}},body:{body}}})",
+            url = js_string(&url),
+            body = js_string(&report.to_string()),
+        )
+    }
+
+    #[cfg(not(feature = "appview"))]
+    {
+        let url = format!(
+            "{}/feedback?kind=crash&message={}&path={}&app={}&commit={}&ua={}",
+            crate::backend_api::BACKEND_URL,
+            js_sys::encode_uri_component(&message),
+            js_sys::encode_uri_component(&path),
+            js_sys::encode_uri_component(env!("CARGO_PKG_VERSION")),
+            // Which build crashed. The offsets in the stack only mean anything
+            // against the binary they came from, and the backend already keys
+            // its symbol lookup on the bundle hash in the stack: this says the
+            // same in terms a person can act on.
+            js_sys::encode_uri_component(crate::build_info::COMMIT),
+            js_sys::encode_uri_component(&ua),
+        );
+        format!(
+            "fetch({url},{{method:'POST',keepalive:true,headers:{{{bearer}}}}})",
+            url = js_string(&url),
+        )
+    }
 }
 
 /// A JS function literal `function(ok){…}` that writes the outcome into the

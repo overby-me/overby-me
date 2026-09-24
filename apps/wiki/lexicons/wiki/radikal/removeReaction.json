@@ -1,0 +1,49 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.removeReaction",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Take one's own reaction back. Not asked about membership: leaving a group must not strand what one left in it. Removing what is not there changes nothing.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["subject", "emoji"],
+					"properties": {
+						"subject": {
+							"type": "string",
+							"format": "at-uri",
+							"description": "The at-uri of the record being un-reacted."
+						},
+						"emoji": {
+							"type": "string",
+							"maxGraphemes": 1,
+							"maxLength": 64,
+							"description": "The emoji grapheme to remove."
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["ok"],
+					"properties": {
+						"ok": {
+							"type": "boolean",
+							"const": true
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				}
+			]
+		}
+	}
+}

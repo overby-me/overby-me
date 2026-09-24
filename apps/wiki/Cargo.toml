@@ -13,9 +13,18 @@ edition = "2021"
 # not ours to fix and not what the gate is for.
 [workspace]
 members = ["heic-worker"]
-exclude = ["vendor"]
+# `crates` is the rewrite's own workspace. Named here because a path dependency
+# inside this directory is otherwise made a member of THIS one, and a package
+# cannot be in two.
+exclude = ["crates", "vendor"]
 
 [dependencies]
+# The typed client for the AppView, generated from its lexicons. Only under the
+# `appview` feature, which swaps the data layer over to it; the build that ships
+# does not compile it.
+appview-client = { path = "crates/appview-client", optional = true }
+# A secret ballot is blinded and unblinded by the voter, so in the browser.
+ballot-spec = { path = "crates/ballot-spec", features = ["custody"], optional = true }
 # (xlsx roster parsing moved to the backend to keep calamine/zip/inflate out of
 # the wasm bundle — see nhost::parse_roster / backend roster.rs.)
 # Pictures embedded in a Word document become `data:` urls, which is base64.
@@ -130,8 +139,19 @@ web-sys = { version = "=0.3.98", features = [
 xlsx-parser = { path = "vendor/ooxml/xlsx-parser" }
 zip = { version = "2", default-features = false, features = ["deflate-miniz"] }
 
+[dev-dependencies]
+# For `src/appview/live.rs`, which drives the data layer against a real AppView
+# from `cargo test`. Already in the tree through reqwest; the test macro is the
+# one crate it adds.
+tokio = { version = "1", features = ["macros", "net", "rt", "time"] }
+# And its `/ws`, which a browser speaks through `web_sys` and a test cannot.
+tokio-tungstenite = "0.24"
+
 [features]
 default = ["web"]
+# The data layer on the atproto AppView instead of NHost and Hasura (roadmap M9,
+# `docs/appview-roadmap.md`). Off, which is what ships, nothing changes.
+appview = ["dep:appview-client", "dep:ballot-spec"]
 # Ship warn/error logs (with interaction breadcrumbs, user/session enrichment and
 # panics) to Better Stack / Logtail. Reads BETTERSTACK_SOURCE_TOKEN at build time.
 remote-logging = []

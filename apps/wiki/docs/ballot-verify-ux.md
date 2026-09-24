@@ -294,4 +294,4 @@ actual copy drafts to seed the i18n catalog later; keys are suggestions.
   counts-plus-issued at close), and section 1.4 is the inclusion-receipt consequence of org custody.
   The receipt itself is always-private and gets NO lexicon.
 - **NSID**: no NSID appears in this document by design; everything references records by role. The
-  placeholder authority for the drafts remains `com.example.wiki.*` until the domain call lands.
+  authority is `wiki.radikal.*` (decided 2026-09-20).

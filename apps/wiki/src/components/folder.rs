@@ -1025,6 +1025,7 @@ fn FolderAdd(
 
     // Upload the chosen file to NHost storage, then remember its id/type so the
     // Add button can attach it. Mirrors React's FileUploader (upload on select).
+    let file_context = context_id.clone();
     let on_pick_file = move |evt: FormEvent| {
         let files = evt.files();
         let Some(fd) = files.into_iter().next() else {
@@ -1033,14 +1034,21 @@ fn FolderAdd(
         let name = fd.name();
         let ctype = fd.content_type().unwrap_or_default();
         let token = session.read().access_token.clone();
+        let context = file_context.clone();
         uploading.set(true);
         file_id.set(None);
         spawn(async move {
             match fd.read_bytes().await {
                 Ok(bytes) => {
-                    match crate::nhost::upload_file(token.as_deref(), bytes.to_vec(), &name, &ctype)
-                        .await
-                    {
+                    let kept = crate::nhost::upload_file(
+                        token.as_deref(),
+                        context.as_deref(),
+                        bytes.to_vec(),
+                        &name,
+                        &ctype,
+                    )
+                    .await;
+                    match kept {
                         Ok(up) => {
                             // Default the title to the file's stem when the user
                             // has not typed one, so the node has a sensible name.

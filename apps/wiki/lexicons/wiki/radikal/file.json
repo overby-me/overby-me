@@ -1,0 +1,42 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.file",
+	"defs": {
+		"main": {
+			"type": "record",
+			"description": "A file of a context: what a `file` node is, a cover, a picture in a thread. Pages and comments name it by its key, so one file can be named from many places and is kept as long as the context keeps it. Held by whoever holds the bytes, since a blob lives on its record's PDS.",
+			"key": "any",
+			"record": {
+				"type": "object",
+				"required": ["blob", "sha256", "createdAt"],
+				"properties": {
+					"blob": {
+						"type": "blob",
+						"accept": ["*/*"],
+						"maxSize": 100000000
+					},
+					"name": {
+						"type": "string",
+						"description": "What it was called when it was uploaded.",
+						"maxLength": 2000,
+						"maxGraphemes": 255
+					},
+					"sha256": {
+						"type": "string",
+						"description": "Of the bytes, in hex: what a copy is checked against.",
+						"maxLength": 64
+					},
+					"madeBy": {
+						"type": "string",
+						"description": "Who uploaded it: a DID, or the id of an account carried over from the interim.",
+						"maxLength": 256
+					},
+					"createdAt": {
+						"type": "string",
+						"format": "datetime"
+					}
+				}
+			}
+		}
+	}
+}

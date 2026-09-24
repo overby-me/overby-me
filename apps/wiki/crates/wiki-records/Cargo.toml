@@ -1,0 +1,13 @@
+[package]
+name = "wiki-records"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# The records a context's atproto space holds (`docs/atproto-spaces-redesign.md`)
+# as Rust types, and the mapping between them and the backend's rows: what a
+# write through records and a rebuild of the index from records both stand on.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wiki-domain-types = { path = "../domain-types" }

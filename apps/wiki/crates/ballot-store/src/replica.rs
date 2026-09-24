@@ -7,8 +7,8 @@
 //!
 //! Item 12 built the durable board + the `ReplicationSink` seam; this adds the
 //! concrete append-only replica log and the rebuild-from-replica recovery path.
-//! [`ReplicaLog`] is an append-only JSONL file — one record per committed cast,
-//! written synchronously in the fire-and-forget hook — which IS the shippable
+//! [`ReplicaLog`] is an append-only JSONL file (one record per committed cast,
+//! written synchronously in the fire-and-forget hook), which IS the shippable
 //! artifact: an independent node mirrors this file (rsync / WAL-style shipping).
 //! The concrete incremental TRANSPORT of this file (a byte-offset cursor, ship
 //! only whole records) lives in the sibling [`crate::transport`] module; this
@@ -17,15 +17,19 @@
 
 use crate::board::{BoardError, PersistentBoard, ReplicationSink};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::sync::Mutex;
 
-/// One replicated board entry: the position, the unit token (dedup key), and the
-/// opaque provisional body. Serialized as one JSONL line in the replica log.
+/// One replicated board entry: whose board, the position, the unit token (dedup
+/// key), and the opaque provisional body. Serialized as one JSONL line in the
+/// replica log.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ReplicaRecord {
+    poll: String,
     position: u64,
     token: Vec<u8>,
     body: Vec<u8>,
@@ -59,21 +63,25 @@ impl ReplicaLog {
 }
 
 impl ReplicationSink for ReplicaLog {
-    fn on_appended(&self, position: u64, token: &[u8], body: &[u8]) {
+    fn on_appended(&self, poll_id: &str, position: u64, token: &[u8], body: &[u8]) {
         let rec = ReplicaRecord {
+            poll: poll_id.to_string(),
             position,
             token: token.to_vec(),
             body: body.to_vec(),
         };
-        let line = match serde_json::to_string(&rec) {
-            Ok(s) => s,
+        let mut line = match serde_json::to_vec(&rec) {
+            Ok(line) => line,
             Err(e) => {
                 *self.last_error.lock().unwrap() = Some(e.to_string());
                 return;
             }
         };
+        // Record and newline in ONE write. The transport ships whole lines, and
+        // `writeln!` on a file is two writes, which a reader can land between.
+        line.push(b'\n');
         let mut file = self.file.lock().unwrap();
-        if let Err(e) = writeln!(file, "{line}").and_then(|()| file.flush()) {
+        if let Err(e) = file.write_all(&line).and_then(|()| file.flush()) {
             *self.last_error.lock().unwrap() = Some(e.to_string());
         }
     }
@@ -113,15 +121,17 @@ impl From<BoardError> for RebuildError {
     }
 }
 
-/// Rebuild `board` (a fresh, empty [`PersistentBoard`]) from a replica log: read
+/// Rebuild every poll's board in a fresh, empty store from a replica log: read
 /// every record in append order and [`PersistentBoard::restore_entry`] it at its
-/// original position. Returns the number of entries restored. This is the
-/// recovery path for a lost primary: the replica log is the source of truth.
+/// original position on its own poll's board. Returns the number of entries
+/// restored. This is the recovery path for a lost primary: the replica log is
+/// the source of truth.
 pub async fn rebuild_from_replica(
-    board: &PersistentBoard,
+    conn: &turso::Connection,
     log_path: impl AsRef<Path>,
 ) -> Result<u64, RebuildError> {
     let reader = BufReader::new(File::open(log_path)?);
+    let mut boards: HashMap<String, PersistentBoard> = HashMap::new();
     let mut restored = 0;
     for line in reader.lines() {
         let line = line?;
@@ -129,6 +139,12 @@ pub async fn rebuild_from_replica(
             continue;
         }
         let rec: ReplicaRecord = serde_json::from_str(&line)?;
+        let board = match boards.entry(rec.poll.clone()) {
+            Entry::Occupied(found) => found.into_mut(),
+            Entry::Vacant(slot) => {
+                slot.insert(PersistentBoard::open(conn.clone(), &rec.poll).await?)
+            }
+        };
         board
             .restore_entry(rec.position, &rec.token, &rec.body)
             .await?;
@@ -167,12 +183,17 @@ mod tests {
         }
     }
 
-    async fn fresh_board() -> PersistentBoard {
-        let db = turso::Builder::new_local(":memory:")
+    async fn fresh_store() -> turso::Connection {
+        turso::Builder::new_local(":memory:")
             .build()
             .await
-            .expect("build");
-        PersistentBoard::open(db.connect().expect("connect"))
+            .expect("build")
+            .connect()
+            .expect("connect")
+    }
+
+    async fn board_of(conn: &turso::Connection, poll_id: &str) -> PersistentBoard {
+        PersistentBoard::open(conn.clone(), poll_id)
             .await
             .expect("open")
     }
@@ -186,11 +207,17 @@ mod tests {
 
         // Primary board with the replica sink attached.
         let replica = Arc::new(ReplicaLog::open(&log_path).expect("open replica"));
-        let primary = fresh_board().await.with_replication(replica.clone());
+        let store = fresh_store().await;
+        let primary = board_of(&store, "p1")
+            .await
+            .with_replication(replica.clone());
+        let beside = board_of(&store, "p2")
+            .await
+            .with_replication(replica.clone());
         let issuer = TokenIssuer::new_for_poll(2048).expect("keypair");
 
-        // Cast three distinct valid ballots: each lands on the primary AND is
-        // shipped to the replica log by the sink.
+        // Cast three distinct valid ballots, and one on another poll's board in
+        // between: each lands on the primary AND is shipped to the replica log.
         for choice in [0usize, 1, 2] {
             primary
                 .cast(
@@ -200,29 +227,43 @@ mod tests {
                 )
                 .await
                 .expect("cast");
+            if choice == 1 {
+                beside
+                    .cast(issuer.public_key(), &rules(), valid_entry(&issuer, vec![0]))
+                    .await
+                    .expect("cast beside");
+            }
         }
         assert!(replica.last_error().is_none(), "replica had no write error");
         let original = primary.entries().await.expect("original entries");
         assert_eq!(original.len(), 3);
+        let original_beside = beside.entries().await.expect("entries beside");
 
         // Simulate PRIMARY LOSS: the original Turso file is gone. Rebuild a fresh,
-        // empty board purely from the replica log.
-        let rebuilt = fresh_board().await;
+        // empty store purely from the replica log.
+        let fresh = fresh_store().await;
+        let rebuilt = board_of(&fresh, "p1").await;
         assert!(rebuilt.is_empty().await.expect("empty before rebuild"));
-        let restored = rebuild_from_replica(&rebuilt, &log_path)
+        let restored = rebuild_from_replica(&fresh, &log_path)
             .await
             .expect("rebuild");
-        assert_eq!(restored, 3, "every replicated entry restored");
+        assert_eq!(restored, 4, "every replicated entry restored");
 
-        // The rebuilt board matches the original byte-for-byte (positions +
-        // tokens), so the public board survived the loss of the primary node.
+        // The rebuilt boards match the originals byte-for-byte (positions +
+        // tokens), each entry back on its own poll's board, so the public board
+        // survived the loss of the primary node.
         let recovered = rebuilt.entries().await.expect("rebuilt entries");
         assert_eq!(recovered, original, "rebuilt board == original board");
+        assert_eq!(
+            board_of(&fresh, "p2").await.entries().await.expect("p2"),
+            original_beside,
+            "an entry was restored onto the wrong poll's board"
+        );
 
         // Rebuild is idempotent: re-running over the same log re-materializes
-        // nothing new (UNIQUE(token) rejects the duplicates), so a retried
+        // nothing new (the UNIQUE token rejects the duplicates), so a retried
         // recovery is safe.
-        let again = rebuild_from_replica(&rebuilt, &log_path).await;
+        let again = rebuild_from_replica(&fresh, &log_path).await;
         assert!(again.is_err(), "a second rebuild collides on the dedup key");
         assert_eq!(
             rebuilt.entries().await.expect("still 3"),

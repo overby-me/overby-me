@@ -193,14 +193,17 @@ pub(super) fn UserMenu() -> Element {
                         // No separate "Profile" row: the identity card at the top
                         // of this menu is the way to your profile, and two links to
                         // one page is one too many.
-                        button {
-                            class: "list-item",
-                            onclick: move |_| {
-                                menu_open.set(false);
-                                nav.push(Route::SetPassword {});
-                            },
-                            span { class: "material-icons", "lock" }
-                            " {t(\"auth.setPassword\")}"
+                        // An atproto account's password is its provider's.
+                        if cfg!(not(feature = "appview")) {
+                            button {
+                                class: "list-item",
+                                onclick: move |_| {
+                                    menu_open.set(false);
+                                    nav.push(Route::SetPassword {});
+                                },
+                                span { class: "material-icons", "lock" }
+                                " {t(\"auth.setPassword\")}"
+                            }
                         }
                         button {
                             class: "list-item",

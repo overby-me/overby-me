@@ -1,0 +1,17 @@
+[package]
+name = "spaces-spike"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# A spike, like `oauth-spike` and `dagcbor-spike`: is a permissioned repo's signed
+# commit (atproto spaces, proposal 0016) checkable from Rust, against what a real
+# spaces PDS serves? Findings in FINDINGS.md. What holds here is what the
+# AppView's syncer would be built on.
+[dependencies]
+atproto-spaces = { path = "../atproto-spaces" }
+
+[dev-dependencies]
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

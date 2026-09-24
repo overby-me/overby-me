@@ -1,0 +1,164 @@
+{
+	"users": [
+		{
+			"did": "0a000000-0000-4000-8000-0000000000a1",
+			"handle": null,
+			"display_name": "Alice Example",
+			"avatar_url": null,
+			"legacy_id": "0a000000-0000-4000-8000-0000000000a1"
+		}
+	],
+	"contexts": [
+		{
+			"id": "0c000000-0000-4000-8000-0000000000c0",
+			"kind": "home",
+			"name": "Example Wiki",
+			"slug": "",
+			"path": "",
+			"parent_id": null,
+			"idx": 0,
+			"attachable": true,
+			"owner_did": null,
+			"created_at": "2026-01-01T09:00:00+00:00",
+			"updated_at": null,
+			"deleted_at": null,
+			"deleted_root": null,
+			"content": [
+				{
+					"children": [
+						{
+							"text": "Welcome"
+						}
+					],
+					"type": "paragraph"
+				}
+			],
+			"visibility": "private",
+			"published_uri": null,
+			"legacy_id": "0c000000-0000-4000-8000-0000000000c0"
+		},
+		{
+			"id": "0c000000-0000-4000-8000-0000000000c1",
+			"kind": "group",
+			"name": "Open Group",
+			"slug": "open",
+			"path": "open",
+			"parent_id": "0c000000-0000-4000-8000-0000000000c0",
+			"idx": 0,
+			"attachable": true,
+			"owner_did": "0a000000-0000-4000-8000-0000000000a1",
+			"created_at": "2026-01-02T09:00:00+00:00",
+			"updated_at": null,
+			"deleted_at": null,
+			"deleted_root": null,
+			"visibility": "public",
+			"published_uri": null,
+			"legacy_id": "0c000000-0000-4000-8000-0000000000c1"
+		}
+	],
+	"documents": [
+		{
+			"id": "0d000000-0000-4000-8000-0000000000d1",
+			"context_id": "0c000000-0000-4000-8000-0000000000c1",
+			"kind": "file",
+			"title": "Agenda.pdf",
+			"slug": "agenda_pdf",
+			"path": "open/agenda_pdf",
+			"parent_id": "0c000000-0000-4000-8000-0000000000c1",
+			"idx": 0,
+			"attachable": true,
+			"owner_did": "0a000000-0000-4000-8000-0000000000a1",
+			"created_at": "2026-01-03T09:00:00+00:00",
+			"updated_at": null,
+			"deleted_at": null,
+			"deleted_root": null,
+			"mutable": false,
+			"content": null,
+			"data": {
+				"fileId": "0f000000-0000-4000-8000-0000000000f1",
+				"type": "application/pdf"
+			},
+			"authors": [],
+			"visibility": "private",
+			"published_uri": null,
+			"legacy_id": "0d000000-0000-4000-8000-0000000000d1"
+		},
+		{
+			"id": "0d000000-0000-4000-8000-0000000000d2",
+			"context_id": "0c000000-0000-4000-8000-0000000000c1",
+			"kind": "document",
+			"title": "Minutes",
+			"slug": "minutes",
+			"path": "open/minutes",
+			"parent_id": "0c000000-0000-4000-8000-0000000000c1",
+			"idx": 0,
+			"attachable": true,
+			"owner_did": "0a000000-0000-4000-8000-0000000000a1",
+			"created_at": "2026-01-04T09:00:00+00:00",
+			"updated_at": null,
+			"deleted_at": null,
+			"deleted_root": null,
+			"mutable": false,
+			"content": [
+				{
+					"children": [
+						{
+							"text": "The meeting was opened"
+						}
+					],
+					"type": "paragraph"
+				}
+			],
+			"data": null,
+			"authors": [],
+			"visibility": "private",
+			"published_uri": null,
+			"legacy_id": "0d000000-0000-4000-8000-0000000000d2"
+		}
+	],
+	"members": [
+		{
+			"id": "0b000000-0000-4000-8000-0000000000b1",
+			"user_did": "0a000000-0000-4000-8000-0000000000a1",
+			"context_id": "0c000000-0000-4000-8000-0000000000c0",
+			"role": "owner",
+			"active": true,
+			"name": null,
+			"hidden": false,
+			"accepted": true,
+			"email": null,
+			"claim_token": null,
+			"legacy_id": "0b000000-0000-4000-8000-0000000000b1"
+		},
+		{
+			"id": "0b000000-0000-4000-8000-0000000000b2",
+			"user_did": "0a000000-0000-4000-8000-0000000000a1",
+			"context_id": "0c000000-0000-4000-8000-0000000000c1",
+			"role": "owner",
+			"active": true,
+			"name": null,
+			"hidden": false,
+			"accepted": true,
+			"email": "alice@wiki.example",
+			"claim_token": null,
+			"legacy_id": "0b000000-0000-4000-8000-0000000000b2"
+		}
+	],
+	"comments": [],
+	"accounts": [
+		{
+			"id": "0a000000-0000-4000-8000-0000000000a1",
+			"email": "alice@wiki.example"
+		}
+	],
+	"reactions": [],
+	"polls": [],
+	"canvases": [],
+	"feedback": [],
+	"report": {
+		"unmapped_source": {},
+		"unmapped_mimes": {},
+		"unfilled_required": {},
+		"left_behind": {}
+	}
+}

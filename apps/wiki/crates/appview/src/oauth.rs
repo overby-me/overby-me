@@ -10,17 +10,22 @@
 //! all compiling and unit-covered. The one step that needs a human is a real
 //! browser redirect against an independent PDS; see the run harness note below.
 //!
-//! ## Run harness (the live confirmation, a human step)
+//! ## The login, end to end
 //!
-//! 1. Construct `WikiOAuth::new(db)` and mount [`callback_handler`] at `/callback`
-//!    (already wired when [`crate::AppState`] carries the client).
-//! 2. Call `begin_login("<handle-or-pds>")` to get the authorization URL; open it
-//!    in a browser and complete consent on the account's real PDS.
-//! 3. The PDS redirects to `http://127.0.0.1/callback?code=...&state=...&iss=...`;
-//!    the handler drives [`WikiOAuth::callback`] to a token + the resolved DID.
-//!    Record how far the exchange + refresh get (per the spike's honest limits).
+//! 1. The frontend sends the browser to `/login?handle=<handle>&return=<url>`.
+//!    [`login_handler`] runs the pre-redirect flow, binds the login to this
+//!    browser with a cookie, and redirects to the account's own PDS.
+//! 2. The PDS redirects back to `/callback?code=...&state=...&iss=...`.
+//!    [`callback_handler`] checks the cookie, drives the token exchange, and
+//!    returns to `<url>#code=<one-time code>`.
+//! 3. The frontend POSTs the code to `wiki.radikal.createSession` and holds
+//!    the bearer token it gets back (`crate::session`).
+//!
+//! Step 2 against a real PDS needs a human in a browser; everything around the
+//! exchange is unit-covered here.
 
 use crate::db::{Db, DbError};
+use crate::http::{Reach, RustlsHttpClient};
 use atrium_api::agent::SessionManager;
 use atrium_api::types::string::Did;
 use atrium_common::store::Store;
@@ -31,16 +36,13 @@ use atrium_identity::handle::{
 use atrium_oauth::store::session::{Session, SessionStore};
 use atrium_oauth::store::state::{InternalStateData, StateStore};
 use atrium_oauth::{
-    AtprotoLocalhostClientMetadata, AuthorizeOptions, CallbackParams, DefaultHttpClient,
-    KnownScope, OAuthClient, OAuthClientConfig, OAuthResolverConfig, Scope,
+    AtprotoClientMetadata, AtprotoLocalhostClientMetadata, AuthMethod, AuthorizeOptions,
+    CallbackParams, GrantType, KnownScope, OAuthClient, OAuthClientConfig, OAuthResolverConfig,
+    Scope,
 };
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-
-// ---------------------------------------------------------------------------
-// Durable stores: atrium's `Store<K, V>` over a SQLite (Turso) JSON-KV table.
-// ---------------------------------------------------------------------------
 
 /// A store failure: a datastore error or a (de)serialization error. atrium's
 /// `Store` trait requires the error to be `std::error::Error`.
@@ -110,27 +112,16 @@ impl JsonKv {
     async fn set_json<V: Serialize>(&self, key: &str, value: &V) -> Result<(), StoreError> {
         let json = serde_json::to_string(value)?;
         let conn = self.db.acquire().await?;
-        // turso 0.2.2 has no upsert (ON CONFLICT/OR REPLACE unsupported), so
-        // UPDATE-then-INSERT (same as the push seam in `store.rs`).
-        let updated = conn
-            .execute(
-                &format!(
-                    "UPDATE {} SET value = ?1 WHERE {} = ?2",
-                    self.table, self.key_col
-                ),
-                [json.clone(), key.to_string()],
-            )
-            .await?;
-        if updated == 0 {
-            conn.execute(
-                &format!(
-                    "INSERT INTO {} ({}, value) VALUES (?1, ?2)",
-                    self.table, self.key_col
-                ),
-                [key.to_string(), json],
-            )
-            .await?;
-        }
+        conn.execute(
+            &format!(
+                "INSERT INTO {table} ({key}, value) VALUES (?1, ?2) \
+                 ON CONFLICT({key}) DO UPDATE SET value = excluded.value",
+                table = self.table,
+                key = self.key_col
+            ),
+            [key.to_string(), json],
+        )
+        .await?;
         Ok(())
     }
 
@@ -228,14 +219,10 @@ impl Store<Did, Session> for SqliteSessionStore {
 
 impl SessionStore for SqliteSessionStore {}
 
-// ---------------------------------------------------------------------------
-// The OAuth client wrapper.
-// ---------------------------------------------------------------------------
-
-type HttpClient = DefaultHttpClient;
+type HttpClient = RustlsHttpClient;
 type DidRes = CommonDidResolver<HttpClient>;
 type HandleRes = AtprotoHandleResolver<DohDnsTxtResolver<HttpClient>, HttpClient>;
-type Client = OAuthClient<SqliteStateStore, SqliteSessionStore, DidRes, HandleRes>;
+type Client = OAuthClient<SqliteStateStore, SqliteSessionStore, DidRes, HandleRes, HttpClient>;
 
 /// The result of a completed callback: the resolved account DID (if the session
 /// exposes it) and the app-state the authorize call round-tripped.
@@ -244,72 +231,134 @@ pub struct CallbackOutcome {
     pub app_state: Option<String>,
 }
 
+fn scopes() -> Vec<Scope> {
+    vec![
+        Scope::Known(KnownScope::Atproto),
+        Scope::Known(KnownScope::TransitionGeneric),
+        // The account's address, which is how an invitation sent to it finds
+        // its person (`crate::profile`). atrium has no name for it yet.
+        Scope::Unknown("transition:email".to_string()),
+    ]
+}
+
 /// The wiki's atproto OAuth client, backed by durable SQLite stores. Construct
 /// once (`new`), `begin_login` per member, `callback` on the redirect back.
 pub struct WikiOAuth {
     client: Client,
+    /// A second handle on the state store the client owns, so a callback can be
+    /// checked against its login before the token exchange is spent on it.
+    states: SqliteStateStore,
 }
 
 impl WikiOAuth {
-    /// Build the OAuth client with durable stores over `db`. Uses the localhost
-    /// client-metadata profile (public client, no secret or JWKS), the atproto +
-    /// transitional-generic scopes, Cloudflare DoH for handle TXT resolution, and
-    /// the default PLC directory for DID resolution (mirrors `oauth-spike`).
-    pub fn new(db: Db) -> Result<Self, Box<dyn std::error::Error>> {
-        let http_client = Arc::new(DefaultHttpClient::default());
-        let config = OAuthClientConfig {
-            client_metadata: AtprotoLocalhostClientMetadata {
-                redirect_uris: Some(vec![String::from("http://127.0.0.1/callback")]),
-                scopes: Some(vec![
-                    Scope::Known(KnownScope::Atproto),
-                    Scope::Known(KnownScope::TransitionGeneric),
-                ]),
-            },
-            keys: None,
-            resolver: OAuthResolverConfig {
-                did_resolver: CommonDidResolver::new(CommonDidResolverConfig {
-                    plc_directory_url: DEFAULT_PLC_DIRECTORY_URL.to_string(),
-                    http_client: Arc::clone(&http_client),
-                }),
-                handle_resolver: AtprotoHandleResolver::new(AtprotoHandleResolverConfig {
-                    dns_txt_resolver: DohDnsTxtResolver::new(DohDnsTxtResolverConfig {
-                        service_url: String::from("https://cloudflare-dns.com/dns-query"),
-                        http_client: Arc::clone(&http_client),
-                    }),
-                    http_client: Arc::clone(&http_client),
-                }),
-                authorization_server_metadata: Default::default(),
-                protected_resource_metadata: Default::default(),
-            },
-            state_store: SqliteStateStore::new(db.clone()),
-            session_store: SqliteSessionStore::new(db),
+    /// Build the OAuth client with durable stores over `db`. A configured
+    /// `public_url` selects the production profile, whose `client_id` is the
+    /// metadata document [`client_metadata_handler`] serves; without one this is
+    /// a loopback dev client. Both are public clients (no secret, no JWKS).
+    pub fn new(db: Db, config: &crate::Config) -> Result<Self, Box<dyn std::error::Error>> {
+        // A dev instance has no public URL, and may need a PDS on localhost.
+        let reach = if config.public_url.is_empty() {
+            Reach::Any
+        } else {
+            Reach::PublicOnly
         };
-        Ok(Self {
-            client: OAuthClient::new(config)?,
-        })
+        let http = RustlsHttpClient::new(reach)?;
+        let http_client = Arc::new(http.clone());
+        let resolver = OAuthResolverConfig {
+            did_resolver: CommonDidResolver::new(CommonDidResolverConfig {
+                plc_directory_url: match config.plc_url.as_str() {
+                    "" => DEFAULT_PLC_DIRECTORY_URL.to_string(),
+                    own => own.to_string(),
+                },
+                http_client: Arc::clone(&http_client),
+            }),
+            handle_resolver: AtprotoHandleResolver::new(AtprotoHandleResolverConfig {
+                dns_txt_resolver: DohDnsTxtResolver::new(DohDnsTxtResolverConfig {
+                    service_url: String::from("https://cloudflare-dns.com/dns-query"),
+                    http_client: Arc::clone(&http_client),
+                }),
+                http_client: Arc::clone(&http_client),
+            }),
+            authorization_server_metadata: Default::default(),
+            protected_resource_metadata: Default::default(),
+        };
+        let states = SqliteStateStore::new(db.clone());
+        let state_store = states.clone();
+        let session_store = SqliteSessionStore::new(db);
+        let client = if config.public_url.is_empty() {
+            OAuthClient::new(OAuthClientConfig {
+                client_metadata: AtprotoLocalhostClientMetadata {
+                    // The port is part of the declared URI because atrium matches
+                    // redirect URIs exactly; the PDS itself ignores a loopback port.
+                    redirect_uris: Some(vec![format!("http://127.0.0.1:{}/callback", config.port)]),
+                    scopes: Some(scopes()),
+                },
+                keys: None,
+                resolver,
+                state_store,
+                session_store,
+                http_client: http,
+            })?
+        } else {
+            let base = &config.public_url;
+            OAuthClient::new(OAuthClientConfig {
+                client_metadata: AtprotoClientMetadata {
+                    client_id: format!("{base}{CLIENT_METADATA_PATH}"),
+                    client_uri: Some(base.clone()),
+                    redirect_uris: vec![format!("{base}/callback")],
+                    token_endpoint_auth_method: AuthMethod::None,
+                    grant_types: vec![GrantType::AuthorizationCode, GrantType::RefreshToken],
+                    scopes: scopes(),
+                    // Not to sign in with: this stays a public client. A space
+                    // that admits applications by a list has them attest with a
+                    // key their client metadata publishes (`crate::spaces`).
+                    jwks_uri: (!config.spaces_pds.is_empty())
+                        .then(|| format!("{base}{}", crate::spaces::JWKS_PATH)),
+                    token_endpoint_auth_signing_alg: None,
+                },
+                keys: None,
+                resolver,
+                state_store,
+                session_store,
+                http_client: http,
+            })?
+        };
+        Ok(Self { client, states })
     }
 
     /// Begin login for a member identified by handle or PDS URL: the full
     /// server-side pre-redirect flow (resolution + PAR with a fresh DPoP key +
-    /// PKCE), returning the authorization URL to redirect them to.
+    /// PKCE), returning the authorization URL to redirect them to. `app_state`
+    /// comes back from [`WikiOAuth::callback`].
     pub async fn begin_login(
         &self,
         handle_or_pds: &str,
+        app_state: Option<String>,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let url = self
             .client
             .authorize(
                 handle_or_pds,
                 AuthorizeOptions {
-                    scopes: vec![
-                        Scope::Known(KnownScope::Atproto),
-                        Scope::Known(KnownScope::TransitionGeneric),
-                    ],
+                    scopes: scopes(),
+                    state: app_state,
                     ..Default::default()
                 },
             )
             .await?;
         Ok(url)
+    }
+
+    /// The app-state of a login that has begun and not yet come back, by the
+    /// OAuth `state` its callback carries.
+    pub async fn pending_app_state(&self, state: &str) -> Option<String> {
+        match Store::get(&self.states, &state.to_string()).await {
+            Ok(data) => data.and_then(|d| d.app_state),
+            Err(e) => {
+                tracing::error!("oauth state lookup failed: {e}");
+                None
+            }
+        }
     }
 
     /// Complete login from the callback query: drive the token exchange, persist
@@ -322,21 +371,159 @@ impl WikiOAuth {
         let did = session.did().await.map(|d| d.as_str().to_string());
         Ok(CallbackOutcome { did, app_state })
     }
+
+    /// What `did`'s own PDS says about them, asked with the session their login
+    /// left here: the account (`getSession`), its profile record if it has one,
+    /// and which PDS answered.
+    pub async fn account(
+        &self,
+        did: &str,
+    ) -> Result<crate::profile::PdsAccount, Box<dyn std::error::Error + Send + Sync>> {
+        use atrium_api::com::atproto::repo::get_record::ParametersData;
+        use atrium_api::xrpc::XrpcClient;
+        let did: atrium_api::types::string::Did = did.parse()?;
+        let session = self.client.restore(&did).await?;
+        // Where this session's requests go, which the login bound to the DID.
+        let pds = session.base_uri();
+        let agent = atrium_api::agent::Agent::new(session);
+        let account = agent.api.com.atproto.server.get_session().await?;
+        // An account need not have a profile: that is not a failure.
+        let profile = agent
+            .api
+            .com
+            .atproto
+            .repo
+            .get_record(
+                ParametersData {
+                    cid: None,
+                    collection: "app.bsky.actor.profile".parse()?,
+                    repo: did.clone().into(),
+                    rkey: "self".parse()?,
+                }
+                .into(),
+            )
+            .await
+            .ok()
+            .and_then(|found| serde_json::to_value(&found.value).ok());
+        Ok(crate::profile::account_from(
+            did.as_str(),
+            &pds,
+            &serde_json::to_value(&account.data)?,
+            profile.as_ref(),
+        ))
+    }
+
+    /// Write a record into `did`'s own repo, on their PDS, with the OAuth session
+    /// their login left here. Returns the record's at-uri. Fails for someone who
+    /// has not signed in through this AppView, or whose PDS has since withdrawn
+    /// the grant.
+    pub async fn create_record(
+        &self,
+        did: &str,
+        collection: &str,
+        record: serde_json::Value,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        use atrium_api::com::atproto::repo::create_record::InputData;
+        let did: atrium_api::types::string::Did = did.parse()?;
+        let session = self.client.restore(&did).await?;
+        let agent = atrium_api::agent::Agent::new(session);
+        let created = agent
+            .api
+            .com
+            .atproto
+            .repo
+            .create_record(
+                InputData {
+                    collection: collection.parse()?,
+                    record: serde_json::from_value(record)?,
+                    repo: did.into(),
+                    rkey: None,
+                    swap_commit: None,
+                    validate: None,
+                }
+                .into(),
+            )
+            .await?;
+        Ok(created.uri.clone())
+    }
+
+    /// The client metadata document a PDS fetches from the `client_id` URL.
+    /// atrium's struct omits two fields the atproto profile lists as required.
+    pub fn client_metadata(&self) -> serde_json::Value {
+        let mut doc = serde_json::to_value(&self.client.client_metadata)
+            .unwrap_or_else(|_| serde_json::json!({}));
+        if let Some(map) = doc.as_object_mut() {
+            map.insert("application_type".into(), "web".into());
+            map.insert("response_types".into(), serde_json::json!(["code"]));
+        }
+        doc
+    }
 }
 
-// ---------------------------------------------------------------------------
-// The /callback HTTP handler.
-// ---------------------------------------------------------------------------
-
+use crate::session::Sessions;
 use axum::Json;
 use axum::extract::{RawQuery, State};
-use axum::http::StatusCode;
+use axum::http::header::{COOKIE, LOCATION, SET_COOKIE};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 
-/// `/callback`: the PDS redirects the browser here with `code`/`state`/`iss`.
-/// Drives [`WikiOAuth::callback`] to a token + DID. Returns 503 if the AppView
-/// was built without an OAuth client (the default in tests).
-pub async fn callback_handler(
+pub const CLIENT_METADATA_PATH: &str = "/client-metadata.json";
+
+const LOGIN_COOKIE: &str = "wiki_login";
+const LOGIN_COOKIE_SECS: u64 = 600;
+
+/// What a login carries across the PDS redirect, as atrium's app-state. It stays
+/// server-side in `oauth_state`; the browser holds only `binder`, in a cookie.
+#[derive(Serialize, Deserialize)]
+struct LoginState {
+    binder: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    return_to: Option<String>,
+}
+
+fn bad_request(message: &str) -> Response {
+    crate::xrpc::err(StatusCode::BAD_REQUEST, "InvalidRequest", message)
+}
+
+fn login_cookie(value: &str, max_age: u64, config: &crate::Config) -> String {
+    // The AppView sits behind a TLS-terminating edge, so the public URL is the
+    // only place it can learn that the browser is on https.
+    let secure = if config.public_url.starts_with("https://") {
+        "; Secure"
+    } else {
+        ""
+    };
+    format!(
+        "{LOGIN_COOKIE}={value}; Max-Age={max_age}; Path=/callback; HttpOnly; SameSite=Lax{secure}"
+    )
+}
+
+fn cookie<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers
+        .get_all(COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find_map(|(k, v)| (k == name).then_some(v))
+}
+
+fn redirect(location: &str, set_cookie: &str) -> Response {
+    let (Ok(location), Ok(set_cookie)) = (
+        HeaderValue::from_str(location),
+        HeaderValue::from_str(set_cookie),
+    ) else {
+        return bad_request("unusable redirect target");
+    };
+    let mut resp = StatusCode::SEE_OTHER.into_response();
+    resp.headers_mut().insert(LOCATION, location);
+    resp.headers_mut().insert(SET_COOKIE, set_cookie);
+    resp
+}
+
+/// `GET /login?handle=<handle-or-pds>&return=<frontend url>`: start a login and
+/// send the browser to the account's own PDS.
+pub async fn login_handler(
     State(state): State<crate::AppState>,
     RawQuery(query): RawQuery,
 ) -> Response {
@@ -345,28 +532,129 @@ pub async fn callback_handler(
     };
     let pairs = crate::util::parse_query(query.as_deref());
     let get = |k: &str| pairs.iter().find(|(kk, _)| kk == k).map(|(_, v)| v.clone());
-    let Some(code) = get("code") else {
-        return (StatusCode::BAD_REQUEST, "missing code").into_response();
+    let Some(handle) = get("handle").filter(|h| !h.is_empty()) else {
+        return bad_request("missing handle");
     };
+    let return_to = get("return");
+    if let Some(url) = &return_to
+        && !state.config.allows_return(url)
+    {
+        return bad_request("return is not an allowed frontend origin");
+    }
+    let binder = crate::util::random_token(16);
+    let login = LoginState {
+        binder: binder.clone(),
+        return_to,
+    };
+    let Ok(app_state) = serde_json::to_string(&login) else {
+        return bad_request("unusable login state");
+    };
+    match oauth.begin_login(&handle, Some(app_state)).await {
+        Ok(url) => redirect(
+            &url,
+            &login_cookie(&binder, LOGIN_COOKIE_SECS, &state.config),
+        ),
+        Err(e) => {
+            // Almost always a handle that does not resolve, which is the
+            // caller's to fix, so this is not a 5xx.
+            tracing::warn!("login could not start for {handle}: {e}");
+            bad_request("could not start a login for that handle")
+        }
+    }
+}
+
+/// `GET /callback`: the PDS redirects the browser here with `code`/`state`/`iss`.
+///
+/// The cookie check comes before the exchange on purpose. Without it, a link to
+/// an attacker's own finished consent would sign the victim's browser in as the
+/// attacker (login CSRF), and everything they then wrote would land in the
+/// attacker's account.
+pub async fn callback_handler(
+    State(state): State<crate::AppState>,
+    headers: HeaderMap,
+    RawQuery(query): RawQuery,
+) -> Response {
+    let Some(oauth) = state.oauth.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "oauth not configured").into_response();
+    };
+    let pairs = crate::util::parse_query(query.as_deref());
+    let get = |k: &str| pairs.iter().find(|(kk, _)| kk == k).map(|(_, v)| v.clone());
+    let Some(code) = get("code") else {
+        return bad_request("missing code");
+    };
+    let Some(oauth_state) = get("state") else {
+        return bad_request("missing state");
+    };
+    let login = oauth
+        .pending_app_state(&oauth_state)
+        .await
+        .and_then(|json| serde_json::from_str::<LoginState>(&json).ok());
+    let Some(login) = login else {
+        return bad_request("unknown or expired login");
+    };
+    if cookie(&headers, LOGIN_COOKIE) != Some(login.binder.as_str()) {
+        return bad_request("this login was not started in this browser");
+    }
+
     let params = CallbackParams {
         code,
-        state: get("state"),
+        state: Some(oauth_state),
         iss: get("iss"),
     };
-    match oauth.callback(params).await {
-        Ok(outcome) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "ok": true,
-                "did": outcome.did,
-                "app_state": outcome.app_state,
-            })),
-        )
-            .into_response(),
+    let did = match oauth.callback(params).await {
+        Ok(CallbackOutcome { did: Some(did), .. }) => did,
+        Ok(_) => {
+            tracing::error!("oauth callback resolved no DID");
+            return (StatusCode::BAD_GATEWAY, "callback failed").into_response();
+        }
         Err(e) => {
             tracing::error!("oauth callback failed: {e}");
-            (StatusCode::BAD_GATEWAY, "callback failed").into_response()
+            return (StatusCode::BAD_GATEWAY, "callback failed").into_response();
         }
+    };
+    finish_login(&state, &did, login.return_to.as_deref()).await
+}
+
+/// Record a completed login and hand the browser a one-time code for it.
+async fn finish_login(state: &crate::AppState, did: &str, return_to: Option<&str>) -> Response {
+    let issued = async {
+        crate::Store::new(state.db.clone())
+            .upsert_user_min(did)
+            .await?;
+        Sessions::new(state.db.clone()).issue_code(did).await
+    };
+    let code = match issued.await {
+        Ok(code) => code,
+        Err(e) => {
+            tracing::error!("could not record the login of {did}: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "login failed").into_response();
+        }
+    };
+    // Beside the login, never in its way: a PDS that is slow to say who
+    // someone is must not keep them from signing in.
+    tokio::spawn(crate::profile::hydrate(state.clone(), did.to_string()));
+    let clear = login_cookie("", 0, &state.config);
+    // Re-checked, not trusted: the allowlist may have shrunk since /login.
+    match return_to.filter(|url| state.config.allows_return(url)) {
+        Some(url) => {
+            let base = url.split_once('#').map_or(url, |(base, _)| base);
+            redirect(&format!("{base}#code={code}"), &clear)
+        }
+        None => {
+            let mut resp = Json(serde_json::json!({ "did": did, "code": code })).into_response();
+            if let Ok(clear) = HeaderValue::from_str(&clear) {
+                resp.headers_mut().insert(SET_COOKIE, clear);
+            }
+            resp
+        }
+    }
+}
+
+/// `GET /client-metadata.json`: the document the production `client_id` names.
+pub async fn client_metadata_handler(State(state): State<crate::AppState>) -> Response {
+    match &state.oauth {
+        Some(oauth) => Json(oauth.client_metadata()).into_response(),
+        None => (StatusCode::SERVICE_UNAVAILABLE, "oauth not configured").into_response(),
     }
 }
 
@@ -402,7 +690,7 @@ mod tests {
         };
         kv.set_json("k", &v).await.expect("set");
         assert_eq!(kv.get_json::<Probe>("k").await.expect("get").unwrap(), v);
-        // Upsert overwrites (no ON CONFLICT: UPDATE path).
+        // Upsert overwrites.
         kv.set_json(
             "k",
             &Probe {
@@ -421,6 +709,209 @@ mod tests {
         kv.set_json("b", &v).await.expect("set b");
         kv.clear().await.expect("clear");
         assert!(kv.get_json::<Probe>("a").await.expect("get").is_none());
+    }
+
+    // -- The login handlers. Nothing here touches the network: building the
+    //    client is offline, and every case stops before the PDS is contacted. --
+
+    use crate::{AppState, Config, router};
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    const FRONTEND: &str = "https://wiki.example";
+
+    async fn login_state(public_url: &str) -> AppState {
+        let db = Db::open(":memory:").await.expect("open");
+        db.init_schema().await.expect("schema");
+        let config = Config {
+            public_url: public_url.to_string(),
+            frontend_origins: vec![FRONTEND.to_string()],
+            ..Config::default()
+        };
+        let oauth = WikiOAuth::new(db.clone(), &config).expect("oauth client");
+        AppState::new(db, config).with_oauth(Arc::new(oauth))
+    }
+
+    async fn send(state: &AppState, uri: &str, cookie: Option<&str>) -> (StatusCode, String) {
+        let mut req = Request::builder().uri(uri);
+        if let Some(c) = cookie {
+            req = req.header("cookie", c);
+        }
+        let resp = router(state.clone())
+            .oneshot(req.body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), 64 * 1024)
+            .await
+            .expect("body");
+        (status, String::from_utf8_lossy(&bytes).into_owned())
+    }
+
+    /// A login that has begun and not come back, as `authorize()` leaves it. The
+    /// key is the RFC 7517 appendix A.2 example; nothing signs with it here.
+    async fn pending_login(state: &AppState, oauth_state: &str, login: &LoginState) {
+        let data = serde_json::json!({
+            "iss": "https://pds.example",
+            "dpop_key": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7D4",
+                "y": "4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM",
+                "d": "870MB6gfuTJ4HtUnUvYMyJpr5eUZNP4Bk43bVdj3eAE"
+            },
+            "verifier": "v",
+            "app_state": serde_json::to_string(login).expect("json"),
+        });
+        let data: InternalStateData = serde_json::from_value(data).expect("state data");
+        Store::set(
+            &SqliteStateStore::new(state.db.clone()),
+            oauth_state.to_string(),
+            data,
+        )
+        .await
+        .expect("set");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn login_refuses_a_missing_handle_and_a_foreign_return() {
+        let state = login_state("").await;
+        let (status, body) = send(&state, "/login", None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+        let (status, body) = send(
+            &state,
+            "/login?handle=alice.test&return=https%3A%2F%2Fevil.example%2F",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body.contains("allowed frontend origin"), "{body}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_callback_for_no_known_login_is_refused() {
+        let state = login_state("").await;
+        let (status, body) = send(&state, "/callback?code=c&state=nope", None).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(body.contains("unknown or expired login"), "{body}");
+    }
+
+    /// Login CSRF: the attacker finishes consent for their OWN account and gets
+    /// the victim's browser to open the callback. That browser never started the
+    /// login, so it has no binder cookie, or has the binder of another login.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_callback_from_a_browser_that_did_not_start_the_login_is_refused() {
+        let state = login_state("").await;
+        let login = LoginState {
+            binder: "attackers-binder".into(),
+            return_to: None,
+        };
+        pending_login(&state, "st1", &login).await;
+        for cookie in [None, Some("wiki_login=some-other-login")] {
+            let (status, body) = send(&state, "/callback?code=c&state=st1", cookie).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "cookie {cookie:?}");
+            assert!(body.contains("not started in this browser"), "{body}");
+        }
+        let oauth = state.oauth.as_ref().expect("oauth");
+        assert!(
+            oauth.pending_app_state("st1").await.is_some(),
+            "a refused callback must not spend the login it was aimed at"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_finished_login_returns_a_redeemable_code_to_the_frontend() {
+        let state = login_state("https://api.wiki.example").await;
+        let resp = finish_login(
+            &state,
+            "did:plc:alice",
+            Some("https://wiki.example/a/b?app=vote#stale"),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+        let location = resp.headers()[LOCATION].to_str().expect("location");
+        let (base, code) = location.split_once("#code=").expect("a code fragment");
+        assert_eq!(base, "https://wiki.example/a/b?app=vote");
+        let cleared = resp.headers()[SET_COOKIE].to_str().expect("cookie");
+        assert!(cleared.contains("Max-Age=0"), "{cleared}");
+        assert!(cleared.contains("; Secure"), "{cleared}");
+
+        let did = Sessions::new(state.db.clone())
+            .redeem_code(code)
+            .await
+            .expect("redeem");
+        assert_eq!(did.as_deref(), Some("did:plc:alice"));
+        let user = crate::Store::new(state.db.clone())
+            .read_user("did:plc:alice")
+            .await
+            .expect("read");
+        assert!(user.is_some(), "a login must leave a user row behind");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_finished_login_never_redirects_off_the_allowlist() {
+        let state = login_state("").await;
+        for return_to in [None, Some("https://evil.example/")] {
+            let resp = finish_login(&state, "did:plc:alice", return_to).await;
+            assert_eq!(resp.status(), StatusCode::OK, "return_to {return_to:?}");
+            assert!(resp.headers().get(LOCATION).is_none());
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_production_profile_serves_its_own_client_id() {
+        let state = login_state("https://api.wiki.example").await;
+        let (status, body) = send(&state, CLIENT_METADATA_PATH, None).await;
+        assert_eq!(status, StatusCode::OK);
+        let doc: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(
+            doc["client_id"],
+            "https://api.wiki.example/client-metadata.json"
+        );
+        assert_eq!(
+            doc["redirect_uris"],
+            serde_json::json!(["https://api.wiki.example/callback"])
+        );
+        assert_eq!(doc["dpop_bound_access_tokens"], true);
+        assert_eq!(doc["token_endpoint_auth_method"], "none");
+        assert_eq!(doc["response_types"], serde_json::json!(["code"]));
+        assert_eq!(doc["application_type"], "web");
+        assert_eq!(doc["scope"], "atproto transition:generic transition:email");
+        assert!(doc.get("jwks_uri").is_none(), "no keys to publish: {doc}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_wiki_in_spaces_publishes_the_key_it_attests_with_and_signs_in_as_before() {
+        let db = Db::open(":memory:").await.expect("open");
+        db.init_schema().await.expect("schema");
+        let config = Config {
+            public_url: "https://api.wiki.example".to_string(),
+            spaces_pds: "https://pds.wiki.example".to_string(),
+            ..Config::default()
+        };
+        let oauth = WikiOAuth::new(db, &config).expect("oauth client");
+        let doc = oauth.client_metadata();
+        assert_eq!(doc["jwks_uri"], "https://api.wiki.example/jwks.json");
+        assert_eq!(doc["token_endpoint_auth_method"], "none");
+        assert!(
+            doc.get("token_endpoint_auth_signing_alg").is_none(),
+            "{doc}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_loopback_profile_redirects_to_the_port_it_listens_on() {
+        let state = login_state("").await;
+        let oauth = state.oauth.as_ref().expect("oauth");
+        let doc = oauth.client_metadata();
+        assert_eq!(
+            doc["redirect_uris"],
+            serde_json::json!(["http://127.0.0.1:8080/callback"])
+        );
+        let client_id = doc["client_id"].as_str().expect("client_id");
+        assert!(client_id.starts_with("http://localhost?"), "{client_id}");
     }
 
     #[tokio::test(flavor = "current_thread")]

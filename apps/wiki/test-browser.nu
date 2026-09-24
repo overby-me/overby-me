@@ -24,10 +24,16 @@
 #   # Authenticated tests are opt-in and need credentials (never commit these):
 #   WIKI_EMAIL=you@example.com WIKI_PASSWORD=secret nu test-browser.nu
 #
+#   # The same suite against the AppView: the build with `--features appview`
+#   # and a dev AppView this starts (crates/appview-dev). No account, nothing
+#   # outside this machine, and the authenticated tests always run.
+#   nu test-browser.nu --firefox --appview
+#
 # Exit codes: 0 all passed · 1 test failure · 2 missing deps / setup failure
 
 const WD_PORT = 7134
 const SERVE_PORT = 8134
+const API_PORT = 8137
 
 def wd-url [] { $"http://127.0.0.1:($WD_PORT)" }
 def base-url [] { $"http://127.0.0.1:($SERVE_PORT)" }
@@ -36,6 +42,23 @@ def base-url [] { $"http://127.0.0.1:($SERVE_PORT)" }
 # the app's own compile-time override in src/nhost.rs.
 def gql-url [] {
     $env.WIKI_GRAPHQL_URL? | default "https://pgvhpsenoifywhuxnybq.hasura.eu-central-1.nhost.run/v1/graphql"
+}
+
+# Which backend the app under test is built on: the interim's (the default, and
+# what ships), or the AppView (`--appview`).
+def on-appview []: nothing -> bool { ($env.WIKI_BACKEND? | default "") == "appview" }
+def api-url [] { $"http://127.0.0.1:($API_PORT)" }
+
+# The JS every backend check starts with: `gql(query, variables)`, synchronous,
+# as the signed-in user. On the AppView the same name is an adapter that answers
+# the suite's few documents from XRPC (`test-browser-appview-adapter.js`), so
+# that each check holds both backends to the same thing.
+def gql-prelude [GQL: string]: nothing -> string {
+    if (on-appview) {
+        open --raw ($env.FILE_PWD | path join "test-browser-appview-adapter.js") | str replace --all "__API__" (api-url)
+    } else {
+        ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
+    }
 }
 
 # ── Logging ────────────────────────────────────────────────────────────────
@@ -298,6 +321,52 @@ def gecko-cmd [log: string] {
     }
 }
 
+# What the dev AppView said of itself, or an empty record until it has.
+def read-hello [path: string]: nothing -> record {
+    let raw = (try { open --raw $path | str trim } catch { "" })
+    if ($raw | is-empty) { return {} }
+    try { $raw | from json } catch { {} }
+}
+
+# Start `crates/appview-dev` for `--appview`, with the wiki the suite expects
+# to find around its own fixtures: the owner runs the site, and sits as a plain
+# member in one group that is somebody else's to run, which is what the
+# owner-gated checks need and an owner of everything would never see. Returns
+# its pid, or 0 with the reason logged.
+def start-dev-appview []: nothing -> int {
+    kill-port $API_PORT
+    log-info "Building and starting the dev AppView..."
+    let built = (do -i { ^cargo build --quiet -p appview-dev --manifest-path crates/Cargo.toml } | complete)
+    if $built.exit_code != 0 { log-fail "appview-dev did not build"; print -e $built.stderr; return 0 }
+    let hello = (^mktemp /tmp/wiki-appview-XXXXXX.json | str trim)
+    let pid = (^bash -c $'APPVIEW_FRONTEND_ORIGINS=(base-url) crates/target/debug/appview-dev --port ($API_PORT) did:plc:owner did:plc:member > "($hello)" 2>/dev/null < /dev/null & echo $!' | str trim | into int)
+    mut said = {}
+    for _ in 1..40 {
+        $said = (read-hello $hello)
+        if ($said | is-not-empty) { break }
+        sleep 250ms
+    }
+    rm -f $hello
+    if ($said | is-empty) { log-fail "the dev AppView did not start"; return 0 }
+    let owner = ($said.sessions | get "did:plc:owner")
+    let member = ($said.sessions | get "did:plc:member")
+    let xrpc = $"(api-url)/xrpc/wiki.radikal"
+    let post = {|token: string, method: string, body: record|
+        ^curl -s -X POST -H $"authorization: Bearer ($token)" -H "content-type: application/json" -d ($body | to json -r) $"($xrpc).($method)" | from json
+    }
+    let get = {|token: string, call: string| ^curl -s -H $"authorization: Bearer ($token)" $"($xrpc).($call)" | from json }
+    # Made by the owner, since only who runs the site starts a group at its top,
+    # then handed to the member, and the owner steps down to a seat in it.
+    let group = (do $post $owner "createContext" {parent_id: "home", kind: "group", name: "E2E Foreign"} | get id)
+    do $post $owner "inviteMembers" {context_id: $group, invites: [{name: "Medlem", did: "did:plc:member"}]} | ignore
+    let invitation = (do $get $member "listInvitations" | get invitations | first | get id)
+    do $post $member "acceptInvitation" {id: $invitation} | ignore
+    let seats = (do $get $owner $"listMembers?context=($group)" | get members)
+    do $post $owner "updateMember" {id: ($seats | where user_did == "did:plc:member" | first | get id), owner: true} | ignore
+    do $post $owner "updateMember" {id: ($seats | where user_did == "did:plc:owner" | first | get id), owner: false} | ignore
+    $pid
+}
+
 def do-cleanup [session_id: string, driver_pid: int, server_pid: int, keep_server: bool] {
     if ($session_id | is-not-empty) { wd-delete $"/session/($session_id)" }
     # Always tear down the browser; keep the dev server when it was reused.
@@ -312,6 +381,8 @@ def do-cleanup [session_id: string, driver_pid: int, server_pid: int, keep_serve
     # so sweep the WebDriver port too. Leave the serve port alone when reusing.
     kill-port $WD_PORT
     if not $keep_server { kill-port $SERVE_PORT }
+    # The dev AppView holds nothing worth keeping: it is in memory.
+    if (on-appview) { kill-port $API_PORT }
 }
 
 # ── Tests: unauthenticated shell ────────────────────────────────────────────
@@ -376,8 +447,15 @@ def test-shell [session_id: string, timeout: int, passed: int, failed: int]: not
     if ($login | is-not-empty) and $login != "null" {
         wd-click $session_id $login
         sleep 500ms
-        let r = (assert-exists $session_id "login route has email input" '#main input[type=email]' -p $p -f $fl); $p = $r.passed; $fl = $r.failed
-        let r = (assert-exists $session_id "login route has password input" '#main input[type=password]' -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+        if (on-appview) {
+            # One thing to type: the password is the provider's to ask for.
+            let r = (assert-exists $session_id "login route asks for a handle" '#main input#auth-handle' -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+            let asked = (wd-execute $session_id 'return document.querySelectorAll("#main input[type=password]").length')
+            if $asked == 0 { log-ok "login route asks for no password"; $p = $p + 1 } else { log-fail $"login route has ($asked) password fields"; $fl = $fl + 1 }
+        } else {
+            let r = (assert-exists $session_id "login route has email input" '#main input[type=email]' -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+            let r = (assert-exists $session_id "login route has password input" '#main input[type=password]' -p $p -f $fl); $p = $r.passed; $fl = $r.failed
+        }
         let path = (wd-execute $session_id 'return location.pathname')
         if $path == "/user/login" { log-ok "client-side routing to /user/login"; $p = $p + 1 } else { log-fail $"expected /user/login, got ($path)"; $fl = $fl + 1 }
     } else {
@@ -401,13 +479,21 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     wd-navigate $session_id $"(base-url)/"
     if not (wd-wait-for-mount $session_id 120) { log-fail "unauthenticated home did not mount"; return { passed: $p, failed: ($fl + 1) } }
 
-    wd-navigate $session_id $"(base-url)/user/login"
-    if not (wd-wait-for-element $session_id '#main input[type=email]' 40) { log-fail "login form did not render"; return { passed: $p, failed: ($fl + 1) } }
-    sleep 300ms
+    if (on-appview) {
+        # As a provider sends a browser back: a one-time code after `#`, which the
+        # dev AppView mints for whoever asks. The provider's own pages are
+        # `scripts/test-real-login.nu`'s to go through.
+        let code = (^curl -s $"(api-url)/dev/code?did=did:plc:owner" | from json | get code)
+        wd-navigate $session_id $"(base-url)/user/login#code=($code)"
+    } else {
+        wd-navigate $session_id $"(base-url)/user/login"
+        if not (wd-wait-for-element $session_id '#main input[type=email]' 40) { log-fail "login form did not render"; return { passed: $p, failed: ($fl + 1) } }
+        sleep 300ms
 
-    wd-send-keys $session_id (wd-find $session_id '#main input[type=email]') $email
-    wd-send-keys $session_id (wd-find $session_id '#main input[type=password]') $password
-    wd-click $session_id (wd-find $session_id '#main button')
+        wd-send-keys $session_id (wd-find $session_id '#main input[type=email]') $email
+        wd-send-keys $session_id (wd-find $session_id '#main input[type=password]') $password
+        wd-click $session_id (wd-find $session_id '#main button')
+    }
 
     # Wait for the session to land and the drawer to populate.
     mut ok = false
@@ -453,6 +539,10 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # can't be exercised, and a left-over corrupt token would break the welcome
     # check below) — verified under Firefox.
     if (servo-skip "stale-JWT refresh+retry recovery") {
+    } else if (on-appview) {
+        # A bearer that lasts a month, with nothing to refresh it by: a spoiled
+        # one is a sign-out, which is its own check.
+        log-info "no token refresh on the AppView: skipping the stale-JWT check"
     } else {
         let jwt_corrupt = (wd-execute $session_id 'try { var s=JSON.parse(localStorage.getItem("wiki_session")); if(!s || !s.access_token) return "nosession"; s.access_token = s.access_token.slice(0,-6) + "AAAAAA"; localStorage.setItem("wiki_session", JSON.stringify(s)); return "ok"; } catch(e){ return "err:"+e; }')
         if $jwt_corrupt != "ok" { log-warn $"could not stage JWT-recovery check: ($jwt_corrupt)" }
@@ -615,12 +705,16 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # existing populated context so the run still exercises the in-context views.
     let GQL = (gql-url)
     # gql() prelude: read the session token from localStorage, sync-XHR to Hasura.
-    let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
+    let gql = (gql-prelude $GQL)
     # Per-context permission template (mirrors graphql::context_permission_objects),
     # plus a wiki/event row so an event can be nested inside the group.
     let perm_fn = 'function permObjs(cid){var R=[["vote/vote","member",["vote/poll"]],["vote/policy","member",["wiki/folder"]],["vote/candidate","member",["vote/position"]],["wiki/document","owner",["wiki/event","wiki/folder","wiki/group"]],["vote/poll","owner",["vote/policy","vote/change","vote/position"]],["vote/question","member",["vote/position","wiki/file"]],["vote/comment","member",["vote/policy","vote/change"]],["speak/speak","member",["speak/list"]],["vote/change","member",["vote/policy","vote/change","wiki/file"]],["wiki/folder","owner",["wiki/folder","wiki/group","wiki/event"]],["vote/position","owner",["wiki/folder"]],["wiki/file","owner",["wiki/event","wiki/folder","wiki/group"]],["wiki/event","owner",["wiki/group","wiki/folder"]]];return R.map(function(r){var m=r[0]!="vote/vote";return {contextId:cid,nodeId:cid,mimeId:r[0],role:r[1],parents:r[2],active:true,insert:true,select:true,update:m,delete:m};});}'
     # Group (own context + perms) -> event (own context + perms) + folder -> policy.
     let setup_js = ($gql + $perm_fn + 'var INS="mutation($o:nodes_insert_input!){insertNode(object:$o){id key}}";var UPD="mutation($id:uuid!,$s:nodes_set_input!){updateNode(pk_columns:{id:$id},_set:$s){id}}";var PERM="mutation($o:[permissions_insert_input!]!){insertPermissions(objects:$o){affected_rows}}";var rt=gql("query{nodes(where:{mimeId:{_eq:\"wiki/home\"}}){id contextId}}",{});var ROOT=null,RC=null;try{ROOT=rt.data.nodes[0].id;RC=rt.data.nodes[0].contextId}catch(e){}var out={group:null,groupKey:null,event:null,eventKey:null,folder:null,folderKey:null,policy:null,policyKey:null,member:0,err:null};if(!ROOT){out.err="root not found";return JSON.stringify(out);}var t=Date.now();var CONTENT=[{type:"heading-one",children:[{text:"E2E Suite"}]},{type:"paragraph",children:[{text:"Hermetic fixture content for the in-context checks."}]},{type:"heading-two",children:[{text:"Section"}]},{type:"paragraph",children:[{text:"Body text so the landing view renders a populated document card."}]}];var g=gql(INS,{o:{name:"E2E Suite "+t,key:"e2e-suite-"+t,mimeId:"wiki/group",parentId:ROOT,contextId:RC,mutable:true,data:{content:CONTENT}}});try{out.group=g.data.insertNode.id;out.groupKey=g.data.insertNode.key}catch(e){}if(!out.group){out.err=g.errors?JSON.stringify(g.errors):"group insert failed";return JSON.stringify(out);}gql(UPD,{id:out.group,s:{contextId:out.group,mutable:false}});var ps=gql(PERM,{o:permObjs(out.group)});if(ps.errors){out.err="perm seed: "+JSON.stringify(ps.errors);return JSON.stringify(out);}var ME=null;try{ME=__s.user}catch(e){}function ownRow(cid){if(!ME)return;gql("mutation($o:[members_insert_input!]!){insertMembers(objects:$o){affected_rows}}",{o:[{parentId:cid,nodeId:ME.id,email:ME.email,name:(ME.display_name||ME.email),owner:true,accepted:true,active:true}]});}ownRow(out.group);var ev=gql(INS,{o:{name:"E2E Event "+t,key:"e2e-evt-"+t,mimeId:"wiki/event",parentId:out.group,contextId:out.group,mutable:true}});try{out.event=ev.data.insertNode.id;out.eventKey=ev.data.insertNode.key}catch(e){}if(out.event){gql(UPD,{id:out.event,s:{contextId:out.event,mutable:false}});gql(PERM,{o:permObjs(out.event)});ownRow(out.event);}else{out.err=ev.errors?("event: "+JSON.stringify(ev.errors)):"event insert failed";}var f=gql(INS,{o:{name:"E2E Docs",key:"e2e-fld-"+t,mimeId:"wiki/folder",parentId:out.group,contextId:out.group,mutable:true}});try{out.folder=f.data.insertNode.id;out.folderKey=f.data.insertNode.key}catch(e){}if(!out.folder){out.err=(out.err?out.err+"; ":"")+(f.errors?JSON.stringify(f.errors):"folder insert failed");return JSON.stringify(out);}var pl=gql(INS,{o:{name:"E2E policy",key:"e2e-pol-"+t,mimeId:"vote/policy",parentId:out.folder,contextId:out.group,mutable:true}});try{out.policy=pl.data.insertNode.id;out.policyKey=pl.data.insertNode.key}catch(e){}if(!out.policy){out.err=(out.err?out.err+"; ":"")+(pl.errors?JSON.stringify(pl.errors):"policy insert failed");}var mem=gql("mutation($o:[members_insert_input!]!){insertMembers(objects:$o){affected_rows}}",{o:[{parentId:out.group,name:"E2E Member",email:"e2e-member-"+t+"@example.com"}]});try{out.member=mem.data.insertMembers.affected_rows}catch(e){}return JSON.stringify(out);')
+    # The same fixture by the AppView's own calls: there is no row to insert a
+    # node as, and whoever makes a context owns it, with no permission rows.
+    let setup_appview_js = ($gql + 'var out={group:null,groupKey:null,event:null,eventKey:null,folder:null,folderKey:null,policy:null,policyKey:null,member:0,err:null};var home=xrpc("getNode",{path:""});if(!home||!home.node){out.err="root not found";return JSON.stringify(out);}var t=Date.now();var CONTENT=[{type:"heading-one",children:[{text:"E2E Suite"}]},{type:"paragraph",children:[{text:"Hermetic fixture content for the in-context checks."}]},{type:"heading-two",children:[{text:"Section"}]},{type:"paragraph",children:[{text:"Body text so the landing view renders a populated document card."}]}];var g=xrpc("createContext",null,{kind:"group",name:"E2E Suite "+t,parent_id:home.node.id});if(!g){out.err="group create failed";return JSON.stringify(out);}out.group=g.id;out.groupKey=g.path;xrpc("updateContext",null,{id:g.id,content:CONTENT});var ev=xrpc("createContext",null,{kind:"event",name:"E2E Event "+t,parent_id:g.id});if(ev){out.event=ev.id;out.eventKey=ev.path.split("/").pop();}else{out.err="event create failed";}var f=xrpc("createDocument",null,{context_id:g.id,parent_id:g.id,kind:"folder",title:"E2E Docs"});if(!f){out.err=(out.err?out.err+"; ":"")+"folder create failed";return JSON.stringify(out);}out.folder=f.id;out.folderKey=f.slug;var pl=xrpc("createDocument",null,{context_id:g.id,parent_id:f.id,kind:"policy",title:"E2E policy"});if(pl){out.policy=pl.id;out.policyKey=pl.slug;}else{out.err=(out.err?out.err+"; ":"")+"policy create failed";}var mem=xrpc("inviteMembers",null,{context_id:g.id,invites:[{name:"E2E Member",email:"e2e-member-"+t+"@example.com"}]});out.member=mem?mem.inserted:0;return JSON.stringify(out);')
+    let setup_js = (if (on-appview) { $setup_appview_js } else { $setup_js })
     let setup = (try { wd-execute $session_id $setup_js | from json } catch { {group: null, groupKey: null, event: null, eventKey: null, folder: null, folderKey: null, policy: null, policyKey: null, err: "setup exec failed"} })
 
     mut hermetic_gid = ""
@@ -807,7 +901,10 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # generalized use_data_resource! makes every view refetch on the bump).
     let path_b = (wd-execute $session_id 'return location.pathname')
     let items_b = (wd-execute $session_id 'return String(document.querySelectorAll("#main .folder-tile, #main .list-link, #main .card").length)')
-    wd-execute $session_id "if(!window.__gqlHooked){window.__gqlHooked=1; var of=window.fetch; window.fetch=function(){try{var u=arguments[0]; var s=(typeof u=='string')?u:((u&&u.url)||''); if(s.indexOf('graphql')>=0){window.__gql=(window.__gql||0)+1;}}catch(e){} return of.apply(this,arguments);};} return 'ok'" | ignore
+    # Counted by wrapping fetch, handed on WITH the window as receiver: a client
+    # that calls the global `fetch(..)` bare gave the wrapper no `this`, and the
+    # real fetch then refused every request, emptying the drawer until a reload.
+    wd-execute $session_id "if(!window.__gqlHooked){window.__gqlHooked=1; var of=window.fetch; window.fetch=function(){try{var u=arguments[0]; var s=(typeof u=='string')?u:((u&&u.url)||''); if(s.indexOf('graphql')>=0||s.indexOf('/xrpc/')>=0){window.__gql=(window.__gql||0)+1;}}catch(e){} return of.apply(window,arguments);};} return 'ok'" | ignore
     sleep 400ms
     wd-execute $session_id "window.__gql=0; window.scrollTo(0,0); var e=new WheelEvent('wheel',{deltaY:-300,bubbles:true,cancelable:true}); window.dispatchEvent(e); return 1" | ignore
     mut refetched = false
@@ -880,7 +977,9 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # client-side route change between two path pages, not show stale content).
     let path_before = (wd-execute $session_id 'return location.pathname')
     let main_before = (wd-execute $session_id 'return (document.getElementById("main")||{innerText:""}).innerText')
-    let clicked = (wd-execute $session_id 'var e=document.querySelector("#main .folder-tile, #main .list-link"); if(e){e.click(); return "y"} return "n"')
+    # The fixture's folder where there is one: its event is a context of its own,
+    # whose drawer starts over at the event and has no row for it to highlight.
+    let clicked = (wd-execute $session_id 'var es=[...document.querySelectorAll("#main .folder-tile, #main .list-link")]; var e=es.find(function(x){return x.textContent.indexOf("E2E Docs")>=0})||es[0]; if(e){e.click(); return "y"} return "n"')
     if $clicked == "y" {
         mut deeper = false
         for _ in 1..($timeout) {
@@ -892,13 +991,15 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
         let main_after = (wd-execute $session_id 'return (document.getElementById("main")||{innerText:""}).innerText')
         if $deeper and ($main_after != $main_before) {
             log-ok "navigating to a child node updates the view"; $p = $p + 1
-            # The drawer tree highlights the current node in the path.
-            sleep 1500ms
-            let sel = (wd-execute $session_id 'return document.querySelector(".nav-rail-tree .list-item.selected, .nav-rail-tree .list-item.selected")?"y":"n"')
+            # The drawer tree highlights the current node in the path. Waited for:
+            # the tree fetches its levels again after the move.
+            wd-wait-y $session_id 'return document.querySelector(".nav-rail-tree .list-item.selected")?"y":"n"' 8000 | ignore
+            let sel = (wd-execute $session_id 'return document.querySelector(".nav-rail-tree .list-item.selected")?"y":"n"')
             if $sel == "y" {
                 log-ok "drawer highlights the current node"; $p = $p + 1
             } else {
-                log-fail "drawer does not highlight the current node"; $fl = $fl + 1
+                let rows = (wd-execute $session_id 'var t=document.querySelector(".nav-rail-tree");return JSON.stringify({path:location.pathname,rows:[...document.querySelectorAll(".nav-rail-tree .list-item")].map(function(r){return r.className}),rail:(document.querySelector(".nav-rail")||{}).className,tree:t?t.innerHTML.replace(/\s+/g," ").slice(0,500):null})')
+                log-fail $"drawer does not highlight the current node: ($rows)"; $fl = $fl + 1
             }
         } else {
             log-fail "child navigation did not update the view (stale PathPage)"; $fl = $fl + 1
@@ -1227,24 +1328,29 @@ def test-auth [session_id: string, email: string, password: string, timeout: int
     # The muted-text refactor relies on Dioxus MERGING two `class:` attributes
     # (a base body-* class + text-muted), not last-wins. A profile paragraph must
     # carry BOTH classes, confirming the base class was not silently dropped.
-    wd-navigate $session_id $"(base-url)($ctx_path)?app=profile"
+    # A person has one page, /profile/:id, their own id included (`?app=profile`
+    # is gone: it made two pages of one person).
+    let own_id = (wd-execute $session_id 'try{return JSON.parse(localStorage.getItem("wiki_session")).user.id}catch(e){return ""}')
+    let own_profile = $"(base-url)/profile/($own_id)"
+    wd-navigate $session_id $own_profile
     if (wd-wait-for-element $session_id "#main .text-muted" 15) {
         let merged = (wd-execute $session_id 'return document.querySelector("#main .body-medium.text-muted, #main .body-small.text-muted")?"y":"n"')
         if $merged == "y" { log-ok "class attributes merge (base + text-muted)"; $p = $p + 1 } else { log-fail "class merge dropped the base class" ; $fl = $fl + 1 }
     } else {
         log-warn "no .text-muted on profile — skipping class-merge check"
     }
-    # The profile has distinct Groups, Events and Contributions sections.
+    # The profile is the person: who they are, and what they wrote. Where they
+    # belong is the home's to list, in separate Groups and Events.
     sleep 500ms
-    let sections = (wd-execute $session_id 'var hs=[...document.querySelectorAll("#main .card-header h3")].map(function(h){return h.textContent.trim()}); return JSON.stringify({groups:hs.indexOf("Groups")>=0,events:hs.indexOf("Events")>=0,contrib:hs.indexOf("Your contributions")>=0})')
-    let sec = ($sections | from json)
-    if $sec.groups and $sec.events { log-ok "profile has separate Groups and Events lists"; $p = $p + 1 } else { log-fail $"profile missing group/event split: ($sections)"; $fl = $fl + 1 }
-    if $sec.contrib { log-ok "profile shows a contributions section"; $p = $p + 1 } else { log-fail "profile missing the contributions section"; $fl = $fl + 1 }
-    # The root route /?app=profile must render the profile, not the home page.
-    wd-navigate $session_id $"(base-url)/?app=profile"
-    sleep 800ms
     let on_profile = (wd-execute $session_id 'return [...document.querySelectorAll("#main .card-header h3")].some(function(h){return h.textContent.trim()=="Your contributions"})?"y":"n"')
-    if $on_profile == "y" { log-ok "/?app=profile renders the profile \(not home)"; $p = $p + 1 } else { log-fail "/?app=profile did not render the profile"; $fl = $fl + 1 }
+    if $on_profile == "y" { log-ok "own /profile/:id renders the profile, with a contributions section"; $p = $p + 1 } else { log-fail "own /profile/:id did not render the profile"; $fl = $fl + 1 }
+    wd-navigate $session_id $"(base-url)/"
+    wd-wait-y $session_id 'return [...document.querySelectorAll("#main .card-header h3")].some(function(h){return h.textContent.trim()=="Groups"})?"y":"n"' 6000 | ignore
+    let sections = (wd-execute $session_id 'var hs=[...document.querySelectorAll("#main .card-header h3")].map(function(h){return h.textContent.trim()}); return JSON.stringify({groups:hs.indexOf("Groups")>=0,events:hs.indexOf("Events")>=0})')
+    let sec = ($sections | from json)
+    if $sec.groups and $sec.events { log-ok "home has separate Groups and Events lists"; $p = $p + 1 } else { log-fail $"home missing group/event split: ($sections)"; $fl = $fl + 1 }
+    wd-navigate $session_id $own_profile
+    sleep 800ms
     # Profile lists reveal more incrementally via "Show more".
     let more = (wd-execute $session_id 'var b=[...document.querySelectorAll("#main .list-expand-toggle")].find(function(x){return x.textContent.indexOf("Show more")>=0}); if(!b) return "notoggle"; var before=document.querySelectorAll("#main .list-item, #main .list-link").length; b.click(); return JSON.stringify({before:before})')
     if $more == "notoggle" {
@@ -1542,12 +1648,16 @@ def wd-folder-add [session_id: string, mime: string, name: string]: nothing -> b
     }
     wd-execute $session_id 'var b=[...document.querySelectorAll("#main button.add-action")].find(function(b){return b.getAttribute("aria-label")=="Add content"});if(b)b.click();return 1' | ignore
     sleep 500ms
-    # The type menu is populated from node_insert_mimes, so wait for the option we
-    # want before selecting it (proves the mime is genuinely offered by the UI).
-    if not (wd-wait-y $session_id ('return document.querySelector(".m3-dialog select option[value=\"' + $mime + '\"]")?"y":"n"') 8000) {
+    # The kinds are icon buttons (a <select> cannot show an icon), offered from
+    # what the parent allows, so wait for the one we want before pressing it
+    # (proves the kind is genuinely offered by the UI). Found by its icon: the
+    # label is translated.
+    let icon = ({"wiki/document": "article", "wiki/folder": "folder", "wiki/file": "upload_file", "vote/policy": "gavel", "vote/position": "how_to_reg"} | get -o $mime | default "")
+    let kind_btn = ('[...document.querySelectorAll(".m3-dialog [role=group] button")].find(function(b){var i=b.querySelector(".material-icons");return i&&i.textContent.trim()=="' + $icon + '"})')
+    if ($icon | is-empty) or not (wd-wait-y $session_id ('return ' + $kind_btn + '?"y":"n"') 8000) {
         return false
     }
-    wd-execute $session_id ('var s=document.querySelector(".m3-dialog select");if(s){s.value="' + $mime + '";s.dispatchEvent(new Event("change",{bubbles:true}))}return 1') | ignore
+    wd-execute $session_id ('var b=' + $kind_btn + ';if(b)b.click();return 1') | ignore
     sleep 300ms
     wd-execute $session_id ('var ta=document.querySelector(".m3-dialog .text-field input");if(ta){ta.value="' + $name + '";ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1') | ignore
     sleep 300ms
@@ -1583,7 +1693,7 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
     }
     let GQL = (gql-url)
     # gql() prelude: read the session token from localStorage, sync-XHR to Hasura.
-    let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
+    let gql = (gql-prelude $GQL)
     let t = (date now | format date '%Y%m%d%H%M%S')
     let gname = $"E2E hermetic ($t)"
     let ename = $"E2E event ($t)"
@@ -1623,6 +1733,9 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
         wd-execute $session_id 'var b=[...document.querySelectorAll("button.add-action")].find(function(b){return b.getAttribute("aria-label")=="New event"});if(b)b.click();return 1' | ignore
         sleep 500ms
         wd-execute $session_id ('var ta=document.querySelector(".m3-dialog .text-field input");if(ta){ta.value="' + $ename + '";ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1') | ignore
+        sleep 400ms
+        # An event belongs to a group, and the dialog asks which: the one just made.
+        wd-execute $session_id ('var s=document.querySelector(".m3-dialog select");if(s){var o=[...s.options].find(function(o){return o.textContent.trim()=="' + $gname + '"});if(o){s.value=o.value;s.dispatchEvent(new Event("change",{bubbles:true}))}}return 1') | ignore
         sleep 400ms
         wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
         for _ in 1..20 { let path = (wd-execute $session_id 'return location.pathname'); if ($path != "/") and ($path != null) { break }; sleep 300ms }
@@ -1664,6 +1777,9 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
         return { passed: $p, failed: $fl }
     }
     log-ok "motion created via the Add-content UI"; $p = $p + 1
+    # Making a page goes to the page: back to the folder for the next one.
+    wd-navigate $session_id $"(base-url)/($grp.key)/($fld.key)"
+    sleep 800ms
     wd-folder-add $session_id "vote/position" $poname | ignore
     let pos = (try { wd-execute $session_id ($gql + 'var P="' + $fld.id + '";var r=gql("query($p:uuid!,$n:String!){nodes(where:{parentId:{_eq:$p},name:{_eq:$n},mimeId:{_eq:\"vote/position\"}}){id key}}",{p:P,n:"' + $poname + '"});var o={id:null,key:null};try{o.id=r.data.nodes[0].id;o.key=r.data.nodes[0].key}catch(e){}return JSON.stringify(o);') | from json } catch { {id: null, key: null} })
     if ($pos.id | is-not-empty) { log-ok "election created via the Add-content UI"; $p = $p + 1 } else { log-fail "election (vote/position) not creatable via the Add-content UI"; $fl = $fl + 1 }
@@ -1674,9 +1790,9 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
 
     # ── Add a poll (UI: the StartPollButton on the policy) ──
     wd-navigate $session_id $"(base-url)($ppath)"
-    if (wd-wait-y $session_id 'return [...document.querySelectorAll("#main .btn-icon.add-action")].some(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"})?"y":"n"' 8000) {
+    if (wd-wait-y $session_id 'return [...document.querySelectorAll(".sheet-action")].some(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent.trim()=="ballot"})?"y":"n"' 8000) {
         log-ok "poll-start control shown (owner)"; $p = $p + 1
-        wd-execute $session_id 'var b=[...document.querySelectorAll("#main .btn-icon.add-action")].find(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"});if(b)b.click();return 1' | ignore
+        wd-execute $session_id 'var b=[...document.querySelectorAll(".sheet-action")].find(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent.trim()=="ballot"});if(b)b.click();return 1' | ignore
         sleep 700ms
         wd-execute $session_id 'var b=document.querySelector(".m3-dialog-actions .btn-primary");if(b)b.click();return 1' | ignore
         if (wd-wait-y $session_id 'return document.querySelector("#main .ballot-option, #main .btn-cast")?"y":"n"' 9000) {
@@ -1705,7 +1821,7 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
     if (wd-wait-y $session_id 'return document.querySelector("#main .comment-composer .comment-input")?"y":"n"' 8000) {
         wd-execute $session_id 'var ta=document.querySelector("#main .comment-composer .comment-input");if(ta){ta.value="e2e comment "+Date.now();ta.dispatchEvent(new Event("input",{bubbles:true}))}return 1' | ignore
         sleep 500ms
-        wd-execute $session_id 'var b=document.querySelector("#main .comment-composer .comment-send");if(b)b.click();return 1' | ignore
+        wd-execute $session_id 'var b=document.querySelector("#main .comment-composer button[aria-label=Send]");if(b)b.click();return 1' | ignore
         sleep 1800ms
         let cres = (try { wd-execute $session_id ($gql + 'var PID="' + $pid + '";var cr=gql("query($p:uuid!){nodes(where:{parentId:{_eq:$p},mimeId:{_eq:\"vote/comment\"}}){id}}",{p:PID});var cc=0;try{cc=cr.data.nodes.length}catch(e){}return JSON.stringify({comments:cc});') | from json } catch { {comments: 0} })
         if (($cres.comments | default 0) >= 1) {
@@ -1748,6 +1864,9 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
         # Add ten candidates through the inline add-candidate dialog (name only).
         for i in 1..10 {
             let cname = $"Candidate ($i)"
+            # Adding one lands in its editor, for its text to be written: back to
+            # the election for the next.
+            if $i > 1 { wd-navigate $session_id $"(base-url)($pospath)" }
             if (wd-wait-y $session_id 'return [...document.querySelectorAll("#main button[aria-label]")].some(function(b){return b.getAttribute("aria-label")=="Add candidate"})?"y":"n"' 8000) {
                 wd-execute $session_id 'var b=[...document.querySelectorAll("#main button[aria-label]")].find(function(x){return x.getAttribute("aria-label")=="Add candidate"});if(b)b.click();return 1' | ignore
                 sleep 450ms
@@ -1767,8 +1886,8 @@ def test-vote-flow [session_id: string, passed: int, failed: int]: nothing -> re
         # shows two vote-range sliders (min, max) once there are >2 options; drag
         # the max (second) slider to 5.
         wd-navigate $session_id $"(base-url)($pospath)"
-        if (wd-wait-y $session_id 'return [...document.querySelectorAll("#main .btn-icon.add-action")].some(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"})?"y":"n"' 8000) {
-            wd-execute $session_id 'var b=[...document.querySelectorAll("#main .btn-icon.add-action")].find(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent=="play_arrow"});if(b)b.click();return 1' | ignore
+        if (wd-wait-y $session_id 'return [...document.querySelectorAll(".sheet-action")].some(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent.trim()=="ballot"})?"y":"n"' 8000) {
+            wd-execute $session_id 'var b=[...document.querySelectorAll(".sheet-action")].find(function(b){var m=b.querySelector(".material-icons");return m&&m.textContent.trim()=="ballot"});if(b)b.click();return 1' | ignore
             sleep 700ms
             let maxset = (wd-execute $session_id 'var rs=[...document.querySelectorAll(".m3-dialog input[type=range]")];if(rs.length<2)return rs.length.toString();var mx=rs[1];mx.value="5";mx.dispatchEvent(new Event("input",{bubbles:true}));return rs.length.toString()')
             if ($maxset == "2") { log-ok "poll dialog exposes min/max vote sliders for a multi-candidate election"; $p = $p + 1 } else { log-fail $"expected two vote-range sliders, saw ($maxset)"; $fl = $fl + 1 }
@@ -1848,7 +1967,7 @@ def test-editor-flow [session_id: string, passed: int, failed: int]: nothing -> 
     }
     let GQL = (gql-url)
     # gql() prelude: read the session token from localStorage, sync-XHR to Hasura.
-    let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
+    let gql = (gql-prelude $GQL)
     # Editor-DOM prelude for every editor-side execute: the surface plus helpers to
     # put the caret at the end, select a word by its text, and click a toolbar
     # icon button the way a user would.
@@ -2013,15 +2132,24 @@ def test-editor-flow [session_id: string, passed: int, failed: int]: nothing -> 
         log-fail "editor did not re-mount for the round-trip check"; $fl = $fl + 1
     }
 
-    # ── Autosave: a typed draft persists after the debounce, with no Save click ──
-    wd-navigate $session_id $"(base-url)($ed_path)"
-    if (wd-wait-for-element $session_id "#rich-editor" 30) {
+    # ── Autosave: a typed draft persists after the debounce, with no Save click.
+    #    On a DRAFT, which a page is until it is submitted. A group is submitted
+    #    from the moment it is made, and autosave stays off for what is (the
+    #    editor says so in a banner), so the group above is no place to look. ──
+    let dname = $"E2E draft ($t)"
+    wd-navigate $session_id $"(base-url)/($grp.key)"
+    sleep 800ms
+    wd-folder-add $session_id "wiki/document" $dname | ignore
+    let draft = (try { wd-execute $session_id ($gql + 'var P="' + $grp.id + '";var r=gql("query($p:uuid!,$n:String!){nodes(where:{parentId:{_eq:$p},name:{_eq:$n},mimeId:{_eq:\"wiki/document\"}}){id key}}",{p:P,n:"' + $dname + '"});var o={id:null,key:null};try{o.id=r.data.nodes[0].id;o.key=r.data.nodes[0].key}catch(e){}return JSON.stringify(o);') | from json } catch { {id: null, key: null} })
+    if ($draft.id | is-empty) { log-fail "draft page not created via the Add-content UI"; $fl = $fl + 1 }
+    wd-navigate $session_id $"(base-url)/($grp.key)/($draft.key | default '')?app=editor"
+    if ($draft.id | is-not-empty) and (wd-wait-for-element $session_id "#rich-editor" 30) {
         sleep 500ms
         wd-execute $session_id ($ed + 'endCaret();document.execCommand("insertText",false," AutosaveProbe");return 1') | ignore
         # AUTOSAVE_DEBOUNCE_MS is 2.5s; leave headroom for the mutation round trip.
         sleep 4500ms
         let still_editing = (wd-execute $session_id 'return location.search.indexOf("app=editor")>=0?"y":"n"')
-        let auto = (wd-execute $session_id ($gql + 'var GID="' + $grp.id + '";var r=gql("query($i:uuid!){node(id:$i){data}}",{i:GID});var c="";try{c=JSON.stringify(r.data.node.data.content)}catch(e){}return c.indexOf("AutosaveProbe")>=0?"y":"n"'))
+        let auto = (wd-execute $session_id ($gql + 'var GID="' + $draft.id + '";var r=gql("query($i:uuid!){node(id:$i){data}}",{i:GID});var c="";try{c=JSON.stringify(r.data.node.data.content)}catch(e){}return c.indexOf("AutosaveProbe")>=0?"y":"n"'))
         if ($still_editing == "y") and ($auto == "y") {
             log-ok "debounced autosave persists the draft without Save"; $p = $p + 1
         } else {
@@ -2055,7 +2183,7 @@ def test-create-context [session_id: string, passed: int, failed: int]: nothing 
         return { passed: $p, failed: $fl }
     }
     let GQL = (gql-url)
-    let gql = ('var __s;try{__s=JSON.parse(localStorage.getItem("wiki_session"))}catch(e){}var __T=__s?__s.access_token:"";function gql(q,v){var x=new XMLHttpRequest();x.open("POST","' + $GQL + '",false);x.setRequestHeader("content-type","application/json");x.setRequestHeader("authorization","Bearer "+__T);try{x.send(JSON.stringify({query:q,variables:v}))}catch(e){return {errors:[{message:String(e)}]}}try{return JSON.parse(x.responseText)}catch(e){return {errors:[{message:x.responseText}]}}}')
+    let gql = (gql-prelude $GQL)
     let gname = $"E2E Group (date now | format date '%Y%m%d%H%M%S')"
 
     # Home: open the owner-only "add group" dialog from the Groups list header
@@ -2091,7 +2219,12 @@ def test-create-context [session_id: string, passed: int, failed: int]: nothing 
         log-fail "group not found in backend after create"; $fl = $fl + 1
     } else {
         if ($chk.selfCtx == true) { log-ok "new group is its own context"; $p = $p + 1 } else { log-fail "new group context not set to self"; $fl = $fl + 1 }
-        if ($chk.perms >= 10) { log-ok $"permission template seeded \(($chk.perms) rows\)"; $p = $p + 1 } else { log-fail $"permission template not seeded \(($chk.perms) rows\)"; $fl = $fl + 1 }
+        if (on-appview) {
+            # No rows to seed: what may be made where is code. What a template gave
+            # its maker is that the new group is theirs to run.
+            let owns = (wd-execute $session_id ($gql + 'var r=xrpc("getNode",{id:"' + $chk.id + '"});return (r&&r.viewer&&r.viewer.is_context_owner)?"y":"n"'))
+            if $owns == "y" { log-ok "whoever made the group runs it"; $p = $p + 1 } else { log-fail "the new group is not its maker's to run"; $fl = $fl + 1 }
+        } else if ($chk.perms >= 10) { log-ok $"permission template seeded \(($chk.perms) rows\)"; $p = $p + 1 } else { log-fail $"permission template not seeded \(($chk.perms) rows\)"; $fl = $fl + 1 }
     }
 
     # Teardown: delete the group's permissions + the node (it has no children yet).
@@ -2182,6 +2315,9 @@ def main [
     --reuse     # Reuse a `dx serve` already listening on the serve port instead of
                 # rebuilding. Start one with `--keep` once, then pass --reuse to skip
                 # the ~minute build on every subsequent run.
+    --appview   # The build on the AppView (`--features appview`), against a dev
+                # AppView this starts. Needs no account: the authenticated tests
+                # always run, signed in as the dev AppView's owner.
 ] {
     let proj = $env.FILE_PWD
     if $shots {
@@ -2193,8 +2329,10 @@ def main [
     # contenteditable execCommand). These pass under real Firefox (--firefox),
     # which is the reference engine; on Servo they warn-skip instead of failing.
     $env.WIKI_ENGINE = (if $firefox { "firefox" } else { "servo" })
+    if $appview { $env.WIKI_BACKEND = "appview" }
     mut servo_pid = 0
     mut server_pid = 0
+    mut api_pid = 0
     mut session_id = ""
     mut passed = 0
     mut failed = 0
@@ -2210,6 +2348,10 @@ def main [
     }
 
     cd $proj
+    if $appview {
+        $api_pid = (start-dev-appview)
+        if $api_pid == 0 { exit 2 }
+    }
     # Reuse a `dx serve` already listening on the serve port (skips the ~minute
     # rebuild) when --reuse is set and it answers; otherwise start a fresh one.
     let reuse_active = ($reuse and ((do -i { ^curl -sf -o /dev/null $"(base-url)/" } | complete).exit_code == 0))
@@ -2221,7 +2363,12 @@ def main [
         # Start dx serve (debug build — the one Servo can run).
         log-info $"Starting `dx serve` on :($SERVE_PORT) \(first build may take a minute)..."
         $serve_log = (^mktemp /tmp/wiki-dx-XXXXXX.log | str trim)
-        $server_pid = (^bash -c $'dx serve --port ($SERVE_PORT) > "($serve_log)" 2>&1 & echo $!' | str trim | into int)
+        let serve = (if $appview {
+            $"WIKI_APPVIEW_URL=(api-url) dx serve --features appview --interactive false --open false --port ($SERVE_PORT)"
+        } else {
+            $"dx serve --port ($SERVE_PORT)"
+        })
+        $server_pid = (^bash -c $'($serve) > "($serve_log)" 2>&1 < /dev/null & echo $!' | str trim | into int)
 
         # `dx serve` binds the port before it finishes the first wasm build, so wait
         # for the build to actually complete (its log announces it) — otherwise the
@@ -2285,7 +2432,7 @@ def main [
 
     let email = ($env | get -o WIKI_EMAIL | default "")
     let password = ($env | get -o WIKI_PASSWORD | default "")
-    if ($email | is-not-empty) and ($password | is-not-empty) {
+    if $appview or (($email | is-not-empty) and ($password | is-not-empty)) {
         let r = (test-auth $session_id $email $password $timeout $passed $failed); $passed = $r.passed; $failed = $r.failed
         # Write-flow (create poll / vote / comment) needs the authed session and
         # only runs for real under Firefox; it self-cleans on the live backend.

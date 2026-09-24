@@ -6,16 +6,16 @@
 }:
 rustPlatform.buildRustPackage rec {
   pname = "hakoniwa";
-  version = "1.3.1";
+  version = "1.7.2";
 
   src = fetchFromGitHub {
     owner = "souk4711";
     repo = "hakoniwa";
     rev = "v${version}";
-    hash = "sha256-2QvOAcJvgXDE8tEqzaoZDV0R+yHK1ggAAEbnlK6jBac=";
+    hash = "sha256-UKudgBDn1kziBWIAZMVdaF2/+1pL42xqbvDBgxUuGCU=";
   };
 
-  cargoHash = "sha256-I+GM6G0BqGyxbrYKT9x1RaK2uKOldxgitjhjRZXgT4Y=";
+  cargoHash = "sha256-HAHjLS7GGQVqFFUrfHU366JXsWQn6EA1tHqMQw35DSY=";
 
   buildInputs = [
     libseccomp

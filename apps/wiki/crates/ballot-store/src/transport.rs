@@ -138,12 +138,17 @@ mod tests {
         }
     }
 
-    async fn fresh_board() -> PersistentBoard {
-        let db = turso::Builder::new_local(":memory:")
+    async fn fresh_store() -> turso::Connection {
+        turso::Builder::new_local(":memory:")
             .build()
             .await
-            .expect("build");
-        PersistentBoard::open(db.connect().expect("connect"))
+            .expect("build")
+            .connect()
+            .expect("connect")
+    }
+
+    async fn board_of(conn: &turso::Connection) -> PersistentBoard {
+        PersistentBoard::open(conn.clone(), "p1")
             .await
             .expect("open")
     }
@@ -189,7 +194,9 @@ mod tests {
 
         // Primary board shipping its casts into the source replica log.
         let replica = Arc::new(ReplicaLog::open(&src).expect("open replica"));
-        let primary = fresh_board().await.with_replication(replica.clone());
+        let primary = board_of(&fresh_store().await)
+            .await
+            .with_replication(replica.clone());
         let issuer = TokenIssuer::new_for_poll(2048).expect("keypair");
 
         // Round 1: two casts, then a partial ship to the follower.
@@ -232,8 +239,11 @@ mod tests {
         // complete replica -- the off-node integrity guarantee.
         let original = primary.entries().await.expect("primary entries");
         assert_eq!(original.len(), 3);
-        let rebuilt = fresh_board().await;
-        let restored = rebuild_from_replica(&rebuilt, &dst).await.expect("rebuild");
+        let follower = fresh_store().await;
+        let restored = rebuild_from_replica(&follower, &dst)
+            .await
+            .expect("rebuild");
+        let rebuilt = board_of(&follower).await;
         assert_eq!(restored, 3, "every shipped entry restored on the follower");
         assert_eq!(
             rebuilt.entries().await.expect("rebuilt entries"),

@@ -9,9 +9,8 @@ A first cut of the data model for the custom backend, derived from the current
   backend DB (Turso, per the tech-stack decision). Written as concrete SQL (SQLite
   dialect) as a starting point.
 
-> Draft, not committed. NSID `com.example.wiki.*` is a deliberate RFC 2606 placeholder:
-> the authority domain is not decided yet (an Open entry in `atproto-open-decisions.md`);
-> the rebrand procedure is documented in `lexicons/README.md`.
+> Draft, not committed. The NSID is `wiki.radikal.*` (decided 2026-09-20, see
+> `lexicons/README.md`); it was the placeholder `com.example.wiki.*` until then.
 
 ## The headline: visibility is per-item — a public/private hybrid
 
@@ -28,8 +27,10 @@ public half:
 
 Two constraints shape the whole design, and both matter:
 
-- **atproto has no private records.** Anything private is simply DB-only, never a
-  record. "Optionally public" therefore means "optionally *becomes* a record" —
+- **atproto has no private records.** (True when written. atproto spaces, in
+  alpha since 2026-08-20, are non-public records; `atproto-spaces-redesign.md` is
+  what that changes here. What follows describes the AppView as built.) Anything
+  private is simply DB-only, never a record. "Optionally public" therefore means "optionally *becomes* a record" —
   publish creates it, un-publish tombstones it.
 - **A few things are never public regardless of the toggle.** Secret ballots
   (obviously). And for a political org, **membership/affiliation** probably —
@@ -51,7 +52,7 @@ atproto earns its place on two counts, independent of how public the app is:
    True even for a mostly-private app.
 2. **Lexicons are canonical at the federation boundary ONLY.** The public subset
    (post, statement, resolution, public group/event/document, comment) is governed
-   by `com.example.wiki.*` lexicons: `atrium` codegens the Rust record types, and the
+   by `wiki.radikal.*` lexicons: `atrium` codegens the Rust record types, and the
    lexicon is the published, versioned contract every federated record must obey.
    The always-private entities (ballot, eligibility/delegation, voted-dedup,
    membership-as-affiliation, projector/speaker state) get NO lexicon: hand-authored
@@ -111,7 +112,7 @@ The `post` is the feed unit — the atproto-native heart of the "public half":
 ```json
 {
   "lexicon": 1,
-  "id": "com.example.wiki.post",
+  "id": "wiki.radikal.post",
   "defs": {
     "main": {
       "type": "record",
@@ -137,7 +138,7 @@ The `post` is the feed unit — the atproto-native heart of the "public half":
 ```json
 {
   "lexicon": 1,
-  "id": "com.example.wiki.statement",
+  "id": "wiki.radikal.statement",
   "defs": {
     "main": {
       "type": "record",
@@ -161,7 +162,7 @@ The `post` is the feed unit — the atproto-native heart of the "public half":
 ```json
 {
   "lexicon": 1,
-  "id": "com.example.wiki.resolution",
+  "id": "wiki.radikal.resolution",
   "defs": {
     "main": {
       "type": "record",
@@ -234,43 +235,60 @@ CREATE TABLE user (
   avatar_url   TEXT
 );
 
--- Contexts: groups & events (the org's structures). Hierarchy via parent_id.
+-- Contexts and documents are the two spines of ONE tree. The frontend reaches
+-- every node by the path in its URL, so both carry the same place columns:
+--   slug (the interim key), path (the slugs from the root, STORED and rewritten
+--   on a rename or a move, since turso has no recursive CTEs), parent_id, idx,
+--   attachable, owner_did, created_at, updated_at, deleted_at (the bin).
+-- parent_id names a context OR a document (a group can sit in a folder), so it
+-- is not a foreign key on either; the write path keeps it honest. A path is
+-- unique among LIVE rows only, so a binned node does not hold its URL hostage.
+
+-- Contexts: groups, events & sites (the org's structures), and the one home they
+-- are all under: its path is the empty one, and its owners run the site.
 CREATE TABLE context (
   id            TEXT PRIMARY KEY,
-  kind          TEXT NOT NULL CHECK (kind IN ('group','event')),
+  kind          TEXT NOT NULL CHECK (kind IN ('home','group','event','site')),
   name          TEXT NOT NULL,
-  slug          TEXT NOT NULL,
-  parent_id     TEXT REFERENCES context(id),
+  -- ...the place columns...
+  content       TEXT,                                    -- what the place says about itself (Slate JSON)
+  data          TEXT,                                    -- a cover image, a redirect
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
-  published_uri TEXT,                                    -- the at-uri, if the group/event is public
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  published_uri TEXT                                     -- the at-uri, if the context is public
 );
-CREATE UNIQUE INDEX context_slug ON context(parent_id, slug);
+CREATE UNIQUE INDEX context_path_live ON context(path) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX context_one_home ON context(kind) WHERE kind = 'home';
 
 -- Content: documents / folders / files / proposals (kind-tagged).
 CREATE TABLE document (
   id            TEXT PRIMARY KEY,
   context_id    TEXT NOT NULL REFERENCES context(id),
-  parent_id     TEXT,                                    -- folder or context
-  kind          TEXT NOT NULL,                           -- document|folder|file|policy|position|candidate|change
+  kind          TEXT NOT NULL,                           -- document|folder|file|policy|position|candidate|change|question
   title         TEXT NOT NULL,
+  -- ...the place columns...
+  mutable       INTEGER NOT NULL DEFAULT 1,              -- cleared when a motion is submitted
   content       TEXT,                                    -- Slate JSON (carries over)
+  data          TEXT,                                    -- the rest of the interim data blob: file id/type, cover image
   visibility    TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private','public')),
-  published_uri TEXT,                                    -- the at-uri, once published
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  published_uri TEXT                                     -- the at-uri, once published
 );
-CREATE INDEX document_context ON document(context_id, parent_id);
+CREATE UNIQUE INDEX document_path_live ON document(path) WHERE deleted_at IS NULL;
+CREATE INDEX document_children ON document(parent_id, idx);
 
 -- A document's authors: many per document (census: up to 8), each a DID (an
--- account) OR a free-text display name (no account), never a scalar author_did.
+-- account), a free-text display name (no account), or a group or event (a
+-- branch putting a motion forward), never a scalar author_did.
 CREATE TABLE document_author (
-  document_id TEXT NOT NULL REFERENCES document(id),
-  author_did  TEXT REFERENCES user(did),
-  author_text TEXT,                                      -- free-text name (no account)
-  ord         INTEGER NOT NULL DEFAULT 0,
-  CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
+  document_id    TEXT NOT NULL REFERENCES document(id),
+  author_did     TEXT REFERENCES user(did),
+  author_text    TEXT,                                   -- free-text name (no account)
+  author_context TEXT REFERENCES context(id),            -- a group or event as the author
+  ord            INTEGER NOT NULL DEFAULT 0,
+  CHECK (author_did IS NOT NULL OR author_text IS NOT NULL OR author_context IS NOT NULL)
 );
 CREATE INDEX document_author_by_doc ON document_author(document_id);
+CREATE INDEX document_author_by_did ON document_author(author_did);
+CREATE INDEX document_author_by_context ON document_author(author_context);
 
 -- Feed posts: the social unit. visibility='public' -> mirrored to a repo.
 CREATE TABLE post (
@@ -305,23 +323,32 @@ CREATE TABLE member (
   user_did    TEXT REFERENCES user(did),                  -- NULL until the invite is claimed
   context_id  TEXT NOT NULL REFERENCES context(id),
   role        TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('member','owner')),
-  active      INTEGER NOT NULL DEFAULT 1,
-  email       TEXT,                                       -- the invite (roster) address
+  active      INTEGER NOT NULL DEFAULT 1,                 -- VOTING RIGHTS, not membership
+  name        TEXT,                                       -- the roster's name: all a pending row has
+  hidden      INTEGER NOT NULL DEFAULT 0,                 -- kept off the list everyone sees
+  accepted    INTEGER NOT NULL DEFAULT 0,                 -- an invite by account is bound but unanswered
+  email       TEXT,                                       -- the invite (roster) address; owners only
   claim_token TEXT UNIQUE                                 -- secret for mismatched-email claims
 );
 CREATE UNIQUE INDEX member_bound   ON member(context_id, user_did) WHERE user_did IS NOT NULL;
 CREATE UNIQUE INDEX member_pending ON member(context_id, email)    WHERE user_did IS NULL;
 CREATE INDEX member_by_context ON member(context_id, active);
 
--- Comments: internal discussion, threaded via on_id.
+-- Comments: internal discussion, threaded via on_id. root_id is the document the
+-- whole thread is on: a move, a purge and the feed find a thread by it.
 CREATE TABLE comment (
-  id          TEXT PRIMARY KEY,
-  on_id       TEXT NOT NULL,                             -- document/comment it replies to
-  context_id  TEXT NOT NULL REFERENCES context(id),
-  author_did  TEXT REFERENCES user(did),                -- DID-or-free-text (a migrated
-  author_text TEXT,                                     --   comment may have no account)
-  text        TEXT NOT NULL,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  id           TEXT PRIMARY KEY,
+  on_id        TEXT NOT NULL,                            -- document/comment it replies to
+  root_id      TEXT NOT NULL,
+  context_id   TEXT NOT NULL REFERENCES context(id),
+  author_did   TEXT REFERENCES user(did),               -- DID-or-free-text (a migrated
+  author_text  TEXT,                                    --   comment may have no account)
+  text         TEXT NOT NULL,
+  image        TEXT,                                    -- a blob id
+  tombstone    INTEGER NOT NULL DEFAULT 0,              -- emptied, kept for its answers
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  deleted_at   TEXT,                                    -- in the bin
+  deleted_root TEXT,
   CHECK (author_did IS NOT NULL OR author_text IS NOT NULL)
 );
 
@@ -330,24 +357,38 @@ CREATE TABLE comment (
 -- replaces the interim voter_did dedup + cast_bucket design: dedup is now
 -- token-uniqueness on the board, and nothing in the store links a ballot to a
 -- DID. Crypto field encodings (token bytes, signature format) are PROVISIONAL
--- until the ballot-math spec crate pins the message format, and the board's
--- custody (voter-published vs org-published records) is a pending owner call.
+-- (crates/ballot-spec DECISIONS.md D7), and the board's custody (voter-published
+-- vs org-published records) is a pending owner call. These tables are owned by
+-- crates/ballot-store, not by the entity schema.
 CREATE TABLE poll (
-  id            TEXT PRIMARY KEY,
+  id            TEXT PRIMARY KEY,                        -- also the id of its node: a document of kind 'poll'
   context_id    TEXT NOT NULL REFERENCES context(id),
-  question      TEXT NOT NULL,
+  question      TEXT NOT NULL,                           -- the wording voted on, fixed at open
   options       TEXT NOT NULL,                           -- JSON array of strings
+  min_choices   INTEGER NOT NULL DEFAULT 1,
+  max_choices   INTEGER NOT NULL DEFAULT 1,
+  blank         INTEGER NOT NULL DEFAULT 0,              -- the LAST option is the abstention
   open          INTEGER NOT NULL DEFAULT 1,
   secret        INTEGER NOT NULL DEFAULT 0,
-  -- Per-poll RSA issuer keypair: the pubkey is published to the board BEFORE
-  -- the poll opens (verifiability); the private key is dropped at close.
+  hide_tally    INTEGER NOT NULL DEFAULT 0,              -- counts are for the context's owners
+  -- Per-poll RSA issuer keypair: the pubkey is published with the poll, BEFORE
+  -- any ballot (verifiability). The private key is kept sealed under
+  -- APPVIEW_SECRET while the poll is open, and destroyed at close.
   issuer_pubkey TEXT,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  issuer_secret TEXT,
+  -- The result, written once at close. A poll migrated from the interim has
+  -- only these: its ballots could not be carried, its outcome can.
+  counts        TEXT,                                    -- JSON array, one count per option
+  ballots       INTEGER,
+  issued        INTEGER,                                 -- unit tokens handed out: the bound on `ballots`
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  closed_at     TEXT
 );
 
--- WHO MAY vote, org-authoritative and always-private. base_weight is the
+-- WHO MAY vote, org-authoritative and always-private: the members of the
+-- poll's context who held voting rights when it OPENED. base_weight is the
 -- voter's own weight; resolved_weight = base plus incoming delegations, FROZEN
--- when the poll opens (delegation changes after open do not move weight).
+-- when the poll opens (nothing after open moves weight, or adds a voter).
 CREATE TABLE eligibility (
   poll_id         TEXT NOT NULL REFERENCES poll(id),
   did             TEXT NOT NULL REFERENCES user(did),
@@ -359,6 +400,8 @@ CREATE TABLE eligibility (
 -- Delegations: a signed assignment moving a voter's weight to a delegate,
 -- resolved into eligibility.resolved_weight BEFORE the poll opens. Visible to
 -- the org, never on the public board (the delegation-vs-anonymity resolution).
+-- Nothing writes these yet: the interim has no delegation, and what signs an
+-- assignment is undecided.
 CREATE TABLE delegation (
   poll_id        TEXT NOT NULL REFERENCES poll(id),
   from_did       TEXT NOT NULL REFERENCES user(did),
@@ -370,50 +413,80 @@ CREATE TABLE delegation (
 -- THAT a voter was issued their tokens (never the tokens themselves: storing a
 -- token would link its later spend back to the DID and break unlinkability).
 -- A voter with resolved_weight N is blind-issued N identical unit tokens.
+-- Nothing about WHEN or in what ORDER either: a row is written with a random
+-- rowid and the poll's opening time, because insertion order or a clock, set
+-- beside the board's positions, would pair voters with ballots.
+-- request_hash digests the BLINDED messages, so a voter whose reply was lost
+-- can ask again for the same signatures. A blinded message says nothing about
+-- the token inside it.
 CREATE TABLE token_issued (
-  poll_id   TEXT NOT NULL REFERENCES poll(id),
-  did       TEXT NOT NULL REFERENCES user(did),
-  issued_at TEXT NOT NULL DEFAULT (datetime('now')),
+  poll_id      TEXT NOT NULL REFERENCES poll(id),
+  did          TEXT NOT NULL REFERENCES user(did),
+  request_hash TEXT,
+  issued_at    TEXT NOT NULL,
   PRIMARY KEY (poll_id, did)                             -- issuance happens once per voter
 );
 
--- The org-side MIRROR of the public bulletin board, for tally and serving.
--- Append-only; one row per spent unit token; carries NO voter identity. The
--- UNIQUE token IS the double-vote rejection (a reused token collides here and
--- publicly on the board). Every entry weighs exactly 1 (unit tokens), so the
--- tally is a plain count and no weight column exists to shrink the anonymity
--- set. entry_ref points at the public board record once published.
-CREATE TABLE board_entry (
-  poll_id   TEXT NOT NULL REFERENCES poll(id),
-  token     TEXT NOT NULL UNIQUE,                        -- the unblinded unit token
-  token_sig TEXT NOT NULL,                               -- RSA-PSS sig under poll.issuer_pubkey
-  choices   TEXT NOT NULL,                               -- JSON array of option indices
-  entry_ref TEXT                                         -- at-uri/CID of the public record
+-- A ballot in a poll that is NOT secret names its voter, which is what such a
+-- poll means. It weighs what the voter's frozen roster row says.
+CREATE TABLE open_ballot (
+  poll_id TEXT NOT NULL REFERENCES poll(id),
+  did     TEXT NOT NULL REFERENCES user(did),
+  weight  INTEGER NOT NULL,
+  choices TEXT NOT NULL,                                 -- JSON array of option indices
+  cast_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  PRIMARY KEY (poll_id, did)                             -- one per voter; the first stands
 );
-CREATE INDEX board_by_poll ON board_entry(poll_id);
+
+-- The bulletin board of every secret poll. Append-only; one row pair per spent
+-- unit token; carries NO voter identity and NO clock. The UNIQUE token IS the
+-- double-vote rejection. Every entry weighs exactly 1 (unit tokens), so the
+-- tally is a plain count and no weight column exists to shrink the anonymity
+-- set. The body is an opaque provisional blob (message randomizer, signature,
+-- choices) until the record encoding is pinned.
+CREATE TABLE board_nullifier (
+  poll_id  TEXT NOT NULL,
+  token    BLOB NOT NULL,                                -- the unblinded unit token
+  position INTEGER NOT NULL,                             -- monotonic within the poll
+  PRIMARY KEY (poll_id, token),
+  UNIQUE (poll_id, position)
+);
+CREATE TABLE board_body (
+  poll_id  TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  body     BLOB NOT NULL,
+  PRIMARY KEY (poll_id, position)
+);
+-- A row here seals a board: no cast is appended after it.
+CREATE TABLE board_closed (
+  poll_id   TEXT PRIMARY KEY,
+  entries   INTEGER NOT NULL,
+  closed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
 ```
 
-**Casting** (atomic; robust regardless of isolation guarantees). `BEGIN IMMEDIATE` takes the write lock up
-front; the UNIQUE token constraint rejects a double spend in the same statement that records the ballot:
+**Casting** (atomic; robust regardless of isolation guarantees). The signature is verified against
+`poll.issuer_pubkey` and the choices against the poll's rules first, so a forged token never probes the
+spent set and a spoiled ballot does not use its token up. Then `BEGIN IMMEDIATE` takes the write lock up
+front, and inside it: the seal is checked, the token is looked up, and the two rows are written. The
+UNIQUE token rejects a double spend in the same transaction that records the ballot:
 
 ```sql
 BEGIN IMMEDIATE;
+  SELECT 1 FROM board_closed WHERE poll_id = :poll;      -- sealed: refuse
   -- fails on a reused token: that IS the one-vote-per-token rule
-  INSERT INTO board_entry (poll_id, token, token_sig, choices)
-    VALUES (:poll, :token, :sig, :choices);
+  INSERT INTO board_nullifier (poll_id, token, position) VALUES (:poll, :token, :next);
+  INSERT INTO board_body (poll_id, position, body) VALUES (:poll, :next, :body);
 COMMIT;
 ```
 
-(The signature is verified against `poll.issuer_pubkey` before the insert; the transaction shape, a
-unique-constrained dedup insert plus an append-only ballot insert under `BEGIN IMMEDIATE`, is the same one
-the Turso crash harness exercises.)
+The transaction shape, a unique-constrained dedup insert plus an append-only ballot insert under
+`BEGIN IMMEDIATE`, is the one the Turso crash harness exercises. Closing takes the same lock to write
+the seal, so a cast either landed before it and is counted, or finds it and is refused.
 
-**Tally** — always recomputed by aggregation, never a mutable counter; unit tokens make it a plain count,
-and anyone can recompute the same count from the public board (universal verifiability):
-
-```sql
-SELECT choices, count(*) AS n FROM board_entry WHERE poll_id = :poll GROUP BY choices;
-```
+**Tally**: always recomputed by counting the board (or the open ballots, by weight), never a mutable
+counter. Unit tokens make it a plain count, and anyone who may see the board can recompute the same
+count from it (universal verifiability). It is stored once, at close.
 
 **Membership checks** (replace Hasura's `is_context_owner` subqueries with an indexed join):
 
@@ -445,10 +518,28 @@ The roster constraint is unchanged (Excel, keyed by email). Flow:
 `member.email` stays the invite address; the DID is the durable identity. This is
 the current `members.node_id` pattern, re-pointed at DIDs.
 
+As built, the 17 percent of rows that already had an interim account do not
+import as pending. They stay bound to that account, carried under its interim id
+as a `user` row that no login can produce, so that its name, its authorship and
+its comments stay attached to it:
+
+```sql
+CREATE TABLE legacy_account (
+  id    TEXT PRIMARY KEY REFERENCES user(did),   -- the interim account id
+  email TEXT NOT NULL                            -- only if the interim had VERIFIED it
+);
+```
+
+At sign-in, a DID whose trusted PDS confirms that address takes the account
+over: every column that names it is pointed at the DID, in one transaction, and
+the carried `user` row is deleted (`crates/appview/src/legacy.rs`). A claim
+token on a seat held by a carried account hands over that one seat, for people
+whose address cannot be vouched for.
+
 ## AppView / materialisation
 
-- Consume **Jetstream**, filtered to `com.example.wiki.*` + relevant `app.bsky.*`.
-- On a `com.example.wiki.statement` / `resolution` record → upsert a row and link it
+- Consume **Jetstream**, filtered to `wiki.radikal.*` + relevant `app.bsky.*`.
+- On a `wiki.radikal.statement` / `resolution` record → upsert a row and link it
   (`document.published_uri`); on delete → unlink.
 - **Publishing** (internal → public) writes the record to the repo via `atrium`,
   then the firehose echoes it back for materialisation.

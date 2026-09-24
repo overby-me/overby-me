@@ -16,7 +16,6 @@
             #nu-jupyter-kernel
           ]
       ))
-      #sidecar
     ];
   };
 }

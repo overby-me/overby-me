@@ -173,7 +173,12 @@
             exit 0
           fi
 
-          echo "$changed_content" | $lychee_cmd -
+          # lychee parses a URI before it consults its exclude list, and a DID
+          # authority reads as an invalid port, so no lychee.toml entry can
+          # silence one. Drop the URIs rather than the files mentioning them:
+          # the wiki's atproto docs and fixtures are full of at://did:plc:...,
+          # and excluding those paths would blind lychee to their real links.
+          echo "$changed_content" | ${pkgs.gnused}/bin/sed 's#\(at\|https\?\)://did:[^[:space:]"`]*##g' | $lychee_cmd -
         '';
       in {
         enable = true;

@@ -1,0 +1,59 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.spaceDefs",
+	"defs": {
+		"author": {
+			"type": "object",
+			"description": "Who is credited: an account, a name with no account behind it, or a group or event, which is how a branch puts a motion forward. Exactly one of `did`, `display` and `context` is present, as `kind` says.",
+			"required": ["kind"],
+			"properties": {
+				"kind": {
+					"type": "string",
+					"knownValues": ["user", "free_text", "context"]
+				},
+				"did": {
+					"type": "string",
+					"description": "A DID, or the id of an account carried over from the interim that nobody has signed in as yet.",
+					"maxLength": 256
+				},
+				"display": {
+					"type": "string",
+					"maxLength": 1000,
+					"maxGraphemes": 200
+				},
+				"context": {
+					"type": "string",
+					"format": "at-uri",
+					"description": "The space of the group or event."
+				}
+			}
+		},
+		"binned": {
+			"type": "object",
+			"description": "In the bin: hidden from every view, and restorable until purged.",
+			"required": ["at"],
+			"properties": {
+				"at": {
+					"type": "string",
+					"format": "datetime"
+				},
+				"root": {
+					"type": "string",
+					"format": "at-uri",
+					"description": "The record whose removal took this one along. A restore undoes that one act and not a guess at a subtree."
+				}
+			}
+		},
+		"number": {
+			"type": "object",
+			"description": "A number that atproto data cannot hold, inside `content` or `data`: a fraction, or an integer past 2^53 - 1. In its own digits, as JSON writes a number.",
+			"required": ["value"],
+			"properties": {
+				"value": {
+					"type": "string",
+					"maxLength": 64
+				}
+			}
+		}
+	}
+}

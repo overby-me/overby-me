@@ -439,6 +439,13 @@ pub fn Layout() -> Element {
         }
     });
 
+    // On the AppView a sign-in comes back as a one-time code, stashed the same
+    // way. Here and not at the root: it ends by navigating, which takes a router.
+    #[cfg(feature = "appview")]
+    use_hook(|| {
+        spawn(super::auth::finish_sign_in());
+    });
+
     // Resolve the path once for the whole chrome. The breadcrumbs, drawer and app
     // rail all key off the current context (the nearest group/event), so
     // resolving it here keeps them consistent and avoids each re-querying.

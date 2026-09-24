@@ -7,13 +7,22 @@
 resolver = "2"
 members = [
   "appview",
+  "appview-client",
+  "appview-dev",
+  "atproto-spaces",
   "ballot-spec",
   "ballot-store",
+  "board-mirror",
   "dagcbor-spike",
   "domain-types",
   "durability-harness",
+  "fake-pds",
+  "fake-plc",
+  "lexgen",
   "migration-extractor",
   "migration-loader",
   "oauth-spike",
   "schema",
+  "spaces-spike",
+  "wiki-records",
 ]

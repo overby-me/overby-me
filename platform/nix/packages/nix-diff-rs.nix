@@ -6,16 +6,16 @@
 }:
 rustPlatform.buildRustPackage {
   pname = "nix-diff-rs";
-  version = "unstable-2025-11-02";
+  version = "unstable-2026-09-12";
 
   src = fetchFromGitHub {
     owner = "Mic92";
     repo = "nix-diff-rs";
-    rev = "7b79a68963fd7fcb48a57071b52bc90bd8d60609";
-    hash = "sha256-heUqcAnGmMogyVXskXc4FMORb8ZaK6vUX+mMOpbfSUw=";
+    rev = "a8c9a1b679bf412f5a9d3707cdb41dba20938c23";
+    hash = "sha256-+cc2D67WrpBHagcqLqVEbkFk8mvZaIAW3NUM1JWqeqE=";
   };
 
-  cargoHash = "sha256-rPrzxePIdyqt0THYfTy15AB7+NyPPmu/nevsdcHmFgQ=";
+  cargoHash = "sha256-DPHxOPBllnO6fyIRRElPo8WgZEWXL2Dq7qR4ePxiaH4=";
 
   buildInputs = [
     rust-jemalloc-sys

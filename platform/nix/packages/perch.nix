@@ -7,16 +7,16 @@
 }:
 rustPlatform.buildRustPackage (finalAttrs: {
   pname = "perch";
-  version = "0.3.2";
+  version = "0.3.4";
 
   src = fetchFromGitHub {
     owner = "ricardodantas";
     repo = "perch";
     tag = "v${finalAttrs.version}";
-    hash = "sha256-rpN/q3RL7WCLkcR4DAcm9Vu6QlAN/NO14eFL/3qhAgo=";
+    hash = "sha256-TURpPI4Nj9xfTUEY90KCDgrGFjXGm+/n3cVxxOM709k=";
   };
 
-  cargoHash = "sha256-HxVZ5YWEPMPLXHJZfIfIbVAdkEzCsK5AJIQnqfZVVSg=";
+  cargoHash = "sha256-pbVDG8Wm2K7Hhciq+6xYWbJWYU5CdrAqMXY2ZM1fgfs=";
 
   nativeBuildInputs = [
     pkg-config

@@ -1,0 +1,31 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.renderMetafile",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Turn a Windows metafile (EMF, EMF+ or WMF), which Word and PowerPoint keep pasted figures as and no browser can draw, into a picture: SVG where the figure can be drawn as shapes and real text, PNG otherwise. The metafile is the body; the caller already holds it, having opened the document to find it, so this reads no storage. A session is asked for only so that this is not a conversion service for whoever finds the URL.",
+			"input": {
+				"encoding": "*/*"
+			},
+			"output": {
+				"encoding": "image/*",
+				"description": "`image/svg+xml` or `image/png`."
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "Not a metafile, or one the renderer does not cover. The viewer falls back to a placeholder."
+				},
+				{
+					"name": "MetafileTooLarge",
+					"description": "Larger than 8 MiB (HTTP 413)."
+				}
+			]
+		}
+	}
+}

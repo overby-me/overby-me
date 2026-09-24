@@ -26,6 +26,12 @@ pub fn random_token(n: usize) -> String {
     b64url(&random_bytes(n))
 }
 
+pub fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+}
+
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -51,6 +57,18 @@ pub fn rfc3339_utc(secs: u64) -> String {
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = if month <= 2 { year + 1 } else { year };
     format!("{year:04}-{month:02}-{day:02}T{hh:02}:{mm:02}:{ss:02}.000Z")
+}
+
+/// The present, to the millisecond, as the database's own `strftime` default
+/// writes it. A row stamped to the second sorts before one the database stamped
+/// earlier in that same second, which put a reaction ahead of the comment it
+/// was to.
+pub fn now_stamp() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let whole = rfc3339_utc(now.as_secs());
+    format!("{}{:03}Z", &whole[..whole.len() - 4], now.subsec_millis())
 }
 
 /// Percent-decode one `application/x-www-form-urlencoded` component.
@@ -87,6 +105,68 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Whether a date a person set names a day and no time of it. Setting the day a
+/// node already has must leave its time alone: the editor sends the day back
+/// with every save, and a page made a minute ago would read as made at midnight.
+pub fn names_a_day(input: &str) -> bool {
+    !input.trim().contains(['T', ' '])
+}
+
+/// `column`, re-dated to the timestamp bound at `?at`. With `?day` set, a row
+/// already dated that day keeps its time of day (see [`names_a_day`]).
+pub fn redated_sql(column: &str, at: usize, day: usize) -> String {
+    format!(
+        "CASE WHEN ?{at} IS NULL THEN {column} \
+              WHEN ?{day} = 1 AND substr({column}, 1, 10) = substr(?{at}, 1, 10) THEN {column} \
+              ELSE ?{at} END"
+    )
+}
+
+/// A date a person may set, as timestamps are stored here: ISO-8601, UTC,
+/// milliseconds, so that they compare as text. Takes `2026-05-01`, or a UTC
+/// RFC 3339 timestamp with or without a fraction. `None` for anything else, an
+/// offset other than UTC included: converting one takes a calendar.
+pub fn stored_timestamp(input: &str) -> Option<String> {
+    let input = input.trim();
+    let digits = |s: &str, max: u32| {
+        (s.len() == 2 && s.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| s.parse::<u32>().ok())
+            .flatten()
+            .filter(|n| *n <= max)
+    };
+    let (date, time) = match input.split_once(['T', ' ']) {
+        Some((date, time)) => (date, Some(time)),
+        None => (input, None),
+    };
+    let mut parts = date.split('-');
+    let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
+    let year_ok = year.len() == 4 && year.bytes().all(|b| b.is_ascii_digit());
+    let in_range = digits(month, 12)? >= 1 && digits(day, 31)? >= 1;
+    if parts.next().is_some() || !year_ok || !in_range {
+        return None;
+    }
+    let Some(time) = time else {
+        return Some(format!("{date}T00:00:00.000Z"));
+    };
+    let time = time
+        .strip_suffix('Z')
+        .or_else(|| time.strip_suffix("+00:00"))?;
+    let (clock, fraction) = time.split_once('.').unwrap_or((time, "0"));
+    let mut parts = clock.split(':');
+    let (hour, minute, second) = (parts.next()?, parts.next()?, parts.next()?);
+    if parts.next().is_some()
+        || fraction.is_empty()
+        || !fraction.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    digits(hour, 23)?;
+    digits(minute, 59)?;
+    digits(second, 60)?;
+    let millis: String = fraction.chars().chain("000".chars()).take(3).collect();
+    Some(format!("{date}T{clock}.{millis}Z"))
+}
+
 /// Parse a `a=b&c=d` query string (without the leading `?`) into decoded pairs.
 pub fn parse_query(query: Option<&str>) -> Vec<(String, String)> {
     query
@@ -103,6 +183,44 @@ pub fn parse_query(query: Option<&str>) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_present_is_stamped_to_the_millisecond() {
+        let stamp = now_stamp();
+        assert_eq!(stamp.len(), "2026-05-01T18:30:00.123Z".len(), "{stamp}");
+        assert_eq!(stored_timestamp(&stamp).as_deref(), Some(stamp.as_str()));
+    }
+
+    #[test]
+    fn a_date_is_stored_as_every_timestamp_is() {
+        for (given, stored) in [
+            ("2026-05-01", "2026-05-01T00:00:00.000Z"),
+            (" 2026-05-01T18:30:00Z ", "2026-05-01T18:30:00.000Z"),
+            ("2026-05-01T18:30:00.5Z", "2026-05-01T18:30:00.500Z"),
+            (
+                "2026-05-01T18:30:00.123456+00:00",
+                "2026-05-01T18:30:00.123Z",
+            ),
+            ("2026-05-01 18:30:00Z", "2026-05-01T18:30:00.000Z"),
+        ] {
+            assert_eq!(stored_timestamp(given).as_deref(), Some(stored), "{given}");
+        }
+        for not in [
+            "",
+            "1. maj",
+            "2026-13-01",
+            "2026-05-00",
+            "26-05-01",
+            "2026-05-01T25:00:00Z",
+            "2026-05-01T18:30:00+02:00",
+            "2026-05-01T18:30:00",
+            "2026-05-01T18:30:00.Z",
+            "2026-05-01-01",
+            "2026-05-01T18:30Z",
+        ] {
+            assert_eq!(stored_timestamp(not), None, "{not}");
+        }
+    }
 
     #[test]
     fn parse_query_decodes_pairs() {

@@ -16,6 +16,14 @@ exclude = [
   '\{',
   # Nushell string interpolation `($var)` in URLs (e.g. snapshot-index.nu)
   '\(\$',
+  # AT-URIs name atproto records, not web pages. Only handle-authority ones
+  # reach this list: a DID authority reads as an invalid port and fails
+  # before any exclude runs, so the hook strips those URIs before lychee
+  # sees them (platform/nix/config/devshell/modules/git-hooks.nix).
+  "^at://",
+  # A made-up host in those same docs, written to show the shape of a
+  # reference rather than to point anywhere.
+  "^https?://a/b",
   "localhost",
   '127\.0\.0\.1',
   'host\.docker\.internal',

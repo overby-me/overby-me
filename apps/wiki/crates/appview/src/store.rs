@@ -6,26 +6,27 @@
 //! query bodies changed from GraphQL to SQL. This is the seam class where at
 //! cutover only this module was ever meant to be rewritten.
 //!
-//! DELIBERATELY NOT PORTED here (see `docs/rewrite-kickoff-plan.md` item 4):
-//! - `is_active_member` / `is_active_owner`: the interim keys authz on the NHost
-//!   `uid`, but the target keys it on `user_did`, and 0 DIDs are linked with no
-//!   uid->DID resolution yet. They are a DID-keyed rewrite that waits on the
-//!   DID-binding flow, NOT a mechanical body swap.
-//! - `poll_meta` and any voting query: deferred with the voting shapes.
+//! Who may read or write a row is not decided here: `crate::authz` owns that
+//! rule, as SQL the reads below compose in and as predicates the handlers ask.
+//! Voting queries arrive with the voting procedures.
 //!
 //! Schema shifts from the interim GraphQL these queries reconcile to:
-//! - the universal `node` table split into `document`/`comment`/`context`, so a
-//!   "node's owner + context" is now read from `document`/`comment` with the
-//!   owner realized as the document's first author DID (`author_did` in the
-//!   `document_author` join), free-text-only authors having no notifiable DID;
+//! - the universal `node` table split into `document`/`comment`/`context`. The
+//!   first two are the spines of one tree and share a `Place` (a stored path,
+//!   the parent, the order, the bin), so a path resolves in one lookup;
+//! - a "node's owner + context" for a reply notification is read from
+//!   `document`/`comment` with the owner realized as the document's first
+//!   author DID (`author_did` in the `document_author` join), free-text-only
+//!   authors having no notifiable DID;
 //! - `members.nodeId`/`parentId`/`accepted` became `member.user_did`/
 //!   `context_id` and the folded-in active state (there is no `accepted`);
-//! - `push_subscriptions` is AppView runtime infra (`RUNTIME_DDL`), keyed by
-//!   endpoint, with `user_id` now `user_did`.
 
+use crate::authz::{listed_document, readable_comment, readable_context, readable_document};
 use crate::db::{Db, DbError};
 use turso::Value;
-use wiki_domain_types::{Author, Comment, Context, ContextKind, Document, DocumentKind, Reaction};
+use wiki_domain_types::{
+    Author, Comment, Context, ContextKind, Document, DocumentKind, Place, Reaction, User,
+};
 
 /// Parse a snake_case DB enum value (e.g. `"document"`, `"private"`) into a
 /// `#[serde(rename_all = "snake_case")]` domain enum; `None` on an unknown value.
@@ -33,51 +34,107 @@ fn parse_enum<T: serde::de::DeserializeOwned>(s: &str) -> Option<T> {
     serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
 }
 
+/// The tree columns `context` and `document` share, as [`place_at`] reads them.
+/// They end each column list, so the same reader serves both tables.
+macro_rules! place_cols {
+    () => {
+        "slug, path, parent_id, idx, attachable, owner_did, created_at, updated_at, deleted_at, \
+         deleted_root"
+    };
+}
 /// The `document` columns the read side selects (order matches [`doc_base`]).
-const DOC_COLS: &str =
-    "id, context_id, parent_id, kind, title, content, visibility, published_uri, created_at";
-/// The `context` columns the read side selects (order matches [`ctx_from_row`]).
-const CTX_COLS: &str = "id, kind, name, slug, parent_id, visibility, published_uri, created_at";
+const DOC_COLS: &str = concat!(
+    "id, context_id, kind, title, mutable, content, data, visibility, published_uri, ",
+    place_cols!()
+);
+/// The `context` columns a listing selects (order matches [`ctx_from_row`]).
+const CTX_COLS: &str = concat!(
+    "id, kind, name, visibility, published_uri, ",
+    place_cols!(),
+    ", data"
+);
+/// And with what the place says about itself, for a read of that one place.
+const CTX_FULL: &str = concat!(
+    "id, kind, name, visibility, published_uri, ",
+    place_cols!(),
+    ", data, content"
+);
+
+/// The present, as every timestamp here is written: ISO-8601, UTC, milliseconds.
+/// Matches the DDL's defaults and the migrated rows, so timestamps compare as
+/// text and parse in a browser. SQLite's `datetime('now')` has no zone.
+const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+
+/// A row is live unless it is in the bin. Every read but the bin's own asks.
+const LIVE: &str = "deleted_at IS NULL";
+
+/// The node whose path is `?2` and everything under it. Not `LIKE`: a slug is
+/// full of underscores, and to `LIKE` an underscore is a wildcard.
+const SUBTREE: &str = "(path = ?2 OR substr(path, 1, length(?2) + 1) = ?2 || '/')";
+
+fn place_at(row: &turso::Row, first: usize) -> Result<Place, DbError> {
+    Ok(Place {
+        slug: row.get::<String>(first)?,
+        path: row.get::<String>(first + 1)?,
+        parent_id: opt_text(row, first + 2),
+        idx: row.get::<i64>(first + 3)?,
+        attachable: row.get::<i64>(first + 4)? != 0,
+        owner_did: opt_text(row, first + 5),
+        created_at: opt_text(row, first + 6),
+        updated_at: opt_text(row, first + 7),
+        deleted_at: opt_text(row, first + 8),
+        deleted_root: opt_text(row, first + 9),
+    })
+}
 
 /// The raw `document` row fields, before authors are hydrated.
 struct DocBase {
     id: String,
     context_id: String,
-    parent_id: Option<String>,
     kind: String,
     title: String,
+    mutable: bool,
     content: Option<String>,
+    data: Option<String>,
     visibility: Option<String>,
     published_uri: Option<String>,
-    created_at: Option<String>,
+    place: Place,
 }
 
 fn doc_base(row: &turso::Row) -> Result<DocBase, DbError> {
     Ok(DocBase {
         id: row.get::<String>(0)?,
         context_id: row.get::<String>(1)?,
-        parent_id: opt_text(row, 2),
-        kind: row.get::<String>(3)?,
-        title: row.get::<String>(4)?,
+        kind: row.get::<String>(2)?,
+        title: row.get::<String>(3)?,
+        mutable: row.get::<i64>(4)? != 0,
         content: opt_text(row, 5),
-        visibility: opt_text(row, 6),
-        published_uri: opt_text(row, 7),
-        created_at: opt_text(row, 8),
+        data: opt_text(row, 6),
+        visibility: opt_text(row, 7),
+        published_uri: opt_text(row, 8),
+        place: place_at(row, 9)?,
     })
 }
 
+/// A row of [`CTX_COLS`] or of [`CTX_FULL`].
 fn ctx_from_row(row: &turso::Row) -> Result<Context, DbError> {
+    let json = |idx: usize| {
+        (idx < row.column_count())
+            .then(|| opt_text(row, idx))
+            .flatten()
+            .and_then(|text| serde_json::from_str(&text).ok())
+    };
     Ok(Context {
         id: row.get::<String>(0)?,
         kind: parse_enum(&row.get::<String>(1)?).unwrap_or(ContextKind::Group),
         name: row.get::<String>(2)?,
-        slug: row.get::<String>(3)?,
-        parent_id: opt_text(row, 4),
-        visibility: opt_text(row, 5)
+        visibility: opt_text(row, 3)
             .and_then(|s| parse_enum(&s))
             .unwrap_or_default(),
-        published_uri: opt_text(row, 6),
-        created_at: opt_text(row, 7),
+        published_uri: opt_text(row, 4),
+        place: place_at(row, 5)?,
+        data: json(15),
+        content: json(16),
         legacy_id: None,
     })
 }
@@ -114,22 +171,437 @@ pub struct ClaimMember {
     pub parent_id: Option<String>,
 }
 
+/// What a write to a comment has to know about it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommentMeta {
+    pub context_id: String,
+    pub author_did: Option<String>,
+    pub on_id: String,
+    pub tombstone: bool,
+    pub binned: bool,
+    /// It is what was deleted, and not something that went along with that.
+    pub bin_entry: bool,
+}
+
+/// How a deleted comment went.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommentGone {
+    Binned,
+    /// Emptied in place. The picture it held is the caller's to forget.
+    Emptied {
+        image: Option<String>,
+    },
+}
+
 /// A member's context + secret claim token (for the owner claim-link flow).
 pub struct MemberClaimInfo {
     pub parent_id: Option<String>,
+    /// Who holds the seat, if anyone.
+    pub node_id: Option<String>,
     pub claim_token: Option<String>,
 }
 
-/// A stored Web Push subscription (the fields the push sender needs).
-pub struct Subscription {
-    pub endpoint: String,
-    pub p256dh: String,
-    pub auth: String,
+/// What a path names: either spine of the tree.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "node", rename_all = "snake_case")]
+pub enum Node {
+    Context(Context),
+    Document(Document),
+}
+
+impl Node {
+    pub fn id(&self) -> &str {
+        match self {
+            Node::Context(c) => &c.id,
+            Node::Document(d) => &d.id,
+        }
+    }
+
+    /// The context it is in. A context is in itself.
+    pub fn context_id(&self) -> &str {
+        match self {
+            Node::Context(c) => &c.id,
+            Node::Document(d) => &d.context_id,
+        }
+    }
+
+    pub fn place(&self) -> &Place {
+        match self {
+            Node::Context(c) => &c.place,
+            Node::Document(d) => &d.place,
+        }
+    }
+}
+
+/// A child as a folder view, the drawer and a breadcrumb need it: the same few
+/// fields whichever table it lives in, and no content.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Child {
+    /// `context` or `document`.
+    pub node: &'static str,
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub slug: String,
+    pub path: String,
+    pub idx: i64,
+    pub mutable: bool,
+    pub attachable: bool,
+    pub owner_did: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+    /// A file's id and type, a cover image: what a row needs to draw itself.
+    pub data: Option<serde_json::Value>,
+    /// Live children, so the drawer offers to expand only what has some.
+    pub child_count: i64,
+    /// Its number among the submitted siblings of its kind: the A, B, C of a
+    /// motion. A draft has none. See [`Store::ordinal_of`].
+    pub ordinal: Option<i64>,
+}
+
+/// The name and picture behind a DID.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Profile {
+    pub handle: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+/// More authors than any node has had (the census found eight at most).
+pub const MAX_AUTHORS: usize = 16;
+
+/// One segment of the way down to a node.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Crumb {
+    pub slug: String,
+    pub path: String,
+    /// Absent where the caller may not read the node the segment names. They
+    /// hold the slug already, in the URL, and are told nothing more.
+    #[serde(flatten)]
+    pub named: Option<CrumbName>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct CrumbName {
+    pub id: String,
+    pub node: &'static str,
+    pub kind: String,
+    pub name: String,
+}
+
+/// A row of a context's member list.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct MemberRow {
+    pub id: String,
+    pub user_did: Option<String>,
+    pub role: String,
+    /// Voting rights.
+    pub active: bool,
+    pub accepted: bool,
+    pub hidden: bool,
+    /// The roster's name for them, the only label a pending invitation has.
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+    pub handle: Option<String>,
+    pub avatar_url: Option<String>,
+    /// Served to owners of the context and to nobody else: see
+    /// [`MemberQuery::for_owner`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    /// When the claim link was last mailed to `email`. For owners, as `email` is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mailed_at: Option<String>,
+}
+
+/// Which members of a context to list.
+#[derive(Debug, Default, Clone)]
+pub struct MemberQuery {
+    pub owner: Option<bool>,
+    pub active: Option<bool>,
+    pub accepted: Option<bool>,
+    pub hidden: Option<bool>,
+    /// Matched against the names. Against the email too, for an owner only:
+    /// for anyone else a search that matched an address would be a way to ask
+    /// whether it is on the roster.
+    pub search: String,
+    /// The caller owns the context, so they are served addresses and the rows
+    /// that are hidden from everyone else. The interim could not draw this
+    /// line (a column permission is per role, and an owner is role `user` too),
+    /// so any member could read most of the organisation's addresses.
+    pub for_owner: bool,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+/// Someone to put on a context's roster. A `did` invites an account, which is
+/// bound from the start and has to say yes; otherwise it is a roster row that
+/// whoever holds its claim link binds.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct Invite {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub did: Option<String>,
+}
+
+/// What an import did. `skipped` counts people this context had already: a
+/// roster says who belongs here, not that none of them are here yet, so they are
+/// passed over rather than failing the import.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct InviteOutcome {
+    pub inserted: usize,
+    pub skipped: usize,
+    /// Of those inserted, how many the roster gave no address for. On the list,
+    /// but only reachable by handing them their claim link.
+    pub without_email: usize,
+    /// Of those inserted, how many are being mailed their claim link. None on a
+    /// site that sends no mail.
+    pub mailing: usize,
+}
+
+/// What a change to a member may set. `None` leaves a field as it is.
+#[derive(Debug, Default)]
+pub struct MemberPatch<'a> {
+    pub name: Option<&'a str>,
+    pub email: Option<&'a str>,
+    pub owner: Option<bool>,
+    pub active: Option<bool>,
+    pub hidden: Option<bool>,
+}
+
+/// What authorizing a change to a member row needs to know about it.
+pub struct MemberMeta {
+    pub context_id: String,
+    pub user_did: Option<String>,
+}
+
+/// An invitation the caller has not answered.
+#[derive(Debug, serde::Serialize)]
+pub struct Invitation {
+    pub id: String,
+    pub context_id: String,
+    pub context_kind: String,
+    pub context_name: String,
+    pub context_path: String,
+}
+
+pub(crate) fn normalized_email(email: Option<&str>) -> Option<String> {
+    email
+        .map(|e| e.trim().to_lowercase())
+        .filter(|e| !e.is_empty())
+}
+
+/// SQL that holds for a `column` strictly under the path bound as `?param`. By
+/// `substr` and not `LIKE`, in which the underscore every slug is full of is a
+/// wildcard.
+pub(crate) fn under(column: &str, param: usize) -> String {
+    format!("substr({column}, 1, length(?{param}) + 1) = ?{param} || '/'")
+}
+
+/// A document to create. The store picks its slug and path.
+pub struct NewDocument<'a> {
+    pub context_id: &'a str,
+    /// `None` hangs it directly off the context.
+    pub parent_id: Option<&'a str>,
+    pub kind: &'a str,
+    pub title: &'a str,
+    pub content: Option<&'a str>,
+    pub data: Option<&'a str>,
+    /// The creator, and the first author.
+    pub author_did: &'a str,
+    /// Whether the creator is also listed as an author. Not for a poll: the
+    /// chair who opens one did not write what is voted on.
+    pub credited: bool,
+}
+
+/// What a change to a document may set. `None` leaves a field as it is. The
+/// slug is not among them: a rename keeps the URL people have linked to.
+#[derive(Debug, Default)]
+pub struct DocumentPatch<'a> {
+    pub title: Option<&'a str>,
+    pub content: Option<&'a str>,
+    pub data: Option<&'a str>,
+    /// The date it is filed under, as `crate::util::stored_timestamp` leaves it.
+    pub created_at: Option<&'a str>,
+    /// It was given as a day: see `crate::util::names_a_day`.
+    pub day_only: bool,
+    pub mutable: Option<bool>,
+    pub attachable: Option<bool>,
+    pub idx: Option<i64>,
+}
+
+/// What authorizing a change to a document needs to know about it.
+pub struct DocumentMeta {
+    pub context_id: String,
+    pub owner_did: Option<String>,
+    pub mutable: bool,
+    pub path: String,
+    pub parent_id: Option<String>,
+    /// Whether it is in the bin.
+    pub binned: bool,
+}
+
+/// A row of the bin: the root of a subtree that was deleted together.
+#[derive(Debug, serde::Serialize)]
+pub struct Binned {
+    /// `document`, restored with `restoreDocument`, or `context`, with
+    /// `restoreContext`.
+    pub node: &'static str,
+    pub id: String,
+    pub kind: String,
+    pub title: String,
+    pub path: String,
+    pub owner_did: Option<String>,
+    pub deleted_at: String,
+}
+
+/// Why a write was refused, as distinct from failing.
+#[derive(Debug)]
+pub enum WriteError {
+    Db(DbError),
+    /// The parent is missing, or in the bin.
+    NoSuchParent,
+    /// The parent is in another context. A member of one context could otherwise
+    /// hang a document off another's tree.
+    ParentElsewhere,
+    /// A live node has taken the path a restore would put this one back at.
+    PathTaken,
+    /// The new parent is the node itself, or somewhere inside it.
+    IntoItself,
+    /// The change would leave a context with nobody who owns it, and then
+    /// nobody could ever administer it again.
+    LastOwner,
+    /// Another invitation to this context already has that address.
+    EmailTaken,
+    /// A poll is running somewhere in what would be moved. Its voters are the
+    /// members of the context it was opened in, and would not be of the next.
+    OpenPollInside,
+    /// A poll is in what would be deleted for good, and a vote's record is not
+    /// anybody's to delete.
+    PollInside,
+    /// A group or an event is in what would be deleted for good.
+    ContextInside,
+    /// Deleting for good is for what is already in the bin.
+    NotBinned,
+    /// More nodes than one request may copy.
+    TooMany,
+}
+
+impl std::fmt::Display for WriteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WriteError::Db(e) => write!(f, "{e}"),
+            WriteError::NoSuchParent => write!(f, "no such parent"),
+            WriteError::ParentElsewhere => write!(f, "parent is not in that context"),
+            WriteError::PathTaken => write!(f, "another node now has that path"),
+            WriteError::IntoItself => write!(f, "a node cannot be moved into itself"),
+            WriteError::LastOwner => write!(f, "a context must keep an owner"),
+            WriteError::EmailTaken => write!(f, "that address is already invited here"),
+            WriteError::OpenPollInside => write!(f, "a poll is running in there; close it first"),
+            WriteError::PollInside => write!(f, "a poll is in there, and a vote's record stays"),
+            WriteError::ContextInside => write!(f, "a group or an event is in there"),
+            WriteError::NotBinned => write!(f, "only what is in the bin is deleted for good"),
+            WriteError::TooMany => write!(f, "too much to copy at once"),
+        }
+    }
+}
+
+impl std::error::Error for WriteError {}
+
+impl From<DbError> for WriteError {
+    fn from(e: DbError) -> Self {
+        WriteError::Db(e)
+    }
+}
+
+impl From<turso::Error> for WriteError {
+    fn from(e: turso::Error) -> Self {
+        WriteError::Db(e.into())
+    }
+}
+
+/// A live node, as somewhere to hang a child or a comment.
+pub struct Parent {
+    pub path: String,
+    /// The context it is in. A context is in itself.
+    pub context_id: String,
+    /// [`crate::authz::CONTEXT`] for any context, else the document's kind.
+    pub kind: String,
+    pub attachable: bool,
+    /// It is the home, which only a group, an event or a site sits in.
+    pub home: bool,
+}
+
+impl Parent {
+    /// The path of a child with `slug`. The home's own path is the empty one,
+    /// and what is in it is at `slug`, not at `/slug`.
+    pub fn child_path(&self, slug: &str) -> String {
+        match self.path.as_str() {
+            "" => slug.to_string(),
+            path => format!("{path}/{slug}"),
+        }
+    }
 }
 
 impl Store {
     pub fn new(db: Db) -> Self {
         Self { db }
+    }
+
+    /// The live context or document `id` names, as a place to hang a child.
+    /// Ungated: it answers a write check, and says nothing to the caller.
+    pub async fn parent_of(&self, id: &str) -> Result<Option<Parent>, DbError> {
+        let conn = self.db.acquire().await?;
+        self.parent(&conn, id).await
+    }
+
+    async fn parent(&self, conn: &turso::Connection, id: &str) -> Result<Option<Parent>, DbError> {
+        let context = crate::authz::CONTEXT;
+        for sql in [
+            format!(
+                "SELECT path, id, '{context}', attachable, kind = 'home' \
+                 FROM context WHERE id = ?1 AND {LIVE}"
+            ),
+            format!(
+                "SELECT path, context_id, kind, attachable, 0 \
+                 FROM document WHERE id = ?1 AND {LIVE}"
+            ),
+        ] {
+            let mut rows = conn.query(&sql, [id]).await?;
+            if let Some(row) = rows.next().await? {
+                return Ok(Some(Parent {
+                    path: row.get::<String>(0)?,
+                    context_id: row.get::<String>(1)?,
+                    kind: row.get::<String>(2)?,
+                    attachable: row.get::<i64>(3)? != 0,
+                    home: row.get::<i64>(4)? != 0,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Whether a live node of either kind already has this path. The unique
+    /// indexes each cover one table, so the other is asked here.
+    pub(crate) async fn path_taken(
+        &self,
+        conn: &turso::Connection,
+        path: &str,
+    ) -> Result<bool, DbError> {
+        for table in ["context", "document"] {
+            let mut rows = conn
+                .query(
+                    &format!("SELECT 1 FROM {table} WHERE path = ?1 AND {LIVE}"),
+                    [path],
+                )
+                .await?;
+            if rows.next().await?.is_some() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Fetch a node's owner DID + context. Reads `document` first (owner = its
@@ -178,6 +650,35 @@ impl Store {
         Ok(None)
     }
 
+    /// The context and kind of a node (a document, or a comment as `"comment"`)
+    /// that `caller` may read. `None` covers both "no such node" and "not theirs
+    /// to read".
+    pub async fn readable_subject(
+        &self,
+        node_id: &str,
+        caller: Option<&str>,
+    ) -> Result<Option<(String, String)>, DbError> {
+        let conn = self.db.acquire().await?;
+        let params = || vec![Value::Text(node_id.to_string()), opt_str_val(caller)];
+        for sql in [
+            format!(
+                "SELECT d.context_id, d.kind FROM document d \
+                 WHERE d.id = ?1 AND d.{LIVE} AND {}",
+                readable_document("d", 2)
+            ),
+            format!(
+                "SELECT k.context_id, 'comment' FROM comment k WHERE k.id = ?1 AND {}",
+                readable_comment("k", 2)
+            ),
+        ] {
+            let mut rows = conn.query(&sql, params()).await?;
+            if let Some(row) = rows.next().await? {
+                return Ok(Some((row.get::<String>(0)?, row.get::<String>(1)?)));
+            }
+        }
+        Ok(None)
+    }
+
     /// Look up the member a `?claim=<token>` link points at.
     pub async fn member_by_claim_token(
         &self,
@@ -203,10 +704,12 @@ impl Store {
         }))
     }
 
-    /// Bind a pending member row to a user, guarded on `user_did` still NULL so a
-    /// race cannot double-claim. Returns whether a row was actually bound. The
+    /// Bind a member row to a user, guarded on no PERSON holding it yet (an
+    /// interim account is not one, `crate::legacy`), so a race cannot
+    /// double-claim. Returns whether a row was actually bound. The
     /// `member_bound` partial unique additionally rejects binding a DID already
-    /// active in the context (surfaces as a constraint error).
+    /// active in the context (surfaces as a constraint error). Claiming an
+    /// invitation is saying yes to it, so the row is accepted too.
     pub async fn bind_member_to_user(
         &self,
         member_id: &str,
@@ -215,11 +718,30 @@ impl Store {
         let conn = self.db.acquire().await?;
         let affected = conn
             .execute(
-                "UPDATE member SET user_did = ?1 WHERE id = ?2 AND user_did IS NULL",
+                "UPDATE member SET user_did = ?1, accepted = 1 \
+                 WHERE id = ?2 AND (user_did IS NULL OR user_did NOT LIKE 'did:%')",
                 [user_did, member_id],
             )
             .await?;
         Ok(affected > 0)
+    }
+
+    /// Give a member row that has no claim token one, and return the one it
+    /// has then: two owners asking at once are handed the same link.
+    pub async fn mint_claim_token(&self, member_id: &str) -> Result<String, DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute(
+            "UPDATE member SET claim_token = ?1 WHERE id = ?2 AND claim_token IS NULL",
+            [crate::util::random_token(24).as_str(), member_id],
+        )
+        .await?;
+        let mut rows = conn
+            .query("SELECT claim_token FROM member WHERE id = ?1", [member_id])
+            .await?;
+        match rows.next().await? {
+            Some(row) => Ok(row.get::<String>(0)?),
+            None => Err(DbError::Turso(turso::Error::QueryReturnedNoRows)),
+        }
     }
 
     /// Fetch a member's context id + claim token by member id.
@@ -230,7 +752,7 @@ impl Store {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
-                "SELECT context_id, claim_token FROM member WHERE id = ?1 LIMIT 1",
+                "SELECT context_id, claim_token, user_did FROM member WHERE id = ?1 LIMIT 1",
                 [member_id],
             )
             .await?;
@@ -240,141 +762,408 @@ impl Store {
         Ok(Some(MemberClaimInfo {
             parent_id: opt_text(&row, 0),
             claim_token: opt_text(&row, 1),
+            node_id: opt_text(&row, 2),
         }))
     }
 
-    /// The emails of a context's active members (push fan-out targets). The
-    /// interim `accepted` flag has no target column (it folded into the active/
-    /// bind state), so active membership is `active = 1`.
-    pub async fn active_member_emails(&self, context: &str) -> Result<Vec<String>, DbError> {
-        let conn = self.db.acquire().await?;
-        let mut rows = conn
-            .query(
-                "SELECT email FROM member \
-                 WHERE context_id = ?1 AND active = 1 AND email IS NOT NULL",
-                [context],
-            )
-            .await?;
-        let mut out = Vec::new();
-        while let Some(row) = rows.next().await? {
-            if let Some(email) = opt_text(&row, 0) {
-                out.push(email);
+    /// A page of a context's members, by name with the nameless last, and how
+    /// many match in all.
+    pub async fn list_members(
+        &self,
+        context_id: &str,
+        q: &MemberQuery,
+    ) -> Result<(Vec<MemberRow>, i64), DbError> {
+        let mut wheres = vec!["m.context_id = ?1".to_string()];
+        let mut params = vec![Value::Text(context_id.to_string())];
+        let flag = |b: bool| Value::Integer(i64::from(b));
+        if let Some(owner) = q.owner {
+            params.push(Value::Text(
+                if owner { "owner" } else { "member" }.to_string(),
+            ));
+            wheres.push(format!("m.role = ?{}", params.len()));
+        }
+        for (column, wanted) in [
+            ("active", q.active),
+            ("accepted", q.accepted),
+            ("hidden", q.hidden),
+        ] {
+            if let Some(wanted) = wanted {
+                params.push(flag(wanted));
+                wheres.push(format!("m.{column} = ?{}", params.len()));
             }
         }
-        Ok(out)
-    }
+        if !q.for_owner {
+            wheres.push("m.hidden = 0".to_string());
+        }
+        let search = q.search.trim();
+        if !search.is_empty() {
+            params.push(Value::Text(format!("%{search}%")));
+            let n = params.len();
+            let email = if q.for_owner {
+                format!(" OR m.email LIKE ?{n}")
+            } else {
+                String::new()
+            };
+            wheres.push(format!(
+                "(m.name LIKE ?{n} OR u.display_name LIKE ?{n} OR u.handle LIKE ?{n}{email})"
+            ));
+        }
+        let from = format!(
+            "FROM member m LEFT JOIN user u ON u.did = m.user_did WHERE {}",
+            wheres.join(" AND ")
+        );
 
-    /// Upsert a device's Web Push subscription by endpoint (a device
-    /// re-subscribing keeps one row with fresh keys).
-    ///
-    /// FINDING (turso 0.2.2): neither `INSERT ... ON CONFLICT` nor `INSERT OR
-    /// REPLACE` parse ("ON CONFLICT clause is not supported"), so the interim's
-    /// single upsert statement cannot port verbatim. This does the portable
-    /// two-step instead: UPDATE by the endpoint key, and INSERT only if no row
-    /// matched. Revisit when turso gains upsert support.
-    pub async fn upsert_push_subscription(
-        &self,
-        user_did: &str,
-        email: &str,
-        endpoint: &str,
-        p256dh: &str,
-        auth: &str,
-    ) -> Result<(), DbError> {
         let conn = self.db.acquire().await?;
-        let updated = conn
-            .execute(
-                "UPDATE push_subscription SET user_did = ?1, email = ?2, p256dh = ?3, auth = ?4 \
-                 WHERE endpoint = ?5",
-                [user_did, email, p256dh, auth, endpoint],
-            )
+        let mut rows = conn
+            .query(&format!("SELECT count(*) {from}"), params.clone())
             .await?;
-        if updated == 0 {
-            conn.execute(
-                "INSERT INTO push_subscription \
-                 (endpoint, user_did, email, p256dh, auth) VALUES (?1, ?2, ?3, ?4, ?5)",
-                [endpoint, user_did, email, p256dh, auth],
-            )
-            .await?;
-        }
-        Ok(())
-    }
+        let total = match rows.next().await? {
+            Some(row) => row.get::<i64>(0)?,
+            None => 0,
+        };
+        drop(rows);
 
-    /// Delete push subscriptions by endpoint (unsubscribe, or pruning gone ones).
-    pub async fn delete_subscriptions_by_endpoint(
-        &self,
-        endpoints: &[String],
-    ) -> Result<(), DbError> {
-        if endpoints.is_empty() {
-            return Ok(());
-        }
-        let conn = self.db.acquire().await?;
-        let placeholders = in_placeholders(endpoints.len());
-        conn.execute(
-            &format!("DELETE FROM push_subscription WHERE endpoint IN ({placeholders})"),
-            turso::params_from_iter(endpoints.to_vec()),
-        )
-        .await?;
-        Ok(())
-    }
-
-    /// The stored Web Push subscriptions for a set of member emails.
-    pub async fn subscriptions_for_emails(
-        &self,
-        emails: &[String],
-    ) -> Result<Vec<Subscription>, DbError> {
-        if emails.is_empty() {
-            return Ok(Vec::new());
-        }
-        let conn = self.db.acquire().await?;
-        let placeholders = in_placeholders(emails.len());
+        params.push(Value::Integer(q.limit));
+        params.push(Value::Integer(q.offset));
+        let (limit, offset) = (params.len() - 1, params.len());
         let mut rows = conn
             .query(
                 &format!(
-                    "SELECT endpoint, p256dh, auth FROM push_subscription \
-                     WHERE email IN ({placeholders})"
+                    "SELECT m.id, m.user_did, m.role, m.active, m.accepted, m.hidden, m.name, \
+                            u.display_name, u.handle, u.avatar_url, m.email, m.mailed_at \
+                     {from} \
+                     ORDER BY coalesce(m.name, u.display_name, u.handle) IS NULL, \
+                              lower(coalesce(m.name, u.display_name, u.handle)), m.id \
+                     LIMIT ?{limit} OFFSET ?{offset}"
                 ),
-                turso::params_from_iter(emails.to_vec()),
+                params,
             )
             .await?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().await? {
-            let (Some(endpoint), Some(p256dh), Some(auth)) =
-                (opt_text(&row, 0), opt_text(&row, 1), opt_text(&row, 2))
-            else {
+            out.push(MemberRow {
+                id: row.get::<String>(0)?,
+                user_did: opt_text(&row, 1),
+                role: row.get::<String>(2)?,
+                active: row.get::<i64>(3)? != 0,
+                accepted: row.get::<i64>(4)? != 0,
+                hidden: row.get::<i64>(5)? != 0,
+                name: opt_text(&row, 6),
+                display_name: opt_text(&row, 7),
+                handle: opt_text(&row, 8),
+                avatar_url: opt_text(&row, 9),
+                email: opt_text(&row, 10).filter(|_| q.for_owner),
+                mailed_at: opt_text(&row, 11).filter(|_| q.for_owner),
+            });
+        }
+        Ok((out, total))
+    }
+
+    /// Put people on a context's roster. Anyone the context already has, by
+    /// address or by account, is skipped, and so is an address the batch itself
+    /// repeats. One write transaction, so two imports cannot interleave. Also
+    /// returns the seats a claim link can be mailed to: those with an address
+    /// and no account yet.
+    pub async fn invite(
+        &self,
+        context_id: &str,
+        invites: &[Invite],
+    ) -> Result<(InviteOutcome, Vec<crate::mail::Seat>), DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let outcome = self.invite_in(&conn, context_id, invites).await;
+        conn.execute(
+            if outcome.is_ok() {
+                "COMMIT"
+            } else {
+                "ROLLBACK"
+            },
+            (),
+        )
+        .await?;
+        outcome
+    }
+
+    async fn invite_in(
+        &self,
+        conn: &turso::Connection,
+        context_id: &str,
+        invites: &[Invite],
+    ) -> Result<(InviteOutcome, Vec<crate::mail::Seat>), DbError> {
+        let mut outcome = InviteOutcome::default();
+        let mut to_mail = Vec::new();
+        for invite in invites {
+            let name = invite
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|n| !n.is_empty());
+            let email = normalized_email(invite.email.as_deref());
+            let did = invite
+                .did
+                .as_deref()
+                .map(str::trim)
+                .filter(|d| !d.is_empty());
+            if name.is_none() && email.is_none() && did.is_none() {
                 continue;
+            }
+            // Only an address or an account can say "the same person". Two rows
+            // sharing a name and nothing else are two people.
+            let had = match (did, email.as_deref()) {
+                (Some(did), _) => {
+                    let mut rows = conn
+                        .query(
+                            "SELECT 1 FROM member WHERE context_id = ?1 AND user_did = ?2",
+                            [context_id, did],
+                        )
+                        .await?;
+                    rows.next().await?.is_some()
+                }
+                (None, Some(email)) => {
+                    let mut rows = conn
+                        .query(
+                            "SELECT 1 FROM member WHERE context_id = ?1 AND email = ?2",
+                            [context_id, email],
+                        )
+                        .await?;
+                    rows.next().await?.is_some()
+                }
+                (None, None) => false,
             };
-            out.push(Subscription {
-                endpoint,
-                p256dh,
-                auth,
+            if had {
+                outcome.skipped += 1;
+                continue;
+            }
+            if let Some(did) = did {
+                conn.execute("INSERT OR IGNORE INTO user (did) VALUES (?1)", [did])
+                    .await?;
+            }
+            let member_id = format!("m-{}", crate::util::random_token(16));
+            // An account is bound already, so it has nothing to claim.
+            let claim_token = did.is_none().then(|| crate::util::random_token(24));
+            conn.execute(
+                "INSERT INTO member (id, context_id, user_did, name, email, claim_token) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                vec![
+                    Value::Text(member_id.clone()),
+                    Value::Text(context_id.to_string()),
+                    opt_str_val(did),
+                    opt_str_val(name),
+                    opt_str_val(email.as_deref()),
+                    opt_str_val(claim_token.as_deref()),
+                ],
+            )
+            .await?;
+            outcome.inserted += 1;
+            if let (Some(email), Some(claim_token)) = (email.clone(), claim_token) {
+                to_mail.push(crate::mail::Seat {
+                    member_id,
+                    email,
+                    claim_token,
+                });
+            }
+            if did.is_none() && email.is_none() {
+                outcome.without_email += 1;
+            }
+        }
+        Ok((outcome, to_mail))
+    }
+
+    /// A member row's authorization facts.
+    pub async fn member_meta(&self, id: &str) -> Result<Option<MemberMeta>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT context_id, user_did FROM member WHERE id = ?1",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(MemberMeta {
+            context_id: row.get::<String>(0)?,
+            user_did: opt_text(&row, 1),
+        }))
+    }
+
+    /// Whether taking the owner role from member `id` would leave its context
+    /// with no owner who can sign in. An unclaimed invitation cannot administer
+    /// anything, so it does not count.
+    async fn is_last_owner(&self, conn: &turso::Connection, id: &str) -> Result<bool, DbError> {
+        let mut rows = conn
+            .query(
+                "SELECT m.role = 'owner' AND m.user_did IS NOT NULL AND NOT EXISTS ( \
+                   SELECT 1 FROM member o WHERE o.context_id = m.context_id AND o.id <> m.id \
+                     AND o.role = 'owner' AND o.user_did IS NOT NULL) \
+                 FROM member m WHERE m.id = ?1",
+                [id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => Ok(row.get::<i64>(0)? != 0),
+            None => Ok(false),
+        }
+    }
+
+    /// Apply `patch` to a member row. Returns whether there was one.
+    pub async fn update_member(
+        &self,
+        id: &str,
+        patch: &MemberPatch<'_>,
+    ) -> Result<bool, WriteError> {
+        let conn = self.db.acquire().await?;
+        if patch.owner == Some(false) && self.is_last_owner(&conn, id).await? {
+            return Err(WriteError::LastOwner);
+        }
+        let mut sets = Vec::new();
+        let mut params = Vec::new();
+        let mut set = |column: &'static str, value: Value| {
+            params.push(value);
+            sets.push(format!("{column} = ?{}", params.len()));
+        };
+        let flag = |b: bool| Value::Integer(i64::from(b));
+        if let Some(name) = patch.name {
+            set(
+                "name",
+                opt_str_val(Some(name.trim()).filter(|n| !n.is_empty())),
+            );
+        }
+        if let Some(email) = patch.email {
+            set(
+                "email",
+                opt_str_val(normalized_email(Some(email)).as_deref()),
+            );
+        }
+        if let Some(owner) = patch.owner {
+            set(
+                "role",
+                Value::Text(if owner { "owner" } else { "member" }.to_string()),
+            );
+        }
+        if let Some(active) = patch.active {
+            set("active", flag(active));
+        }
+        if let Some(hidden) = patch.hidden {
+            set("hidden", flag(hidden));
+        }
+        if sets.is_empty() {
+            return Ok(self.member_meta(id).await?.is_some());
+        }
+        params.push(Value::Text(id.to_string()));
+        let changed = conn
+            .execute(
+                &format!(
+                    "UPDATE member SET {} WHERE id = ?{}",
+                    sets.join(", "),
+                    params.len()
+                ),
+                params,
+            )
+            .await;
+        match changed {
+            Ok(n) => Ok(n > 0),
+            // `member_pending`: one unclaimed invitation per address per context.
+            Err(turso::Error::Constraint(_)) => Err(WriteError::EmailTaken),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Take someone off a roster: a removal, a leaving, or a declined invitation.
+    pub async fn remove_member(&self, id: &str) -> Result<bool, WriteError> {
+        let conn = self.db.acquire().await?;
+        if self.is_last_owner(&conn, id).await? {
+            return Err(WriteError::LastOwner);
+        }
+        // Whoever leaves takes what they gave and were given with them: a vote
+        // cannot stand with someone who is not there to cast it.
+        conn.execute(
+            "DELETE FROM standing_delegation WHERE (context_id, from_did) IN \
+               (SELECT context_id, user_did FROM member WHERE id = ?1) \
+             OR (context_id, to_did) IN \
+               (SELECT context_id, user_did FROM member WHERE id = ?1)",
+            [id],
+        )
+        .await?;
+        let removed = conn
+            .execute("DELETE FROM member WHERE id = ?1", [id])
+            .await?;
+        Ok(removed > 0)
+    }
+
+    /// The invitations `did` has not answered, newest first.
+    pub async fn list_invitations(&self, did: &str) -> Result<Vec<Invitation>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT m.id, c.id, c.kind, c.name, c.path \
+                     FROM member m JOIN context c ON c.id = m.context_id \
+                     WHERE m.user_did = ?1 AND m.accepted = 0 AND c.{LIVE} \
+                     ORDER BY m.created_at DESC, m.id"
+                ),
+                [did],
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(Invitation {
+                id: row.get::<String>(0)?,
+                context_id: row.get::<String>(1)?,
+                context_kind: row.get::<String>(2)?,
+                context_name: row.get::<String>(3)?,
+                context_path: row.get::<String>(4)?,
             });
         }
         Ok(out)
     }
 
-    // -- Firehose materialization (public records mirrored into the view) --
+    /// Say yes to an invitation. The row is named by its id AND its account, so
+    /// nobody accepts on another's behalf, and accepting touches that row alone:
+    /// the interim's accept once asked "is there a membership here?" with a
+    /// question the invitation itself answered, and deleted it as a duplicate.
+    pub async fn accept_invitation(&self, id: &str, did: &str) -> Result<bool, DbError> {
+        let conn = self.db.acquire().await?;
+        let accepted = conn
+            .execute(
+                "UPDATE member SET accepted = 1 WHERE id = ?1 AND user_did = ?2",
+                [id, did],
+            )
+            .await?;
+        Ok(accepted > 0)
+    }
 
-    /// Upsert a MINIMAL user row (just the DID) so an author FK target exists for
-    /// a firehose-materialized public record. No-op if the user already exists.
-    /// The nullable-UNIQUE `legacy_id` is passed as an explicit NULL (turso
-    /// rejects omitting it).
-    pub async fn upsert_user_min(&self, did: &str) -> Result<(), DbError> {
+    /// How many members of a context hold voting rights: a poll's turnout is
+    /// out of this.
+    pub async fn count_voters(&self, context_id: &str) -> Result<i64, DbError> {
         let conn = self.db.acquire().await?;
         let mut rows = conn
-            .query("SELECT 1 FROM user WHERE did = ?1 LIMIT 1", [did])
+            .query(
+                "SELECT count(*) FROM member WHERE context_id = ?1 AND active = 1",
+                [context_id],
+            )
             .await?;
-        if rows.next().await?.is_some() {
-            return Ok(());
+        match rows.next().await? {
+            Some(row) => Ok(row.get::<i64>(0)?),
+            None => Ok(0),
         }
-        conn.execute("INSERT INTO user (did, legacy_id) VALUES (?1, NULL)", [did])
+    }
+
+    // -- Firehose materialization (public records mirrored into the view) --
+
+    /// A user row for `did` if there is none yet, so the foreign keys that point
+    /// at a person have something to point at. Leaves an existing profile alone.
+    pub async fn upsert_user_min(&self, did: &str) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("INSERT OR IGNORE INTO user (did) VALUES (?1)", [did])
             .await?;
         Ok(())
     }
 
-    /// Materialize a public `com.example.wiki.post` record into the `post` view,
-    /// keyed by its at-uri (also its `published_uri` and `legacy_id`). Upsert via
-    /// UPDATE-then-INSERT (turso has no `ON CONFLICT`). `group`/`reply` are the
-    /// record's at-uris, stored as-is (resolving them to local ids is depth-3).
+    /// Materialize a public `wiki.radikal.post` record into the `post` view,
+    /// keyed by its at-uri (also its `published_uri` and `legacy_id`). `group` and
+    /// `reply` are at-uris and foreign keys, so the caller must have checked that
+    /// both are in the view.
     pub async fn upsert_public_post(
         &self,
         uri: &str,
@@ -385,38 +1174,23 @@ impl Store {
         created_at: &str,
     ) -> Result<(), DbError> {
         let conn = self.db.acquire().await?;
-        let group = opt_str_val(group);
-        let reply = opt_str_val(reply);
-        let updated = conn
-            .execute(
-                "UPDATE post SET author_did = ?1, text = ?2, group_id = ?3, reply_to = ?4, \
-                 visibility = 'public', published_uri = ?5, created_at = ?6 WHERE id = ?5",
-                vec![
-                    Value::Text(author_did.to_string()),
-                    Value::Text(text.to_string()),
-                    group.clone(),
-                    reply.clone(),
-                    Value::Text(uri.to_string()),
-                    Value::Text(created_at.to_string()),
-                ],
-            )
-            .await?;
-        if updated == 0 {
-            conn.execute(
-                "INSERT INTO post \
-                 (id, author_did, text, group_id, reply_to, visibility, published_uri, created_at, legacy_id) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'public', ?1, ?6, ?1)",
-                vec![
-                    Value::Text(uri.to_string()),
-                    Value::Text(author_did.to_string()),
-                    Value::Text(text.to_string()),
-                    group,
-                    reply,
-                    Value::Text(created_at.to_string()),
-                ],
-            )
-            .await?;
-        }
+        conn.execute(
+            "INSERT INTO post \
+             (id, author_did, text, group_id, reply_to, visibility, published_uri, created_at, legacy_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 'public', ?1, ?6, ?1) \
+             ON CONFLICT(id) DO UPDATE SET author_did = excluded.author_did, \
+               text = excluded.text, group_id = excluded.group_id, \
+               reply_to = excluded.reply_to, created_at = excluded.created_at",
+            vec![
+                Value::Text(uri.to_string()),
+                Value::Text(author_did.to_string()),
+                Value::Text(text.to_string()),
+                opt_str_val(group),
+                opt_str_val(reply),
+                Value::Text(created_at.to_string()),
+            ],
+        )
+        .await?;
         Ok(())
     }
 
@@ -428,7 +1202,7 @@ impl Store {
         Ok(())
     }
 
-    /// Materialize a public `com.example.wiki.reaction` record into the `reaction`
+    /// Materialize a public `wiki.radikal.reaction` record into the `reaction`
     /// view, keyed by its at-uri. Idempotent: updates the row if the at-uri is
     /// already present, and skips if the same `(subject, reactor, emoji)` triple
     /// already exists under a different record (a redundant double-react).
@@ -482,14 +1256,17 @@ impl Store {
     // -- Read side of the native serving layer (returns the canonical domain
     //    types, which the XRPC handlers serve as JSON). Identity-free reads. --
 
-    /// The authors of a document (from the `document_author` join, in `ord`),
-    /// each a DID (an account) or a free-text display name.
+    /// The authors of a document (from the `document_author` join, in `ord`):
+    /// an account, a name with no account, or a group, which comes with the name
+    /// and path a chip is drawn from. A group's name on something the caller may
+    /// read is part of what they are reading, whoever may read the group.
     async fn document_authors(&self, document_id: &str) -> Result<Vec<Author>, DbError> {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
-                "SELECT author_did, author_text FROM document_author \
-                 WHERE document_id = ?1 ORDER BY ord",
+                "SELECT a.author_did, a.author_text, a.author_context, c.name, c.path \
+                 FROM document_author a LEFT JOIN context c ON c.id = a.author_context \
+                 WHERE a.document_id = ?1 ORDER BY a.ord",
                 [document_id],
             )
             .await?;
@@ -499,6 +1276,12 @@ impl Store {
                 out.push(Author::User { did });
             } else if let Some(text) = opt_text(&row, 1) {
                 out.push(Author::FreeText { display: text });
+            } else if let Some(context_id) = opt_text(&row, 2) {
+                out.push(Author::Context {
+                    context_id,
+                    name: opt_text(&row, 3),
+                    path: opt_text(&row, 4),
+                });
             }
         }
         Ok(out)
@@ -512,30 +1295,40 @@ impl Store {
         Ok(Document {
             id: b.id,
             context_id: b.context_id,
-            parent_id: b.parent_id,
             kind: parse_enum(&b.kind).unwrap_or(DocumentKind::Document),
             title: b.title,
+            place: b.place,
+            mutable: b.mutable,
             content: b.content.and_then(|s| serde_json::from_str(&s).ok()),
+            data: b.data.and_then(|s| serde_json::from_str(&s).ok()),
             authors,
             visibility: b
                 .visibility
                 .and_then(|s| parse_enum(&s))
                 .unwrap_or_default(),
             published_uri: b.published_uri,
-            created_at: b.created_at,
             legacy_id: None,
         })
     }
 
     /// A content node (document / folder / file / proposal) by id, with its
-    /// authors. `None` if no such document.
-    pub async fn read_document(&self, id: &str) -> Result<Option<Document>, DbError> {
+    /// authors. `None` if there is no such document, or none `caller` may read:
+    /// the two are not told apart, so a private document's existence is not
+    /// revealed.
+    pub async fn read_document(
+        &self,
+        id: &str,
+        caller: Option<&str>,
+    ) -> Result<Option<Document>, DbError> {
         let base = {
             let conn = self.db.acquire().await?;
             let mut rows = conn
                 .query(
-                    &format!("SELECT {DOC_COLS} FROM document WHERE id = ?1"),
-                    [id],
+                    &format!(
+                        "SELECT {DOC_COLS} FROM document d WHERE d.id = ?1 AND d.{LIVE} AND {}",
+                        readable_document("d", 2)
+                    ),
+                    vec![Value::Text(id.to_string()), opt_str_val(caller)],
                 )
                 .await?;
             match rows.next().await? {
@@ -546,13 +1339,40 @@ impl Store {
         Ok(Some(self.hydrate_document(base).await?))
     }
 
-    /// A context (group / event) by id. `None` if no such context.
-    pub async fn read_context(&self, id: &str) -> Result<Option<Context>, DbError> {
+    pub async fn read_user(&self, did: &str) -> Result<Option<User>, DbError> {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
-                &format!("SELECT {CTX_COLS} FROM context WHERE id = ?1"),
-                [id],
+                "SELECT did, handle, display_name, avatar_url FROM user WHERE did = ?1",
+                [did],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(User {
+            did: row.get::<String>(0)?,
+            handle: opt_text(&row, 1),
+            display_name: opt_text(&row, 2),
+            avatar_url: opt_text(&row, 3),
+            legacy_id: None,
+        }))
+    }
+
+    /// A context (group / event) by id. `None` if there is none `caller` may read.
+    pub async fn read_context(
+        &self,
+        id: &str,
+        caller: Option<&str>,
+    ) -> Result<Option<Context>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT {CTX_FULL} FROM context c WHERE c.id = ?1 AND c.{LIVE} AND {}",
+                    readable_context("c", 2)
+                ),
+                vec![Value::Text(id.to_string()), opt_str_val(caller)],
             )
             .await?;
         match rows.next().await? {
@@ -561,59 +1381,314 @@ impl Store {
         }
     }
 
-    /// Resolve a path of context slugs from the root (a top-level group/event with
-    /// no parent), each segment a child context's slug. `None` if the path breaks.
-    /// Documents carry no slug in the reconciled schema, so they are id-addressed
-    /// via `read_document`, not path-resolved.
-    pub async fn resolve_context(&self, slugs: &[String]) -> Result<Option<Context>, DbError> {
-        let conn = self.db.acquire().await?;
-        let mut parent_id: Option<String> = None;
-        let mut found: Option<Context> = None;
-        for slug in slugs {
-            let row = if let Some(pid) = &parent_id {
-                let mut rows = conn
-                    .query(
-                        &format!(
-                            "SELECT {CTX_COLS} FROM context WHERE parent_id = ?1 AND slug = ?2 LIMIT 1"
-                        ),
-                        vec![Value::Text(pid.clone()), Value::Text(slug.clone())],
-                    )
-                    .await?;
-                rows.next().await?
-            } else {
-                let mut rows = conn
-                    .query(
-                        &format!(
-                            "SELECT {CTX_COLS} FROM context WHERE parent_id IS NULL AND slug = ?1 LIMIT 1"
-                        ),
-                        [slug.as_str()],
-                    )
-                    .await?;
-                rows.next().await?
-            };
-            match row {
-                Some(row) => {
-                    let ctx = ctx_from_row(&row)?;
-                    parent_id = Some(ctx.id.clone());
-                    found = Some(ctx);
-                }
+    /// The live node at `path` that `caller` may read. One lookup at any depth,
+    /// because the path is stored; it also means nothing above the node has to be
+    /// readable, so a member of an event reaches it through a group they do not
+    /// belong to.
+    pub async fn resolve_path(
+        &self,
+        path: &str,
+        caller: Option<&str>,
+    ) -> Result<Option<Node>, DbError> {
+        let found = {
+            let conn = self.db.acquire().await?;
+            let params = || vec![Value::Text(path.to_string()), opt_str_val(caller)];
+            let mut rows = conn
+                .query(
+                    &format!(
+                        "SELECT {CTX_FULL} FROM context c \
+                         WHERE c.path = ?1 AND c.{LIVE} AND {}",
+                        readable_context("c", 2)
+                    ),
+                    params(),
+                )
+                .await?;
+            if let Some(row) = rows.next().await? {
+                return Ok(Some(Node::Context(ctx_from_row(&row)?)));
+            }
+            let mut rows = conn
+                .query(
+                    &format!(
+                        "SELECT {DOC_COLS} FROM document d \
+                         WHERE d.path = ?1 AND d.{LIVE} AND {}",
+                        readable_document("d", 2)
+                    ),
+                    params(),
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => doc_base(&row)?,
                 None => return Ok(None),
             }
-        }
-        Ok(found)
+        };
+        Ok(Some(Node::Document(self.hydrate_document(found).await?)))
     }
 
-    /// The child content nodes directly under `parent_id` (a context or folder),
-    /// oldest first, each with its authors.
-    pub async fn list_children(&self, parent_id: &str) -> Result<Vec<Document>, DbError> {
+    /// Everything directly under `parent_id` that `caller` may read, of either
+    /// kind, in the manual order and then by age.
+    pub async fn children(
+        &self,
+        parent_id: &str,
+        caller: Option<&str>,
+    ) -> Result<Vec<Child>, DbError> {
+        // What the caller would be listed on opening it, so that a drawer
+        // offers to expand only what has something to show them.
+        let counted = |alias: &str| {
+            format!(
+                "(SELECT count(*) FROM document x WHERE x.parent_id = {alias}.id AND x.{LIVE} \
+                    AND {} AND {}) + \
+                 (SELECT count(*) FROM context y WHERE y.parent_id = {alias}.id AND y.{LIVE} \
+                    AND {})",
+                readable_document("x", 2),
+                listed_document("x", 2),
+                readable_context("y", 2)
+            )
+        };
+        let queries = [
+            (
+                "context",
+                format!(
+                    "SELECT c.id, c.kind, c.name, c.slug, c.path, c.idx, 0, c.attachable, \
+                            c.owner_did, c.created_at, NULL, {}, c.updated_at \
+                     FROM context c WHERE c.parent_id = ?1 AND c.{LIVE} AND {}",
+                    counted("c"),
+                    readable_context("c", 2)
+                ),
+            ),
+            (
+                "document",
+                format!(
+                    "SELECT d.id, d.kind, d.title, d.slug, d.path, d.idx, d.mutable, d.attachable, \
+                            d.owner_did, d.created_at, d.data, {}, d.updated_at \
+                     FROM document d WHERE d.parent_id = ?1 AND d.{LIVE} AND {} AND {}",
+                    counted("d"),
+                    readable_document("d", 2),
+                    listed_document("d", 2)
+                ),
+            ),
+        ];
+        let conn = self.db.acquire().await?;
+        let mut out = Vec::new();
+        for (node, sql) in queries {
+            let mut rows = conn
+                .query(
+                    &sql,
+                    vec![Value::Text(parent_id.to_string()), opt_str_val(caller)],
+                )
+                .await?;
+            while let Some(row) = rows.next().await? {
+                out.push(Child {
+                    node,
+                    id: row.get::<String>(0)?,
+                    kind: row.get::<String>(1)?,
+                    name: row.get::<String>(2)?,
+                    slug: row.get::<String>(3)?,
+                    path: row.get::<String>(4)?,
+                    idx: row.get::<i64>(5)?,
+                    mutable: row.get::<i64>(6)? != 0,
+                    attachable: row.get::<i64>(7)? != 0,
+                    owner_did: opt_text(&row, 8),
+                    created_at: opt_text(&row, 9),
+                    data: opt_text(&row, 10).and_then(|s| serde_json::from_str(&s).ok()),
+                    child_count: row.get::<i64>(11)?,
+                    updated_at: opt_text(&row, 12),
+                    ordinal: None,
+                });
+            }
+        }
+        number_the_submitted(&mut out);
+        out.sort_by(|a, b| (a.idx, &a.created_at, &a.id).cmp(&(b.idx, &b.created_at, &b.id)));
+        Ok(out)
+    }
+
+    /// A document's number among the submitted siblings of its kind, from 1: the
+    /// A, B, C of a motion and the 1, 2, 3 of an amendment, for a page that loads
+    /// no sibling list. `None` for a draft, which is not numbered until it is
+    /// submitted, and for a root.
+    ///
+    /// The order is the interim's (`migrations/0017`): manual index, then last
+    /// update, then id, which makes it total, so two motions never swap letters
+    /// between one read and the next. A count of what sorts earlier, not a
+    /// ranking of everything.
+    pub async fn ordinal_of(&self, id: &str) -> Result<Option<i64>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT (SELECT count(*) + 1 FROM document s \
+                             WHERE s.parent_id = d.parent_id AND s.kind = d.kind \
+                               AND s.mutable = 0 AND s.{LIVE} \
+                               AND (s.idx, s.updated_at, s.id) < (d.idx, d.updated_at, d.id)) \
+                     FROM document d \
+                     WHERE d.id = ?1 AND d.mutable = 0 AND d.parent_id IS NOT NULL"
+                ),
+                [id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => Ok(Some(row.get::<i64>(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// The profiles of those `dids` the view knows. A DID it has never seen is
+    /// simply absent.
+    pub async fn profiles(
+        &self,
+        dids: &std::collections::BTreeSet<String>,
+    ) -> Result<std::collections::BTreeMap<String, Profile>, DbError> {
+        let mut out = std::collections::BTreeMap::new();
+        if dids.is_empty() {
+            return Ok(out);
+        }
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT did, handle, display_name, avatar_url FROM user WHERE did IN ({})",
+                    in_placeholders(dids.len())
+                ),
+                turso::params_from_iter(dids.iter().cloned()),
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            out.insert(
+                row.get::<String>(0)?,
+                Profile {
+                    handle: opt_text(&row, 1),
+                    display_name: opt_text(&row, 2),
+                    avatar_url: opt_text(&row, 3),
+                },
+            );
+        }
+        Ok(out)
+    }
+
+    /// Replace a document's authors, in the order given. An author with a DID
+    /// gets a user row if they have none, since the author table points at one.
+    pub async fn set_document_authors(&self, id: &str, authors: &[Author]) -> Result<(), DbError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let written = async {
+            conn.execute("DELETE FROM document_author WHERE document_id = ?1", [id])
+                .await?;
+            for (ord, author) in authors.iter().enumerate() {
+                if let Some(did) = author.did() {
+                    conn.execute("INSERT OR IGNORE INTO user (did) VALUES (?1)", [did])
+                        .await?;
+                }
+                conn.execute(
+                    "INSERT INTO document_author \
+                       (document_id, author_did, author_text, author_context, ord) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    vec![
+                        Value::Text(id.to_string()),
+                        opt_str_val(author.did()),
+                        opt_str_val(author.text()),
+                        opt_str_val(author.context()),
+                        Value::Integer(i64::try_from(ord).unwrap_or(i64::MAX)),
+                    ],
+                )
+                .await?;
+            }
+            conn.execute(
+                &format!("UPDATE document SET updated_at = {NOW} WHERE id = ?1"),
+                [id],
+            )
+            .await?;
+            Ok::<(), DbError>(())
+        }
+        .await;
+        conn.execute(
+            if written.is_ok() {
+                "COMMIT"
+            } else {
+                "ROLLBACK"
+            },
+            (),
+        )
+        .await?;
+        written
+    }
+
+    /// The way down to `path`, a crumb per segment. A segment the caller may not
+    /// read keeps its slug and loses its name.
+    pub async fn crumbs(&self, path: &str, caller: Option<&str>) -> Result<Vec<Crumb>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut out = Vec::new();
+        let mut prefix = String::new();
+        for slug in path.split('/').filter(|s| !s.is_empty()) {
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(slug);
+            let params = || vec![Value::Text(prefix.clone()), opt_str_val(caller)];
+            let mut named = None;
+            for (node, sql) in [
+                (
+                    "context",
+                    format!(
+                        "SELECT c.id, c.kind, c.name FROM context c \
+                         WHERE c.path = ?1 AND c.{LIVE} AND {}",
+                        readable_context("c", 2)
+                    ),
+                ),
+                (
+                    "document",
+                    format!(
+                        "SELECT d.id, d.kind, d.title FROM document d \
+                         WHERE d.path = ?1 AND d.{LIVE} AND {}",
+                        readable_document("d", 2)
+                    ),
+                ),
+            ] {
+                let mut rows = conn.query(&sql, params()).await?;
+                if let Some(row) = rows.next().await? {
+                    named = Some(CrumbName {
+                        id: row.get::<String>(0)?,
+                        node,
+                        kind: row.get::<String>(1)?,
+                        name: row.get::<String>(2)?,
+                    });
+                    break;
+                }
+            }
+            out.push(Crumb {
+                slug: slug.to_string(),
+                path: prefix.clone(),
+                named,
+            });
+        }
+        Ok(out)
+    }
+
+    /// The live node `id` names that `caller` may read, of either kind.
+    pub async fn read_node(&self, id: &str, caller: Option<&str>) -> Result<Option<Node>, DbError> {
+        if let Some(ctx) = self.read_context(id, caller).await? {
+            return Ok(Some(Node::Context(ctx)));
+        }
+        Ok(self.read_document(id, caller).await?.map(Node::Document))
+    }
+
+    /// The child content nodes directly under `parent_id` (a context or folder)
+    /// that `caller` may read, oldest first, each with its authors.
+    pub async fn list_children(
+        &self,
+        parent_id: &str,
+        caller: Option<&str>,
+    ) -> Result<Vec<Document>, DbError> {
         let bases = {
             let conn = self.db.acquire().await?;
             let mut rows = conn
                 .query(
                     &format!(
-                        "SELECT {DOC_COLS} FROM document WHERE parent_id = ?1 ORDER BY created_at"
+                        "SELECT {DOC_COLS} FROM document d \
+                         WHERE d.parent_id = ?1 AND d.{LIVE} AND {} AND {} \
+                         ORDER BY d.idx, d.created_at",
+                        readable_document("d", 2),
+                        listed_document("d", 2)
                     ),
-                    [parent_id],
+                    vec![Value::Text(parent_id.to_string()), opt_str_val(caller)],
                 )
                 .await?;
             let mut v = Vec::new();
@@ -629,12 +1704,44 @@ impl Store {
         Ok(out)
     }
 
-    /// The top-level contexts (groups/events with no parent), by name.
-    pub async fn list_root_contexts(&self) -> Result<Vec<Context>, DbError> {
+    /// The contexts `caller` has a seat in and has said yes to, at any depth, by
+    /// name: their groups and their events. `kind` narrows it to one of the two.
+    pub async fn list_my_contexts(
+        &self,
+        caller: &str,
+        kind: Option<&str>,
+    ) -> Result<Vec<Context>, DbError> {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
-                &format!("SELECT {CTX_COLS} FROM context WHERE parent_id IS NULL ORDER BY name"),
+                &format!(
+                    "SELECT {CTX_COLS} FROM context c \
+                     WHERE c.{LIVE} AND c.kind <> 'home' AND (?2 IS NULL OR c.kind = ?2) AND EXISTS \
+                       (SELECT 1 FROM member m WHERE m.context_id = c.id \
+                          AND m.user_did = ?1 AND m.accepted = 1) \
+                     ORDER BY c.name"
+                ),
+                vec![Value::Text(caller.to_string()), opt_str_val(kind)],
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(ctx_from_row(&row)?);
+        }
+        Ok(out)
+    }
+
+    /// Every place open to the public, at any depth, by name. Not the home: that
+    /// is the front page, and listing it among the places to go is furniture.
+    pub async fn list_public_contexts(&self) -> Result<Vec<Context>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT {CTX_COLS} FROM context c \
+                     WHERE c.{LIVE} AND c.visibility = 'public' AND c.kind <> 'home' \
+                     ORDER BY c.name"
+                ),
                 (),
             )
             .await?;
@@ -645,66 +1752,47 @@ impl Store {
         Ok(out)
     }
 
-    /// Documents whose title or content matches `query` (a case-insensitive
-    /// substring), most recent first, capped.
-    pub async fn search_documents(&self, query: &str) -> Result<Vec<Document>, DbError> {
-        let like = format!("%{query}%");
-        let bases = {
-            let conn = self.db.acquire().await?;
-            let mut rows = conn
-                .query(
-                    &format!(
-                        "SELECT {DOC_COLS} FROM document \
-                         WHERE title LIKE ?1 OR content LIKE ?1 ORDER BY created_at DESC LIMIT 50"
-                    ),
-                    [like.as_str()],
-                )
-                .await?;
-            let mut v = Vec::new();
-            while let Some(row) = rows.next().await? {
-                v.push(doc_base(&row)?);
-            }
-            v
-        };
-        let mut out = Vec::with_capacity(bases.len());
-        for b in bases {
-            out.push(self.hydrate_document(b).await?);
-        }
-        Ok(out)
-    }
-
-    /// The most recently created documents across all contexts (the "newest" feed).
-    pub async fn list_recent(&self, limit: i64) -> Result<Vec<Document>, DbError> {
-        let bases = {
-            let conn = self.db.acquire().await?;
-            let mut rows = conn
-                .query(
-                    &format!("SELECT {DOC_COLS} FROM document ORDER BY created_at DESC LIMIT ?1"),
-                    [limit],
-                )
-                .await?;
-            let mut v = Vec::new();
-            while let Some(row) = rows.next().await? {
-                v.push(doc_base(&row)?);
-            }
-            v
-        };
-        let mut out = Vec::with_capacity(bases.len());
-        for b in bases {
-            out.push(self.hydrate_document(b).await?);
-        }
-        Ok(out)
-    }
-
-    /// The comment thread on a node (comments whose `on_id` is the node), oldest
-    /// first. Each carries a DID or free-text author.
-    pub async fn get_comments(&self, on_id: &str) -> Result<Vec<Comment>, DbError> {
+    /// The top-level contexts `caller` may read, by name: those directly under
+    /// the home, and in a datastore that has no home, those under nothing.
+    pub async fn list_root_contexts(&self, caller: Option<&str>) -> Result<Vec<Context>, DbError> {
         let conn = self.db.acquire().await?;
         let mut rows = conn
             .query(
-                "SELECT id, on_id, context_id, author_did, author_text, text, created_at \
-                 FROM comment WHERE on_id = ?1 ORDER BY created_at",
-                [on_id],
+                &format!(
+                    "SELECT {CTX_COLS} FROM context c \
+                     WHERE c.kind <> 'home' AND c.{LIVE} AND {} \
+                       AND (c.parent_id IS NULL OR c.parent_id IN \
+                            (SELECT h.id FROM context h WHERE h.kind = 'home')) \
+                     ORDER BY c.name",
+                    readable_context("c", 1)
+                ),
+                vec![opt_str_val(caller)],
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(ctx_from_row(&row)?);
+        }
+        Ok(out)
+    }
+
+    /// The comments on a node (those whose `on_id` is the node) that `caller`
+    /// may read, oldest first. Each carries a DID or free-text author.
+    pub async fn get_comments(
+        &self,
+        on_id: &str,
+        caller: Option<&str>,
+    ) -> Result<Vec<Comment>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT k.id, k.on_id, k.context_id, k.author_did, k.author_text, k.text, \
+                            k.created_at, k.root_id, k.image, k.tombstone \
+                     FROM comment k WHERE k.on_id = ?1 AND {} ORDER BY k.created_at",
+                    readable_comment("k", 2)
+                ),
+                vec![Value::Text(on_id.to_string()), opt_str_val(caller)],
             )
             .await?;
         let mut out = Vec::new();
@@ -718,10 +1806,15 @@ impl Store {
             out.push(Comment {
                 id: row.get::<String>(0)?,
                 on_id: row.get::<String>(1)?,
+                root_id: row.get::<String>(7)?,
                 context_id: row.get::<String>(2)?,
                 author,
                 text: row.get::<String>(5)?,
+                image: opt_text(&row, 8),
+                tombstone: row.get::<i64>(9)? != 0,
                 created_at: opt_text(&row, 6),
+                deleted_at: None,
+                deleted_root: None,
                 legacy_id: None,
             });
         }
@@ -752,62 +1845,759 @@ impl Store {
         Ok(out)
     }
 
+    // -- Rows as they are, the bin included and no caller asked about: for
+    //    what mirrors them as records (`crate::spaces`). --
+
+    pub(crate) async fn row_document(&self, id: &str) -> Result<Option<Document>, DbError> {
+        let base = {
+            let conn = self.db.acquire().await?;
+            let mut rows = conn
+                .query(
+                    &format!("SELECT {DOC_COLS} FROM document d WHERE d.id = ?1"),
+                    [id],
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => doc_base(&row)?,
+                None => return Ok(None),
+            }
+        };
+        let mut doc = self.hydrate_document(base).await?;
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query("SELECT legacy_id FROM document WHERE id = ?1", [id])
+            .await?;
+        if let Some(row) = rows.next().await? {
+            doc.legacy_id = opt_text(&row, 0);
+        }
+        Ok(Some(doc))
+    }
+
+    pub(crate) async fn row_context(&self, id: &str) -> Result<Option<Context>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                &format!("SELECT {CTX_FULL}, legacy_id FROM context c WHERE c.id = ?1"),
+                [id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => {
+                let mut ctx = ctx_from_row(&row)?;
+                ctx.legacy_id = opt_text(&row, row.column_count() - 1);
+                Ok(Some(ctx))
+            }
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) async fn row_comment(&self, id: &str) -> Result<Option<Comment>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT id, on_id, root_id, context_id, author_did, author_text, text, image, \
+                        tombstone, created_at, deleted_at, deleted_root, legacy_id \
+                 FROM comment WHERE id = ?1",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(Comment {
+            id: row.get::<String>(0)?,
+            on_id: row.get::<String>(1)?,
+            root_id: row.get::<String>(2)?,
+            context_id: row.get::<String>(3)?,
+            author: match (opt_text(&row, 4), opt_text(&row, 5)) {
+                (Some(did), _) => Author::User { did },
+                (None, display) => Author::FreeText {
+                    display: display.unwrap_or_default(),
+                },
+            },
+            text: row.get::<String>(6)?,
+            image: opt_text(&row, 7),
+            tombstone: row.get::<i64>(8)? != 0,
+            created_at: opt_text(&row, 9),
+            deleted_at: opt_text(&row, 10),
+            deleted_root: opt_text(&row, 11),
+            legacy_id: opt_text(&row, 12),
+        }))
+    }
+
+    pub(crate) async fn row_reaction(&self, id: &str) -> Result<Option<Reaction>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT id, subject_uri, reactor_did, emoji, created_at, legacy_id \
+                 FROM reaction WHERE id = ?1",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(Reaction {
+            id: row.get::<String>(0)?,
+            subject_uri: row.get::<String>(1)?,
+            reactor_did: opt_text(&row, 2),
+            emoji: row.get::<String>(3)?,
+            created_at: opt_text(&row, 4),
+            legacy_id: opt_text(&row, 5),
+        }))
+    }
+
     // -- Write side (Phase 1): a freshly-authenticated DID authors its own
     //    content. Membership/authz gating (is_active_member) is deferred with the
     //    DID-binding flow; these inserts are unconditional given a caller DID. --
 
-    /// Create a document authored by `author_did` (the sole author). Returns the
-    /// new document id. Nullable-UNIQUE `legacy_id` is passed as explicit NULL.
+    /// Create a document, giving it the cleanest slug that is free under its
+    /// parent. Returns the new document's id.
+    ///
+    /// The slug is found inside one write transaction, so two members naming a
+    /// document the same thing at once get `name` and `name-2`, not an error.
     pub async fn create_document(
         &self,
-        context_id: &str,
-        parent_id: Option<&str>,
-        kind: &str,
-        title: &str,
-        content: Option<&str>,
-        author_did: &str,
-    ) -> Result<String, DbError> {
+        new: &NewDocument<'_>,
+    ) -> Result<(String, String), WriteError> {
         let id = format!("d-{}", crate::util::random_token(16));
+        let parent_id = new.parent_id.unwrap_or(new.context_id);
         let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let written = self.insert_document(&conn, &id, parent_id, new).await;
         conn.execute(
-            "INSERT INTO document (id, context_id, parent_id, kind, title, content, legacy_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)",
+            if written.is_ok() {
+                "COMMIT"
+            } else {
+                "ROLLBACK"
+            },
+            (),
+        )
+        .await?;
+        written.map(|path| (id, path))
+    }
+
+    /// The insert of [`Self::create_document`], for a caller that has more to
+    /// write in the same transaction, which it must already have begun. Returns
+    /// the path it was given, which says its slug too.
+    pub(crate) async fn insert_document(
+        &self,
+        conn: &turso::Connection,
+        id: &str,
+        parent_id: &str,
+        new: &NewDocument<'_>,
+    ) -> Result<String, WriteError> {
+        let parent = self
+            .parent(conn, parent_id)
+            .await?
+            .ok_or(WriteError::NoSuchParent)?;
+        if parent.context_id != new.context_id {
+            return Err(WriteError::ParentElsewhere);
+        }
+        let mut slug = String::new();
+        let mut path = String::new();
+        for candidate in crate::slug::candidates(new.title) {
+            path = parent.child_path(&candidate);
+            slug = candidate;
+            if !self.path_taken(conn, &path).await? {
+                break;
+            }
+        }
+        conn.execute(
+            "INSERT INTO document \
+             (id, context_id, parent_id, kind, title, slug, path, owner_did, content, data) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             vec![
-                Value::Text(id.clone()),
-                Value::Text(context_id.to_string()),
-                opt_str_val(parent_id),
-                Value::Text(kind.to_string()),
-                Value::Text(title.to_string()),
-                opt_str_val(content),
+                Value::Text(id.to_string()),
+                Value::Text(new.context_id.to_string()),
+                Value::Text(parent_id.to_string()),
+                Value::Text(new.kind.to_string()),
+                Value::Text(new.title.to_string()),
+                Value::Text(slug),
+                Value::Text(path.clone()),
+                Value::Text(new.author_did.to_string()),
+                opt_str_val(new.content),
+                opt_str_val(new.data),
             ],
         )
         .await?;
+        if new.credited {
+            conn.execute(
+                "INSERT INTO document_author (document_id, author_did, ord) VALUES (?1, ?2, 0)",
+                [id, new.author_did],
+            )
+            .await?;
+        }
+        crate::search::index(conn, id, new.title, new.content).await?;
+        Ok(path)
+    }
+
+    /// Move a live document, and everything under it, to a new parent. Returns
+    /// its new path. `across` says the parent may be in another context, which
+    /// is the caller's to have checked: it takes an owner of both.
+    ///
+    /// It keeps its slug if that is free there and takes the next one if not.
+    /// Every path in the subtree is rewritten, the binned ones too: a node that
+    /// is restored later must come back under where its parent now is.
+    pub async fn move_document(
+        &self,
+        id: &str,
+        new_parent_id: &str,
+        across: bool,
+    ) -> Result<String, WriteError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let moved = self.move_in(&conn, id, new_parent_id, across).await;
+        conn.execute(if moved.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())
+            .await?;
+        moved
+    }
+
+    async fn move_in(
+        &self,
+        conn: &turso::Connection,
+        id: &str,
+        new_parent_id: &str,
+        across: bool,
+    ) -> Result<String, WriteError> {
+        let mut rows = conn
+            .query(
+                &format!("SELECT path, slug, context_id FROM document WHERE id = ?1 AND {LIVE}"),
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Err(WriteError::NoSuchParent);
+        };
+        let (old_path, slug, context_id) = (
+            row.get::<String>(0)?,
+            row.get::<String>(1)?,
+            row.get::<String>(2)?,
+        );
+        drop(rows);
+        let parent = self
+            .parent(conn, new_parent_id)
+            .await?
+            .ok_or(WriteError::NoSuchParent)?;
+        let rehomed = parent.context_id != context_id;
+        if rehomed && !across {
+            return Err(WriteError::ParentElsewhere);
+        }
+        if parent.path == old_path || parent.path.starts_with(&format!("{old_path}/")) {
+            return Err(WriteError::IntoItself);
+        }
+        if rehomed {
+            let mut rows = conn
+                .query(
+                    &format!(
+                        "SELECT 1 FROM poll p JOIN document d ON d.id = p.id \
+                         WHERE p.open = 1 AND (d.id = ?1 OR {})",
+                        under("d.path", 2)
+                    ),
+                    [id, old_path.as_str()],
+                )
+                .await?;
+            if rows.next().await?.is_some() {
+                return Err(WriteError::OpenPollInside);
+            }
+        }
+
+        let mut new_slug = slug.clone();
+        let mut new_path = parent.child_path(&new_slug);
+        for candidate in std::iter::once(slug.clone()).chain(crate::slug::candidates(&slug).skip(1))
+        {
+            new_path = parent.child_path(&candidate);
+            new_slug = candidate;
+            if new_path == old_path || !self.path_taken(conn, &new_path).await? {
+                break;
+            }
+        }
+
+        // Descendants first, while the old prefix still identifies them.
+        for table in ["document", "context"] {
+            conn.execute(
+                &format!(
+                    "UPDATE {table} SET path = ?1 || substr(path, length(?2) + 1), \
+                       updated_at = {NOW} \
+                     WHERE substr(path, 1, length(?2) + 1) = ?2 || '/'"
+                ),
+                [new_path.as_str(), old_path.as_str()],
+            )
+            .await?;
+        }
         conn.execute(
-            "INSERT INTO document_author (document_id, author_did, author_text, ord) \
-             VALUES (?1, ?2, NULL, 0)",
-            [id.as_str(), author_did],
+            &format!(
+                "UPDATE document SET parent_id = ?1, slug = ?2, path = ?3, \
+                   updated_at = {NOW} WHERE id = ?4"
+            ),
+            [new_parent_id, new_slug.as_str(), new_path.as_str(), id],
         )
         .await?;
-        Ok(id)
+        if rehomed {
+            self.rehome(conn, id, &new_path, &context_id, &parent.context_id)
+                .await?;
+        }
+        Ok(new_path)
+    }
+
+    /// Hand the documents at and under `path` that belong to context `from` over
+    /// to context `to`, with what hangs on them. A group inside the subtree, and
+    /// what is its own, stays its own.
+    ///
+    /// The comments, the files and the polls go along because each is read
+    /// through its OWN context: left behind, a file would stay readable by the
+    /// old group and unreadable by the new.
+    async fn rehome(
+        &self,
+        conn: &turso::Connection,
+        id: &str,
+        path: &str,
+        from: &str,
+        to: &str,
+    ) -> Result<(), WriteError> {
+        let moved = format!(
+            "SELECT d.id FROM document d WHERE d.context_id = ?2 AND (d.id = ?3 OR {})",
+            under("d.path", 4)
+        );
+        let args = [to, from, id, path];
+        // By root, so that the replies go too and not only what they answer.
+        conn.execute(
+            &format!(
+                "UPDATE blob SET context_id = ?1 WHERE context_id = ?2 AND id IN \
+                   (SELECT k.image FROM comment k WHERE k.root_id IN ({moved}))"
+            ),
+            args,
+        )
+        .await?;
+        conn.execute(
+            &format!("UPDATE comment SET context_id = ?1 WHERE root_id IN ({moved})"),
+            args,
+        )
+        .await?;
+        for field in ["$.fileId", "$.image"] {
+            conn.execute(
+                &format!(
+                    "UPDATE blob SET context_id = ?1 WHERE context_id = ?2 AND id IN \
+                       (SELECT json_extract(d.data, '{field}') FROM document d \
+                        WHERE d.context_id = ?2 AND (d.id = ?3 OR {}))",
+                    under("d.path", 4)
+                ),
+                args,
+            )
+            .await?;
+        }
+        conn.execute(
+            &format!("UPDATE poll SET context_id = ?1 WHERE id IN ({moved})"),
+            args,
+        )
+        .await?;
+        conn.execute(
+            &format!(
+                "UPDATE document SET context_id = ?1 \
+                 WHERE context_id = ?2 AND (id = ?3 OR {})",
+                under("path", 4)
+            ),
+            args,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// A document's authorization facts, whether or not it is in the bin.
+    /// Ungated: it answers a write check, and says nothing to the caller.
+    pub async fn document_meta(&self, id: &str) -> Result<Option<DocumentMeta>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT context_id, owner_did, mutable, path, parent_id, deleted_at IS NOT NULL \
+                 FROM document WHERE id = ?1",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(DocumentMeta {
+            context_id: row.get::<String>(0)?,
+            owner_did: opt_text(&row, 1),
+            mutable: row.get::<i64>(2)? != 0,
+            path: row.get::<String>(3)?,
+            parent_id: opt_text(&row, 4),
+            binned: row.get::<i64>(5)? != 0,
+        }))
+    }
+
+    /// The bin of a context: each document that was deleted, but not the ones
+    /// that only went along with a parent, which come back with it. `owner`
+    /// narrows it to what one person created.
+    pub async fn list_binned(
+        &self,
+        context_id: &str,
+        owner: Option<&str>,
+    ) -> Result<Vec<Binned>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT d.id, d.kind, d.title, d.path, d.owner_did, d.deleted_at \
+                 FROM document d \
+                 WHERE d.context_id = ?1 AND d.deleted_at IS NOT NULL \
+                   AND (?2 IS NULL OR d.owner_did = ?2) \
+                   AND d.deleted_root = d.id \
+                 ORDER BY d.deleted_at DESC",
+                vec![Value::Text(context_id.to_string()), opt_str_val(owner)],
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            out.push(Binned {
+                node: "document",
+                id: row.get::<String>(0)?,
+                kind: row.get::<String>(1)?,
+                title: row.get::<String>(2)?,
+                path: row.get::<String>(3)?,
+                owner_did: opt_text(&row, 4),
+                deleted_at: row.get::<String>(5)?,
+            });
+        }
+        // A group or an event that sat in this context. It is its own context,
+        // so it is found by where it sat.
+        let mut rows = conn
+            .query(
+                "SELECT c.id, c.kind, c.name, c.path, c.owner_did, c.deleted_at FROM context c \
+                 WHERE c.deleted_root = c.id AND (?2 IS NULL OR c.owner_did = ?2) \
+                   AND (c.parent_id = ?1 OR c.parent_id IN \
+                        (SELECT d.id FROM document d WHERE d.context_id = ?1))",
+                vec![Value::Text(context_id.to_string()), opt_str_val(owner)],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            out.push(Binned {
+                node: "context",
+                id: row.get::<String>(0)?,
+                kind: row.get::<String>(1)?,
+                title: row.get::<String>(2)?,
+                path: row.get::<String>(3)?,
+                owner_did: opt_text(&row, 4),
+                deleted_at: row.get::<String>(5)?,
+            });
+        }
+        // A comment, shown by how it begins and filed under what it was on.
+        let mut rows = conn
+            .query(
+                "SELECT k.id, substr(k.text, 1, 80), k.author_did, k.deleted_at, \
+                        coalesce((SELECT d.path FROM document d WHERE d.id = k.root_id), '') \
+                 FROM comment k \
+                 WHERE k.context_id = ?1 AND k.deleted_root = k.id AND k.deleted_at IS NOT NULL \
+                   AND (?2 IS NULL OR k.author_did = ?2)",
+                vec![Value::Text(context_id.to_string()), opt_str_val(owner)],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            out.push(Binned {
+                node: "comment",
+                id: row.get::<String>(0)?,
+                kind: "comment".to_string(),
+                title: row.get::<String>(1)?,
+                path: row.get::<String>(4)?,
+                owner_did: opt_text(&row, 2),
+                deleted_at: row.get::<String>(3)?,
+            });
+        }
+        out.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+        Ok(out)
+    }
+
+    /// Apply `patch` to a live document. Returns whether there was one.
+    pub async fn update_document(
+        &self,
+        id: &str,
+        patch: &DocumentPatch<'_>,
+    ) -> Result<bool, DbError> {
+        let mut sets = Vec::new();
+        let mut params = Vec::new();
+        let mut set = |column: &'static str, value: Value| {
+            params.push(value);
+            sets.push(format!("{column} = ?{}", params.len()));
+        };
+        let flag = |b: bool| Value::Integer(i64::from(b));
+        if let Some(title) = patch.title {
+            set("title", Value::Text(title.to_string()));
+        }
+        if let Some(content) = patch.content {
+            set("content", Value::Text(content.to_string()));
+        }
+        if let Some(data) = patch.data {
+            set("data", Value::Text(data.to_string()));
+        }
+        if let Some(mutable) = patch.mutable {
+            set("mutable", flag(mutable));
+        }
+        if let Some(attachable) = patch.attachable {
+            set("attachable", flag(attachable));
+        }
+        if let Some(idx) = patch.idx {
+            set("idx", Value::Integer(idx));
+        }
+        if let Some(created_at) = patch.created_at {
+            params.push(Value::Text(created_at.to_string()));
+            params.push(Value::Integer(i64::from(patch.day_only)));
+            let redated = crate::util::redated_sql("created_at", params.len() - 1, params.len());
+            sets.push(format!("created_at = {redated}"));
+        }
+        params.push(Value::Text(id.to_string()));
+        let conn = self.db.acquire().await?;
+        let changed = conn
+            .execute(
+                &format!(
+                    "UPDATE document SET {}updated_at = {NOW} \
+                     WHERE id = ?{} AND {LIVE}",
+                    sets.iter().map(|s| format!("{s}, ")).collect::<String>(),
+                    params.len()
+                ),
+                params,
+            )
+            .await?;
+        if changed > 0 && (patch.title.is_some() || patch.content.is_some()) {
+            crate::search::index_document(&conn, id).await?;
+        }
+        Ok(changed > 0)
+    }
+
+    /// Put the node `id` at `path`, and everything under it, in the bin, contexts
+    /// included. Each row is marked with `id` as the root it went with, so
+    /// [`Store::restore_subtree`] brings back exactly those and nothing that was
+    /// deleted from inside the subtree before.
+    pub async fn bin_subtree(&self, id: &str, path: &str) -> Result<u64, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut binned = 0;
+        for table in ["document", "context"] {
+            binned += conn
+                .execute(
+                    &format!(
+                        "UPDATE {table} SET deleted_at = {NOW}, deleted_root = ?1, \
+                           updated_at = {NOW} \
+                         WHERE {LIVE} AND {SUBTREE}"
+                    ),
+                    [id, path],
+                )
+                .await?;
+        }
+        Ok(binned)
+    }
+
+    /// Bring back what went to the bin with the node `id`, whose path is `path`.
+    /// Refused if a live node has since taken that path; a path deeper in the
+    /// subtree cannot be taken while its root's is free.
+    pub async fn restore_subtree(&self, id: &str, path: &str) -> Result<u64, WriteError> {
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let restored = self.restore_in(&conn, id, path).await;
+        conn.execute(
+            if restored.is_ok() {
+                "COMMIT"
+            } else {
+                "ROLLBACK"
+            },
+            (),
+        )
+        .await?;
+        restored
+    }
+
+    async fn restore_in(
+        &self,
+        conn: &turso::Connection,
+        id: &str,
+        path: &str,
+    ) -> Result<u64, WriteError> {
+        if self.path_taken(conn, path).await? {
+            return Err(WriteError::PathTaken);
+        }
+        let mut restored = 0;
+        for table in ["document", "context"] {
+            restored += conn
+                .execute(
+                    &format!(
+                        "UPDATE {table} SET deleted_at = NULL, deleted_root = NULL, \
+                           updated_at = {NOW} \
+                         WHERE deleted_root = ?1"
+                    ),
+                    [id],
+                )
+                .await?;
+        }
+        Ok(restored)
     }
 
     /// Create a comment on `on_id` authored by `author_did`. Returns its id.
+    /// Its thread hangs on what `on_id`'s does, or on `on_id` itself.
     pub async fn create_comment(
         &self,
         on_id: &str,
         context_id: &str,
         author_did: &str,
         text: &str,
+        image: Option<&str>,
     ) -> Result<String, DbError> {
         let id = format!("k-{}", crate::util::random_token(16));
         let conn = self.db.acquire().await?;
         conn.execute(
-            "INSERT INTO comment (id, on_id, context_id, author_did, author_text, text, legacy_id) \
-             VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL)",
-            [id.as_str(), on_id, context_id, author_did, text],
+            "INSERT INTO comment (id, on_id, root_id, context_id, author_did, text, image) \
+             VALUES (?1, ?2, coalesce((SELECT up.root_id FROM comment up WHERE up.id = ?2), ?2), \
+                     ?3, ?4, ?5, ?6)",
+            vec![
+                Value::Text(id.clone()),
+                Value::Text(on_id.to_string()),
+                Value::Text(context_id.to_string()),
+                Value::Text(author_did.to_string()),
+                Value::Text(text.to_string()),
+                opt_str_val(image),
+            ],
         )
         .await?;
         Ok(id)
+    }
+
+    /// A comment's authorization facts, in the bin or out of it. Ungated: it
+    /// answers a write check, and says nothing to the caller.
+    pub async fn comment_meta(&self, id: &str) -> Result<Option<CommentMeta>, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT context_id, author_did, on_id, tombstone, deleted_at IS NOT NULL, \
+                        coalesce(deleted_root = id, 0) \
+                 FROM comment WHERE id = ?1",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        Ok(Some(CommentMeta {
+            context_id: row.get::<String>(0)?,
+            author_did: opt_text(&row, 1),
+            on_id: row.get::<String>(2)?,
+            tombstone: row.get::<i64>(3)? != 0,
+            binned: row.get::<i64>(4)? != 0,
+            bin_entry: row.get::<i64>(5)? != 0,
+        }))
+    }
+
+    /// Delete a live comment. One that has been answered is emptied and stays,
+    /// since its replies hang on it; any other goes to the bin, where it can be
+    /// brought back from. `None` if it was not there to delete.
+    pub async fn delete_comment(&self, id: &str) -> Result<Option<CommentGone>, DbError> {
+        let _turn = self.db.write_turn().await;
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let gone = self.delete_comment_in(&conn, id).await;
+        conn.execute(if gone.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())
+            .await?;
+        gone
+    }
+
+    async fn delete_comment_in(
+        &self,
+        conn: &turso::Connection,
+        id: &str,
+    ) -> Result<Option<CommentGone>, DbError> {
+        let mut rows = conn
+            .query(
+                "SELECT image, EXISTS (SELECT 1 FROM comment r \
+                                       WHERE r.on_id = k.id AND r.deleted_at IS NULL) \
+                 FROM comment k WHERE k.id = ?1 AND k.deleted_at IS NULL AND k.tombstone = 0",
+                [id],
+            )
+            .await?;
+        let Some(row) = rows.next().await? else {
+            return Ok(None);
+        };
+        let (image, answered) = (opt_text(&row, 0), row.get::<i64>(1)? != 0);
+        drop(rows);
+        if !answered {
+            conn.execute(
+                "UPDATE comment SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), \
+                   deleted_root = id WHERE id = ?1",
+                [id],
+            )
+            .await?;
+            return Ok(Some(CommentGone::Binned));
+        }
+        // The reactions go too: they were to something that now says nothing.
+        conn.execute("DELETE FROM reaction WHERE subject_uri = ?1", [id])
+            .await?;
+        conn.execute(
+            "UPDATE comment SET text = '', author_did = NULL, author_text = '', image = NULL, \
+               tombstone = 1 WHERE id = ?1",
+            [id],
+        )
+        .await?;
+        Ok(Some(CommentGone::Emptied { image }))
+    }
+
+    /// Bring back what one bin entry holds. Returns how many comments that was.
+    pub async fn restore_comment(&self, id: &str) -> Result<u64, DbError> {
+        let conn = self.db.acquire().await?;
+        Ok(conn
+            .execute(
+                "UPDATE comment SET deleted_at = NULL, deleted_root = NULL \
+                 WHERE deleted_root = ?1 AND deleted_at IS NOT NULL",
+                [id],
+            )
+            .await?)
+    }
+
+    /// Whether a comment can be shown again where it was: what it answers is
+    /// still there, and is not itself a comment in the bin.
+    pub async fn comment_parent_stands(&self, on_id: &str) -> Result<bool, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM comment WHERE id = ?1 AND deleted_at IS NULL \
+                 UNION ALL SELECT 1 FROM document WHERE id = ?1 LIMIT 1",
+                [on_id],
+            )
+            .await?;
+        Ok(rows.next().await?.is_some())
+    }
+
+    /// Delete for good what one bin entry holds, with the reactions to it.
+    /// Returns how many comments went, and the pictures they held.
+    pub async fn purge_comment(&self, id: &str) -> Result<(u64, Vec<String>), DbError> {
+        let _turn = self.db.write_turn().await;
+        let conn = self.db.acquire().await?;
+        conn.execute("BEGIN IMMEDIATE", ()).await?;
+        let purged = async {
+            let going = "SELECT id FROM comment WHERE deleted_root = ?1 AND deleted_at IS NOT NULL";
+            let mut images = Vec::new();
+            let mut rows = conn
+                .query(
+                    "SELECT image FROM comment WHERE deleted_root = ?1 AND deleted_at IS NOT NULL \
+                       AND image IS NOT NULL",
+                    [id],
+                )
+                .await?;
+            while let Some(row) = rows.next().await? {
+                images.extend(opt_text(&row, 0));
+            }
+            drop(rows);
+            conn.execute(
+                &format!("DELETE FROM reaction WHERE subject_uri IN ({going})"),
+                [id],
+            )
+            .await?;
+            let comments = conn
+                .execute(
+                    "DELETE FROM comment WHERE deleted_root = ?1 AND deleted_at IS NOT NULL",
+                    [id],
+                )
+                .await?;
+            Ok::<_, DbError>((comments, images))
+        }
+        .await;
+        conn.execute(if purged.is_ok() { "COMMIT" } else { "ROLLBACK" }, ())
+            .await?;
+        purged
     }
 
     /// Add `reactor_did`'s `emoji` reaction to `subject_uri` (idempotent via
@@ -819,7 +2609,7 @@ impl Store {
         emoji: &str,
     ) -> Result<String, DbError> {
         let id = format!("r-{}", crate::util::random_token(16));
-        let now = crate::util::rfc3339_utc(crate::util::now_secs());
+        let now = crate::util::now_stamp();
         self.upsert_reaction(&id, subject_uri, reactor_did, emoji, &now)
             .await?;
         Ok(id)
@@ -845,6 +2635,8 @@ impl Store {
     //    event), comments, and resolutions, keyed by the record's at-uri. --
 
     /// Materialize a public `group`/`event` record into the `context` view.
+    /// `parent_uri` is a foreign key, so the caller must have checked it is in
+    /// the view.
     pub async fn upsert_public_context(
         &self,
         uri: &str,
@@ -855,36 +2647,34 @@ impl Store {
         created_at: &str,
     ) -> Result<(), DbError> {
         let conn = self.db.acquire().await?;
-        let updated = conn
-            .execute(
-                "UPDATE context SET kind = ?1, name = ?2, slug = ?3, parent_id = ?4, \
-                 visibility = 'public', published_uri = ?5, created_at = ?6 WHERE id = ?5",
-                vec![
-                    Value::Text(kind.to_string()),
-                    Value::Text(name.to_string()),
-                    Value::Text(slug.to_string()),
-                    opt_str_val(parent_uri),
-                    Value::Text(uri.to_string()),
-                    Value::Text(created_at.to_string()),
-                ],
-            )
-            .await?;
-        if updated == 0 {
-            conn.execute(
+        let path = match parent_uri {
+            Some(parent) => match self.parent(&conn, parent).await? {
+                Some(parent) => parent.child_path(slug),
+                None => return Ok(()),
+            },
+            None => slug.to_string(),
+        };
+        conn.execute(
+            &format!(
                 "INSERT INTO context \
-                 (id, kind, name, slug, parent_id, visibility, published_uri, created_at, legacy_id) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'public', ?1, ?6, NULL)",
-                vec![
-                    Value::Text(uri.to_string()),
-                    Value::Text(kind.to_string()),
-                    Value::Text(name.to_string()),
-                    Value::Text(slug.to_string()),
-                    opt_str_val(parent_uri),
-                    Value::Text(created_at.to_string()),
-                ],
-            )
-            .await?;
-        }
+                 (id, kind, name, slug, path, parent_id, visibility, published_uri, created_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'public', ?1, ?7) \
+                 ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, \
+                   slug = excluded.slug, path = excluded.path, parent_id = excluded.parent_id, \
+                   created_at = excluded.created_at, updated_at = {NOW}"
+            ),
+            vec![
+                Value::Text(uri.to_string()),
+                Value::Text(kind.to_string()),
+                Value::Text(name.to_string()),
+                Value::Text(slug.to_string()),
+                Value::Text(path),
+                opt_str_val(parent_uri),
+                Value::Text(created_at.to_string()),
+            ],
+        )
+        .await?;
+        crate::search::index(&conn, uri, name, None).await?;
         Ok(())
     }
 
@@ -894,6 +2684,37 @@ impl Store {
         conn.execute("DELETE FROM context WHERE id = ?1", [uri])
             .await?;
         Ok(())
+    }
+
+    /// Whether `id` is a row of `table`. `table` is one of this crate's own table
+    /// names, never caller input.
+    async fn exists(&self, table: &'static str, id: &str) -> Result<bool, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(&format!("SELECT 1 FROM {table} WHERE id = ?1"), [id])
+            .await?;
+        Ok(rows.next().await?.is_some())
+    }
+
+    pub async fn context_exists(&self, id: &str) -> Result<bool, DbError> {
+        self.exists("context", id).await
+    }
+
+    pub async fn post_exists(&self, id: &str) -> Result<bool, DbError> {
+        self.exists("post", id).await
+    }
+
+    /// Whether `id` is a post anyone may read: one mirrored from the public
+    /// network. Nothing serves a private post yet, so nothing may act on one.
+    pub async fn public_post_exists(&self, id: &str) -> Result<bool, DbError> {
+        let conn = self.db.acquire().await?;
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM post WHERE id = ?1 AND visibility = 'public'",
+                [id],
+            )
+            .await?;
+        Ok(rows.next().await?.is_some())
     }
 
     /// The context a subject at-uri belongs to, resolved through the view (a
@@ -930,22 +2751,16 @@ impl Store {
         created_at: &str,
     ) -> Result<(), DbError> {
         let conn = self.db.acquire().await?;
-        let updated = conn
-            .execute(
-                "UPDATE comment SET on_id = ?1, context_id = ?2, author_did = ?3, text = ?4, \
-                 created_at = ?5 WHERE id = ?6",
-                [on_id, context_id, author_did, text, created_at, uri],
-            )
-            .await?;
-        if updated == 0 {
-            conn.execute(
-                "INSERT INTO comment \
-                 (id, on_id, context_id, author_did, author_text, text, created_at, legacy_id) \
-                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?6, NULL)",
-                [uri, on_id, context_id, author_did, text, created_at],
-            )
-            .await?;
-        }
+        conn.execute(
+            "INSERT INTO comment (id, on_id, root_id, context_id, author_did, text, created_at) \
+             VALUES (?1, ?2, coalesce((SELECT up.root_id FROM comment up WHERE up.id = ?2), ?2), \
+                     ?3, ?4, ?5, ?6) \
+             ON CONFLICT(id) DO UPDATE SET on_id = excluded.on_id, root_id = excluded.root_id, \
+               context_id = excluded.context_id, author_did = excluded.author_did, \
+               text = excluded.text, created_at = excluded.created_at",
+            [uri, on_id, context_id, author_did, text, created_at],
+        )
+        .await?;
         Ok(())
     }
 
@@ -959,7 +2774,8 @@ impl Store {
 
     /// Materialize a public `resolution` record as a `document` (kind
     /// `resolution`), its body + status folded into the content JSON, authored by
-    /// the org DID. `context_id` is the resolution's context at-uri.
+    /// the org DID. `context_id` is the resolution's context at-uri and a foreign
+    /// key, so the caller must have checked it is in the view.
     #[allow(clippy::too_many_arguments)]
     pub async fn upsert_public_resolution(
         &self,
@@ -973,29 +2789,46 @@ impl Store {
     ) -> Result<(), DbError> {
         let content = serde_json::json!({ "body": body, "status": status }).to_string();
         let conn = self.db.acquire().await?;
-        let updated = conn
-            .execute(
-                "UPDATE document SET context_id = ?1, kind = 'resolution', title = ?2, \
-                 content = ?3, visibility = 'public', published_uri = ?4, created_at = ?5 \
-                 WHERE id = ?4",
-                [context_id, title, content.as_str(), uri, created_at],
-            )
-            .await?;
-        if updated == 0 {
-            conn.execute(
+        let Some(parent) = self.parent(&conn, context_id).await? else {
+            return Ok(());
+        };
+        // The record key, not the title: a mirrored record's place must not
+        // depend on what else happens to be in the view when it arrives.
+        let slug = uri.rsplit('/').next().unwrap_or(uri);
+        let path = parent.child_path(slug);
+        conn.execute(
+            &format!(
                 "INSERT INTO document \
-                 (id, context_id, parent_id, kind, title, content, visibility, published_uri, created_at, legacy_id) \
-                 VALUES (?1, ?2, NULL, 'resolution', ?3, ?4, 'public', ?1, ?5, NULL)",
-                [uri, context_id, title, content.as_str(), created_at],
-            )
+                 (id, context_id, parent_id, kind, title, slug, path, owner_did, content, \
+                  visibility, published_uri, created_at) \
+                 VALUES (?1, ?2, ?2, 'resolution', ?3, ?4, ?5, ?6, ?7, 'public', ?1, ?8) \
+                 ON CONFLICT(id) DO UPDATE SET context_id = excluded.context_id, \
+                   parent_id = excluded.parent_id, title = excluded.title, \
+                   path = excluded.path, content = excluded.content, \
+                   created_at = excluded.created_at, updated_at = {NOW}"
+            ),
+            [
+                uri,
+                context_id,
+                title,
+                slug,
+                path.as_str(),
+                author_did,
+                content.as_str(),
+                created_at,
+            ],
+        )
+        .await?;
+        // A resolution's words are its body, which is not Slate.
+        let words = serde_json::json!({ "text": body }).to_string();
+        crate::search::index(&conn, uri, title, Some(&words)).await?;
+        conn.execute("DELETE FROM document_author WHERE document_id = ?1", [uri])
             .await?;
-            conn.execute(
-                "INSERT INTO document_author (document_id, author_did, author_text, ord) \
-                 VALUES (?1, ?2, NULL, 0)",
-                [uri, author_did],
-            )
-            .await?;
-        }
+        conn.execute(
+            "INSERT INTO document_author (document_id, author_did, ord) VALUES (?1, ?2, 0)",
+            [uri, author_did],
+        )
+        .await?;
         Ok(())
     }
 
@@ -1007,6 +2840,24 @@ impl Store {
         conn.execute("DELETE FROM document WHERE id = ?1", [uri])
             .await?;
         Ok(())
+    }
+}
+
+/// Number the submitted documents among `children`, per kind, in the order
+/// [`Store::ordinal_of`] counts in, so a listing and a page agree on a letter.
+fn number_the_submitted(children: &mut [Child]) {
+    let mut order: Vec<usize> = (0..children.len())
+        .filter(|&i| children[i].node == "document" && !children[i].mutable)
+        .collect();
+    order.sort_by(|&a, &b| {
+        let key = |c: &Child| (c.idx, c.updated_at.clone(), c.id.clone());
+        key(&children[a]).cmp(&key(&children[b]))
+    });
+    let mut counted = std::collections::BTreeMap::new();
+    for i in order {
+        let n = counted.entry(children[i].kind.clone()).or_insert(0);
+        *n += 1;
+        children[i].ordinal = Some(*n);
     }
 }
 
@@ -1039,16 +2890,16 @@ mod tests {
         conn.execute_batch(
             "INSERT INTO user (did, handle, display_name, legacy_id) \
                VALUES ('did:plc:alice', 'alice.test', 'Alice', NULL);
-             INSERT INTO context (id, kind, name, slug, legacy_id) \
-               VALUES ('c1', 'group', 'Group One', 'group-one', NULL);
-             INSERT INTO document (id, context_id, kind, title, legacy_id) \
-               VALUES ('d1', 'c1', 'document', 'Doc', NULL);
+             INSERT INTO context (id, kind, name, slug, path) \
+               VALUES ('c1', 'group', 'Group One', 'group-one', 'group-one');
+             INSERT INTO document (id, context_id, parent_id, kind, title, slug, path) \
+               VALUES ('d1', 'c1', 'c1', 'document', 'Doc', 'doc', 'group-one/doc');
              INSERT INTO document_author (document_id, author_did, author_text, ord) \
                VALUES ('d1', 'did:plc:alice', NULL, 0);
              INSERT INTO document_author (document_id, author_did, author_text, ord) \
                VALUES ('d1', NULL, 'Guest', 1);
-             INSERT INTO comment (id, on_id, context_id, author_did, author_text, text, legacy_id) \
-               VALUES ('k1', 'd1', 'c1', 'did:plc:alice', NULL, 'nice', NULL);
+             INSERT INTO comment (id, on_id, root_id, context_id, author_did, author_text, text, legacy_id) \
+               VALUES ('k1', 'd1', 'd1', 'c1', 'did:plc:alice', NULL, 'nice', NULL);
              INSERT INTO member (id, user_did, context_id, role, active, email, claim_token, legacy_id) \
                VALUES ('m1', 'did:plc:alice', 'c1', 'owner', 1, 'alice@x.dk', 'tok-a', NULL);
              INSERT INTO member (id, user_did, context_id, role, active, email, claim_token, legacy_id) \
@@ -1114,6 +2965,8 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn bind_member_to_user_is_guarded_and_idempotent() {
         let store = Store::new(seeded().await);
+        // Binding follows a login, which has already written the user row.
+        store.upsert_user_min("did:plc:bob").await.expect("user");
         // First bind of the pending invite succeeds.
         assert!(
             store
@@ -1147,64 +3000,5 @@ mod tests {
             .expect("some");
         assert_eq!(info.parent_id.as_deref(), Some("c1"));
         assert_eq!(info.claim_token.as_deref(), Some("tok-a"));
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn active_member_emails_excludes_inactive() {
-        let store = Store::new(seeded().await);
-        let mut emails = store.active_member_emails("c1").await.expect("query");
-        emails.sort();
-        // m1 + m2 are active; m3 is inactive and excluded.
-        assert_eq!(emails, vec!["alice@x.dk", "bob@x.dk"]);
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn push_subscriptions_upsert_fetch_and_delete() {
-        let store = Store::new(seeded().await);
-        store
-            .upsert_push_subscription("did:plc:alice", "alice@x.dk", "https://ep/1", "k1", "a1")
-            .await
-            .expect("insert");
-        // Re-subscribing the same endpoint updates keys, not duplicates.
-        store
-            .upsert_push_subscription("did:plc:alice", "alice@x.dk", "https://ep/1", "k2", "a2")
-            .await
-            .expect("update");
-        store
-            .upsert_push_subscription("did:plc:bob", "bob@x.dk", "https://ep/2", "k3", "a3")
-            .await
-            .expect("insert 2");
-
-        let subs = store
-            .subscriptions_for_emails(&["alice@x.dk".into(), "bob@x.dk".into()])
-            .await
-            .expect("fetch");
-        assert_eq!(
-            subs.len(),
-            2,
-            "one row per endpoint (no duplicate on upsert)"
-        );
-        let alice = subs.iter().find(|s| s.endpoint == "https://ep/1").unwrap();
-        assert_eq!(alice.p256dh, "k2", "upsert refreshed the key");
-
-        // Empty inputs short-circuit.
-        assert!(
-            store
-                .subscriptions_for_emails(&[])
-                .await
-                .expect("empty")
-                .is_empty()
-        );
-
-        store
-            .delete_subscriptions_by_endpoint(&["https://ep/1".into()])
-            .await
-            .expect("delete");
-        let after = store
-            .subscriptions_for_emails(&["alice@x.dk".into(), "bob@x.dk".into()])
-            .await
-            .expect("fetch after delete");
-        assert_eq!(after.len(), 1);
-        assert_eq!(after[0].endpoint, "https://ep/2");
     }
 }

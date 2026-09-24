@@ -1,0 +1,52 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.parseRoster",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Read a bulk member-import roster: the raw .xlsx as the body, the rows of its first sheet back. The header row names the columns `Fornavn`, `Efternavn` and `Email`, in any case and order. A row with a name or an address is kept; an empty `email` means the office has none. It reads and nothing more: `inviteMembers` is what puts people on a roster.",
+			"input": {
+				"encoding": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["entries"],
+					"properties": {
+						"entries": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"required": ["name", "email"],
+								"properties": {
+									"name": {
+										"type": "string"
+									},
+									"email": {
+										"type": "string",
+										"description": "Lowercased. Empty when the row has none."
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "The body is not an .xlsx workbook."
+				},
+				{
+					"name": "RosterTooLarge",
+					"description": "The file is larger than a roster can be (HTTP 413)."
+				}
+			]
+		}
+	}
+}

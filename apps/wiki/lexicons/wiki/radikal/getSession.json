@@ -1,0 +1,24 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.getSession",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "Who the presented session belongs to. Requires authentication.",
+			"output": {
+				"encoding": "application/json",
+				"schema": { "type": "ref", "ref": "wiki.radikal.defs#userView" }
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The request carries no session."
+				},
+				{
+					"name": "InvalidToken",
+					"description": "The session is unknown or has expired."
+				}
+			]
+		}
+	}
+}

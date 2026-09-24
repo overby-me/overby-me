@@ -55,6 +55,24 @@ fn issue_blind_unblind_verify_round_trip() {
         .expect("unblinded signature verifies");
 }
 
+/// A custodian restarts mid-poll: the issuer it restores from the stored key is
+/// the same issuer, to a voter and to the board.
+#[test]
+fn an_issuer_survives_being_stored() {
+    let der = issuer().secret_der().expect("export");
+    let restored = TokenIssuer::from_secret_der(&der).expect("restore");
+    assert_eq!(
+        restored.public_key().to_der().expect("der"),
+        issuer().public_key().to_der().expect("der")
+    );
+    let entry = issue_token(&restored, vec![0]);
+    issuer()
+        .public_key()
+        .verify(&entry.signature, entry.msg_randomizer, &entry.token)
+        .expect("a token the restored issuer signed verifies under the published key");
+    assert!(TokenIssuer::from_secret_der(b"not a key").is_err());
+}
+
 #[test]
 fn cross_poll_token_rejected() {
     // Per-poll keys ARE the poll binding: a token issued by poll B's issuer

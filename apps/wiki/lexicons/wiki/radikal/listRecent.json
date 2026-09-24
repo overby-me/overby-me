@@ -1,0 +1,50 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.listRecent",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "The feed: submitted content and comments, newest first, each with what it is about. A draft is nobody's news, and neither is what has lost its parent. With `context`, that context's own content (a group's feed is not its events': each is its own context). Without, everything in the contexts the caller belongs to, or whatever is public for someone not signed in.",
+			"parameters": {
+				"type": "params",
+				"properties": {
+					"context": {
+						"type": "string"
+					},
+					"limit": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 100,
+						"default": 20
+					},
+					"offset": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 2000,
+						"default": 0
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["items", "profiles"],
+					"properties": {
+						"items": {
+							"type": "array",
+							"items": {
+								"type": "ref",
+								"ref": "wiki.radikal.defs#feedItemView"
+							}
+						},
+						"profiles": {
+							"type": "unknown",
+							"description": "A map from DID to profile, for every `by_did` in `items`."
+						}
+					}
+				}
+			}
+		}
+	}
+}

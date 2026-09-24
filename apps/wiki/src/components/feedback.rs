@@ -64,8 +64,10 @@ pub fn FeedbackDialog() -> Element {
                     if bytes.len() > MAX_SCREENSHOT_BYTES {
                         show_snackbar(&t("editor.imageTooLarge"));
                     } else {
+                        // No page it belongs to: `None` for the context.
                         match crate::nhost::upload_file(
                             token.as_deref(),
+                            None,
                             bytes.to_vec(),
                             &name,
                             &ctype,

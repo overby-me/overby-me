@@ -11,17 +11,6 @@
 /// Idempotent (`IF NOT EXISTS`) so a persistent-file process can re-run it on
 /// restart without erroring.
 pub const RUNTIME_DDL: &str = r#"
--- Web Push device subscriptions (reply-notification fan-out targets). Keyed by
--- endpoint so a device re-subscribing keeps one row with fresh keys.
-CREATE TABLE IF NOT EXISTS push_subscription (
-  endpoint  TEXT PRIMARY KEY,
-  user_did  TEXT,
-  email     TEXT,
-  p256dh    TEXT NOT NULL,
-  auth      TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS push_subscription_by_email ON push_subscription(email);
-
 -- Durable atrium-oauth StateStore: the pre-redirect PKCE verifier + DPoP key +
 -- issuer, keyed by the OAuth `state` nonce; value is JSON of atrium's
 -- InternalStateData. Replaces the in-memory MemoryStateStore so a login survives
@@ -36,5 +25,23 @@ CREATE TABLE IF NOT EXISTS oauth_state (
 CREATE TABLE IF NOT EXISTS oauth_session (
   did   TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+
+-- Browser sessions (src/session.rs). token_hash is SHA-256 of the bearer token,
+-- never the token; the two timestamps are Unix seconds.
+CREATE TABLE IF NOT EXISTS session (
+  token_hash TEXT PRIMARY KEY,
+  did        TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_by_did ON session(did);
+
+-- One-time login codes: what /callback hands the browser in place of a session
+-- token, so no credential ever sits in a URL. Hashed like the session tokens.
+CREATE TABLE IF NOT EXISTS login_code (
+  code_hash  TEXT PRIMARY KEY,
+  did        TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
 );
 "#;

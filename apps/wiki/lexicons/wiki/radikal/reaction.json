@@ -1,0 +1,42 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.reaction",
+	"defs": {
+		"main": {
+			"type": "record",
+			"description": "An emoji given to a node or a comment, in a context's space or in public. One per person, subject and emoji; taking it back deletes the record.",
+			"key": "tid",
+			"record": {
+				"type": "object",
+				"required": ["subject", "emoji", "createdAt"],
+				"properties": {
+					"subject": {
+						"type": "ref",
+						"ref": "com.atproto.repo.strongRef",
+						"description": "The public record being reacted to."
+					},
+					"emoji": {
+						"type": "string",
+						"maxLength": 64,
+						"maxGraphemes": 1,
+						"description": "A single emoji grapheme cluster (the reaction), e.g. an emoji that may itself be a ZWJ sequence."
+					},
+					"author": {
+						"type": "ref",
+						"ref": "wiki.radikal.spaceDefs#author",
+						"description": "Who gave it, when the record is held by the organization for them."
+					},
+					"legacyId": {
+						"type": "string",
+						"description": "Its id in the interim, for what was carried over.",
+						"maxLength": 64
+					},
+					"createdAt": {
+						"type": "string",
+						"format": "datetime"
+					}
+				}
+			}
+		}
+	}
+}

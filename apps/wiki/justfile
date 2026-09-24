@@ -126,10 +126,50 @@ test:
     # deploy ships — so its tests never ran in the default run.
     cargo test --features remote-logging
 
+# The same tests with the data layer on the AppView. Its own recipe because the
+# end-to-end ones build and start `crates/appview-dev`, which `test` need not.
+test-appview:
+    cargo test --features appview
+
 # Browser smoke tests: build, serve, and drive the app in headless Servo.
 # Set WIKI_EMAIL / WIKI_PASSWORD to also run the authenticated tests.
 test-browser *ARGS:
     nu test-browser.nu {{ARGS}}
+
+# The build on the AppView (`--features appview`), against a dev AppView it
+# starts itself: needs no account and nothing outside this machine. What only
+# that backend has (a secret ballot blinded in the browser, the board, a vote
+# given to another, a change arriving live).
+test-browser-appview *ARGS:
+    nu scripts/test-browser-appview.nu {{ARGS}}
+
+# `test-browser`'s own suite against the AppView: every screen and write-flow
+# the interim is held to, signed in as the dev AppView's owner.
+test-browser-on-appview *ARGS:
+    nu test-browser.nu --firefox --appview {{ARGS}}
+
+# One REAL sign-in, all of it on this machine: the real `appview`, a real PDS
+# from nixpkgs, a stand-in `did:plc` directory, and the frontend in headless
+# Firefox through the PDS's own sign-in and consent pages and back.
+test-real-login *ARGS:
+    nu scripts/test-real-login.nu {{ARGS}}
+
+# `crates/atproto-spaces` and the AppView's mirror against the real spaces PDS,
+# in a container (needs docker): atproto spaces are an alpha, and this is what
+# says when it moved.
+test-spaces *ARGS:
+    nu scripts/test-spaces.nu {{ARGS}}
+
+# The move into atproto spaces, rehearsed on a cutover already rehearsed in DIR
+# (needs docker): every record and file into the alpha's PDS, read back, and
+# every row rebuilt from its record alone.
+rehearse-spaces DIR *ARGS:
+    nu scripts/rehearse-spaces.nu {{DIR}} {{ARGS}}
+
+# The cutover, rehearsed from a dump already in DIR (docs/cutover-runbook.md):
+# extract, load, files, the gates, every carried account returns, a smoke test.
+rehearse-cutover DIR *ARGS:
+    nu scripts/rehearse-cutover.nu {{DIR}} {{ARGS}}
 
 # Drive assets/sw.js against stubbed Cache/fetch and assert every path answers
 # with a Response. The service worker only matters when the network is failing,

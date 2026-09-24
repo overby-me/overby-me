@@ -576,16 +576,20 @@ fn roster_import_keys(r: graphql::RosterImport) -> Vec<&'static str> {
     if r.without_email > 0 {
         keys.push("invite.someWithoutEmail");
     }
+    if r.mailing > 0 {
+        keys.push("invite.someMailed");
+    }
     keys
 }
 
 fn roster_import_message(r: graphql::RosterImport) -> String {
     let (count, skipped) = (r.inserted.to_string(), r.skipped.to_string());
-    let no_email = r.without_email.to_string();
+    let (no_email, mailed) = (r.without_email.to_string(), r.mailing.to_string());
     let args = [
         ("count", count.as_str()),
         ("skipped", skipped.as_str()),
         ("noEmail", no_email.as_str()),
+        ("mailed", mailed.as_str()),
     ];
     roster_import_keys(r)
         .into_iter()
@@ -980,7 +984,22 @@ mod tests {
             inserted,
             skipped,
             without_email,
+            mailing: 0,
         })
+    }
+
+    /// Only a backend that mails says so, and only when it mailed someone.
+    #[test]
+    fn an_import_that_mailed_its_invitations_says_how_many() {
+        let mailed = graphql::RosterImport {
+            inserted: 3,
+            mailing: 2,
+            ..Default::default()
+        };
+        assert_eq!(
+            roster_import_keys(mailed),
+            ["invite.imported", "invite.someMailed"]
+        );
     }
 
     /// An import that inserted nobody because everyone was already there has

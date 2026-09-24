@@ -451,6 +451,7 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
     // the stream above (shadowing the prop); the server-side gate for late votes
     // is separate and does not trust this.
     let open = live_open() && !closed_opt();
+    let audit_poll = poll_id.clone();
     // The trailing option is always the "Blank" abstention (see StartPollButton /
     // ballot_order): it is shown as a distinct muted row and excluded from the
     // winner, and the For/Imod split is computed on the non-blank cast votes.
@@ -895,6 +896,16 @@ pub fn PollApp(node: NodeWithChildren, #[props(default)] projector: bool) -> Ele
                             }
                         } else {
                             "{t(\"poll.resultsHidden\")}"
+                        }
+                    }
+                    // A voter's own check of a secret poll, where the backend
+                    // gives them the means. Not on the projector: it is theirs.
+                    if graphql::BALLOT_RECEIPTS && poll_secret && !projector {
+                        super::audit::BallotAudit {
+                            poll_id: audit_poll.clone(),
+                            open,
+                            show_results,
+                            rev: *refresh.read(),
                         }
                     }
                     // Export/print the tally for the minutes (hidden on the projector,

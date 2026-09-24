@@ -972,11 +972,13 @@ fn CommentComposer(
         preview.set(url);
     };
 
+    let image_context = context_id.clone();
     let pick_image = move |evt: FormEvent| {
         let Some(fd) = evt.files().into_iter().next() else {
             return;
         };
         let token = session.read().access_token.clone();
+        let context = image_context.clone();
         spawn(async move {
             let name = fd.name();
             let ctype = fd.content_type().unwrap_or_default();
@@ -996,7 +998,15 @@ fn CommentComposer(
             // that: the reader sees what they picked while the network works.
             set_preview(object_url(&bytes, &ctype));
             uploading.set(true);
-            match crate::nhost::upload_file(token.as_deref(), bytes.to_vec(), &name, &ctype).await {
+            let kept = crate::nhost::upload_file(
+                token.as_deref(),
+                context.as_deref(),
+                bytes.to_vec(),
+                &name,
+                &ctype,
+            )
+            .await;
+            match kept {
                 Ok(f) => attached.set(Some(f.id)),
                 Err(e) => {
                     log::error!("attachment upload failed: {e:?}");

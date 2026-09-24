@@ -1332,6 +1332,8 @@ fn truncate_key(base: &str) -> String {
 /// spends the clean key first and only falls back to something like this when
 /// the name is genuinely taken. This remains for callers with no parent to check
 /// against, and as that fallback.
+// The AppView chooses a node's key itself, so nothing there asks for one.
+#[cfg_attr(feature = "appview", allow(dead_code, unused_imports))]
 pub fn slugify(name: &str) -> String {
     let base = slug_base(name);
     let suffix = web_sys::window()

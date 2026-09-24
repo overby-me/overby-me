@@ -1,0 +1,70 @@
+{
+	"space": "at://did:plc:s3u4fbsahc4f5yhqxjtmiibo/space/com.example.wiki.context/c-fixture",
+	"author": "did:plc:gla4t5itrqscamlfhrctev3x",
+	"publicKeyMultibase": "zQ3shRfSAJCzpbCMTAwN18DAsjZjQzBhsMFyWu6LK7cAYPF4G",
+	"commit": {
+		"ver": 1,
+		"hash": {
+			"$bytes": "1UG8/nZiqACnYai1RTSAhhb+6IWb4XZV9Bpgz2Qw5Fk"
+		},
+		"ikm": {
+			"$bytes": "y4yUr12J7Y6VZ/CzXjmxGKOnGS5ufZy1okyB2N9tpLk"
+		},
+		"mac": {
+			"$bytes": "UvuEfyN+Prjt5NVHl25+ItP8Vl/MUw3vgqM/jpGHPWM"
+		},
+		"sig": {
+			"$bytes": "kHCVO8kp/iRci+RJEe6Nm5Fyr4+CXQ2YsYYDX8jRAwBDiN3uf6oFM5QqltFqouXpOXJUlCSsM/lwOjY00l4A6w"
+		},
+		"rev": "3mvx57w5bl52g"
+	},
+	"ops": [
+		{
+			"rev": "3mvx57w2ril2g",
+			"collection": "com.example.wiki.comment",
+			"rkey": "one",
+			"cid": "bafyreihgdyfrorjzitm7rie5jub5fuoemtbwmbh57czy7qogcblq5k3nru",
+			"prev": null
+		},
+		{
+			"rev": "3mvx57w3fyu2g",
+			"collection": "com.example.wiki.comment",
+			"rkey": "two",
+			"cid": "bafyreihyigzqd4fg5sdz767brihz6ngxozjrhcz5msiqhnpsexqw4eaoxu",
+			"prev": null
+		},
+		{
+			"rev": "3mvx57w3zju2g",
+			"collection": "com.example.wiki.comment",
+			"rkey": "three",
+			"cid": "bafyreih2omdvvk4m22hsvdg7bdzz2nbhrttutslzqedgimjbfxtqiumqnu",
+			"prev": null
+		},
+		{
+			"rev": "3mvx57w4m3n2g",
+			"collection": "com.example.wiki.comment",
+			"rkey": "two",
+			"cid": "bafyreiccqi6v3sgz4qvhazg2fqeymgwl7dqixswz5b5xe7efbhcl2puvnq",
+			"prev": "bafyreihyigzqd4fg5sdz767brihz6ngxozjrhcz5msiqhnpsexqw4eaoxu"
+		},
+		{
+			"rev": "3mvx57w5bl52g",
+			"collection": "com.example.wiki.comment",
+			"rkey": "three",
+			"cid": null,
+			"prev": "bafyreih2omdvvk4m22hsvdg7bdzz2nbhrttutslzqedgimjbfxtqiumqnu"
+		}
+	],
+	"records": [
+		{
+			"collection": "com.example.wiki.comment",
+			"rkey": "two",
+			"cid": "bafyreiccqi6v3sgz4qvhazg2fqeymgwl7dqixswz5b5xe7efbhcl2puvnq"
+		},
+		{
+			"collection": "com.example.wiki.comment",
+			"rkey": "one",
+			"cid": "bafyreihgdyfrorjzitm7rie5jub5fuoemtbwmbh57czy7qogcblq5k3nru"
+		}
+	]
+}

@@ -42,5 +42,31 @@
 				"useExhaustiveDependencies": "off"
 			}
 		}
-	}
+	},
+	"overrides": [
+		{
+			// A snippet WebDriver evaluates inside the page, written in ES5 to
+			// match the suite's original it stands in for: var, XMLHttpRequest,
+			// function expressions, synchronous on purpose. Each rule below
+			// asks for syntax ES5 does not have, down to the named `catch (e)`
+			// binding that optional catch binding made redundant in ES2019.
+			// An entry in `files.includes` would not work: biome lints a path
+			// handed to it explicitly whatever that list says.
+			"includes": ["**/test-browser-appview-adapter.js"],
+			"linter": {
+				"rules": {
+					"complexity": {
+						"useOptionalChain": "off"
+					},
+					"correctness": {
+						"noInnerDeclarations": "off",
+						"noUnusedVariables": "off"
+					},
+					"style": {
+						"useTemplate": "off"
+					}
+				}
+			}
+		}
+	]
 }

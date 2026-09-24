@@ -1,0 +1,82 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.setProjector",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "An owner changes what the room sees. An absent field stays as it is; an explicit `null` clears `active_id` or `focus`. Putting another node on screen clears the focus, since an anchor points into the node that was there. Answers with the projector as it now is.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["context_id"],
+					"nullable": ["active_id", "focus", "canvas_id"],
+					"properties": {
+						"context_id": {
+							"type": "string"
+						},
+						"active_id": {
+							"type": "string",
+							"description": "The node on screen. During a vote it is the open poll."
+						},
+						"focus": {
+							"type": "string",
+							"description": "A heading anchor within it, for a document too long to show whole."
+						},
+						"canvas_id": {
+							"type": "string",
+							"description": "The canvas the context shows where it shows one: the room's board. A setting of its own, since a board is up beside whatever is on the screen."
+						},
+						"show_comments": {
+							"type": "boolean"
+						},
+						"show_feed": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["show_comments", "show_feed"],
+					"properties": {
+						"active_id": {
+							"type": "string",
+							"description": "The node on screen. During a vote it is the open poll."
+						},
+						"focus": {
+							"type": "string",
+							"description": "A heading anchor within it, for a document too long to show whole."
+						},
+						"canvas_id": {
+							"type": "string",
+							"description": "The canvas the context shows where it shows one: the room's board. A setting of its own, since a board is up beside whatever is on the screen."
+						},
+						"show_comments": {
+							"type": "boolean"
+						},
+						"show_feed": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such context, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is not an owner of the context."
+				}
+			]
+		}
+	}
+}

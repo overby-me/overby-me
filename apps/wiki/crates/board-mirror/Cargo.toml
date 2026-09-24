@@ -1,0 +1,24 @@
+[package]
+name = "board-mirror"
+version = "0.1.0"
+edition = "2024"
+
+# An independent copy of a published ballot board, and the check of it. Run by
+# someone who is NOT the organization: it reads the board account's public repo
+# and trusts nothing the AppView says (`docs/ballot-board-custody.md`).
+[dependencies]
+# For a board in a group's space: the credential a member reads it with, and
+# the signed commit the copy is held to.
+atproto-spaces = { path = "../atproto-spaces" }
+ballot-spec = { path = "../ballot-spec", features = ["custody"] }
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls"
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[dev-dependencies]
+fake-pds = { path = "../fake-pds" }

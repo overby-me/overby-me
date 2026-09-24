@@ -4,7 +4,10 @@
 # plain derivation check cannot exercise: the service starts, `/healthz` reports
 # liveness + DB-reachable (direct and through the reverse-proxy edge), the Turso
 # StateDirectory survives a restart intact, structured JSON logs reach journald,
-# and the systemd hardening is applied.
+# and the systemd hardening is applied. Then the cutover's load, as an operator
+# runs it on this very layout: `wiki-appview-import` stops the service, loads a
+# (made-up) migrated wiki and its files into the private state directory, and
+# the service serves them once started again.
 #
 # Run with: nix build .#checks.x86_64-linux.wiki-appview-e2e
 {
@@ -24,7 +27,16 @@ pkgs.testers.nixosTest {
       # The bundled Ferron proxy is on by default (proxyDomain = null -> a
       # plain-HTTP :80 catch-all forwarding to the AppView), which is exactly the
       # end-to-end edge path this test exercises.
+      import = {
+        extraction = "/etc/wiki-cutover/extraction.json";
+        files = "/etc/wiki-cutover/files";
+      };
     };
+
+    # `src/import.rs` loads the same fixture in a unit test, so a change to what
+    # an extraction looks like fails there first.
+    environment.etc."wiki-cutover/extraction.json".source = ./fixtures/extraction.json;
+    environment.etc."wiki-cutover/files".source = ./fixtures/files;
 
     # curl for the checks; the VM has no internet, which is fine: startup and
     # /healthz are offline (the firehose consumer connects best-effort with a
@@ -79,5 +91,27 @@ pkgs.testers.nixosTest {
     assert "ProtectSystem=strict" in unit, unit
     assert "NoNewPrivileges=yes" in unit, unit
     assert "PrivateTmp=yes" in unit, unit
+
+    # The load. The service has run, so its datastore already has a home of its
+    # own making, which has to make way for the one loaded.
+    machine.succeed("systemctl start wiki-appview-import.service")
+    gates = machine.succeed("journalctl -u wiki-appview-import.service --no-pager")
+    assert "every gate is green" in gates, gates
+    machine.fail("systemctl is-active wiki-appview.service")
+    machine.succeed("systemctl start wiki-appview.service")
+    machine.wait_for_open_port(8080)
+    xrpc = "http://localhost:8080/xrpc/wiki.radikal"
+    page = machine.succeed(f"curl -sf '{xrpc}.getNode?path=open/minutes'")
+    assert "The meeting was opened" in page, page
+    agenda = machine.succeed("curl -sf http://localhost:8080/blob/0f000000-0000-4000-8000-0000000000f1")
+    assert "an agenda" in agenda, agenda
+    # The home came across closed, and stays closed to the signed out.
+    machine.fail(f"curl -sf '{xrpc}.getNode?path='")
+
+    # Run again, it finds everything there already.
+    machine.succeed("systemctl start wiki-appview-import.service")
+    loaded = machine.succeed("journalctl -u wiki-appview-import.service --no-pager")
+    assert "1 copied" in loaded, loaded
+    assert "0 copied, 1 here already" in loaded, loaded
   '';
 }

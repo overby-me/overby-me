@@ -1,0 +1,53 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.deleteContext",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Put a group or an event, and everything in it, in the bin. An owner of it may, and so may an owner of the context it sits in. Its members keep their rows, so restoring it brings back who was in it. The home is not deleted.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["id"],
+					"properties": {
+						"id": {
+							"type": "string"
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["binned"],
+					"properties": {
+						"binned": {
+							"type": "integer",
+							"description": "How many nodes went, the context itself included."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such context, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller owns neither the context nor where it sits."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "The home."
+				}
+			]
+		}
+	}
+}

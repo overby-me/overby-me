@@ -1,0 +1,54 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.setDelegation",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Give the caller's vote in a context to another member who holds voting rights there, or take it back. It stands until it is taken back or either of them leaves. A poll copies the delegations standing as it opens and freezes them: a chain follows through, a cycle or a delegate without voting rights is void, and one made or taken back while the poll is open moves nothing in it. What stands behind an assignment is the delegator's own session.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["context_id"],
+					"nullable": ["to_did"],
+					"properties": {
+						"context_id": { "type": "string" },
+						"to_did": {
+							"type": "string",
+							"format": "did",
+							"description": "Who casts the caller's vote. Absent or null takes it back."
+						}
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["ok"],
+					"properties": {
+						"ok": { "type": "boolean" }
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "NotFound",
+					"description": "No such context, or none the caller may read."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller holds no voting rights in the context."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "The delegate is the caller, holds no voting rights there, or has never signed in."
+				}
+			]
+		}
+	}
+}

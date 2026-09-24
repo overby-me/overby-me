@@ -8,6 +8,8 @@ use crate::i18n::t;
 use crate::model::NodeWithChildren;
 use crate::session::use_session;
 
+mod audit;
+mod delegation;
 mod policy;
 mod poll;
 mod position;
@@ -31,6 +33,7 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
     let is_auth = session.read().is_authenticated();
     let access_token = session.read().access_token.clone();
     let context_id = node.context_id.clone().map(|c| c.0).unwrap_or(node.id.0);
+    let delegation_context = context_id.clone();
 
     // Voting rights: whether the user is an active member of this context (the
     // port's approximation of React's canVote), for the rights card.
@@ -152,6 +155,10 @@ pub fn VoteApp(node: NodeWithChildren) -> Element {
                     }
                 }
             }
+        }
+        // Only where the backend has delegation, and only for a vote to give.
+        if graphql::DELEGATION && can_vote == Some(true) {
+            delegation::DelegationCard { context_id: delegation_context }
         }
         {content}
     }

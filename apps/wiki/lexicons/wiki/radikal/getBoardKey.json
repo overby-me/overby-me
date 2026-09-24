@@ -1,0 +1,20 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.getBoardKey",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "The key this AppView signs ballot receipts and close-outs with, as a `did:key` (P-256). For anyone, signed in or not: a receipt names its key too, and this is what that is checked against. It is kept for nothing else, and is not a poll's issuer key.",
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["key"],
+					"properties": {
+						"key": { "type": "string" }
+					}
+				}
+			}
+		}
+	}
+}

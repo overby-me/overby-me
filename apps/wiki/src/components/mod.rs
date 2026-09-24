@@ -1,4 +1,9 @@
 pub mod admin;
+#[cfg(not(feature = "appview"))]
+pub mod auth;
+/// The same screens under the same names, for an account that is an atproto one.
+#[cfg(feature = "appview")]
+#[path = "auth_atproto.rs"]
 pub mod auth;
 pub mod back_to_top;
 pub mod bin;

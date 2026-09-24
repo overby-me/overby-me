@@ -12,16 +12,16 @@
 }:
 rustPlatform.buildRustPackage (finalAttrs: {
   pname = "cosmic-nightlight";
-  version = "0.5.0";
+  version = "0.5.1";
 
   src = fetchFromGitHub {
     owner = "cosmic-nightlight";
     repo = "cosmic-nightlight";
     tag = "v${finalAttrs.version}";
-    hash = "sha256-BUWCdmJiXRW9y3cJgQKF4zsQX4Z1n5TPn2g0wJYrK5M=";
+    hash = "sha256-CbCABZO+5UgdCG5DolJGg5BShRHbWMZfR7jNUnYFAgU=";
   };
 
-  cargoHash = "sha256-ciA1dvuHTg2Vl7EYfyPqv6rN9cFn3n0ASBAhBYQX/e8=";
+  cargoHash = "sha256-0A+KBqEU+brqmtZ1hfwcmRmvuetkVPuO1q5n5P8KGHc=";
 
   # The helper and rule paths are compile-time constants aimed at /usr, and the
   # rule whitelists the helper by absolute path, so all three have to agree on

@@ -133,22 +133,25 @@ pub fn ProfileApp() -> Element {
                             "@{link.handle}"
                         }
                     }
-                    button {
-                        class: "btn btn-secondary mt-1",
-                        onclick: move |_| {
-                            let tok = session.read().access_token.clone();
-                            spawn(async move {
-                                let Some(tok) = tok else { return };
-                                if crate::backend_api::atproto_unlink(&tok).await {
-                                    just_unlinked.set(true);
-                                    crate::snackbar::show_snackbar(&t("profile.unlinkedOk"));
-                                } else {
-                                    crate::snackbar::show_snackbar(&t("profile.unlinkErr"));
-                                }
-                            });
-                        },
-                        span { class: "material-icons", "link_off" }
-                        " {t(\"profile.unlink\")}"
+                    // On the AppView the account IS the sign-in: nothing to unlink.
+                    if cfg!(not(feature = "appview")) {
+                        button {
+                            class: "btn btn-secondary mt-1",
+                            onclick: move |_| {
+                                let tok = session.read().access_token.clone();
+                                spawn(async move {
+                                    let Some(tok) = tok else { return };
+                                    if crate::backend_api::atproto_unlink(&tok).await {
+                                        just_unlinked.set(true);
+                                        crate::snackbar::show_snackbar(&t("profile.unlinkedOk"));
+                                    } else {
+                                        crate::snackbar::show_snackbar(&t("profile.unlinkErr"));
+                                    }
+                                });
+                            },
+                            span { class: "material-icons", "link_off" }
+                            " {t(\"profile.unlink\")}"
+                        }
                     }
                 } else {
                     p { class: "body-medium text-muted mb-1", "{t(\"profile.linkBlueskyHint\")}" }

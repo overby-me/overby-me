@@ -47,7 +47,7 @@ invalidation, the per-query WebSocket subscriptions.
    `user_providers`.
 2. **The EAV node tree becomes typed lexicons.** The ~20 `mimeId` kinds are an
    informal schema living in `data` jsonb blobs. Author one **lexicon** per
-   meaningful kind (`com.example.wiki.*` / your NSID). Content is already portable
+   meaningful kind (`wiki.radikal.*` / your NSID). Content is already portable
    Slate JSON, so *content* survives; the parent/context *container* model is what
    becomes records + references.
 3. **Permissions require a trusted service — atproto gives nothing here.** Authz
@@ -223,7 +223,7 @@ pre-populate the data the new world needs.
 
 1. **Design the domain model + atproto lexicons now (highest leverage).** The
    data model is the one artifact that transfers 100%. Writing the lexicons
-   (record schemas for `com.example.wiki.*`) forces the hardest decision — what's a
+   (record schemas for `wiki.radikal.*`) forces the hardest decision — what's a
    *public* record vs *private* authoritative state (§4 split + privacy pivot) —
    while it's still cheap, on paper. Bonus: `atrium` codegens Rust types straight
    from lexicons. A first cut is derivable from the current `mimeId` taxonomy +

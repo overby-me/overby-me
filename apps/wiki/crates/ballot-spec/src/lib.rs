@@ -15,11 +15,15 @@
 //! `DECISIONS.md` (pending owner sign-off), not silently frozen in tests.
 
 pub use blind_rsa_signatures::{
-    BlindSignature, BlindingResult, DefaultRng, MessageRandomizer, PSS, Signature,
+    BlindMessage, BlindSignature, BlindingResult, DefaultRng, Error as CryptoError,
+    MessageRandomizer, PSS, Secret, Signature,
 };
 use blind_rsa_signatures::{KeyPair, PublicKey, Randomized, SecretKey, Sha384};
 use std::collections::{BTreeMap, BTreeSet};
 
+/// What the board's custodian signs: receipts and the close-out.
+#[cfg(feature = "custody")]
+pub mod custody;
 /// PROVISIONAL board-entry wire encoding (base64url), pending decision D7.
 pub mod provisional;
 
@@ -246,6 +250,22 @@ impl TokenIssuer {
         &self.kp.pk
     }
 
+    /// The secret key (DER), for a custodian that has to survive a restart while
+    /// the poll is open. Whoever holds it can mint ballots for this poll: it is
+    /// kept sealed and destroyed at close.
+    pub fn secret_der(&self) -> Result<Vec<u8>, blind_rsa_signatures::Error> {
+        self.kp.sk.to_der()
+    }
+
+    /// The issuer a [`Self::secret_der`] was taken from.
+    pub fn from_secret_der(der: &[u8]) -> Result<Self, blind_rsa_signatures::Error> {
+        let sk = IssuerSecretKey::from_der(der)?;
+        let pk = sk.public_key()?;
+        Ok(Self {
+            kp: IssuerKeyPair { pk, sk },
+        })
+    }
+
     /// Blind-sign one blinded token message. The org calls this N times for a
     /// voter with resolved weight N, AFTER recording the one-shot issuance
     /// marker (`token_issued`); it never sees the nullifier inside.
@@ -313,6 +333,32 @@ pub struct BoardEntry {
     pub signature: Signature,
     /// Selected option indices.
     pub choices: Vec<usize>,
+}
+
+/// What a board comes to when anyone counts it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recount {
+    pub counts: Vec<u64>,
+    /// The entries left out, by their place in what was given, and why: a
+    /// forged signature, a token seen before, choices the rules do not allow.
+    pub dropped: Vec<(usize, CastError)>,
+}
+
+/// Count `entries` as the board that took them did: each through the checks a
+/// cast goes through, in the order given, the first of a repeated token
+/// standing (D4). This is the count anyone can make, of any copy of a board.
+pub fn recount(pk: &IssuerPublicKey, rules: &BallotRules, entries: Vec<BoardEntry>) -> Recount {
+    let mut board = Board::default();
+    let mut dropped = Vec::new();
+    for (at, entry) in entries.into_iter().enumerate() {
+        if let Err(why) = board.cast(pk, rules, entry) {
+            dropped.push((at, why));
+        }
+    }
+    Recount {
+        counts: tally(board.entries(), rules),
+        dropped,
+    }
 }
 
 /// Why a cast was rejected by the board.

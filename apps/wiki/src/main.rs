@@ -2,7 +2,21 @@
 // all far below 2^52, so usize/i64 -> f64 is exact here. The lint stays on
 // for the decoders and wire formats where truncation is real.
 #![allow(clippy::cast_precision_loss)]
+// A native build of the AppView layer is for its tests, which run without a
+// browser and so leave out the half that needs one (storage, toasts, the log).
+#![cfg_attr(
+    all(feature = "appview", not(target_arch = "wasm32")),
+    allow(dead_code)
+)]
+#[cfg(feature = "appview")]
+mod appview;
+// The switch: under the feature the three modules that speak to the interim's
+// backend are the AppView's, under the names every caller already uses.
+#[cfg(feature = "appview")]
+use appview::{self as graphql, account as nhost, api as backend_api};
+#[cfg(not(feature = "appview"))]
 mod backend_api;
+mod bsky;
 mod build_info;
 mod components;
 mod crash;
@@ -14,6 +28,7 @@ mod export;
 /// what broke, and this says what they were doing when it did.
 mod breadcrumbs;
 #[allow(dead_code)]
+#[cfg(not(feature = "appview"))]
 mod graphql;
 mod i18n;
 #[cfg(feature = "remote-logging")]
@@ -21,6 +36,7 @@ mod logging;
 /// Frontend-owned domain types (the anti-corruption seam over `graphql.rs`).
 pub mod model;
 mod nav_memory;
+#[cfg(not(feature = "appview"))]
 mod nhost;
 /// Last-read pages kept in localStorage, served when nothing can be reached.
 mod offline;
@@ -125,6 +141,9 @@ fn main() {
     // now, before the router mounts and rewrites `/`'s query away; Layout then
     // exchanges the token and shows the set-password form.
     components::layout::capture_reset_token();
+    // Likewise the one-time code a sign-in on the AppView comes back with.
+    #[cfg(feature = "appview")]
+    components::auth::capture_returned_code();
 
     // PWA: install the manifest / icon / theme-color head tags and register the
     // service worker (offline where the SW controls the root).

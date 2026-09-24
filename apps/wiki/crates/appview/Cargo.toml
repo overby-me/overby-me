@@ -12,6 +12,16 @@ name = "appview"
 path = "src/main.rs"
 
 [dependencies]
+# Crash symbolication: resolve the wasm code offsets in a reported stack back to
+# `file:line` against the DWARF sidecar the frontend build publishes. `addr2line`
+# wraps `gimli` with the lookup logic; `object` parses the wasm container.
+addr2line = "0.24"
+# Background Web Push (RFC 8291 message encryption + RFC 8292 VAPID) is
+# hand-rolled on RustCrypto primitives, since the `web-push` crate pulls
+# libcurl/openssl: `aes-gcm` for the aes128gcm content encoding, `p256` for the
+# ECDH agreement and the ES256 VAPID signature, `hkdf` for the key derivation.
+aes-gcm = "0.10"
+atproto-spaces = { path = "../atproto-spaces" }
 atrium-api = { version = "0.25.8", default-features = false, features = [
   "agent"
 ] }
@@ -19,26 +29,68 @@ atrium-common = "0.1.4"
 atrium-identity = { version = "0.1.9", features = ["doh-handle-resolver"] }
 # atproto OAuth: the thin atrium-oauth wrapper (proven in crates/oauth-spike),
 # now with durable SQLite-backed state/session stores and the /callback slice.
-atrium-oauth = "0.1.7"
+# default-features off: `default-client` links OpenSSL; src/http.rs replaces it.
+atrium-oauth = { version = "0.1.7", default-features = false }
 # The AppView is a stateful persistent process (not scale-to-zero serverless):
 # axum HTTP + WebSocket, a Turso datastore, an in-process broadcast channel.
 axum = { version = "0.8", features = ["ws"] }
-ballot-spec = { path = "../ballot-spec" }
+ballot-spec = { path = "../ballot-spec", features = ["custody"] }
 # The durable ballot service: the public board (kill-9-proven atomic cast) + the
 # private roster DDL, plus the off-node replica sink wired into this datastore.
 ballot-store = { path = "../ballot-store" }
 # Transferred backend infra: URL-safe base64 + CSRNG (util), and the state-cookie
 # seal (HKDF-SHA256 key + XChaCha20-Poly1305) that survives the OAuth redirect.
 base64 = "0.22"
+# Reads the bulk member-import .xlsx here, so the xlsx/zip/inflate stack stays
+# out of the wasm bundle every phone downloads.
+calamine = "0.36"
 chacha20poly1305 = "0.10"
+# Renders Word/PowerPoint metafile figures (EMF/EMF+/WMF), which no browser can
+# draw. Here rather than in the wasm: the renderer is ~400 KB gzipped.
+#
+# The interim backend's FORK of the v0.2.0 tag, carrying one fix (`dib_to_png`
+# decoded only 24- and 32-bit bitmaps, so a figure holding a palettised one
+# failed outright). Not upstream main, which fixes the same bug but also
+# changed font selection to the family the metafile NAMES, and metafiles name
+# Windows fonts. `backend/Cargo.toml` has the whole story. Pinned to a rev so
+# the Nix `outputHashes` in default.nix cannot go stale under `cargo update`.
+emfsdk = { git = "https://github.com/overby-me/emfsdk", rev = "4e4269f9ed35d2a204dba9880060ea17cf0fc9e4", default-features = false, features = [
+  "render"
+] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hkdf = "0.12"
+# Signs the links that let an <img> or a document viewer fetch one blob.
+hmac = "0.12"
 http = "1"
+lettre = { version = "0.11", default-features = false, features = [
+  "builder",
+  "hostname",
+  "smtp-transport",
+  "tokio1-rustls-tls"
+] }
+# `appview import` is the load step of the cutover: the loader for the entity
+# tables, the extractor for the shape of what it is handed.
+migration-extractor = { path = "../migration-extractor" }
+migration-loader = { path = "../migration-loader" }
+object = { version = "0.36", default-features = false, features = [
+  "read",
+  "wasm"
+] }
+p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
 rand = "0.8"
+# Same 0.12 line atrium resolves, so the two share one connection pool.
+reqwest = { version = "0.12", default-features = false, features = [
+  "gzip",
+  "http2",
+  "json",
+  "rustls-tls"
+] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = [
+  "fs",
+  "io-util",
   "macros",
   "net",
   "rt-multi-thread",
@@ -49,13 +101,25 @@ tokio = { version = "1", features = [
 # The Jetstream firehose consumer: a WebSocket CLIENT (axum only serves WS) over
 # the public wss endpoint, self-contained TLS via rustls + webpki roots.
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# Streams a blob off disk as a response body.
+tokio-util = { version = "0.7", features = ["io"] }
 tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", default-features = false, features = ["cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = [
   "env-filter",
   "fmt",
   "json"
 ] }
-turso = "0.2"
+turso = "0.7"
 wiki-domain-types = { path = "../domain-types" }
+wiki-records = { path = "../wiki-records" }
 wiki-schema = { path = "../schema" }
+
+[dev-dependencies]
+# The mirror that holds a published board to its close-out, and the PDS the
+# two of them are tested against.
+board-mirror = { path = "../board-mirror" }
+fake-pds = { path = "../fake-pds" }
+# Builds the .xlsx a roster test parses. calamine's own zip, so nothing new.
+zip = { version = "8", default-features = false }

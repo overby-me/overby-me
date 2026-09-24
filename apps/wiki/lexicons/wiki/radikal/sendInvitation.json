@@ -1,0 +1,56 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.sendInvitation",
+	"defs": {
+		"main": {
+			"type": "procedure",
+			"description": "Mail a seat's claim link to the address on it, for an owner of that seat's context: again after a mail that was lost, or for the first time to a seat carried over from the interim. `inviteMembers` mails a new seat by itself. An unknown member answers Forbidden too, so the method is no oracle for member ids.",
+			"input": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["member"],
+					"properties": {
+						"member": { "type": "string", "description": "The member id." }
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["ok"],
+					"properties": {
+						"ok": { "type": "boolean" }
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "AuthRequired",
+					"description": "The caller is not authenticated."
+				},
+				{
+					"name": "Forbidden",
+					"description": "The caller is not an active owner of that member's context, or there is no such member."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "The seat is taken by an account already, or has no address."
+				},
+				{
+					"name": "TooSoon",
+					"description": "The seat was mailed within the last ten minutes."
+				},
+				{
+					"name": "MailNotConfigured",
+					"description": "This site sends no mail."
+				},
+				{
+					"name": "MailFailed",
+					"description": "The mail server did not take it."
+				}
+			]
+		}
+	}
+}

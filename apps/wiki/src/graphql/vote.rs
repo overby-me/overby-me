@@ -393,3 +393,38 @@ mod tally_tests {
         assert!(poll_tally_query("p", 1, Some("c\"d")).contains("c\\\"d"));
     }
 }
+
+/// Whether this backend lets a member give their vote to another. This one
+/// does not; the AppView does, and the vote screen shows the card only there.
+pub const DELEGATION: bool = false;
+
+pub async fn query_delegations(
+    _access_token: Option<&str>,
+    _context_id: &str,
+    _user_id: &str,
+) -> Result<model::Delegations, String> {
+    Ok(model::Delegations::default())
+}
+
+pub async fn set_delegation(
+    _access_token: Option<&str>,
+    _context_id: &str,
+    _to: Option<&str>,
+) -> Result<(), String> {
+    Err("this backend has no delegation".to_string())
+}
+
+/// Whether a secret ballot leaves a stub on this device that can be checked
+/// against the board, and the board can be recounted. Not on this backend.
+pub const BALLOT_RECEIPTS: bool = false;
+
+pub async fn my_ballots(_access_token: &str, _poll_id: &str) -> Vec<model::BallotStanding> {
+    Vec::new()
+}
+
+pub async fn recount_poll(
+    _access_token: Option<&str>,
+    _poll_id: &str,
+) -> Result<model::Recounted, String> {
+    Err("this backend has no board to recount".to_string())
+}

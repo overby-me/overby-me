@@ -240,6 +240,35 @@ pub struct UserRef {
     pub avatar_url: String,
 }
 
+/// How one of the reader's own secret ballots stands on the board, by the stub
+/// this device kept of it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum BallotStanding {
+    /// There, saying what was cast.
+    Counted {
+        position: u64,
+    },
+    /// There under the same token, with other choices.
+    RecordedDifferently,
+    NotOnTheBoard,
+}
+
+/// What counting a closed poll's board again, on this device, came to.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Recounted {
+    pub ballots: usize,
+    /// Empty when the count, the board's digest and the signed close-out agree.
+    pub problems: Vec<String>,
+}
+
+/// Where the reader's vote in a context stands: with them, or given to someone,
+/// and whose they cast beside their own.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Delegations {
+    pub given_to: Option<UserRef>,
+    pub received_from: Vec<UserRef>,
+}
+
 /// A user row from the profile / user-search queries.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UserSearchFields {

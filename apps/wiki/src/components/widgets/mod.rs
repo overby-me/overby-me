@@ -24,6 +24,8 @@ pub use color_picker::ColorPicker;
 pub use dialog::Dialog;
 pub use feedback::{EmptyState, ErrorState};
 pub use image::ZoomableImage;
+// The interim's password form is its one caller.
+#[cfg_attr(feature = "appview", allow(dead_code, unused_imports))]
 pub use password_dots::PasswordDots;
 pub use segmented_button::SegmentedButton;
 // Kept exported with no caller on purpose: the editor tried a split button for

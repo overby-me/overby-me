@@ -370,6 +370,16 @@ pub fn expires_at_from(expires_in: Option<i64>) -> Option<f64> {
 /// when the token or expiry is missing or unparsable, i.e. the previous
 /// device-clock behaviour.
 pub fn server_clock_offset_ms() -> f64 {
+    // A session on the AppView is no JWT. Its answers carry the server's clock
+    // instead, which the client measures the difference off as it asks.
+    #[cfg(feature = "appview")]
+    return appview_client::server_clock_ahead_ms().map_or(0.0, |ms| ms as f64);
+    #[cfg(not(feature = "appview"))]
+    jwt_clock_offset_ms()
+}
+
+#[cfg(not(feature = "appview"))]
+fn jwt_clock_offset_ms() -> f64 {
     let s = SESSION.read();
     let (Some(token), Some(expires_at)) = (s.access_token.as_ref(), s.access_token_expires_at)
     else {
@@ -406,6 +416,7 @@ pub fn server_now_iso() -> String {
 /// The `exp` claim (ms epoch) from a JWT's payload segment, or None if it cannot be
 /// decoded. Only reads the standard `exp` number; the signature is not verified (the
 /// server does that), this is purely to read the server's notion of time.
+#[cfg(not(feature = "appview"))]
 fn jwt_exp_ms(token: &str) -> Option<f64> {
     let payload = token.split('.').nth(1)?;
     let bytes = b64url_decode(payload)?;
@@ -415,6 +426,7 @@ fn jwt_exp_ms(token: &str) -> Option<f64> {
 
 /// Minimal base64url decoder (no padding required), enough to read a JWT payload
 /// without pulling in a base64 crate.
+#[cfg(not(feature = "appview"))]
 fn b64url_decode(input: &str) -> Option<Vec<u8>> {
     fn val(c: u8) -> Option<u32> {
         match c {
@@ -592,6 +604,8 @@ async fn refresh_access_token() -> RefreshOutcome {
 /// caller read theirs; an UNEXPIRED one means that refresh actually helped. A
 /// token that differs but is itself expired is a caller holding something very
 /// stale, and that does need the real thing.
+// A session on the AppView has no token to replace: see `appview::account`.
+#[cfg_attr(feature = "appview", allow(dead_code, unused_imports))]
 fn already_replaced(
     stale: Option<&str>,
     current: Option<&str>,
@@ -627,6 +641,7 @@ fn already_replaced(
 /// about to present. That is the race `ROTATION_GRACE_MS` exists to survive, and
 /// this was manufacturing it, on the one evening of the year when several
 /// hundred people open the app at once.
+#[cfg_attr(feature = "appview", allow(dead_code, unused_imports))]
 pub async fn ensure_fresh_token(stale: Option<&str>) -> Option<String> {
     use gloo_timers::future::TimeoutFuture;
     {
@@ -717,10 +732,9 @@ pub async fn run_token_refresh() {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        already_replaced, b64url_decode, is_rotation, jwt_exp_ms, scope_of, ROTATION_ATTEMPTS,
-        ROTATION_GRACE_MS,
-    };
+    use super::{already_replaced, is_rotation, scope_of, ROTATION_ATTEMPTS, ROTATION_GRACE_MS};
+    #[cfg(not(feature = "appview"))]
+    use super::{b64url_decode, jwt_exp_ms};
 
     /// The whole point of passing the failed token in: of seven queries that
     /// lapse together, only the first should reach the auth server.
@@ -795,11 +809,13 @@ mod tests {
         );
     }
 
+    #[cfg(not(feature = "appview"))]
     #[test]
     fn b64url_decodes_without_padding() {
         assert_eq!(b64url_decode("aGVsbG8").as_deref(), Some(&b"hello"[..]));
     }
 
+    #[cfg(not(feature = "appview"))]
     #[test]
     fn jwt_exp_reads_expiry_in_ms() {
         // Payload {"exp":1700000000,"sub":"x"}; signature is irrelevant here.
@@ -815,6 +831,7 @@ mod tests {
         assert_eq!(jwt_exp_ms(token), Some(1_700_000_000_000.0));
     }
 
+    #[cfg(not(feature = "appview"))]
     #[test]
     fn jwt_exp_is_none_for_garbage() {
         assert_eq!(jwt_exp_ms("not-a-jwt"), None);

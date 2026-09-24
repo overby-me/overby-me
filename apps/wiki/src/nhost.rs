@@ -417,8 +417,13 @@ struct UploadResponse {
 /// Upload a file to NHost storage (`POST /files`, multipart field `file[]`,
 /// mirroring `nhost.storage.upload`). Returns the created file's metadata; the
 /// caller stores `{ fileId: id, type: mimeType }` on a `wiki/file` node.
+///
+/// `_context_id` is where the file belongs. Storage here is one bucket and has
+/// no use for it; the AppView files each one under a context, whose readers are
+/// then the file's (`appview::account::upload_file`).
 pub async fn upload_file(
     access_token: Option<&str>,
+    _context_id: Option<&str>,
     bytes: Vec<u8>,
     file_name: &str,
     content_type: &str,

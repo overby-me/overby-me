@@ -1,0 +1,54 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.getBoardEntry",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "The ballot a token was spent on: how a voter checks that theirs is on the board and says what they said. It works where the counts are hidden too, since knowing a token is having cast it. Like `castBallot` it takes no session and reads none: asked as nobody, it does not pair a voter with their token.",
+			"parameters": {
+				"type": "params",
+				"required": ["poll", "token"],
+				"properties": {
+					"poll": {
+						"type": "string"
+					},
+					"token": {
+						"type": "string",
+						"description": "base64url without padding, as it was cast."
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["position", "entry", "receipt"],
+					"properties": {
+						"position": {
+							"type": "integer"
+						},
+						"entry": {
+							"type": "ref",
+							"ref": "wiki.radikal.defs#boardEntryView"
+						},
+						"receipt": {
+							"type": "ref",
+							"ref": "wiki.radikal.defs#receiptView",
+							"description": "Signed again for whoever asks: the answer to their cast, which carried the first, may never have reached them."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "NotFound",
+					"description": "No such poll, or no ballot spent that token."
+				},
+				{
+					"name": "InvalidRequest",
+					"description": "Not a secret poll, or a token that is not base64url."
+				}
+			]
+		}
+	}
+}

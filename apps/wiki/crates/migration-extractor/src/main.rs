@@ -6,7 +6,7 @@
 //!
 //! Usage: extract <snapshot.json>  (writes extraction.json + report.json)
 
-use migration_extractor::{Snapshot, extract};
+use migration_extractor::{Snapshot, extract_snapshot};
 
 fn main() {
     let path = std::env::args().nth(1).unwrap_or_else(|| {
@@ -15,16 +15,25 @@ fn main() {
     });
     let raw = std::fs::read_to_string(&path).expect("read snapshot");
     let snap: Snapshot = serde_json::from_str(&raw).expect("parse snapshot");
-    let ex = extract(&snap.nodes, &snap.members, &snap.users);
+    let ex = extract_snapshot(&snap);
 
     eprintln!(
-        "extracted: {} users, {} contexts, {} documents, {} members, {} comments, {} polls",
+        "extracted: {} users ({} to be recognized by address), {} contexts ({} public), \
+         {} documents, {} members, {} comments, {} reactions, {} polls, {} canvases, {} feedback",
         ex.users.len(),
+        ex.accounts.len(),
         ex.contexts.len(),
+        ex.contexts
+            .iter()
+            .filter(|c| c.visibility == wiki_domain_types::Visibility::Public)
+            .count(),
         ex.documents.len(),
         ex.members.len(),
         ex.comments.len(),
-        ex.polls.len()
+        ex.reactions.len(),
+        ex.polls.len(),
+        ex.canvases.len(),
+        ex.feedback.len()
     );
     eprintln!(
         "field-gap report: {} unmapped source fields, {} unknown mimes, {} unfilled required",
@@ -32,6 +41,12 @@ fn main() {
         ex.report.unmapped_mimes.len(),
         ex.report.unfilled_required.len()
     );
+    for (what, count) in &ex.report.left_behind {
+        eprintln!("left behind on purpose: {count} x {what}");
+    }
+    for (what, entry) in &ex.report.reshaped {
+        eprintln!("reshaped: {} x {what}: {}", entry.count, entry.note);
+    }
     std::fs::write(
         "report.json",
         serde_json::to_string_pretty(&ex.report).unwrap(),

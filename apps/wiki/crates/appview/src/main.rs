@@ -1,5 +1,13 @@
 //! AppView entrypoint: open the Turso datastore, build the router, and serve on
 //! `$PORT` as a long-running process (NOT scale-to-zero serverless).
+//!
+//! `appview import <extraction.json>` loads a migrated wiki instead, and exits;
+//! `appview import-files <extraction.json> <dir>` then files its files, and
+//! `appview verify <extraction.json> [<dir>]` asks the cutover's gates of both.
+//! `appview mirror-spaces` writes the wiki into its atproto spaces once, reads
+//! every space back, and says whether the two agree and whether the rows could
+//! be rebuilt from the records alone. With `--bytes` it fetches every file back
+//! too.
 
 use appview::oauth::WikiOAuth;
 use appview::{AppState, Config, Db, router};
@@ -31,23 +39,94 @@ async fn main() {
         tracing::error!("failed to initialize schema: {e}");
         std::process::exit(1);
     }
+    let mut args = std::env::args().skip(1);
+    match (args.next().as_deref(), args.next(), args.next()) {
+        (None, _, _) => {}
+        (Some("import"), Some(path), None) => import(&db, &path).await,
+        (Some("import-files"), Some(path), Some(dir)) => {
+            import_files(AppState::new(db, config), &path, &dir).await
+        }
+        (Some("verify"), Some(path), dir) => {
+            verify(AppState::new(db, config), &path, dir.as_deref()).await
+        }
+        (Some("mirror-spaces"), bytes, None) if bytes.as_deref().is_none_or(|b| b == "--bytes") => {
+            mirror_spaces(AppState::new(db, config), bytes.is_some()).await
+        }
+        _ => {
+            eprintln!(
+                "usage: appview [import <extraction.json> | import-files <extraction.json> <dir> \
+                 | verify <extraction.json> [<dir>] | mirror-spaces [--bytes]]"
+            );
+            std::process::exit(2);
+        }
+    }
+    if let Err(e) = appview::context::ensure_home(&db, &config).await {
+        tracing::error!("failed to make sure the site has a home: {e}");
+        std::process::exit(1);
+    }
     // The atproto OAuth client (durable SQLite stores). A build failure here is
     // fatal: identity is load-bearing, so the process must not serve `/callback`
     // silently misconfigured.
-    let oauth = match WikiOAuth::new(db.clone()) {
+    let oauth = match WikiOAuth::new(db.clone(), &config) {
         Ok(o) => Arc::new(o),
         Err(e) => {
             tracing::error!("failed to build the OAuth client: {e}");
             std::process::exit(1);
         }
     };
+    appview::blob::sweep_incoming(&config).await;
+    // In the background: a search in the first seconds finds what is indexed so
+    // far, which beats nothing answering until it all is.
+    let to_index = db.clone();
+    tokio::spawn(async move {
+        match appview::search::rebuild(&to_index).await {
+            Ok(nodes) => tracing::info!("search index rebuilt over {nodes} nodes"),
+            Err(e) => tracing::error!("search index rebuild failed: {e}"),
+        }
+    });
+    // Fatal, like the OAuth client: a board that is configured to be replicated
+    // and is not is the integrity control silently off.
+    let replica = match appview::ballot::open_replica(&config.ballot_replica_log) {
+        Ok(replica) => replica,
+        Err(e) => {
+            tracing::error!(
+                "failed to open the ballot replica log at {}: {e}",
+                config.ballot_replica_log
+            );
+            std::process::exit(1);
+        }
+    };
+    // Fatal, as the two above: a site set up to mail its invitations that
+    // cannot is one whose members wait for a mail that is not coming.
+    let mailer = match appview::mail::Mailer::from_config(&config) {
+        Ok(mailer) => mailer.map(Arc::new),
+        Err(e) => {
+            tracing::error!("mail is misconfigured: {e}");
+            std::process::exit(1);
+        }
+    };
+    let spaces = match appview::spaces::Spaces::from_config(&config) {
+        Ok(spaces) => spaces.map(Arc::new),
+        Err(e) => {
+            tracing::error!("spaces are misconfigured: {e}");
+            std::process::exit(1);
+        }
+    };
     let addr = format!("0.0.0.0:{}", config.port);
-    let state = AppState::new(db, config).with_oauth(oauth);
+    let mut state = AppState::new(db, config).with_oauth(oauth);
+    state.replica = replica;
+    state.mailer = mailer;
+    state.spaces = spaces;
 
     // The firehose consumer runs for the life of the process, materializing
     // public records into the view and broadcasting deltas to /ws clients. It
     // reconnects on its own, so a failed connection never blocks serving.
     tokio::spawn(appview::firehose::run(state.clone()));
+    // And the board's publisher, which does nothing where no board account is
+    // configured.
+    tokio::spawn(appview::board::run_publisher(state.clone()));
+    // And the mirror into atproto spaces, likewise where none are configured.
+    tokio::spawn(appview::spaces::run(state.clone()));
 
     let app = router(state);
 
@@ -62,5 +141,144 @@ async fn main() {
     if let Err(e) = axum::serve(listener, app).await {
         tracing::error!("server error: {e}");
         std::process::exit(1);
+    }
+}
+
+async fn import(db: &Db, path: &str) -> ! {
+    match appview::import::import_file(db, path).await {
+        Ok(stats) => {
+            let loaded = &stats.entities;
+            println!(
+                "loaded: {} users ({} to be recognized by address), {} contexts, {} documents \
+                 ({} author rows), {} members, {} comments, {} reactions, {} polls, \
+                 {} canvases ({} cells), {} reports",
+                loaded.users,
+                stats.accounts,
+                loaded.contexts,
+                loaded.documents,
+                loaded.document_authors,
+                loaded.members,
+                loaded.comments,
+                loaded.reactions,
+                stats.polls,
+                stats.canvases,
+                stats.cells,
+                stats.feedback
+            );
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("import failed, nothing was loaded: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+/// The cutover's gates. Exits non-zero on a red one, so that a unit running it
+/// fails where a person would have had to notice.
+async fn verify(state: AppState, path: &str, dir: Option<&str>) -> ! {
+    let asked = async {
+        let raw = tokio::fs::read(path).await?;
+        let ex = serde_json::from_slice(&raw)?;
+        let dir = dir.map(std::path::Path::new);
+        Ok::<_, Box<dyn std::error::Error>>(appview::verify::verify(&state, &ex, dir).await?)
+    };
+    match asked.await {
+        Ok(gates) => {
+            for line in gates.iter().flat_map(|gate| gate.lines()) {
+                println!("{line}");
+            }
+            let red = gates.iter().filter(|gate| !gate.red.is_empty()).count();
+            match red {
+                0 => println!("every gate is green"),
+                n => println!("{n} of {} gates are red: no flip", gates.len()),
+            }
+            std::process::exit(i32::from(red > 0));
+        }
+        Err(e) => {
+            eprintln!("verify failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn mirror_spaces(mut state: AppState, bytes: bool) -> ! {
+    let spaces = match appview::spaces::Spaces::from_config(&state.config) {
+        Ok(Some(spaces)) => Arc::new(spaces),
+        Ok(None) => {
+            eprintln!("no spaces are configured (APPVIEW_SPACES_*)");
+            std::process::exit(2);
+        }
+        Err(e) => {
+            eprintln!("spaces are misconfigured: {e}");
+            std::process::exit(2);
+        }
+    };
+    state.spaces = Some(spaces.clone());
+    let asked = async {
+        let swept = spaces.mirror_everything(&state).await?;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>((
+            swept,
+            spaces.check_everything(&state, bytes).await?,
+        ))
+    };
+    match asked.await {
+        Ok((swept, wrong)) => {
+            println!(
+                "records: {} written, {} deleted, {} as they were, {} waiting for what they \
+                 point at, {} the PDS will not take, {} that failed",
+                swept.written,
+                swept.deleted,
+                swept.same,
+                swept.waiting,
+                swept.refused,
+                swept.failed
+            );
+            for line in &wrong {
+                println!("{line}");
+            }
+            let green = wrong.is_empty() && swept.waiting + swept.refused + swept.failed == 0;
+            match green {
+                true => println!("every space is what the index says, and enough to rebuild it"),
+                false => println!("the spaces are not the index yet"),
+            }
+            std::process::exit(i32::from(!green));
+        }
+        Err(e) => {
+            eprintln!("mirror-spaces failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn import_files(state: AppState, path: &str, dir: &str) -> ! {
+    let copied = async {
+        let raw = tokio::fs::read(path).await?;
+        let ex = serde_json::from_slice(&raw)?;
+        Ok::<_, Box<dyn std::error::Error>>(
+            appview::import::import_files(&state, &ex, std::path::Path::new(dir)).await?,
+        )
+    };
+    match copied.await {
+        Ok(stats) => {
+            println!(
+                "files: {} copied, {} here already, {} not copied, {} that nothing points at",
+                stats.copied,
+                stats.already,
+                stats.failed.len(),
+                stats.unreferenced.len()
+            );
+            for (id, why) in &stats.failed {
+                println!("not copied: {id}: {why}");
+            }
+            for name in &stats.unreferenced {
+                println!("nothing points at: {name}");
+            }
+            std::process::exit(i32::from(!stats.failed.is_empty()));
+        }
+        Err(e) => {
+            eprintln!("import-files failed: {e}");
+            std::process::exit(1);
+        }
     }
 }

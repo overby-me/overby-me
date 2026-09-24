@@ -5,19 +5,20 @@
   pkg-config,
   stdenv,
   wayland,
+  libxkbcommon,
 }:
 rustPlatform.buildRustPackage (finalAttrs: {
   pname = "stochos";
-  version = "0.3.2";
+  version = "1.0.1";
 
   src = fetchFromGitHub {
     owner = "museslabs";
     repo = "stochos";
     tag = "v${finalAttrs.version}";
-    hash = "sha256-UCwMsoqBwRXbItmxtKjhfb8Ua0srjizueWa2LORHL/s=";
+    hash = "sha256-4EEijphUD1lLjBMdsV5asBuSNJlzTtUkzd3ujzmHOoI=";
   };
 
-  cargoHash = "sha256-z+7c2Qat+tX+t4hLeim/GVdbpY6o8hD2rZZP8zahWPc=";
+  cargoHash = "sha256-98z0x0MovUIA+DZPR5o4rH/Gm2cBsWBvGefcCLyuFjc=";
 
   nativeBuildInputs = [
     pkg-config
@@ -25,6 +26,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
 
   buildInputs = lib.optionals stdenv.isLinux [
     wayland
+    libxkbcommon
   ];
 
   meta = {

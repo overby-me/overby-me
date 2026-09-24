@@ -1,0 +1,42 @@
+{
+	"lexicon": 1,
+	"id": "wiki.radikal.getBlobLink",
+	"defs": {
+		"main": {
+			"type": "query",
+			"description": "A link to a file that carries its own authority, for what cannot send an `Authorization` header: an `<iframe>`, a `<video>`, a document viewer on another server. Whoever holds the link reads that one file until it expires, so it is made only for a caller who may read the file. Pictures do not need one: fetch `/blob/<id>` with the session instead.",
+			"parameters": {
+				"type": "params",
+				"required": ["id"],
+				"properties": {
+					"id": {
+						"type": "string"
+					}
+				}
+			},
+			"output": {
+				"encoding": "application/json",
+				"schema": {
+					"type": "object",
+					"required": ["url", "expires"],
+					"properties": {
+						"url": {
+							"type": "string",
+							"format": "uri"
+						},
+						"expires": {
+							"type": "integer",
+							"description": "Unix seconds. Ask again before then for a file still on screen."
+						}
+					}
+				}
+			},
+			"errors": [
+				{
+					"name": "NotFound",
+					"description": "No such file, or none the caller may read."
+				}
+			]
+		}
+	}
+}

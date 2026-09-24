@@ -5,22 +5,23 @@
   pkg-config,
   makeWrapper,
   libxkbcommon,
+  udev,
   vulkan-loader,
   stdenv,
   wayland,
 }:
 rustPlatform.buildRustPackage {
   pname = "cosmic-osk";
-  version = "0-unstable-2026-01-22";
+  version = "0-unstable-2026-09-17";
 
   src = fetchFromGitHub {
     owner = "pop-os";
     repo = "cosmic-osk";
-    rev = "eee4d0472c815bad010492c16f4358fca9a47e5f";
-    hash = "sha256-B5XYflvjykLOn59zHgWWsJY0bU2cUo0XtJTu0QveTRQ=";
+    rev = "d7b66a24890d03e38dd8962d956bc802d4a41067";
+    hash = "sha256-HF/JrGZeKF4z0gRvJfcPEVaNKv8Rftc0vyOrWZ2A8Pc=";
   };
 
-  cargoHash = "sha256-WhAhrediZCNVl9evwNIBKFbCM14lNzfIm0tPJ71HGD0=";
+  cargoHash = "sha256-r5XlNx1GIy4gEiHX9QVYLEufRnuwxe9X4OBbz3tinIo=";
 
   nativeBuildInputs = [
     pkg-config
@@ -30,6 +31,9 @@ rustPlatform.buildRustPackage {
   buildInputs =
     [
       libxkbcommon
+      # libudev-sys arrived with the input rework; its build script wants
+      # libudev.pc, not just the shared library.
+      udev
       vulkan-loader
     ]
     ++ lib.optionals stdenv.isLinux [

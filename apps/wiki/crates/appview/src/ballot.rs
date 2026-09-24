@@ -2,22 +2,20 @@
 //! roster to THIS crate's Turso datastore. The pure scheme (`ballot-spec`) and
 //! its persistent layer (`ballot-store`) were built and property-tested
 //! standalone; this module is where they become part of the running AppView.
+//! The procedures over it (open a poll, issue tokens, cast, tally) are
+//! `crate::poll`.
 //!
-//! Two entry points:
 //! - [`init_ballot_schema`] applies the board + roster DDL alongside the entity
 //!   and runtime tables (called from [`crate::db::Db::init_schema`]). Both DDLs
 //!   are `CREATE TABLE IF NOT EXISTS`, so this is idempotent on a persistent file.
-//! - [`open_board`] hands out a [`PersistentBoard`] over a fresh connection, with
-//!   the off-node replica sink attached when a replica-log path is configured
-//!   (`config.ballot_replica_log`) so every committed cast is shipped to an
-//!   independent node -- the load-bearing E2E-V integrity control.
-//!
-//! The XRPC ballot procedures (open a poll, issue a token, cast, tally) build on
-//! this seam in a later slice; wiring the durable core in first keeps that slice
-//! to handlers over an already-live store.
+//! - [`open_replica`] opens the off-node replica log, once per process.
+//! - [`board`] hands out one poll's [`PersistentBoard`] over a fresh connection,
+//!   with that replica attached, so every committed cast is shipped to an
+//!   independent node: the load-bearing E2E-V integrity control.
 
+use crate::AppState;
 use crate::db::{Db, DbError};
-use ballot_store::{BoardError, PersistentBoard, ReplicaLog};
+use ballot_store::{PersistentBoard, ReplicaLog};
 use std::sync::Arc;
 
 /// Apply the ballot DDL (public board + private roster) to the datastore. Both
@@ -31,55 +29,24 @@ pub async fn init_ballot_schema(db: &Db) -> Result<(), DbError> {
     Ok(())
 }
 
-/// Open a durable [`PersistentBoard`] over a fresh datastore connection. When
-/// `replica_log` is a non-empty path, the off-node replica sink is attached so
-/// every committed cast is appended to that append-only log (which
-/// `ballot_store::transport` mirrors to an independent node); an empty path
-/// disables replication (dev/tests). The board's own DDL is idempotent, so this
-/// composes cleanly with [`init_ballot_schema`].
-pub async fn open_board(db: &Db, replica_log: &str) -> Result<PersistentBoard, BallotError> {
-    let conn = db.acquire().await?;
-    let board = PersistentBoard::open(conn).await?;
-    if replica_log.is_empty() {
-        Ok(board)
-    } else {
-        let replica = Arc::new(ReplicaLog::open(replica_log)?);
-        Ok(board.with_replication(replica))
+/// The replica log at `path`, or none for an empty path (dev and tests).
+///
+/// Opened ONCE and shared: its appends are serialized by a lock inside it, so a
+/// second handle on the same file would let two records interleave.
+pub fn open_replica(path: &str) -> std::io::Result<Option<Arc<ReplicaLog>>> {
+    if path.is_empty() {
+        return Ok(None);
     }
+    Ok(Some(Arc::new(ReplicaLog::open(path)?)))
 }
 
-/// A ballot-wiring failure: the datastore, the board core, or the replica log.
-#[derive(Debug)]
-pub enum BallotError {
-    Db(DbError),
-    Board(BoardError),
-    Replica(std::io::Error),
-}
-
-impl std::fmt::Display for BallotError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BallotError::Db(e) => write!(f, "ballot datastore error: {e}"),
-            BallotError::Board(e) => write!(f, "ballot board error: {e}"),
-            BallotError::Replica(e) => write!(f, "ballot replica-log error: {e}"),
-        }
-    }
-}
-impl std::error::Error for BallotError {}
-impl From<DbError> for BallotError {
-    fn from(e: DbError) -> Self {
-        BallotError::Db(e)
-    }
-}
-impl From<BoardError> for BallotError {
-    fn from(e: BoardError) -> Self {
-        BallotError::Board(e)
-    }
-}
-impl From<std::io::Error> for BallotError {
-    fn from(e: std::io::Error) -> Self {
-        BallotError::Replica(e)
-    }
+/// The board of `poll_id`, over a connection of its own.
+pub async fn board(state: &AppState, poll_id: &str) -> Result<PersistentBoard, DbError> {
+    let board = PersistentBoard::attach(state.db.acquire().await?, poll_id);
+    Ok(match &state.replica {
+        Some(replica) => board.with_replication(replica.clone()),
+        None => board,
+    })
 }
 
 #[cfg(test)]
@@ -120,13 +87,18 @@ mod tests {
         }
     }
 
-    /// End-to-end wiring: a board opened over the AppView's datastore accepts a
-    /// real blind-signed cast, proving the durable core is live in-process (not
-    /// just the DDL). No replica log here (empty path).
+    /// End-to-end wiring: a board over the AppView's datastore accepts a real
+    /// blind-signed cast and ships it to the configured replica, proving the
+    /// durable core is live in-process (not just the DDL).
     #[tokio::test(flavor = "current_thread")]
     async fn board_over_the_appview_datastore_accepts_a_cast() {
-        let db = seeded_db().await;
-        let board = open_board(&db, "").await.expect("open board");
+        let log = std::env::temp_dir().join(format!(
+            "appview-replica-{}.jsonl",
+            crate::util::random_token(8)
+        ));
+        let mut state = AppState::new(seeded_db().await, crate::Config::default());
+        state.replica = open_replica(&log.to_string_lossy()).expect("replica");
+        let board = board(&state, "p1").await.expect("board");
         let issuer = TokenIssuer::new_for_poll(2048).expect("keypair");
         let rules = BallotRules {
             options: 2,
@@ -148,5 +120,9 @@ mod tests {
         };
         board.cast(pk, &rules, entry).await.expect("cast");
         assert_eq!(board.entries().await.expect("entries").len(), 1);
+        let shipped = std::fs::read_to_string(&log).expect("replica log");
+        assert_eq!(shipped.lines().count(), 1);
+        assert!(shipped.contains("\"poll\":\"p1\""), "{shipped}");
+        assert!(open_replica("").expect("none").is_none());
     }
 }

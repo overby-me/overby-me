@@ -16,18 +16,27 @@
 //! views recover without any bookkeeping of their own.
 
 use std::cell::RefCell;
+#[cfg(not(feature = "appview"))]
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use dioxus::core::{Runtime, RuntimeGuard};
 use dioxus::prelude::*;
+#[cfg(not(feature = "appview"))]
 use serde_json::json;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+#[cfg(not(feature = "appview"))]
 use web_sys::{MessageEvent, WebSocket};
 
+#[cfg(not(feature = "appview"))]
 use crate::nhost::graphql_url;
 use crate::session::use_session;
+
+/// Under the feature the socket is the AppView's `/ws`, and everything below
+/// that speaks Hasura's protocol is compiled out. The hooks are the same.
+#[cfg(feature = "appview")]
+use crate::appview::hub::Hub;
 
 /// Whether a pushed payload is news, or just the state on arrival.
 ///
@@ -238,6 +247,7 @@ pub fn use_graphql_subscription(wire: crate::graphql::Wire) -> Signal<Option<ser
     let _session = use_session();
     let data = use_signal(|| None::<serde_json::Value>);
 
+    #[cfg(not(feature = "appview"))]
     let handle = use_hook(|| {
         Hub::subscribe(
             wire.query.clone(),
@@ -246,6 +256,12 @@ pub fn use_graphql_subscription(wire: crate::graphql::Wire) -> Signal<Option<ser
             Runtime::current(),
         )
     });
+    #[cfg(feature = "appview")]
+    let handle = use_hook(|| Hub::subscribe(wire.clone(), data, Runtime::current()));
+    // The AppView's socket is opened AS someone, and keeps no token to renew:
+    // whoever is signed in changing is the one thing it has to be told.
+    #[cfg(feature = "appview")]
+    use_effect(move || Hub::listen_as(_session.read().access_token.as_deref()));
 
     use_drop(move || {
         // Deregister BEFORE anything else: a frame already in flight for this id
@@ -258,6 +274,7 @@ pub fn use_graphql_subscription(wire: crate::graphql::Wire) -> Signal<Option<ser
 
 /// One live subscription: the query text, the variables it was started with, and
 /// every listener waiting on it paired with its own id.
+#[cfg(not(feature = "appview"))]
 type LiveSub<S> = (String, serde_json::Value, Vec<(u64, S)>);
 
 /// Which subscriptions exist on the socket, and who is listening to each.
@@ -270,6 +287,7 @@ type LiveSub<S> = (String, serde_json::Value, Vec<(u64, S)>);
 /// makes a context-wide watch cheaper than a per-row one rather than the same.
 ///
 /// Generic over the sink so the bookkeeping can be tested without a renderer.
+#[cfg(not(feature = "appview"))]
 struct Registry<S> {
     /// Server-side subscription id -> the query, its variables, and everyone
     /// waiting on it.
@@ -283,6 +301,7 @@ struct Registry<S> {
     next_sink: u64,
 }
 
+#[cfg(not(feature = "appview"))]
 impl<S> Default for Registry<S> {
     fn default() -> Self {
         Registry {
@@ -295,12 +314,14 @@ impl<S> Default for Registry<S> {
 }
 
 /// One listener's place in the registry.
+#[cfg(not(feature = "appview"))]
 #[derive(Clone, Debug, PartialEq)]
 struct Handle {
     id: String,
     sink: u64,
 }
 
+#[cfg(not(feature = "appview"))]
 impl<S> Registry<S> {
     /// Add a listener. Returns its handle, and the query to SEND if this is the
     /// first listener for it — `None` means the socket already carries it.
@@ -359,6 +380,7 @@ impl<S> Registry<S> {
 }
 
 /// The single connection, and every subscription riding on it.
+#[cfg(not(feature = "appview"))]
 #[derive(Default)]
 struct HubState {
     ws: Option<WebSocket>,
@@ -384,14 +406,17 @@ struct HubState {
     runtime: Option<Rc<Runtime>>,
 }
 
+#[cfg(not(feature = "appview"))]
 thread_local! {
     static HUB: Rc<RefCell<HubState>> = Rc::new(RefCell::new(HubState::default()));
 }
 
 /// Namespace for the hub's operations; the state itself is thread-local, since
 /// wasm is single-threaded and there is exactly one connection per document.
+#[cfg(not(feature = "appview"))]
 struct Hub;
 
+#[cfg(not(feature = "appview"))]
 impl Hub {
     fn with<R>(f: impl FnOnce(&mut HubState) -> R) -> R {
         HUB.with(|h| f(&mut h.borrow_mut()))
@@ -779,6 +804,7 @@ impl Hub {
 ///
 /// `session.rs` keeps its own copy for the same purpose; this is the second
 /// place that must not start a token refresh on the way into the background.
+#[cfg(not(feature = "appview"))]
 fn page_hidden() -> bool {
     web_sys::window()
         .and_then(|w| w.document())
@@ -797,11 +823,13 @@ fn page_hidden() -> bool {
 ///
 /// A minute is long next to the handshake it must cover and short next to the
 /// ~15 minutes a token lives, so it costs one extra refresh per token at most.
+#[cfg(not(feature = "appview"))]
 const RENEW_LEAD_MS: f64 = 60_000.0;
 
 /// Never schedule a renewal sooner than this. A token that could not be
 /// refreshed has an expiry already in the past, which would otherwise compute a
 /// delay of zero and spin the socket as fast as the browser allows.
+#[cfg(not(feature = "appview"))]
 const RENEW_MIN_MS: f64 = 30_000.0;
 
 /// Whether a token expiring at `expires_at` is too far gone to open a socket
@@ -810,6 +838,7 @@ const RENEW_MIN_MS: f64 = 30_000.0;
 /// No recorded expiry is NOT past use. It means nobody knows, and the honest
 /// move is to try the token rather than refresh on every single connect, which
 /// would put an auth round trip in front of every reconnect in a dropout.
+#[cfg(not(feature = "appview"))]
 fn past_use(expires_at: Option<f64>, now: f64) -> bool {
     expires_at.is_some_and(|exp| now + RENEW_LEAD_MS >= exp)
 }
@@ -822,7 +851,7 @@ fn past_use(expires_at: Option<f64>, now: f64) -> bool {
 /// come back at the same instant too, and the server meets one synchronised
 /// stampede after another. `rand` is a 0..1 sample, passed in so this is pure and
 /// testable.
-fn backoff_delay_ms(attempts: u32, rand: f64) -> i32 {
+pub(crate) fn backoff_delay_ms(attempts: u32, rand: f64) -> i32 {
     let exp = attempts.min(5); // 2^5 * 1s = 32s pre-cap
     let base = ((1u32 << exp) * 1_000).min(30_000) as f64;
     let jitter = 0.75 + rand.clamp(0.0, 1.0) * 0.5;
@@ -831,13 +860,13 @@ fn backoff_delay_ms(attempts: u32, rand: f64) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        backoff_delay_ms, past_use, push_is_a_change, Coalescer, Registry, COALESCE_MS,
-        RENEW_LEAD_MS, SPREAD_MS,
-    };
+    use super::{backoff_delay_ms, push_is_a_change, Coalescer, COALESCE_MS, SPREAD_MS};
+    #[cfg(not(feature = "appview"))]
+    use super::{past_use, Registry, RENEW_LEAD_MS};
 
     /// The reconnect loop this exists to break: a token that expired while the
     /// socket was open must not be presented to the next attempt.
+    #[cfg(not(feature = "appview"))]
     #[test]
     fn a_token_that_has_already_lapsed_is_never_worth_connecting_with() {
         let now = 1_000_000.0;
@@ -856,6 +885,7 @@ mod tests {
     /// token good, the reconnect would present the same dying credential and be
     /// evicted again a minute later: the exact loop this replaced, rebuilt out
     /// of two constants that disagree.
+    #[cfg(not(feature = "appview"))]
     #[test]
     fn a_renewed_connection_always_refreshes_before_it_reconnects() {
         let now = 1_000_000.0;
@@ -871,6 +901,7 @@ mod tests {
 
     /// The other half: refreshing when there is no need would put an auth round
     /// trip in front of every reconnect, and a dropout is many reconnects.
+    #[cfg(not(feature = "appview"))]
     #[test]
     fn a_token_with_life_left_is_used_as_it_is() {
         let now = 1_000_000.0;
@@ -953,6 +984,7 @@ mod tests {
     /// registration is a live query Hasura re-runs on a timer, so sharing is the
     /// difference between one and forty per device — and between 500 and 20,000
     /// in a hall.
+    #[cfg(not(feature = "appview"))]
     #[test]
     fn identical_queries_share_one_subscription() {
         let mut r: Registry<u32> = Registry::default();
@@ -973,6 +1005,7 @@ mod tests {
     /// the query string, so two canvases were two strings. Now they are one
     /// string and two variable sets, and folding them together would have crossed
     /// their traffic — one canvas painting the other.
+    #[cfg(not(feature = "appview"))]
     #[test]
     fn the_same_query_with_other_variables_does_not_share() {
         let mut r: Registry<u32> = Registry::default();
@@ -995,6 +1028,7 @@ mod tests {
     }
 
     /// A shared subscription ends only when its LAST listener goes.
+    #[cfg(not(feature = "appview"))]
     #[test]
     fn a_shared_subscription_outlives_its_first_listener() {
         let mut r: Registry<u32> = Registry::default();
@@ -1018,6 +1052,7 @@ mod tests {
     }
 
     /// Deregistering twice (or an unknown handle) is harmless.
+    #[cfg(not(feature = "appview"))]
     #[test]
     fn deregistering_an_unknown_listener_is_a_no_op() {
         let mut r: Registry<u32> = Registry::default();
