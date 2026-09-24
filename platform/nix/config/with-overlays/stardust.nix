@@ -8,7 +8,8 @@
 #
 # The tree's own non-spatial-input package carried this wrapper until it was
 # dropped for the version-matched nixpkgs build, which does not.
-final: prev: {
+final: prev:
+{
   stardust-xr-non-spatial-input = prev.stardust-xr-non-spatial-input.overrideAttrs (old: {
     nativeBuildInputs = (old.nativeBuildInputs or []) ++ [prev.makeWrapper];
 
@@ -26,17 +27,19 @@ final: prev: {
         done
       '';
   });
-
-  # stardust-xr-server's source runs stock; its two patches are disabled by
-  # request (restore the postPatch override from git to re-enable). Off, turnip
-  # GPUs (phone, XR headset) crash on the OIT resolve buffer and the launcher
-  # spawns inside the flatscreen camera; Intel/desktop GPUs are unaffected.
-  #
-  # The build is still overridden. Upstream's release profile is fat LTO at
-  # codegen-units = 1 with debug symbols, so rustc holds the whole program's IR
-  # and DWARF at once: over 10.5GB, more than an aarch64 builder with 15GB of
-  # RAM can give it. Thin LTO still imports across crates and still did not
-  # fit, so no LTO at all.
+}
+# stardust-xr-server's source runs stock; its two patches are disabled by
+# request (restore the postPatch override from git to re-enable). Off, turnip
+# GPUs (phone, XR headset) crash on the OIT resolve buffer and the launcher
+# spawns inside the flatscreen camera; Intel/desktop GPUs are unaffected.
+#
+# The build override below is aarch64-only. Upstream's release profile is fat
+# LTO at codegen-units = 1 with debug symbols, so rustc holds the whole
+# program's IR and DWARF at once: over 10.5GB, more than an aarch64 builder
+# with 15GB of RAM can give it. Thin LTO still imports across crates and still
+# did not fit, so no LTO at all. x86_64 builders have the headroom, and
+# building stock there keeps them on the binary cache.
+// prev.lib.optionalAttrs (!prev.stdenv.hostPlatform.isx86_64) {
   stardust-xr-server = prev.stardust-xr-server.overrideAttrs (_: {
     CARGO_PROFILE_RELEASE_LTO = "false";
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "16";
