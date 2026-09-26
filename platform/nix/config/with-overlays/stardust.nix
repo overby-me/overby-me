@@ -28,9 +28,9 @@ final: prev:
       '';
   });
 }
-# Gated to aarch64 because that is where this tree's turnip GPUs are (Surface
-# Pro 11, phone, XR headset) and where the small builder is. x86_64 has neither
-# problem, so it builds stock and stays on the binary cache.
+# Gated to aarch64 because that is where this tree's turnip GPUs are (phone, XR
+# headset) and where the small builder is. x86_64 has neither problem, so it
+# builds stock and stays on the binary cache.
 #
 # The server asks bevy for order-independent transparency at its default eight
 # layers, and oit_layers is pixels * layers * 8 bytes. On the XR render target

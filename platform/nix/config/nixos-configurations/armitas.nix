@@ -64,10 +64,9 @@
     # ── Desktop environment ───────────────────────────────────────────
     inputs.self.desktops.cosmic
 
-    # Only the flatscreen half of this works here: the XR session wants
-    # monado's vk_display backend, and turnip exports no
-    # vkGetPhysicalDeviceDisplayPropertiesKHR for it to enumerate.
-    inputs.self.desktops.xr
+    # desktops.xr is deliberately absent: turnip exports no
+    # vkGetPhysicalDeviceDisplayPropertiesKHR for monado's vk_display backend, so
+    # no session here can come up and monado-vulkan-layers would load for nothing.
 
     # ── Shared configuration ──────────────────────────────────────────
     # The portable slice of platform/nix/config/nixos-modules/core.  Deliberately not the whole
