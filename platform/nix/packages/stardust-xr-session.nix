@@ -13,6 +13,7 @@
   stardust-xr-server,
   stardust-xr-flatland,
   stardust-xr-protostar,
+  stardust-xr-atmosphere,
   stardust-xr-non-spatial-input,
   systemd,
   xkeyboard_config,
@@ -44,21 +45,24 @@
     export RUST_BACKTRACE=1
   '';
 
+  # Without an environment the session renders to a black void, and atmosphere
+  # panics on the env.kdl unwrap in env.rs rather than defaulting to one. It
+  # resolves the name it is given against its own data directory, and Rust's
+  # join replaces the base when that name is absolute, so naming the store path
+  # skips `atmosphere install` and the mutable ~/.local/share copy it makes.
+  environment = "${stardust-xr-atmosphere}/share/atmosphere/default_envs/the_grid";
+
   # `--execute-startup-script` runs this once the server accepts clients.
   # Backgrounded rather than waited on: logind kills the session's cgroup at
   # logout, so a wait would only hold the server open behind them. flatland is
   # what 2D applications draw into, so the launcher needs it to launch anything.
-  #
-  # atmosphere is deliberately not here: it is a CLI over a directory of
-  # installed environments, and `atmosphere show` panics on an unwrap in
-  # env.rs when that directory does not exist. Run `atmosphere install <path>`
-  # first, then it belongs in this list.
   startup = name: pipeline:
     writeShellApplication {
       name = "stardust-xr-startup-${name}";
       text = ''
         ${getExe stardust-xr-flatland} &
         ${getExe' stardust-xr-protostar "hexagon_launcher"} &
+        ${getExe' stardust-xr-atmosphere "atmosphere"} show ${environment} &
         ${pipeline} &
       '';
     };
