@@ -31,6 +31,8 @@
   card = "X1E80100Microso";
 
   speakerPcm = "hw:${card},1";
+
+  applyRoute = "${lib.getExe pkgs.nushell} ${./scripts/wsa-routing.nu} ${card}";
 in {
   options.hardware.surfacePro11.audio = {
     enable = lib.mkEnableOption "audio support on the Surface Pro 11";
@@ -99,7 +101,30 @@ in {
           # Ordering the greeter after this means every second spent failing
           # here is a second of black screen.
           TimeoutStartSec = "2min";
-          ExecStart = "${lib.getExe pkgs.nushell} ${./scripts/wsa-routing.nu} ${card}";
+          ExecStart = applyRoute;
+        };
+      };
+
+      # The same route again after resume, because the DSP comes back with its
+      # graph torn down and AudioReach fixes the front-end to back-end
+      # connection at the next open, whoever gets there: the amplifiers then
+      # spend the rest of the session on a bus the DSP never configured.
+      # after/wantedBy as NixOS' own post-resume.service has them, there being
+      # no post-resume.target here.
+      #
+      # No RemainAfterExit, unlike the boot unit, or the second resume finds
+      # the unit active and does nothing. The script applies nothing until it
+      # has seen PCM1 free, so a resume with audio playing gives up rather than
+      # half-writing the route.
+      systemd.services.surface-pro-11-wsa-routing-resume = {
+        description = "Surface Pro 11 speaker route, after resume";
+        after = ["suspend.target" "hibernate.target" "hybrid-sleep.target"];
+        wantedBy = ["suspend.target" "hibernate.target" "hybrid-sleep.target"];
+        path = [pkgs.alsa-utils pkgs.coreutils];
+        serviceConfig = {
+          Type = "oneshot";
+          TimeoutStartSec = "2min";
+          ExecStart = applyRoute;
         };
       };
     }
