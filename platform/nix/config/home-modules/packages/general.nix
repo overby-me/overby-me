@@ -15,6 +15,10 @@
     ++ lib.optionals (pkgs.stdenv.isDarwin || pkgs.stdenv.hostPlatform.isx86_64) [
       slack
     ]
+    # Upstream cuts no releases; only the amd64 CI deb was ever archived.
+    ++ lib.optionals (pkgs.stdenv.isLinux && pkgs.stdenv.hostPlatform.isx86_64) [
+      euro-office-desktopeditors
+    ]
     # GNOME/PipeWire/Wayland desktop apps that only build/apply on Linux.
     ++ lib.optionals pkgs.stdenv.isLinux [
       #bitwarden
