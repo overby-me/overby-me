@@ -61,6 +61,10 @@
     inputs.home-manager.nixosModules.home-manager
     inputs.self.nixosModules.home-manager
 
+    # x86 titles under Steam need FEX given a rootfs and a binfmt handler,
+    # which on SteamOS the OS image provides and here nothing does.
+    inputs.self.nixosModules.fex-rootfs
+
     # ── Desktop environment ───────────────────────────────────────────
     inputs.self.desktops.cosmic
 

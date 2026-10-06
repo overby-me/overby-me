@@ -65,6 +65,20 @@
 
     export LD_LIBRARY_PATH="$client"
 
+    # Valve's compat tool looks for its x86 rootfs where SteamOS keeps one, so
+    # on any other distribution FEX has to be told; nixos-modules/fex-rootfs.nix
+    # is what mounts this one.
+    if [[ -d /run/fex-emu/rootfs ]]; then
+      export FEX_ROOTFS=/run/fex-emu/rootfs
+
+      # Only if the image really carries the manifest. The tool hands this
+      # path down to pressure-vessel, and SteamOS' combined FEX-and-Mesa image
+      # has one where a stock upstream rootfs does not.
+      if [[ -f /run/fex-emu/rootfs/graphics_provider.json ]]; then
+        export STEAM_COMPAT_GRAPHICS_PROVIDER=/run/fex-emu/rootfs/graphics_provider.json
+      fi
+    fi
+
     # The runtime's own run.sh is an x86 binary, so asking it where its
     # libraries are means asking it through FEX. Absent until Steam has
     # downloaded the compatibility tool, which is why this is conditional.
