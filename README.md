@@ -263,6 +263,7 @@ Third-party software packaged under `platform/nix/packages/`, grouped by theme.
 | [Cthulock 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/cthulock.nix) | [GitHub](https://github.com/FriederHannenheim/cthulock) | Wayland screen locker focused on customizability |
 | [Layout 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/layout/default.nix) | [GitHub](https://github.com/nadavrot/layout) | Graphviz dot renderer |
 | [Rustyfications 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/rustyfications.nix) | [GitHub](https://github.com/bzglve/rustyfications) | Rusty notification daemon for Wayland |
+| [Steam 💣🔒🇺🇸](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/steam-aarch64.nix) | [Steam](https://store.steampowered.com) | Valve's aarch64 client, with x86 titles running under FEX |
 | [Stochos 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/stochos.nix) | [GitHub](https://github.com/museslabs/stochos) | Keyboard-driven mouse control for Wayland and X11 |
 | [Vibe 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/vibe.nix) | [GitHub](https://github.com/TornaxO7/vibe) | Desktop audio visualizer |
 | [Wondermagick 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/wondermagick/default.nix) | [GitHub](https://github.com/Shnatsel/wondermagick) | Memory-safe ImageMagick replacement |

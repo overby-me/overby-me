@@ -92,7 +92,7 @@
     ../nixos-modules/services/resolved.nix
 
     # ── Machine configuration ─────────────────────────────────────────
-    (_: {
+    ({pkgs, ...}: {
       # ── Identity ────────────────────────────────────────────────────
       networking.hostName = "armitas";
 
@@ -173,6 +173,10 @@
       hardware = {
         graphics.enable = true;
 
+        # The Valve-hardware udev rules nixpkgs' programs.steam would have set.
+        # The arm64 client has no module of its own.
+        steam-hardware.enable = true;
+
         bluetooth = {
           enable = true;
           powerOnBoot = true;
@@ -198,6 +202,11 @@
       # Waydroid alone, not core/virtualisation.nix, which would bring
       # docker and libvirtd with it.  Runs arm64 Android apps natively.
       virtualisation.waydroid.enable = true;
+
+      # ── Gaming ──────────────────────────────────────────────────────
+      # Here rather than in the home package set, which the phone shares and
+      # has no business carrying 2 GB of Steam into.
+      environment.systemPackages = [pkgs.steam-aarch64];
 
       # ── TPM ─────────────────────────────────────────────────────────
       # systemd tags /dev/tpm0 and /dev/tpmrm0 and pulls in tpm2.target, and
