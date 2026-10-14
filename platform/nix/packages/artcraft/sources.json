@@ -1,0 +1,119 @@
+{
+	"cadcraft": {
+		"version": "0.6.2",
+		"hashes": {
+			"cadcraft-0.6.2-linux-x86_64.tar.gz": "sha256-Sj7HxTUOchK9tPc1r2xs8xnuF3wRUp7FR8d8kmQq1J0=",
+			"cadcraft-0.6.2-linux-aarch64.tar.gz": "sha256-BwCw8DJRcXfZ3uaJHYku4BN6j/4SsAUdXaC922qf4zI=",
+			"cadcraft-0.6.2-macos-universal.dmg": "sha256-+CVSgdgkoaiw8FH30R5Bp4arCB2Ic/UXrmS7t+GhTIw=",
+			"cadcraft-cli-0.6.2-macos-universal.zip": "sha256-L/6bCgFpgQ4xd+TxEZgH4E+06pbv5ePhWZzqUrJch6E="
+		}
+	},
+	"deckcraft": {
+		"version": "0.6.1",
+		"hashes": {
+			"deckcraft-0.6.1-linux-x86_64.tar.gz": "sha256-EhXmTxGqaFKb4+/iB49Rw5p2ad4dY8zhtVisEZPxdWk=",
+			"deckcraft-0.6.1-linux-aarch64.tar.gz": "sha256-aGtR0U3uGNUF/Pwc5d1CuT3kI1BzXVUxF5OmP0TxsUU=",
+			"deckcraft-0.6.1-macos-universal.dmg": "sha256-f53LbcI1zGBd//MaaMTHX9Ks6KURfNO07zHerulBYZo=",
+			"deckcraft-cli-0.6.1-macos-universal.zip": "sha256-ONlbsbepwSY2a0wYIFE2dCUl8xFCI93pReXxFLgHfCg="
+		}
+	},
+	"designcraft": {
+		"version": "0.7.1",
+		"hashes": {
+			"designcraft-0.7.1-linux-x86_64.tar.gz": "sha256-BaKyUx9vJnRrSnQwgf0A+ep3gi+heGY4AqDq7O1sFDc=",
+			"designcraft-0.7.1-linux-aarch64.tar.gz": "sha256-ZlwnNq0IQbipF7T1t2GhrRBKcZb8r10tVgjfDdh22CA=",
+			"designcraft-0.7.1-macos-universal.dmg": "sha256-yFILj6cC4ZQ2wGJpeS5oo8oJpinG1ctZGTNV7z6J7FI=",
+			"designcraft-cli-0.7.1-macos-universal.zip": "sha256-vXIIo5R7GF0diJ68GIVlCxMIXp3yuXThNb/KKnF15wQ="
+		}
+	},
+	"effectcraft": {
+		"version": "0.9.2",
+		"hashes": {
+			"effectcraft-0.9.2-linux-x86_64.tar.gz": "sha256-kW0119wP1WULV/V25lViVtBd7fk+g6l0DBiSMZu0rBw=",
+			"effectcraft-0.9.2-linux-aarch64.tar.gz": "sha256-PvqyhNTwY4Cg822ejSHK/JoF5QVgfNrLi+ttN7ky0WA=",
+			"effectcraft-0.9.2-macos-universal.dmg": "sha256-q8ArC3r9pjgC29Svje2cDDXxivewnogAKtzJhvZ29v4=",
+			"effectcraft-cli-0.9.2-macos-universal.zip": "sha256-lXw5EG8Y1r9PwKiyq4oITjNLGDmSOQNHoJ3ASGnf1QU="
+		}
+	},
+	"figcraft": {
+		"version": "0.5.1",
+		"hashes": {
+			"figcraft-0.5.1-linux-x86_64.tar.gz": "sha256-iuK2qfsNgU33FsuwUiZYLedBOUvGMm6iuEYlRFRf/BY=",
+			"figcraft-0.5.1-linux-aarch64.tar.gz": "sha256-emcs+ajDVt/2spQ709Z+tK1l28+Gas+EV0GxfNcZHYw=",
+			"figcraft-0.5.1-macos-universal.dmg": "sha256-T6MyO1hkbmtgCNEekMR70WnXAC82+D9i7BX+rysLHjc=",
+			"figcraft-cli-0.5.1-macos-universal.zip": "sha256-RrEGp0g2T1mVNQTCL5rDkVhEdXsSbpEcG8//capgqoQ="
+		}
+	},
+	"filmcraft": {
+		"version": "0.7.2",
+		"hashes": {
+			"filmcraft-0.7.2-linux-x86_64.tar.gz": "sha256-QXHEv19X/SlHVlX4pt9HGf7ajI8+2VskddjcESrTvoY=",
+			"filmcraft-0.7.2-linux-aarch64.tar.gz": "sha256-SvVvZJpvsZ3K44ar1Zkh7GyRkLclAUUXB1+k2BEjxoo=",
+			"filmcraft-0.7.2-macos-universal.dmg": "sha256-349ux/fH0idUnCBXnGW59rJjXM2ZRBC7cMjQNpprn7c=",
+			"filmcraft-cli-0.7.2-macos-universal.zip": "sha256-HttbpTkb10OevQzaBZ+B0abgMnvlmuuRpaUyse4aKH4="
+		}
+	},
+	"gridcraft": {
+		"version": "0.6.1",
+		"hashes": {
+			"gridcraft-0.6.1-linux-x86_64.tar.gz": "sha256-YRY7Ytn6+BS4ZOGyVdFdwxCnGnLKA9h5H6gCRCAWJ0U=",
+			"gridcraft-0.6.1-linux-aarch64.tar.gz": "sha256-7I4sQ2U9JDgvWcsWdkO0h7LVBjyyHvoK0e8l6+JKUAo=",
+			"gridcraft-0.6.1-macos-universal.dmg": "sha256-ZbN00wmOfGp23pO6vM/lYSAaAmKUM6OSRjyespijuk8=",
+			"gridcraft-cli-0.6.1-macos-universal.zip": "sha256-mZXtfxMqWWpFZZH674JeME5pWWSIQi13cnXgOvONX8o="
+		}
+	},
+	"lightcraft": {
+		"version": "0.7.1",
+		"hashes": {
+			"lightcraft-0.7.1-linux-x86_64.tar.gz": "sha256-hCiB9a0WUC3xHu70wo5dzyxdZrfU2DivcXmj/S4MtsA=",
+			"lightcraft-0.7.1-linux-aarch64.tar.gz": "sha256-Jt5iEs1qE9XSynWODPaxKxu/ALlINFIJks7lFkgRdKI=",
+			"lightcraft-0.7.1-macos-universal.dmg": "sha256-nHqvGrUy7oGBn97T7EUa9aK607fBtcnUjja4IjkzFFc=",
+			"lightcraft-cli-0.7.1-macos-universal.zip": "sha256-C4fg0pvYKN6eqzGlJ9GPRwL9/S21P7WUhJwS0H6GV1g="
+		}
+	},
+	"pdfcraft": {
+		"version": "0.7.1",
+		"hashes": {
+			"pdfcraft-0.7.1-linux-x86_64.tar.gz": "sha256-vH1lFREnNyD2pcy+DdWyxN3MtsV2oK/2GfOdLFZnoxU=",
+			"pdfcraft-0.7.1-linux-aarch64.tar.gz": "sha256-d7qtY0bm0Ah4cvy29vZOa9t/hAFlislhGdRiqh165OA=",
+			"pdfcraft-0.7.1-macos-universal.dmg": "sha256-yvpRsrvS+n/VMss4yv7FTpiN03yBvEfCbl8I5HLckr8=",
+			"pdfcraft-cli-0.7.1-macos-universal.zip": "sha256-ZjG4aOZaqezqv0FglqJmgfgMpmp+rlPMqC0yOahHqmM="
+		}
+	},
+	"photocraft": {
+		"version": "0.8.2",
+		"hashes": {
+			"photocraft-0.8.2-linux-x86_64.tar.gz": "sha256-FsMImXbu4tKQ2+c5httINcHsWgQ8XBawF7JISP9eqCc=",
+			"photocraft-0.8.2-linux-aarch64.tar.gz": "sha256-85IPMUBldNHT+coVLUZwPI5/O1BODSsuOU8K0Q8N80g=",
+			"photocraft-0.8.2-macos-universal.dmg": "sha256-0x/p+GtSExnkElFcUxOlbfp8oBUgPiy69JpbHdtZpgE=",
+			"photocraft-cli-0.8.2-macos-universal.zip": "sha256-OP0EY/ILxmAKrHWtXp3V7Ew17yOx3YbqGKOQWAwHTqw="
+		}
+	},
+	"soundcraft": {
+		"version": "0.6.1",
+		"hashes": {
+			"soundcraft-0.6.1-linux-x86_64.tar.gz": "sha256-87+jc1FG5NexLNg2O4/ne77/Me6VOSKVAz9QsZFu/O4=",
+			"soundcraft-0.6.1-linux-aarch64.tar.gz": "sha256-VaGEWGcPFyPtyLpF2gHz3YuF/rp8w/g9ROcDgSAkXKQ=",
+			"soundcraft-0.6.1-macos-universal.dmg": "sha256-lPAUcI4Bc8E2MLuPpBYxJNO7t69XHg8D2fmzAn+Q0Oc=",
+			"soundcraft-cli-0.6.1-macos-universal.zip": "sha256-vMNjo/d5njY2SU0MmTikA0KPpjcnmDQZOPRgoCLCXE8="
+		}
+	},
+	"vectorcraft": {
+		"version": "0.10.0",
+		"hashes": {
+			"vectorcraft-0.10.0-linux-x86_64.tar.gz": "sha256-pVc1oZKHcDjJtMMGlQT3pzoFQzpI7d3Y6U/H0plapvw=",
+			"vectorcraft-0.10.0-linux-aarch64.tar.gz": "sha256-GrWic5xPBtJ1OJFMhoOfanhYL5Su18QRyqGYj+Irims=",
+			"vectorcraft-0.10.0-macos-universal.dmg": "sha256-wObT3mDZxCF4MPZeE2pqj5OBiBwlJdrgVYKSzTY1Lik=",
+			"vectorcraft-cli-0.10.0-macos-universal.zip": "sha256-B0TQ1gZ0fq9SHmUp0CR38Hym0E+2THwDJHqrDdTBmWg="
+		}
+	},
+	"wordcraft": {
+		"version": "0.6.1",
+		"hashes": {
+			"wordcraft-0.6.1-linux-x86_64.tar.gz": "sha256-eb1UyBJ29upVEiJDKt7BXg6qtMtYgd7O446v16XKOPk=",
+			"wordcraft-0.6.1-linux-aarch64.tar.gz": "sha256-jVj3RdKf4X6OW0Jo4HVT8UAAW2mGwnxqpAtT88+x4PE=",
+			"wordcraft-0.6.1-macos-universal.dmg": "sha256-bPvFsMEnCJT0337tFfbYgNAfRzP4Vs7lXTeTvXOHhq4=",
+			"wordcraft-cli-0.6.1-macos-universal.zip": "sha256-WIQCk+QPhFtWvpDu9TFpITyV2EHMB4uUp4oiXk7/WeY="
+		}
+	}
+}

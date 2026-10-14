@@ -259,6 +259,7 @@ Third-party software packaged under `platform/nix/packages/`, grouped by theme.
 
 | Package | Homepage | Description |
 |-|-|-|
+| [ArtCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/artcraft) | [ArtCraft](https://getartcraft.com/apps) | The thirteen Crafting Apps, from upstream's release builds: CAD, slides, layout, motion graphics, UI design, video, spreadsheets, raw photos, PDF, photos, audio, vector art and documents |
 | [Cosmic-osk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/cosmic-osk.nix) | [GitHub](https://github.com/pop-os/cosmic-osk) | COSMIC on-screen keyboard |
 | [Cthulock 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/cthulock.nix) | [GitHub](https://github.com/FriederHannenheim/cthulock) | Wayland screen locker focused on customizability |
 | [FEX rootfs 💣](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/fex-rootfs.nix) | [FEX-Emu](https://fex-emu.com) | The x86-64 root filesystem FEX runs x86 binaries against |
