@@ -30,6 +30,7 @@
     - [✨ apps](#apps)
   - [📦 Nix Packages](#-nix-packages)
     - [🤖 AI & Social](#ai--social)
+    - [🎨 Creative](#creative)
     - [🖼️ Desktop & Media](#desktop--media)
     - [📓 Development & Jupyter](#development--jupyter)
     - [🛡️ System & Security](#system--security)
@@ -253,13 +254,32 @@ Third-party software packaged under `platform/nix/packages/`, grouped by theme.
 | [Microcosm-rs 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/microcosm-rs) | [Microcosm](https://microcosm.blue) | AT Protocol crates and services for Microcosm |
 | [Perch 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/perch.nix) | [Perch](https://perch.ricardodantas.me/) | AT Protocol social client |
 
+<a id="creative"></a>
+
+#### 🎨 Creative
+
+| Package | Homepage | Description |
+|-|-|-|
+| [CADCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/cadcraft.nix) | [ArtCraft](https://getartcraft.com/apps/cadcraft) | Draft, dimension and plot 2D drawings |
+| [DeckCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/deckcraft.nix) | [ArtCraft](https://getartcraft.com/apps/deckcraft) | Create and present slide decks |
+| [DesignCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/designcraft.nix) | [ArtCraft](https://getartcraft.com/apps/designcraft) | Lay out magazines, books and print documents |
+| [EffectCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/effectcraft.nix) | [ArtCraft](https://getartcraft.com/apps/effectcraft) | Motion graphics and visual effects compositor |
+| [FigCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/figcraft.nix) | [ArtCraft](https://getartcraft.com/apps/figcraft) | Design and prototype user interfaces |
+| [FilmCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/filmcraft.nix) | [ArtCraft](https://getartcraft.com/apps/filmcraft) | Edit video, color and sound |
+| [GridCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/gridcraft.nix) | [ArtCraft](https://getartcraft.com/apps/gridcraft) | Calculate, analyse and chart data in workbooks |
+| [LightCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/lightcraft.nix) | [ArtCraft](https://getartcraft.com/apps/lightcraft) | Organise photos and develop raw files, non-destructively |
+| [PdfCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/pdfcraft.nix) | [ArtCraft](https://getartcraft.com/apps/pdfcraft) | Read, organize, combine, split and secure PDFs |
+| [PhotoCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/photocraft.nix) | [ArtCraft](https://getartcraft.com/apps/photocraft) | Edit photos and layered PSD documents |
+| [SoundCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/soundcraft.nix) | [ArtCraft](https://getartcraft.com/apps/soundcraft) | Record, edit and mix audio and MIDI |
+| [VectorCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/vectorcraft.nix) | [ArtCraft](https://getartcraft.com/apps/vectorcraft) | Draw and edit vector illustrations, SVG and PDF |
+| [WordCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/wordcraft.nix) | [ArtCraft](https://getartcraft.com/apps/wordcraft) | Write and design documents; open and save Word files |
+
 <a id="desktop--media"></a>
 
 #### 🖼️ Desktop & Media
 
 | Package | Homepage | Description |
 |-|-|-|
-| [ArtCraft 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/artcraft) | [ArtCraft](https://getartcraft.com/apps) | The thirteen Crafting Apps, from upstream's release builds: CAD, slides, layout, motion graphics, UI design, video, spreadsheets, raw photos, PDF, photos, audio, vector art and documents |
 | [Cosmic-osk 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/cosmic-osk.nix) | [GitHub](https://github.com/pop-os/cosmic-osk) | COSMIC on-screen keyboard |
 | [Cthulock 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/cthulock.nix) | [GitHub](https://github.com/FriederHannenheim/cthulock) | Wayland screen locker focused on customizability |
 | [FEX rootfs 💣](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/fex-rootfs.nix) | [FEX-Emu](https://fex-emu.com) | The x86-64 root filesystem FEX runs x86 binaries against |
