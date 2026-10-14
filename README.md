@@ -749,7 +749,8 @@ End-user programs on top of the system, from the command line to desktop and mob
 | ✅ | Application Store Frontend | [Cosmic Store 🦀](https://github.com/pop-os/cosmic-store) | | 🆗 | [GNOME Software 💣](https://gitlab.gnome.org/GNOME/gnome-software) |
 | ✅ | System Monitor | [Cosmic Monitor 🦀](https://github.com/pop-os/cosmic-monitor) | | 🆗 | [GNOME System Monitor 💣](https://gitlab.gnome.org/GNOME/gnome-system-monitor) |
 | 🚫 | Application Store Backend | [Flatpak 💣](https://github.com/flatpak/flatpak) | [Oxidized Flatpak 🦀](https://tangled.org/@overby.me/overby.me/tree/main/safety/oxidized/flatpak) | ⬅️ | [Snap 🔒](https://github.com/canonical/snapd), [AppImage 💣](https://github.com/AppImage) |
-| ✅ | Office Suite | [Euro-Office 🐒🇪🇺](https://github.com/Euro-Office) | | [OpenDocument Format 📖](https://en.wikipedia.org/wiki/OpenDocument), [Microsoft OOXML 🔒🇺🇸](https://en.wikipedia.org/wiki/Office_Open_XML) | [OnlyOffice 🐒🇷🇺](https://www.onlyoffice.com), [LibreOffice 💣🐷](https://www.libreoffice.org) |
+| ✅ | Office Suite | [Euro-Office 🐒🇪🇺](https://github.com/Euro-Office) | [WordCraft 🦀](https://github.com/storytold/wordcraft), [GridCraft 🦀](https://github.com/storytold/gridcraft), [DeckCraft 🦀](https://github.com/storytold/deckcraft) | [OpenDocument Format 📖](https://en.wikipedia.org/wiki/OpenDocument), [Microsoft OOXML 🔒🇺🇸](https://en.wikipedia.org/wiki/Office_Open_XML) | [OnlyOffice 🐒🇷🇺](https://www.onlyoffice.com), [LibreOffice 💣🐷](https://www.libreoffice.org) |
+| 🚧 | Document Viewer | [Evince 💣](https://gitlab.gnome.org/GNOME/evince) | [PdfCraft 🦀](https://github.com/storytold/pdfcraft) | 🆗 | |
 | ✅ | Remote Desktop | [Rustdesk 🦀](https://github.com/rustdesk/rustdesk) | | [VNC](https://en.wikipedia.org/wiki/VNC) | [GNOME Remote Desktop 💣](https://gitlab.gnome.org/GNOME/gnome-remote-desktop) |
 
 </details>
@@ -764,11 +765,18 @@ End-user programs on top of the system, from the command line to desktop and mob
 |:-:|-|-|-|-|-|
 | ✅ | Media Player | [Cosmic Player 🦀](https://github.com/pop-os/cosmic-player) | | 🆗 | [Mpv 💣](https://github.com/mpv-player/mpv) |
 | 🚧 | Multimedia Toolkit | [FFMPEG 💣](https://github.com/FFmpeg/FFmpeg), [GStreamer 💣](https://gitlab.freedesktop.org/gstreamer) | [FFmpReg 🦀](https://github.com/yazaldefilimone/ffmpreg) | ⬅️ | |
-| 🚧 | Raster Graphics | [GIMP 💣](https://gitlab.gnome.org/GNOME/gimp) | [Graphite 🦀](https://github.com/GraphiteEditor/Graphite) | 🆗 | |
-| ✅ | Vector Graphics | [Graphite 🦀](https://github.com/GraphiteEditor/Graphite) | | 🆗 | [Inkscape 💣](https://gitlab.com/inkscape/inkscape) |
+| 🚧 | Raster Graphics | [GIMP 💣](https://gitlab.gnome.org/GNOME/gimp) | [Graphite 🦀](https://github.com/GraphiteEditor/Graphite), [PhotoCraft 🦀](https://github.com/storytold/photocraft) | 🆗 | |
+| ✅ | Vector Graphics | [Graphite 🦀](https://github.com/GraphiteEditor/Graphite) | [VectorCraft 🦀](https://github.com/storytold/vectorcraft) | 🆗 | [Inkscape 💣](https://gitlab.com/inkscape/inkscape) |
+| ❓ | Photo Development | | [LightCraft 🦀](https://github.com/storytold/lightcraft) | 🆗 | |
+| ❓ | Video Editor | | [FilmCraft 🦀](https://github.com/storytold/filmcraft) | 🆗 | |
+| ❓ | Motion Graphics | | [EffectCraft 🦀](https://github.com/storytold/effectcraft) | 🆗 | |
+| ❓ | Audio Workstation | | [SoundCraft 🦀](https://github.com/storytold/soundcraft) | 🆗 | |
+| ❓ | Interface Design | | [FigCraft 🦀](https://github.com/storytold/figcraft) | 🆗 | |
+| ❓ | Computer-Aided Design | | [CADCraft 🦀](https://github.com/storytold/cadcraft) | 🆗 | |
 | ✅ | Screen Recorder | [Kooha 🦀](https://github.com/SeaDve/Kooha) | | 🆗 | [Mutter Built-in Recorder 💣](https://github.com/GNOME/mutter) |
 | ✅ | Diagram Generation | [Layout 🦀](https://github.com/nadavrot/layout) | | 🆗 | [Graphviz 💣](https://graphviz.org) |
 | ✅ | Typesetter | [Typst 🦀](https://github.com/typst) | | 🆗 | [LaTeX 💣](https://github.com/latex3/latex3) |
+| ❓ | Page Layout | | [DesignCraft 🦀](https://github.com/storytold/designcraft) | 🆗 | |
 | ✅ | Image Optimizer | [Cavif-rs 🦀](https://github.com/kornelski/cavif-rs) | | 🆗 | [Oxipng 🦀](https://github.com/shssoichiro/oxipng), [Optipng 💣](https://optipng.sourceforge.net) |
 | ✅ | Image Processing | [Wondermagick 🦀](https://github.com/Shnatsel/wondermagick) | | 🆗 | [ImageMagick 💣](https://github.com/ImageMagick/ImageMagick) |
 
