@@ -937,9 +937,9 @@ The toolchains everything else is built with: general tooling and version contro
 | 🚧 | Language | [TypeScript 🐒](https://github.com/microsoft/TypeScript) | [Mojo 🔒🔥](https://github.com/modularml/mojo) | [ECMAScript 📖](https://ecma-international.org/publications-and-standards/standards/ecma-262/), [WASI 📖](https://github.com/WebAssembly/WASI), [Interface Types 📖](https://github.com/WebAssembly/interface-types/tree/main/proposals/interface-types) | |
 | ✅ | Bundler | [Rsbuild 🦀](https://github.com/web-infra-dev/rsbuild) | [Farm 🦀](https://github.com/farm-fe/farm) | 🆗 | [Webpack 🐒](https://github.com/webpack/webpack) |
 | ✅ | Formatter | [Biome 🦀](https://github.com/biomejs/biome) | | 🆗 | [Prettier 🐒](https://github.com/prettier/prettier) |
-| 🚧 | ECMAScript Typechecker | [TypeScript 🐒](https://github.com/microsoft/typescript) | [Ezno 🦀](https://github.com/kaleidawave/ezno), [TypeScript Go 🐹](https://github.com/microsoft/typescript-go), [Flow 🐒➡️🦀](https://github.com/facebook/flow) | 🆗 | |
+| 🚧 | ECMAScript Typechecker | [TypeScript 🐒](https://github.com/microsoft/typescript) | [Tsrs 🦀](https://github.com/oxc-project/tsrs), [Ezno 🦀](https://github.com/kaleidawave/ezno), [TypeScript Go 🐹](https://github.com/microsoft/typescript-go), [Flow 🐒➡️🦀](https://github.com/facebook/flow) | 🆗 | |
 | ✅ | Certificate Generation | [Rcgen 🦀](https://github.com/rustls/rcgen) | | 🆗 | [Mkcert 🐹](https://github.com/FiloSottile/mkcert) |
-| 🚧 | Language Server | [TypeScript 🐒](https://github.com/microsoft/TypeScript) | [TypeScript Go 🐹](https://github.com/microsoft/typescript-go), [Flow 🐒➡️🦀](https://github.com/facebook/flow) | 🆗 | |
+| 🚧 | Language Server | [TypeScript 🐒](https://github.com/microsoft/TypeScript) | [Tsrs 🦀](https://github.com/oxc-project/tsrs), [TypeScript Go 🐹](https://github.com/microsoft/typescript-go), [Flow 🐒➡️🦀](https://github.com/facebook/flow) | 🆗 | |
 | ✅ | ECMAScript Compiler | [SWC 🦀](https://github.com/swc-project/swc) | | 🆗 | [Babel 🐒](https://github.com/babel/babel) |
 
 </details>
