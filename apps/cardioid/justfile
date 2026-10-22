@@ -1,0 +1,26 @@
+dx := `which -a dx | grep dioxus | head -1`
+
+# DWARF is not worth its weight in a shipped web bundle: it is ~90 KB gzipped
+# and only readable with a browser extension.
+release := "--release --debug-symbols false"
+
+dev:
+    {{dx}} serve
+
+build:
+    {{dx}} build {{release}}
+    # dx drops files from assets/ it doesn't recognize, so copy the host's
+    # _redirects (SPA fallback) into the served root.
+    cp assets/_redirects target/dx/cardioid/release/web/public/
+
+serve:
+    {{dx}} serve {{release}}
+
+# Upload the built bundle to statichost. Needs a fresh `just build` and the
+# API key in the environment; the key is never written into this repository:
+#   STATICHOST_APIKEY=... just deploy
+deploy site="cardioid":
+    nu deploy.nu {{site}} target/dx/cardioid/release/web/public
+
+clean:
+    {{dx}} clean

@@ -14,54 +14,25 @@ serde-wasm-bindgen = "0.6"
 wasm-bindgen = "=0.2.121"
 wasm-bindgen-futures = "0.4"
 wasm-logger = "0.2"
-# `lazy_loader!` expands to unqualified `wasm_split::` paths, so the crate has
-# to be in scope under that exact name.
-wasm_split = { package = "wasm-splitter", version = "0.7.9", optional = true }
 web-sys = { version = "0.3", features = [
   "AddEventListenerOptions",
   "Blob",
-  "CanvasRenderingContext2d",
-  "Document",
-  "DomRect",
   "Element",
   "Event",
   "EventTarget",
-  "History",
-  "HtmlAnchorElement",
   "HtmlCanvasElement",
-  "HtmlElement",
   "HtmlImageElement",
-  "KeyboardEvent",
   "Location",
-  "MessageEvent",
-  "MouseEvent",
-  "Node",
   "Response",
-  "UrlSearchParams",
   "WebGlBuffer",
   "WebGlProgram",
   "WebGlRenderingContext",
   "WebGlShader",
   "WebGlTexture",
   "WebGlUniformLocation",
-  "WebSocket",
   "WheelEvent",
   "Window",
-  "console",
 ] }
-
-[features]
-# Split `/cardioid` into its own lazily-loaded wasm chunk. Must be paired
-# with `dx build --wasm-split`, which is what rewrites the module: with the
-# feature on and the flag off, the generated `./__wasm_split.js` imports are
-# never resolved and the app fails to instantiate. `just build` sets both.
-#
-# Deliberately depends on `wasm-splitter` directly rather than on
-# `dioxus/wasm-split`. Turning the dioxus feature on also makes the router
-# macro split every route, which is both more than we want and enough to crash
-# dioxus-cli 0.7.9's splitter ("Failed to find data symbol"). This way the
-# only split point in the module is the one declared in `src/pages/lazy.rs`.
-split = ["dep:wasm_split"]
 
 [profile.release]
 opt-level = "z"

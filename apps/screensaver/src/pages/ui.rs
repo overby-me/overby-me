@@ -1,5 +1,5 @@
-//! The small controls of the options panel. The homepage's `/cardioid` has its
-//! own copy of the ones it uses.
+//! The small controls of the options panel. cardioid.overby.me has its own copy
+//! of the ones it uses.
 
 use dioxus::prelude::*;
 

@@ -25,7 +25,8 @@ Additional routes:
 
 - `/screensaver`: Moved to [screensaver.overby.me](https://screensaver.overby.me),
   built from the monorepo's `apps/screensaver`; old links are forwarded there
-- `/cardioid` — An epicyclic curve tracer
+- `/cardioid`: Moved to [cardioid.overby.me](https://cardioid.overby.me), built
+  from the monorepo's `apps/cardioid`; old links are forwarded there
 - `/search` — Redirects search queries to [Startpage](https://startpage.com)
 - `/x` — Redirects X/Twitter links through [xcancel.com](https://xcancel.com)
 - `/yt` — Embeds YouTube videos in a clean full-screen player
@@ -63,9 +64,6 @@ just build
 ```
 
 The static site is written to `target/dx/homepage/release/web/public`.
-
-The release build puts `/cardioid` in its own wasm chunk, fetched only when it
-is opened.
 
 ### Clean
 

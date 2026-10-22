@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Moved to cardioid.overby.me</title>
+		<!-- Not a _redirects 301: statichost drops the query string on those, and
+		     the cardioid's settings live in the query. -->
+		<script>
+			const rest = location.pathname.match(/^\/cardioid(\/.*)?$/)?.[1] || "/";
+			location.replace(`https://cardioid.overby.me${rest}${location.search}${location.hash}`);
+		</script>
+		<noscript><meta http-equiv="refresh" content="0; url=https://cardioid.overby.me/" /></noscript>
+	</head>
+	<body>
+		<p>The cardioid moved to <a href="https://cardioid.overby.me/">cardioid.overby.me</a>.</p>
+	</body>
+</html>

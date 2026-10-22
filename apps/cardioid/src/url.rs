@@ -1,10 +1,7 @@
-//! The page's initial `?query`, captured before the router can normalize it.
+//! The page's initial `?query`, captured before the page rewrites it.
 //!
-//! `/cardioid` encodes its settings in the query string so a configured toy is
-//! a shareable link. The Dioxus web router strips the query off
-//! `window.location` while it works out the route, so a shared link's settings
-//! are gone by the time the page component first runs. Grabbing it in `main()`
-//! before `dioxus::launch` is the one place it is still there.
+//! The cardioid encodes its settings in the query string so a configured toy is
+//! a shareable link, and mirrors every change back into it.
 //!
 //! It also puts back the `#` a URL cannot carry. Anyone writing a colour by hand
 //! types `?color=#ff4d8d`, but `#` starts the fragment: the browser reports the

@@ -1,5 +1,5 @@
-//! The small controls of `/cardioid`'s options panel. screensaver.overby.me has
-//! its own copy, with the controls only it uses.
+//! The small controls of the options panel. screensaver.overby.me has its own
+//! copy, with the controls only it uses.
 
 use dioxus::prelude::*;
 

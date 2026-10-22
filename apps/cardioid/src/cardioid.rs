@@ -25,7 +25,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-use crate::pages::ui::{Details, Slider, Toggle};
+use crate::ui::{Details, Slider, Toggle};
 use crate::url::captured_query;
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -809,8 +809,7 @@ fn start_animation_loop(sim: Rc<RefCell<Sim>>) {
 }
 
 #[component]
-pub fn CardioidInner() -> Element {
-    // Seed from the query captured in `main()` before the router ran.
+pub fn Cardioid() -> Element {
     let mut settings = use_signal(|| Settings::from_query(&captured_query()));
     let state: Signal<Option<Rc<RefCell<Sim>>>> = use_signal(|| None);
     let mut paused = use_signal(|| false);

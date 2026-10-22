@@ -3,4 +3,6 @@
 /.well-known/matrix/support https://matrix.overby.me/.well-known/matrix/support 301
 /screensaver /screensaver.html 200
 /screensaver/* /screensaver.html 200
+/cardioid /cardioid.html 200
+/cardioid/* /cardioid.html 200
 /* /index.html 200

@@ -6,10 +6,9 @@ mod atproto;
 mod atproto_web;
 mod graph;
 mod pages;
-mod url;
 
 use dioxus::prelude::*;
-use pages::{AtProto, Cardioid, Index, Search, X, Yt};
+use pages::{AtProto, Index, Search, X, Yt};
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 // Self-hosted Space Grotesk (latin subset, variable 300–700). The @font-face is
@@ -27,8 +26,6 @@ pub enum Route {
     X { url: String },
     #[route("/yt?:url")]
     Yt { url: String },
-    #[route("/cardioid")]
-    Cardioid {},
     // Any other single segment is treated as an atproto request: `/@handle`
     // renders that account's platform graph. Kept last so the static routes
     // above take precedence.
@@ -38,9 +35,6 @@ pub enum Route {
 
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
-    // Snapshot the URL query before the router normalizes it off the location,
-    // so a shared `/cardioid?...` link can reproduce the configuration.
-    url::capture_url_query();
     dioxus::launch(App);
 }
 
