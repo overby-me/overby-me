@@ -18,21 +18,15 @@ def --wrapped main [...raw_args: string] {
     let subcommand = $args.0
 
     # Run pre-commit hook for commands that finalize changes.
-    # First trigger a jj snapshot so the git HEAD reflects the working copy,
-    # then sync the git index with `git add -A`. Without this, prek/pre-commit
-    # sees index-vs-worktree differences as "unstaged changes", stashes them,
-    # and fails to restore the stash when renamed/moved files already exist.
     if $subcommand in ["commit" "new" "squash"] {
-        ^$real_jj status out+err> /dev/null
-        ^git add -A out+err> /dev/null
-        run-git-hook "pre-commit"
+        run-git-hook $real_jj "pre-commit"
     }
 
     # Run prepare-commit-msg hook when -m/--message is provided
     if $subcommand in ["commit" "describe" "new"] {
         let msg = (extract-message $args)
         if $msg != null {
-            validate-commit-message $msg
+            validate-commit-message $real_jj $msg
         }
     }
 
@@ -62,7 +56,7 @@ def --wrapped main [...raw_args: string] {
     if $needs_post_validate {
         let post_description = get-working-description $real_jj $subcommand
         if $post_description != null and $post_description != "" and $post_description != $pre_description {
-            let valid = (do { validate-commit-message $post_description } | complete)
+            let valid = (do { validate-commit-message $real_jj $post_description } | complete)
             if $valid.exit_code != 0 {
                 # Restore the previous description to reject the invalid message
                 if $subcommand == "describe" {
@@ -148,9 +142,18 @@ def extract-revision [args: list<string>] {
     null
 }
 
-def run-git-hook [hook: string] {
+# prek, like pre-commit, stashes every change the git index lacks before any
+# hook, and cannot restore that stash over moved files: the old paths come
+# back and edits are lost. jj does not keep the index current, so stage it.
+def sync-git-index [real_jj: string] {
+    ^$real_jj status out+err> /dev/null
+    ^git add -A out+err> /dev/null
+}
+
+def run-git-hook [real_jj: string, hook: string] {
     let hook_path = $".git/hooks/($hook)"
     if ($hook_path | path exists) {
+        sync-git-index $real_jj
         try {
             ^$hook_path
         } catch {
@@ -178,11 +181,12 @@ def extract-message [args: list<string>] {
     null
 }
 
-def validate-commit-message [msg: string] {
+def validate-commit-message [real_jj: string, msg: string] {
     let hook_path = ".git/hooks/prepare-commit-msg"
     if not ($hook_path | path exists) {
         return
     }
+    sync-git-index $real_jj
     let tmpfile = (mktemp -t "jj-commit-msg-XXXXXX")
     $msg | save -f $tmpfile
     try {
