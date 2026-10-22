@@ -7,12 +7,12 @@
 //! so a saver takes its words from here, chosen with a `text` query
 //! parameter:
 //!
-//! - `/screensaver/starwars` with nothing set scrolls a poem, which is the
+//! - `/starwars` with nothing set scrolls a poem, which is the
 //!   nearest thing to `fortune(6)` still answering;
-//! - `/screensaver/phosphor?text=@overby.me` types out that account's posts;
-//! - `/screensaver/xmatrix?text=%23caturday` rains whatever anyone posts under
+//! - `/phosphor?text=@overby.me` types out that account's posts;
+//! - `/xmatrix?text=%23caturday` rains whatever anyone posts under
 //!   that hashtag, live, as they post it;
-//! - `/screensaver/apple2?text=https://example.com/notes.txt` reads any URL you
+//! - `/apple2?text=https://example.com/notes.txt` reads any URL you
 //!   name.
 //!
 //! This mirrors [`crate::images`] deliberately: same shapes, same `@handle`
@@ -55,7 +55,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{MessageEvent, Response};
 
-use crate::atproto_web::{fetch_json, resolve_did, resolve_pds};
+use crate::atproto::{fetch_json, resolve_did, resolve_pds};
 
 /// The default source: a random poem. See the note above on why this one.
 const FORTUNE_URL: &str = "https://poetrydb.org/random";

@@ -55,7 +55,7 @@ def find-chromium [] {
 # Serve the bundle, then drive the browser at it and save a PNG per saver.
 #
 # The fallback to index.html is what makes a client-side route like
-# /screensaver/starnest load at all. `Page.captureScreenshot` is used rather
+# /starnest load at all. `Page.captureScreenshot` is used rather
 # than reading the canvas back with toDataURL, because a WebGL canvas without
 # preserveDrawingBuffer is blank to toDataURL outside the frame that drew it,
 # and turning that on for the sake of a test would slow down the real thing.
@@ -121,7 +121,7 @@ for (const path of slugs) {
   // alone, which is where the caller goes looking for it.
   const slug = path.split("?")[0];
   console_lines.length = 0;
-  await send("Page.navigate", { url: `http://127.0.0.1:${port}/screensaver/${path}` });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/${path}` });
   // Wait for the stage to mount before starting the clock. Fetching and
   // instantiating the wasm takes a while, and a screenshot taken before that is
   // the browser default white rather than anything the saver did.
@@ -190,7 +190,7 @@ def main [
     --query: string = ""  # settings to start the saver with, as a URL query
     --mouse: string = ""  # put the pointer here first, as "x,y"
     --console             # print the browser console, for when a shader will not compile
-    --dir: string = "target/dx/homepage/release/web/public"
+    --dir: string = "target/dx/screensaver/release/web/public"
 ] {
     let chromium = (find-chromium)
     if $chromium == null {

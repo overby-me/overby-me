@@ -45,7 +45,7 @@
 //!   points can be in, and a table of sixty-four sets of animations for
 //!   getting from any one of them to any other. That table is half a
 //!   megabyte of C struct literals upstream, converted by
-//!   `apps/homepage/gen-hopfanimations.nu` into an asset this module reads.
+//!   `apps/screensaver/gen-hopfanimations.nu` into an asset this module reads.
 //!
 //! [`crate::hacks3d::hopffibration`] is what draws it. How much geometry that
 //! comes to is the saver's one difficulty and is measured by a test at the

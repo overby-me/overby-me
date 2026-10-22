@@ -231,6 +231,7 @@ Original code, grouped by directory.
 |-|-|
 | [Homepage 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/homepage) | Personal website and portfolio |
 | [Randie 🦀](https://tangled.org/@overby.me/overby.me/tree/main/apps/randie) | Indoor navigation drone firmware and its simulator |
+| [Screensaver 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/screensaver) | XScreenSaver ports in the browser, at screensaver.overby.me |
 | [WebXR Compositor 🦀](https://tangled.org/@overby.me/overby.me/tree/main/apps/webxr-compositor) | Wayland compositor for the browser: run Wayland apps flat or in WebXR |
 | [Wiki 🦀🌀](https://tangled.org/@overby.me/overby.me/tree/main/apps/wiki) | Political conference and discussion platform |
 

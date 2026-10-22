@@ -4,16 +4,12 @@
 #![allow(clippy::cast_precision_loss)]
 mod atproto;
 mod atproto_web;
-mod glyphs;
 mod graph;
-mod images;
 mod pages;
-mod text;
-mod tiles;
 mod url;
 
 use dioxus::prelude::*;
-use pages::{AtProto, Cardioid, Index, Screensaver, ScreensaverRandom, Search, X, Yt};
+use pages::{AtProto, Cardioid, Index, Search, X, Yt};
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 // Self-hosted Space Grotesk (latin subset, variable 300–700). The @font-face is
@@ -33,13 +29,6 @@ pub enum Route {
     Yt { url: String },
     #[route("/cardioid")]
     Cardioid {},
-    // `/screensaver` picks one at random and redirects to its slug. Both must
-    // come before the `/:handle` catch-all below, or a single-segment
-    // `/screensaver` would be read as an atproto handle.
-    #[route("/screensaver")]
-    ScreensaverRandom {},
-    #[route("/screensaver/:name")]
-    Screensaver { name: String },
     // Any other single segment is treated as an atproto request: `/@handle`
     // renders that account's platform graph. Kept last so the static routes
     // above take precedence.
@@ -50,8 +39,7 @@ pub enum Route {
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
     // Snapshot the URL query before the router normalizes it off the location,
-    // so `/cardioid?...` and `/screensaver/...?...` shared links can reproduce
-    // the configuration.
+    // so a shared `/cardioid?...` link can reproduce the configuration.
     url::capture_url_query();
     dioxus::launch(App);
 }

@@ -22,7 +22,7 @@
 //!
 //! As with [`gllist`], the arrays are assets rather than Rust source, because a
 //! file with a hundred thousand literals in it takes minutes to compile. The
-//! conversion is `apps/homepage/gen-lwo.nu`, which keeps upstream's numbers
+//! conversion is `apps/screensaver/gen-lwo.nu`, which keeps upstream's numbers
 //! character for character; [`Lwo::parse`] reads what it writes.
 //!
 //! [`gllist`]: crate::runtime::gllist

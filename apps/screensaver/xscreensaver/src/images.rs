@@ -180,7 +180,7 @@ pub const NOSE: [&[u8]; 8] = [
 
 /// `curlicue.h`: the curling arrow the four topology savers draw over their
 /// surface to show its orientation. 64 square, one byte a pixel, converted
-/// from upstream's header by `apps/homepage/gen-curlicue.nu`.
+/// from upstream's header by `apps/screensaver/gen-curlicue.nu`.
 pub const CURLICUE: &[u8] = include_bytes!("../images/curlicue.gray");
 
 /// The two pictures `sballs` maps onto its balls and its backdrop.

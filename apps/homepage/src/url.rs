@@ -1,15 +1,14 @@
 //! The page's initial `?query`, captured before the router can normalize it.
 //!
-//! Both `/cardioid` and `/screensaver/:name` encode their settings in the query
-//! string so a configured toy is a shareable link. The Dioxus web router strips
-//! the query off `window.location` while it works out the route, so a shared
-//! link's settings are gone by the time the page component first runs. Grabbing
-//! it in `main()` before `dioxus::launch` is the one place it is still there.
+//! `/cardioid` encodes its settings in the query string so a configured toy is
+//! a shareable link. The Dioxus web router strips the query off
+//! `window.location` while it works out the route, so a shared link's settings
+//! are gone by the time the page component first runs. Grabbing it in `main()`
+//! before `dioxus::launch` is the one place it is still there.
 //!
-//! It also puts back the `#` a URL cannot carry. A saver takes its pictures
-//! from a hashtag with `?images=#art`, which is what the panel shows and what
-//! anyone would type, but `#` starts the fragment: the browser reports the
-//! query as `?images=` and hands the tag to `location.hash` instead. See
+//! It also puts back the `#` a URL cannot carry. Anyone writing a colour by hand
+//! types `?color=#ff4d8d`, but `#` starts the fragment: the browser reports the
+//! query as `?color=` and hands the value to `location.hash` instead. See
 //! [`splice_fragment`].
 
 use std::cell::RefCell;
@@ -34,7 +33,7 @@ pub fn capture_url_query() {
 /// Put back a value the `#` split off.
 ///
 /// A query ending in `=` and a non-empty fragment is the signature of a URL
-/// like `?images=#art`: the value went missing exactly where the fragment
+/// like `?color=#ff4d8d`: the value went missing exactly where the fragment
 /// begins, so the two halves are one value that the browser cut in half. Any
 /// parameters the user wrote after the tag were swept into the fragment too, so
 /// the join stops at the first `&` and hands the rest back as query string.
@@ -55,24 +54,6 @@ fn splice_fragment(search: &str, hash: &str) -> String {
 /// The query captured at load, with its leading `?` if it had one.
 pub fn captured_query() -> String {
     INITIAL_QUERY.with(|q| q.borrow().clone())
-}
-
-/// Mirror a query string into the address bar without remounting anything.
-///
-/// `replaceState` rather than a router navigation on purpose: a navigation
-/// would tear down the canvas and restart the animation on every slider drag.
-pub fn replace_query(query: &str) {
-    let Some(history) = web_sys::window().and_then(|w| w.history().ok()) else {
-        return;
-    };
-    let url = if query.is_empty() {
-        web_sys::window()
-            .and_then(|w| w.location().pathname().ok())
-            .unwrap_or_else(|| "?".to_string())
-    } else {
-        format!("?{query}")
-    };
-    let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&url));
 }
 
 #[cfg(test)]

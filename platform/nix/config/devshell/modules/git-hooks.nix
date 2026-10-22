@@ -394,10 +394,10 @@
         # errors in wiki-dioxus alone, none of them related to the change. The
         # hook lints whole crates, so leaving it on blocks every wiki commit
         # behind an unrelated backlog. Remove this once that backlog is clear.
-        # apps/homepage/xscreensaver transcribes upstream hacks verbatim, and
+        # apps/screensaver/xscreensaver transcribes upstream hacks verbatim, and
         # the hardened lint set reads that fabric as errors (2,753 on first
         # contact, dominated by cast_precision_loss on graphics maths).
-        excludes = ["^safety/fe-c/" "^apps/wiki/" "^apps/homepage/xscreensaver/"];
+        excludes = ["^safety/fe-c/" "^apps/wiki/" "^apps/screensaver/xscreensaver/"];
         entry = "${pkgs.writeShellScript "clippy-multi-project" ''
           # Determine which Cargo projects contain changed .rs files.
           # Arguments are the changed .rs file paths passed by pre-commit.

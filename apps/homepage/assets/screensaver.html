@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Moved to screensaver.overby.me</title>
+		<!-- Not a _redirects 301: statichost drops the query string on those, and
+		     a saver's settings live in the query. -->
+		<script>
+			const rest = location.pathname.match(/^\/screensaver(\/.*)?$/)?.[1] || "/";
+			location.replace(`https://screensaver.overby.me${rest}${location.search}${location.hash}`);
+		</script>
+		<noscript><meta http-equiv="refresh" content="0; url=https://screensaver.overby.me/" /></noscript>
+	</head>
+	<body>
+		<p>The screensavers moved to <a href="https://screensaver.overby.me/">screensaver.overby.me</a>.</p>
+	</body>
+</html>

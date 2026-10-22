@@ -1,7 +1,7 @@
 # xscreensaver
 
 Rust ports of the [XScreenSaver](https://www.jwz.org/xscreensaver/) hacks,
-served at `overby.me/screensaver/<name>`.
+served at `screensaver.overby.me/<name>`.
 
 Upstream ships 314 screensavers. They fall into three groups, each needing a
 different runtime:
@@ -275,9 +275,9 @@ Upstream grabs the screen or a file from your pictures directory; in a browser
 there is neither, so a saver takes its pictures from atproto:
 
 ```text
-/screensaver/decayscreen?images=@overby.me    that account's own photographs
-/screensaver/decayscreen?images=%23caturday   whatever anyone posts under the tag, live
-/screensaver/decayscreen                      colour bars
+/decayscreen?images=@overby.me    that account's own photographs
+/decayscreen?images=%23caturday   whatever anyone posts under the tag, live
+/decayscreen                      colour bars
 ```
 
 This crate never fetches anything, which is what keeps it dependency-free and
@@ -443,7 +443,7 @@ Measured on clean builds of the same source, three savers registered:
 | savers, one module (`just build-whole`) | 1,025,257 (412,894 gz) | n/a |
 | savers, split (`just build`) | 1,014,604 (406,909 gz) | 9.4 / 12.3 / 21.5 KB |
 
-Loading `/screensaver/munch` fetches `homepage_bg.wasm` and
+Loading `/munch` fetches `screensaver_bg.wasm` and
 `module_1_munch_body.wasm` and nothing else.
 
 The first attempt at this did not work: each chunk's entry point returned a

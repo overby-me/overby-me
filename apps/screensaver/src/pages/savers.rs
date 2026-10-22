@@ -78,7 +78,7 @@ pub struct Entry {
 /// One chunk per saver is what this file did first, and `wasm-split` 0.7.9
 /// cannot do it. Above a threshold it miscompiles the indirect function table:
 /// every route then dispatches to the wrong component, the app rewrites its
-/// own URL to `/screensaver` and sits on "Picking a screensaver" forever, with
+/// own URL to `/` and sits on "Picking a screensaver" forever, with
 /// no error in the console, no failed request, and a build that reports
 /// success. Ten savers to a chunk keeps the table small enough to come out
 /// right.
@@ -6123,7 +6123,7 @@ pub fn find(slug: &str) -> Option<&'static Entry> {
     SAVERS.iter().find(|e| e.slug == slug)
 }
 
-/// Pick one at random. Used by `/screensaver`, which then redirects to it.
+/// Pick one at random. Used by `/`, which then redirects to it.
 pub fn random() -> &'static Entry {
     let i = (js_sys::Math::random() * SAVERS.len() as f64) as usize;
     &SAVERS[i.min(SAVERS.len() - 1)]

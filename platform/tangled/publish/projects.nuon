@@ -270,7 +270,7 @@
   {
     name: "homepage"
     path: "apps/homepage"
-    description: "The overby.me website, in Rust and Dioxus with WebGL screensavers"
+    description: "The overby.me website, in Rust and Dioxus"
     formerPaths: [{path: "web/homepage-dioxus" deps: []} {path: "web/homepage" deps: []}]
   }
   # Written after the restructure, so its filter names one path.

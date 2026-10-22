@@ -7,7 +7,7 @@
 # default.nix, the same file the monorepo builds it with, so there is nothing
 # about it to restate here.
 {
-  description = "The overby.me website, in Rust and Dioxus with WebGL screensavers";
+  description = "The overby.me website, in Rust and Dioxus";
 
   inputs = {
     workspace.url = "git+https://tangled.org/overby.me/nix-workspace";

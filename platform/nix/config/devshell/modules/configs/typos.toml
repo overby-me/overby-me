@@ -22,7 +22,7 @@ extend-ignore-re = [
   "extrac[0-9]+",
   "extrac\\*",
   # XScreenSaver copyright headers and revision histories, transcribed verbatim
-  # into the Rust ports in apps/homepage/xscreensaver.
+  # into the Rust ports in apps/screensaver/xscreensaver.
   "[Oo]rignal",
   # quickhull.c's own comments, kept with the code they explain.
   "ajacent",
@@ -239,7 +239,7 @@ extend-exclude = [
   # The Unicode block names unicrud carries, straight from the standard. They
   # are proper nouns in a hundred languages and several of them look like
   # English misspellings: Tai Tham, Vai, Cham, Miao.
-  "apps/homepage/xscreensaver/src/hacks3d/unicodeblocks.rs",
+  "apps/screensaver/xscreensaver/src/hacks3d/unicodeblocks.rs",
   "apps/wiki/src/i18n.rs",
   # Age ciphertext is base64, which reads as dense misspelling. Matched at any
   # depth: anchoring this to one directory made it stop matching the moment
@@ -256,18 +256,18 @@ extend-exclude = [
   # The Shadertoy programs, vendored verbatim from XScreenSaver. They are
   # shader source, and their local names are short and mathematical (ba, pa,
   # fre, lod, aas), so nearly every one reads as a misspelling.
-  "apps/homepage/xscreensaver/glsl/",
+  "apps/screensaver/xscreensaver/glsl/",
   # Likewise the 6502 demo programs, which are assembly listings.
-  "apps/homepage/xscreensaver/images/m6502/",
+  "apps/screensaver/xscreensaver/images/m6502/",
   # And the molecules, which are published crystallography files: the format
   # spells its bond records CONECT, and the chemistry is full of abbreviations.
-  "apps/homepage/xscreensaver/molecules/",
+  "apps/screensaver/xscreensaver/molecules/",
   # And the names of glsnake shapes, which come from the puzzle manual and
   # from the people who wrote the saver, spelling and all.
-  "apps/homepage/xscreensaver/src/hacks3d/glsnake_models.rs",
+  "apps/screensaver/xscreensaver/src/hacks3d/glsnake_models.rs",
   # And endgame's games, whose moves are algebraic chess notation rather than
   # words: Ba6 is a bishop, Rhe1 a rook, Nf3 a knight.
-  "apps/homepage/xscreensaver/src/hacks3d/endgame_games.rs",
+  "apps/screensaver/xscreensaver/src/hacks3d/endgame_games.rs",
   # The LLVM IR conformance corpus. Its comparison predicates are LangRef
   # keywords rather than English: olt, oge, une, uno and friends.
   "safety/oxidized/llvm/corpus/",

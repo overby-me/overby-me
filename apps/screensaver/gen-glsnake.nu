@@ -78,7 +78,7 @@ def main [glx_dir: string] {
 //! seventy degrees; here each is the first letter of the same token, so a
 //! shape is one string of twenty-four.
 //!
-//! Written by `apps/homepage/gen-glsnake.nu`. Do not edit.
+//! Written by `apps/screensaver/gen-glsnake.nu`. Do not edit.
 
 /// Every shape upstream ships, in its order, which is the order they are
 /// folded in when the sequence is not shuffled.

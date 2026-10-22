@@ -18,7 +18,7 @@
 //!
 //! Here the arrays are assets rather than source, because a Rust file with
 //! tens of thousands of float literals in it takes minutes to compile. The
-//! conversion is `apps/homepage/gen-gllist.nu`, which keeps upstream's literals
+//! conversion is `apps/screensaver/gen-gllist.nu`, which keeps upstream's literals
 //! character for character; [`GlList::parse`] reads what it writes.
 
 use crate::runtime::gl::{Glx, Shape};

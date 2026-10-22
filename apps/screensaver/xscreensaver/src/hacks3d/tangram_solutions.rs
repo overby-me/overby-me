@@ -1,6 +1,6 @@
 // The forty-five figures, as the finished position of each of the seven
 // pieces. Extracted from upstream `tangram.c`'s `solved[]` table by
-// `apps/homepage/gen-tangram.nu`; the fields that are the same constant in every
+// `apps/screensaver/gen-tangram.nu`; the fields that are the same constant in every
 // row of it are left out.
 
 #[rustfmt::skip]

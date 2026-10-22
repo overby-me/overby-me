@@ -1,0 +1,14 @@
+[application]
+name = "screensaver"
+default_platform = "web"
+asset_dir = "assets"
+
+[web.app]
+title = "Screensavers Ⓝ"
+
+[web.wasm_opt]
+level = "z"
+
+[web.watcher]
+index_on_404 = true
+watch_path = ["src"]

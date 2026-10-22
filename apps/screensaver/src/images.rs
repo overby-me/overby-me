@@ -6,9 +6,9 @@
 //! grab, so a saver takes its pictures from atproto, chosen with an `images`
 //! query parameter:
 //!
-//! - `/screensaver/decayscreen?images=@overby.me` melts that account's own
+//! - `/decayscreen?images=@overby.me` melts that account's own
 //!   photographs, newest first;
-//! - `/screensaver/decayscreen?images=%23caturday` melts whatever anyone posts
+//! - `/decayscreen?images=%23caturday` melts whatever anyone posts
 //!   under that hashtag, live, as they post it;
 //! - with no parameter the saver gets colour bars, which is what upstream falls
 //!   back to when it cannot find an image either.
@@ -47,7 +47,7 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageBitmap, MessageEvent, Response};
 use xscreensaver::runtime::{XImage, color::rgb};
 
-use crate::atproto_web::{fetch_json, resolve_did, resolve_pds};
+use crate::atproto::{fetch_json, resolve_did, resolve_pds};
 
 /// The public Jetstream instance. Records only, no auth, no CORS to negotiate
 /// (it is a WebSocket).

@@ -4,11 +4,11 @@
 //! panel. Nobody who came to read the homepage wants it, so it waits until
 //! `/cardioid` is opened.
 //!
-//! The mechanism is `crate::pages::savers`' one, and the note there explains
-//! why it is `wasm_split::lazy_loader!` by hand rather than
-//! `#[component(lazy)]`: that macro puts every lazy component in a chunk
-//! called "lazy", and it needs dioxus's own `wasm-split` feature, which makes
-//! the router macro split every route and crashes the splitter.
+//! It is `wasm_split::lazy_loader!` by hand rather than `#[component(lazy)]`,
+//! as screensaver.overby.me splits its savers: that macro puts every lazy
+//! component in a chunk called "lazy", and it needs dioxus's own `wasm-split`
+//! feature, which makes the router macro split every route and crashes the
+//! splitter.
 //!
 //! The chunk's exported function returns the element *tree*, not the rendered
 //! component. Building it with `rsx!` means the inner component is reachable

@@ -1,4 +1,4 @@
-//! The screensaver stage: `/screensaver` and `/screensaver/:name`.
+//! The screensaver stage: `/` and `/:name`.
 //!
 //! One canvas, one `requestAnimationFrame` loop, and one options panel behind a
 //! button, driving whichever [`SaverDef`] the router asked for. None of this is
@@ -37,7 +37,7 @@ use crate::url::{captured_query, replace_query};
 
 /// Whether the options panel is open.
 ///
-/// Global rather than a `use_signal`, because 🎲 leaves for `/screensaver` and
+/// Global rather than a `use_signal`, because 🎲 leaves for `/` and
 /// comes back on a different slug, which unmounts and remounts this page. A
 /// local signal would reset, so the panel would slam shut under the pointer on
 /// every roll. A fresh page load still starts closed: a screensaver should open
@@ -515,11 +515,11 @@ fn shareable_query(
     parts.join("&")
 }
 
-/// `/screensaver`: pick one at random and redirect to it.
+/// `/`: pick one at random and redirect to it.
 ///
 /// A redirect rather than rendering in place, so the URL always says what you
-/// are looking at and the back button behaves. Reloading `/screensaver` gives
-/// you a different one; reloading `/screensaver/munch` gives you munch.
+/// are looking at and the back button behaves. Reloading `/` gives
+/// you a different one; reloading `/munch` gives you munch.
 #[component]
 pub fn ScreensaverRandom() -> Element {
     let nav = use_navigator();
@@ -533,7 +533,7 @@ pub fn ScreensaverRandom() -> Element {
     }
 }
 
-/// `/screensaver/:name`.
+/// `/:name`.
 #[component]
 pub fn Screensaver(name: String) -> Element {
     if savers::find(&name).is_none() {

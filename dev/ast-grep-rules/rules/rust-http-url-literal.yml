@@ -18,7 +18,7 @@ ignores:
   - "**/*_test.rs"
   # Faithful transcriptions of other systems' screens (fake BSODs quote
   # real-looking URLs).
-  - "apps/homepage/xscreensaver/**"
+  - "apps/screensaver/xscreensaver/**"
 rule:
   kind: string_literal
   regex: '^"http://[a-z0-9]'

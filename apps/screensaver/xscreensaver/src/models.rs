@@ -8,7 +8,7 @@
 //! Here the same arrays are assets rather than source, because a Rust file with
 //! tens of thousands of float literals in it takes minutes to compile. They are
 //! upstream's numbers character for character, converted by
-//! `apps/homepage/gen-gllist.nu` and read back by [`crate::runtime::gllist`].
+//! `apps/screensaver/gen-gllist.nu` and read back by [`crate::runtime::gllist`].
 
 /// The four shapes the Bit takes: two idling polyhedra, the spiky red no, and
 /// the yellow tetrahedral yes.
