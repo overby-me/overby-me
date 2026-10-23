@@ -1,6 +1,6 @@
 ---
 name: prompt
-description: Write the prompt for a given task or agent in a terse, operational style. Covers five prompt shapes, each with its own skeleton: role, tool description, command/skill, service/summarization, orchestration. Produces a prose role file, a code string literal, or inline chat output depending on target. Pairs every non-obvious rule with its reason and every prohibition with its consequence.
+description: "Write the prompt for a given task or agent in a terse, operational style. Covers five prompt shapes, each with its own skeleton: role, tool description, command/skill, service/summarization, orchestration. Produces a prose role file, a code string literal, or inline chat output depending on target. Pairs every non-obvious rule with its reason and every prohibition with its consequence."
 triggers:
   - phrase: "/prompt"
   - phrase: "write a prompt"

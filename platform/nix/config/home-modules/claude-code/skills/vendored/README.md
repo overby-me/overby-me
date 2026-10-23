@@ -9,5 +9,6 @@ of which this is one directory, and would put a fetch between the shell and a
 file you want to read while editing it.
 
 Upstream carries no licence file. Refreshing them is a re-copy from that path
-at a newer revision; nothing here is edited, so a diff against upstream is the
-whole of the review.
+at a newer revision. The only local edit is quoting the `description` of
+`deepcomment` and `prompt`: upstream leaves a colon followed by a space unquoted, which is
+invalid YAML and makes Zed reject the skill. Re-apply it after a refresh.

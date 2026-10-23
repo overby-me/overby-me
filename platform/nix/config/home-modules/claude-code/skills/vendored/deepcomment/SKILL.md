@@ -1,6 +1,6 @@
 ---
 name: deepcomment
-description: Challenge every comment in the target and keep only the ones the code cannot say for itself. Deletes comments that restate the code, rewrites "what" into "why", tightens the survivors, and preserves warnings, contracts, and provenance. Governing rule: a comment must not outweigh the code it describes. Edits in place; defaults to the current unstaged changes.
+description: 'Challenge every comment in the target and keep only the ones the code cannot say for itself. Deletes comments that restate the code, rewrites "what" into "why", tightens the survivors, and preserves warnings, contracts, and provenance. Governing rule: a comment must not outweigh the code it describes. Edits in place; defaults to the current unstaged changes.'
 triggers:
   - phrase: "/deepcomment"
   - phrase: "review the comments"
