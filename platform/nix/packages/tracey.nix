@@ -32,7 +32,7 @@ rustPlatform.buildRustPackage rec {
     inherit pname src;
     sourceRoot = "${src.name}/crates/tracey/src/bridge/http/dashboard";
     fetcherVersion = 3;
-    hash = "sha256-VppxlvJGqM+bJHAg/YwDq7/ZrfJt9fp1F9SZPEul0Vg=";
+    hash = "sha256-M9dDIZC8fdk3xvbs+1J41FbvtGHh8kJjDG+QNuB6EXQ=";
   };
   pnpmRoot = "crates/tracey/src/bridge/http/dashboard";
 
