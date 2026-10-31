@@ -290,6 +290,7 @@ Third-party software packaged under `platform/nix/packages/`, grouped by theme.
 | [Steam 💣🔒🇺🇸](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/steam-aarch64.nix) | [Steam](https://store.steampowered.com) | Valve's aarch64 client, with x86 titles running under FEX |
 | [Stochos 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/stochos.nix) | [GitHub](https://github.com/museslabs/stochos) | Keyboard-driven mouse control for Wayland and X11 |
 | [Vibe 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/vibe.nix) | [GitHub](https://github.com/TornaxO7/vibe) | Desktop audio visualizer |
+| [VibeSquawk 🦀🐍](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/vibesquawk-cosmic.nix) | [GitLab](https://gitlab.com/sneptech/vibesquawk) | System-wide dictation, with its native COSMIC frontend |
 | [Wondermagick 🦀](https://tangled.org/@overby.me/overby.me/tree/main/platform/nix/packages/wondermagick/default.nix) | [GitHub](https://github.com/Shnatsel/wondermagick) | Memory-safe ImageMagick replacement |
 
 <a id="development--jupyter"></a>
